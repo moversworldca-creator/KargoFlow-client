@@ -1,0 +1,8 @@
+{
+  "name": "KargoFlow CRM",
+  "description": "KargoFlow CRM is a modern moving business platform for leads, sales, estimates, jobs, payments, and customer communication.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

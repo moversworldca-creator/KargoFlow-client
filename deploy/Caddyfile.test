@@ -1,0 +1,14 @@
+{
+  email admin@test.kargoflow.net
+}
+
+test.kargoflow.net {
+  encode zstd gzip
+
+  reverse_proxy /api/* backend:8000
+  reverse_proxy /admin* backend:8000
+  reverse_proxy /media/* backend:8000
+  reverse_proxy /static/* backend:8000
+  reverse_proxy /health* frontend:80
+  reverse_proxy /* frontend:80
+}

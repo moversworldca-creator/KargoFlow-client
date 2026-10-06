@@ -1,0 +1,119 @@
+Examining the listed permissions, roles, and files, confirming the backend and frontend RBAC implementations cover...
+  ### Implementation Summary: SaaS Platform Staff RBAC & Real Backend Accounts
+
+  We have implemented the foundational platform Super Admin & Staff Access Control system in accordance with the
+  implementation plan and the approved specification (Section 1.1).
+  ──────
+  ### 1. Platform Roles & Granular Permissions Definition
+
+  Platform permissions are strictly isolated from tenant-level crm.* company permissions. They are defined in
+  serverPlatformRbac.js and mirrored in platformRbac.js:
+
+   Role              | Rank |   Company Scope    | Allowed Permissions             | Key Constraints
+  -------------------|------|--------------------|---------------------------------|----------------------------------
+   Super Admin       | 100  |    Global (all)    | All 14 platform.* permissions   | Protected from suspension if
+                     |      |                    |                                 | last active; only role that can
+                     |      |                    |                                 | manage platform staff or grant
+                     |      |                    |                                 | global scope.
+   Support Admin     |  60  | Assigned or Global | Tenants, Subscriptions,         | Cannot manage staff
+                     |      |                    | Overrides, Support Sessions,    | (platform.users.manage denied);
+                     |      |                    | Audits, Plans, Role/Staff View  | cannot escalate privileges.
+   Support Agent     |  40  |   Assigned only    | Tenant View, Support Sessions   | Restricted to explicitly
+                     |      |                    | Create, Subscriptions View,     | assigned tenants; cannot mutate
+                     |      |                    | Plans View                      | subscriptions, manage overrides,
+                     |      |                    |                                 | or view audit logs.
+   Read Only Auditor |  20  | Assigned or Global | Tenant View, Subscriptions      | Strictly read-only; cannot
+                     |      |                    | View, Plans View, Staff View,   | initiate support sessions or
+                     |      |                    | Roles View, Audit View          | mutate state.
+  ──────
+  ### 2. Real Backend Platform Accounts & Controlled Bootstrap
+
+  Replaced the browser-only dummy records with real backend account persistence in serverPlatformRoutes.js:
+
+  • Account Model: Stores id, email, name, role, status (active, suspended, invited), company_scope_type (all,
+  assigned), assigned_companies array, mfa_enabled, mfa_enforced, expires_at, session_version, and audit timestamps.
+  • Seeded Personas:
+      1. pusr-1: admin@fastmovers.com — Super Admin (Global scope)
+      2. pusr-2: elena.rostova@kargoflow.com — Support Admin (Global scope)
+      3. pusr-3: david.ross@kargoflow.com — Support Admin (Assigned to companies [1, 2, 3])
+      4. pusr-4: agent.smith@kargoflow.com — Support Agent (Assigned to company [1])
+      5. pusr-5: marcus.vance@kargoflow.com — Read Only Auditor (Global audit read)
+      6. pusr-6: expired.agent@kargoflow.com — Support Agent (Expired access test persona)
+      7. pusr-7: suspended.agent@kargoflow.com — Support Agent (Suspended access test persona)
+  • First Super Admin Bootstrap: Exposed POST /api/platform/auth/bootstrap/. If an active Super Admin exists,
+  bootstrap is locked (400 SUPER_ADMIN_EXISTS).
+  ──────
+  ### 3. Backend Authorization & Operational Safeguards
+
+  In serverPlatformRoutes.js:1307-1410:
+
+  • Authentication Middleware (authenticatePlatformStaff):
+      • Resolves staff identity via X-Platform-User-Id header, Authorization: Bearer platform-<userId>.<version>, or
+      active simulation actor.
+      • Rejects suspended staff with 403 ACCOUNT_SUSPENDED.
+      • Rejects pending invitations with 403 INVITATION_PENDING.
+      • Rejects expired credentials with 403 ACCESS_EXPIRED.
+      • Rejects stale tokens where tokenVersion !== user.session_version with 401 SESSION_REVOKED.
+  • Tenant Scope Enforcement (requireTenantScope):
+      • Automatically filters tenant lists and blocks access to /api/platform/tenants/:id/* and /api/platform/support-
+      sessions/ for unassigned companies with 403 TENANT_OUT_OF_SCOPE.
+  • Privilege Escalation Protection (validateRoleAssignment):
+      • Prevents non-Super Admins from assigning super_admin or granting roles with rank ≥ their own.
+      • Prevents non-Super Admins from assigning companies outside their own assigned scope.
+  • Last Super Admin Protection (isLastActiveSuperAdmin):
+      • Guard rejects suspension or demotion of the last active Super Admin with 400 LAST_SUPER_ADMIN_PROTECTED.
+  • Session Revocation:
+      • Incrementing session_version whenever an account is suspended, role is downgraded, or company scope is
+      modified.
+  • Immutable Audit Logging:
+      • Logs PLATFORM_USER_CREATED, PLATFORM_USER_INVITED, PLATFORM_USER_ROLE_SCOPE_MODIFIED, PLATFORM_USER_SUSPENDED,
+      and PLATFORM_USER_REACTIVATED with actor email, target user ID, reason, and change diffs.
+
+  ──────
+  ### 4. Replaced Browser API & Built Management UI
+
+  1. Replaced Frontend API:
+      • In platformApi.js:768-860, replaced dummy storage methods with HTTP calls to backend endpoints
+      /api/platform/admins/, /api/platform/roles/, /api/platform/auth/me/, /api/platform/auth/switch/, etc.
+  2. Platform Admins UI (PlatformAdminsTab.jsx):
+      • Active Persona Toolbar: Live switcher dropdown to test acting as any of the 7 staff accounts.
+      • Sub-View Switcher: Toggle between Staff Accounts and Roles & Permission Matrix.
+      • Search & Granular Filters: Search by name/email/ID, filter by role, filter by status (active, suspended,
+      invited, expired), and filter by company scope.
+      • Invite Staff Modal: Full invitation flow with role preview, global vs. assigned company checklist, expiration
+      presets (30d, 90d, 1y, permanent), and enforced MFA.
+      • Edit Scope & Role Modal: Adjust role, company assignments, and expiration with session-revocation warning.
+      • Suspend & Reactivate Modals: Mandatory audit reason capture, with safeguard preventing suspension of the last
+      Super Admin.
+      • Staff Detail Drawer: Displays effective permissions checklist, assigned company list, and recent audit
+      activity.
+      • Permission Matrix View: Visual comparison matrix across all 4 roles and 14 platform permissions with
+      specification explanations.
+
+  ──────
+  ### 5. Access Matrix Verification & Automated Tests
+
+  Created PlatformAdminsRbac.test.jsx covering all criteria:
+
+  • 17/17 tests passing:
+    npm --prefix frontend test -- src/features/platform/PlatformAdminsRbac.test.jsx --run
+    # ✓ 17 passed (17) in 1.22s
+
+      • ✓ Super Admin granted all 14 permissions
+      • ✓ Support Admin restricted from platform.users.manage
+      • ✓ Support Agent restricted to support sessions and tenant view
+      • ✓ Auditor restricted to read-only capabilities without support session creation
+      • ✓ Super Admin global access verified
+      • ✓ Support Admin restricted to assigned companies
+      • ✓ Support Agent blocked from unassigned company (403 TENANT_OUT_OF_SCOPE)
+      • ✓ In-scope company access allowed
+      • ✓ Privilege escalation blocked (403 FORBIDDEN / platform.users.manage)
+      • ✓ Expired access rejected (403 ACCESS_EXPIRED)
+      • ✓ Suspended access rejected (403 ACCOUNT_SUSPENDED)
+      • ✓ Last active Super Admin protected from suspension (400 LAST_SUPER_ADMIN_PROTECTED)
+      • ✓ Outdated session token rejected (401 SESSION_REVOKED)
+  • Regression Test Suite:
+    npm --prefix frontend test -- src/features/platform/PlatformControlPanel.test.jsx --run
+    # ✓ 6 passed (6) in 2.43s
+
+  • Frontend Bundle: Rebuilt cleanly (npm run build) and live on http://localhost:3000/superuser/platform.

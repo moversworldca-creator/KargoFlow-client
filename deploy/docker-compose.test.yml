@@ -1,0 +1,113 @@
+services:
+  backend:
+    environment:
+      - DB_ENGINE=django.db.backends.postgresql
+      - DB_NAME=${DB_NAME:-movers_crm}
+      - DB_USER=${DB_USER:-movers}
+      - DB_PASS=${DB_PASS:-changeme}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - REDIS_URL=redis://cache:6379/1
+      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - DEBUG=False
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-test.kargoflow.net}
+      - CORS_ALLOW_ALL=false
+      - REPORTING_SERVICE_URL=${REPORTING_SERVICE_URL:-http://reporting:8010}
+      - REPORTING_SERVICE_TOKEN=${REPORTING_SERVICE_TOKEN:-}
+
+  celery_worker:
+    environment:
+      - DB_ENGINE=django.db.backends.postgresql
+      - DB_NAME=${DB_NAME:-movers_crm}
+      - DB_USER=${DB_USER:-movers}
+      - DB_PASS=${DB_PASS:-changeme}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - REDIS_URL=redis://cache:6379/1
+      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - DEBUG=False
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-test.kargoflow.net}
+      - REPORTING_SERVICE_URL=${REPORTING_SERVICE_URL:-http://reporting:8010}
+      - REPORTING_SERVICE_TOKEN=${REPORTING_SERVICE_TOKEN:-}
+
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  celery_beat:
+    environment:
+      - DB_ENGINE=django.db.backends.postgresql
+      - DB_NAME=${DB_NAME:-movers_crm}
+      - DB_USER=${DB_USER:-movers}
+      - DB_PASS=${DB_PASS:-changeme}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - REDIS_URL=redis://cache:6379/1
+      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - DEBUG=False
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-test.kargoflow.net}
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  frontend:
+    # keep frontend internal-only; caddy terminates HTTPS and proxies to frontend:80
+    expose:
+      - "80"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: movers-crm-caddy-test
+    depends_on:
+      - frontend
+      - backend
+    volumes:
+      - ./deploy/Caddyfile.test:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile"]
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    container_name: movers-crm-db-test
+    env_file:
+      - deploy/docker.env
+    environment:
+      - POSTGRES_DB=${DB_NAME:-movers_crm}
+      - POSTGRES_USER=${DB_USER:-movers}
+      - POSTGRES_PASSWORD=${DB_PASS:-changeme}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./deploy/docker/postgres/backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-movers} -d ${DB_NAME:-movers_crm}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  cache:
+    image: redis:7-alpine
+    container_name: movers-crm-cache-test
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:

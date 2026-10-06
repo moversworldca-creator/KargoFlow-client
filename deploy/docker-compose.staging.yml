@@ -1,0 +1,66 @@
+services:
+  backend:
+    environment:
+      # Change DB_PORT to point to pgbouncer
+      - DB_PORT=6432
+      - DB_HOST=pgbouncer
+      - REPORTING_SERVICE_URL=${REPORTING_SERVICE_URL:-http://reporting:8010}
+      - REPORTING_SERVICE_TOKEN=${REPORTING_SERVICE_TOKEN:-}
+    depends_on:
+      pgbouncer:
+        condition: service_started
+
+  celery_worker:
+    environment:
+      - DB_PORT=6432
+      - DB_HOST=pgbouncer
+    depends_on:
+      pgbouncer:
+        condition: service_started
+
+  celery_beat:
+    environment:
+      - DB_PORT=6432
+      - DB_HOST=pgbouncer
+    depends_on:
+      pgbouncer:
+        condition: service_started
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: movers-crm-pgbouncer
+    environment:
+      - DATABASE_URL=postgres://${DB_USER:-movers}:${DB_PASS:-changeme}@db:5432/${DB_NAME:-movers_crm}
+      - MAX_CLIENT_CONN=2000
+      - DEFAULT_POOL_SIZE=100
+      - RESERVE_POOL_SIZE=20
+      - RESERVE_POOL_TIMEOUT=5
+      - POOL_MODE=transaction
+      - IGNORE_STARTUP_PARAMETERS=extra_float_digits
+    ports:
+      - "6432:6432"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Basic monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: movers-crm-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: movers-crm-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+    restart: unless-stopped

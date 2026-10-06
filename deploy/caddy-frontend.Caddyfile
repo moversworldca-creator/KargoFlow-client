@@ -1,0 +1,29 @@
+:80 {
+    encode zstd gzip
+
+    handle /health {
+        respond "healthy" 200
+    }
+
+    handle /static/* {
+        root * /staticfiles
+        file_server
+    }
+
+    handle /media/* {
+        root * /media
+        file_server
+    }
+
+    handle_path /platform-admin* {
+        root * /usr/share/caddy/platform-admin
+        try_files {path} /index.html
+        file_server
+    }
+
+    handle {
+        root * /usr/share/caddy
+        try_files {path} /index.html
+        file_server
+    }
+}

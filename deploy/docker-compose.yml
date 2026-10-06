@@ -1,0 +1,181 @@
+# Production Docker Compose for Movers CRM
+# Run with: docker compose --project-directory . --env-file deploy/docker.env -f deploy/docker-compose.yml up -d --build
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/backend.Dockerfile
+    container_name: movers-crm-backend
+    env_file:
+      - ${ENV_FILE:-deploy/docker.env}
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - DB_ENGINE=django.db.backends.postgresql
+      - DB_NAME=${DB_NAME:-movers_crm}
+      - DB_USER=${DB_USER:-movers}
+      - DB_PASS=${DB_PASS:-changeme}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - REDIS_URL=redis://cache:6379/1
+      - DEBUG=False
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      - REPORTING_SERVICE_URL=${REPORTING_SERVICE_URL:-http://reporting:8010}
+      - REPORTING_SERVICE_TOKEN=${REPORTING_SERVICE_TOKEN:-}
+    expose:
+      - "8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    volumes:
+      - static_data:/app/staticfiles
+      - media_data:/app/media
+    restart: unless-stopped
+
+  celery_worker:
+    build:
+      context: .
+      dockerfile: deploy/backend.Dockerfile
+    container_name: movers-crm-celery-worker
+    env_file:
+      - ${ENV_FILE:-deploy/docker.env}
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - DB_ENGINE=django.db.backends.postgresql
+      - DB_NAME=${DB_NAME:-movers_crm}
+      - DB_USER=${DB_USER:-movers}
+      - DB_PASS=${DB_PASS:-changeme}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - REDIS_URL=redis://cache:6379/1
+      - DEBUG=False
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_started
+      backend:
+        condition: service_healthy
+    command: ["celery", "-A", "config", "worker", "-l", "info"]
+    restart: unless-stopped
+
+  celery_beat:
+    build:
+      context: .
+      dockerfile: deploy/backend.Dockerfile
+    container_name: movers-crm-celery-beat
+    env_file:
+      - ${ENV_FILE:-deploy/docker.env}
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - DB_ENGINE=django.db.backends.postgresql
+      - DB_NAME=${DB_NAME:-movers_crm}
+      - DB_USER=${DB_USER:-movers}
+      - DB_PASS=${DB_PASS:-changeme}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - REDIS_URL=redis://cache:6379/1
+      - DEBUG=False
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_started
+      backend:
+        condition: service_healthy
+    command: ["celery", "-A", "config", "beat", "-l", "info"]
+    restart: unless-stopped
+
+  reporting:
+    build:
+      context: .
+      dockerfile: reporting_service/Dockerfile
+    container_name: movers-crm-reporting
+    env_file:
+      - ${ENV_FILE:-deploy/docker.env}
+    environment:
+      - DB_NAME=${DB_NAME:-movers_crm}
+      - DB_USER=${DB_USER:-movers}
+      - DB_PASS=${DB_PASS:-changeme}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - REPORTING_SERVICE_TOKEN=${REPORTING_SERVICE_TOKEN:-}
+      - REPORTING_MAX_REPORT_DAYS=${REPORTING_MAX_REPORT_DAYS:-366}
+      - REPORTING_MAX_PAGE_SIZE=${REPORTING_MAX_PAGE_SIZE:-500}
+    expose:
+      - "8010"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/frontend.Dockerfile
+    container_name: movers-crm-frontend
+    depends_on:
+      - backend
+    expose:
+      - "80"
+    volumes:
+      - static_data:/staticfiles:ro
+      - media_data:/media:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    container_name: movers-crm-db
+    env_file:
+      - ${ENV_FILE:-deploy/docker.env}
+    environment:
+      - POSTGRES_DB=${DB_NAME:-movers_crm}
+      - POSTGRES_USER=${DB_USER:-movers}
+      - POSTGRES_PASSWORD=${DB_PASS:-changeme}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./deploy/docker/postgres/backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-movers} -d ${DB_NAME:-movers_crm}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  cache:
+    image: redis:7-alpine
+    container_name: movers-crm-cache
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  static_data:
+  media_data:

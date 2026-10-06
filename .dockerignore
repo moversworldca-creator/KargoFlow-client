@@ -1,0 +1,13 @@
+.git
+.gitignore
+.codex
+venv
+frontend/node_modules
+frontend/dist
+platform-admin/node_modules
+platform-admin/dist
+platform-admin-dist
+backend/db.sqlite3
+backend/django.log
+**/__pycache__
+**/*.pyc

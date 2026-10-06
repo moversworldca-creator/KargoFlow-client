@@ -1,0 +1,22 @@
+{
+  "name": "kargoflow-crm",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "workspaces": [
+    "frontend",
+    "platform-admin"
+  ],
+  "scripts": {
+    "dev": "node server.js",
+    "build": "npm run build --workspace=frontend && npm run build --workspace=platform-admin",
+    "build:frontend": "npm run build --workspace=frontend",
+    "build:platform": "npm run build --workspace=platform-admin",
+    "start": "node server.js",
+    "lint": "npm run lint --workspace=frontend"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  }
+}

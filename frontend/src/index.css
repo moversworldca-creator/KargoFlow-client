@@ -1,0 +1,442 @@
+@import url('https://fonts.googleapis.com/css2?family=Lexend+Deca:wght@100..900&family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+/* Tailwind v4 defaults `dark:` to the operating-system preference. The app's
+   theme switcher owns the `.dark` class, so variants must follow that class. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* === FONTS === */
+  --font-sans: 'Lexend Deca', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* === THEME COLORS === */
+  --color-brand: #1f7ae0;
+  --color-brand-dark: #1658a1;
+  --color-brand-tint: #eef5fa;
+  --color-brand-soft: #dbeafe;
+  --color-brand-forest: #00513f;
+  --color-brand-amber: #f59e0b;
+  --color-card-header: #EBF3FA;
+
+  --color-ink-900: #0b1620;
+  --color-ink-800: #111d23;
+  --color-ink-700: #1f2d36;
+  --color-ink-600: #334155;
+  --color-ink-500: #475569;
+  --color-ink-400: #64748b;
+  --color-ink-300: #94a3b8;
+  --color-ink-200: #cbd5e1;
+  --color-ink-100: #e2e8f0;
+  --color-ink-50:  #f1f5f9;
+
+  --color-paper: #fafafa;
+
+  /* Legacy / Compatibility Aliases */
+  --color-primary: var(--color-brand);
+  --color-primary-hover: var(--color-brand-dark);
+  --color-primary-light: var(--color-brand-tint);
+  --color-primary-tint: var(--color-brand-tint);
+  --color-page: #f8fafc;
+  --color-card: #ffffff;
+  --color-border: #eef5fa;
+  --color-subtle: #f1f5f9;
+  --color-heading: #111d23;
+  --color-body: #334155;
+  --color-muted: #64748b;
+
+  --color-brand-bg: #f8fafc;
+  --color-brand-surface: #ffffff;
+  --color-brand-sidebar: #eef5fa;
+  --color-brand-border: #eef5fa;
+
+  /* Status Colors */
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-info: #3b82f6;
+
+  --color-content-main: var(--color-heading);
+  --color-content-sec: var(--color-muted);
+
+  /* === SHADOWS === */
+  --shadow-card: 0 1px 2px rgba(15,23,42,0.04), 0 1px 1px rgba(15,23,42,0.02);
+  --shadow-lift: 0 6px 24px -10px rgba(15,23,42,0.18), 0 2px 4px -2px rgba(15,23,42,0.06);
+  --shadow-pop: 0 12px 40px -16px rgba(31,122,224,0.35), 0 4px 8px -4px rgba(15,23,42,0.08);
+
+  /* === RADIUS === */
+  --radius-4xl: 2rem;
+}
+
+/* Custom Scrollbar */
+.scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: #eef5fa; border-radius: 999px; }
+.scroll-thin::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }
+
+@layer base {
+  html, body { 
+    background-color: var(--color-page); 
+    color: var(--color-body); 
+    -webkit-font-smoothing: antialiased;
+    scroll-behavior: smooth;
+  }
+
+  table thead,
+  table thead tr,
+  table thead th {
+    background-color: #EBF3FA !important;
+    color: #133559;
+  }
+
+  body {
+    font-family: var(--font-sans);
+  }
+
+  .label-eyebrow { 
+    text-transform: uppercase; 
+    letter-spacing: 0.12em; 
+    font-weight: 600; 
+    font-size: 10px; 
+  }
+  @media (min-width: 1024px) {
+    .label-eyebrow { font-size: 11px; }
+  }
+  @media (min-width: 1536px) {
+    .label-eyebrow { font-size: 12px; }
+  }
+  
+  .glass {
+    background: rgba(255,255,255,0.72);
+    backdrop-filter: saturate(160%) blur(14px);
+    -webkit-backdrop-filter: saturate(160%) blur(14px);
+  }
+  
+  .glass-strong {
+    background: rgba(255,255,255,0.86);
+    backdrop-filter: saturate(160%) blur(18px);
+    -webkit-backdrop-filter: saturate(160%) blur(18px);
+  }
+}
+
+@layer utilities {
+  .route-dots {
+    background-image: radial-gradient(circle, #94a3b8 1.2px, transparent 1.4px);
+    background-size: 8px 2px;
+    background-repeat: repeat-x;
+    background-position: center;
+  }
+
+  .grid-bg {
+    background-image:
+      linear-gradient(rgba(31,122,224,0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(31,122,224,0.06) 1px, transparent 1px);
+    background-size: 28px 28px;
+    background-position: -1px -1px;
+  }
+
+  .no-spinner {
+    -moz-appearance: textfield;
+  }
+  .no-spinner::-webkit-outer-spin-button,
+  .no-spinner::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  .bg-card-header {
+    background-color: var(--color-card-header, #1F4E7F);
+  }
+}
+
+/* === DARK MODE CONFIGURATION & OVERRIDES === */
+:root.dark, html.dark {
+  --color-page: #0b1329;
+  --color-card: #14203e;
+  --color-border: #202e4d;
+  --color-subtle: #192744;
+  --color-heading: #f1f5f9;
+  --color-body: #94a3b8;
+  --color-muted: #64748b;
+
+  --color-brand-bg: #0b1329;
+  --color-brand-surface: #14203e;
+  --color-brand-sidebar: #0f1a35;
+  --color-brand-border: #202e4d;
+  --color-brand-tint: #1c2d4f;
+  --color-brand-soft: #142c54;
+  
+  --color-paper: #0b1329;
+
+  --portal-primary: #3b82f6;
+  --portal-primary-hover: #60a5fa;
+  --portal-accent: #f1f5f9;
+  --bg-color: #0b1329;
+  --card-bg: #14203e;
+  --border-color: #202e4d;
+  --text-main: #f1f5f9;
+  --text-muted: #94a3b8;
+}
+
+@layer utilities {
+  .dark body,
+  .dark html {
+    background-color: var(--color-page) !important;
+    color: var(--color-body) !important;
+  }
+
+  .dark h1, .dark h2, .dark h3,
+  .dark h4, .dark h5, .dark h6 {
+    color: var(--color-heading) !important;
+  }
+
+  .dark table { background-color: var(--color-card) !important; }
+  .dark th {
+    background-color: var(--color-subtle) !important;
+    color: var(--color-heading) !important;
+    border-color: var(--color-border) !important;
+  }
+  .dark td {
+    border-color: var(--color-border) !important;
+    color: var(--color-body) !important;
+  }
+  .dark tr:hover { background-color: var(--color-subtle) !important; }
+
+  .dark .bg-white,
+  .dark .bg-white\/95, .dark .bg-white\/90, .dark .bg-white\/80,
+  .dark .bg-white\/70, .dark .bg-white\/50,
+  .dark .bg-\[\#ffffff\], .dark .bg-\[\#fff\] {
+    background-color: var(--color-card) !important;
+  }
+
+  .dark .bg-slate-50, .dark .bg-gray-50,
+  .dark .bg-slate-100, .dark .bg-gray-100,
+  .dark .bg-\[\#fafafa\], .dark .bg-\[\#f1f5f9\],
+  .dark .bg-\[\#eef5fa\], .dark .bg-\[\#f8fafc\],
+  .dark .bg-\[\#f4f7fb\] {
+    background-color: var(--color-subtle) !important;
+  }
+
+  .dark .bg-slate-200, .dark .bg-gray-200,
+  .dark .bg-slate-300, .dark .bg-gray-300 {
+    background-color: var(--color-border) !important;
+  }
+
+  .dark .bg-slate-100:hover, .dark .bg-gray-100:hover {
+    background-color: #203055 !important;
+  }
+
+  .dark .hover\:bg-black\/5:hover { background-color: rgba(255,255,255,0.05) !important; }
+
+  .dark .border-gray-200, .dark .border-slate-200,
+  .dark .border-gray-100, .dark .border-slate-100,
+  .dark .border-gray-300, .dark .border-slate-300,
+  .dark .border-\[\#bae0f5\], .dark .border-\[\#eef5fa\],
+  .dark .border-\[\#e2e8f0\] {
+    border-color: var(--color-border) !important;
+  }
+
+  .dark .text-slate-800, .dark .text-slate-900,
+  .dark .text-slate-700, .dark .text-black,
+  .dark .text-slate-950, .dark .text-gray-950,
+  .dark .text-\[\#111d23\], .dark .text-\[\#0f172a\],
+  .dark .text-\[\#1e293b\], .dark .text-gray-900,
+  .dark .text-gray-800, .dark .text-gray-700 {
+    color: var(--color-heading) !important;
+  }
+
+  .dark .text-slate-600, .dark .text-slate-500,
+  .dark .text-gray-600, .dark .text-gray-500,
+  .dark .text-\[\#334155\], .dark .text-\[\#475569\] {
+    color: var(--color-body) !important;
+  }
+
+  .dark .text-slate-400, .dark .text-gray-400,
+  .dark .text-\[\#64748b\] { color: var(--color-muted) !important; }
+
+  .dark input, .dark select, .dark textarea {
+    background-color: var(--color-subtle) !important;
+    color: var(--color-heading) !important;
+    border-color: var(--color-border) !important;
+  }
+  .dark input::placeholder, .dark textarea::placeholder {
+    color: var(--color-muted) !important;
+  }
+
+  .dark .text-content-sec { color: var(--color-body) !important; }
+  .dark .text-content-main { color: var(--color-heading) !important; }
+
+  .dark .bg-\[\#eef6ff\] { background-color: var(--color-subtle) !important; }
+  .dark .border-\[\#9fcdf5\], .dark .border-\[\#7bb9eb\] { border-color: var(--color-border) !important; }
+  .dark input.text-\[\#1f7ae0\], .dark select.text-\[\#1f7ae0\],
+  .dark textarea.text-\[\#1f7ae0\], .dark div.text-\[\#1f7ae0\] input,
+  .dark div.text-\[\#1f7ae0\] { color: var(--color-heading) !important; }
+
+  .dark .text-\[\#004e9a\] { color: #60a5fa !important; }
+  .dark .hover\:text-\[\#004e9a\]:hover { color: #93c5fd !important; }
+  .dark .hover\:border-\[\#004e9a\]:hover { border-color: #60a5fa !important; }
+
+  .dark canvas.bg-white { background-color: #ffffff !important; }
+
+  .dark .bg-\[\#ECFDF5\], .dark .bg-\[\#ecfdf5\] { background-color: rgba(16,185,129,0.15) !important; }
+  .dark .text-\[\#065F46\], .dark .text-\[\#065f46\] { color: #34d399 !important; }
+  .dark .border-\[\#86EFAC\]\/60 { border-color: rgba(16,185,129,0.3) !important; }
+
+  .dark .bg-\[\#FFFBEB\], .dark .bg-\[\#fffbeb\] { background-color: rgba(245,158,11,0.15) !important; }
+  .dark .text-\[\#92400E\], .dark .text-\[\#92400e\] { color: #fbbf24 !important; }
+  .dark .border-\[\#FDE68A\], .dark .border-\[\#fde68a\] { border-color: rgba(245,158,11,0.3) !important; }
+
+  .dark .bg-\[\#FEF2F2\], .dark .bg-\[\#fef2f2\] { background-color: rgba(239,68,68,0.15) !important; }
+  .dark .text-\[\#7F1D1D\], .dark .text-\[\#7f1d1d\] { color: #f87171 !important; }
+  .dark .border-\[\#FCA5A5\]\/50 { border-color: rgba(239,68,68,0.3) !important; }
+
+  .dark .bg-\[\#FDE8E8\]\/30, .dark .bg-\[\#FDE8E8\]\/40,
+  .dark .bg-\[\#FDE8E8\]\/60 { background-color: rgba(239,68,68,0.15) !important; }
+  .dark .hover\:bg-\[\#FDE8E8\]\/30:hover,
+  .dark .hover\:bg-\[\#FDE8E8\]\/50:hover { background-color: rgba(239,68,68,0.25) !important; }
+  .dark .bg-\[\#FDE8E8\] { background-color: #7f1d1d !important; }
+  .dark .border-\[\#FDE8E8\] { border-color: rgba(239,68,68,0.3) !important; }
+  .dark .text-\[\#791F1F\] { color: #f87171 !important; }
+  .dark .hover\:text-\[\#791F1F\]:hover { color: #fca5a5 !important; }
+
+  .dark .from-\[\#f8fcff\]\/95, .dark .from-\[\#f8fcff\]\/96,
+  .dark .from-\[\#f8fcff\]\/92, .dark .from-\[\#eff7ff\]\/95,
+  .dark .from-\[\#dbeeff\] {
+    background-image: linear-gradient(to bottom right, var(--color-card), var(--color-subtle)) !important;
+  }
+  .dark .from-slate-50 { background-image: none !important; background-color: var(--color-page) !important; }
+  .dark .from-white { background-image: none !important; background-color: var(--color-card) !important; }
+  .dark .from-brand-tint\/20 { background-image: none !important; background-color: var(--color-card) !important; }
+  .dark .from-\[\#eef5fa\] { background-image: none !important; background-color: var(--color-card) !important; }
+
+  .dark .glass { background: rgba(20,32,62,0.72) !important; }
+  .dark .glass-strong { background: rgba(20,32,62,0.86) !important; }
+
+  .dark .bg-white\/95 { background-color: rgba(20,32,62,0.95) !important; }
+  .dark .bg-white\/90 { background-color: rgba(20,32,62,0.90) !important; }
+  .dark .bg-white\/80 { background-color: rgba(20,32,62,0.80) !important; }
+  .dark .bg-white\/70 { background-color: rgba(20,32,62,0.70) !important; }
+  .dark .bg-white\/60 { background-color: rgba(20,32,62,0.60) !important; }
+  .dark .bg-white\/55 { background-color: rgba(20,32,62,0.55) !important; }
+  .dark .bg-white\/50 { background-color: rgba(20,32,62,0.50) !important; }
+  .dark .bg-white\/40 { background-color: rgba(20,32,62,0.40) !important; }
+  .dark .bg-white\/30 { background-color: rgba(20,32,62,0.30) !important; }
+  .dark .bg-white\/20 { background-color: rgba(20,32,62,0.20) !important; }
+  .dark .bg-white\/10 { background-color: rgba(20,32,62,0.10) !important; }
+
+  .dark .bg-content-main\/60 { background-color: rgba(11,19,41,0.6) !important; }
+
+  .dark .contract-portal, .dark .portal-template-default,
+  .dark .contract-portal p, .dark .portal-template-default p,
+  .dark .contract-portal ul, .dark .portal-template-default ul,
+  .dark .contract-portal ol, .dark .portal-template-default ol {
+    color: var(--color-body) !important;
+  }
+  .dark .contract-portal h1, .dark .portal-template-default h1,
+  .dark .contract-portal h2, .dark .portal-template-default h2,
+  .dark .contract-portal h3, .dark .portal-template-default h3,
+  .dark .contract-portal h4, .dark .portal-template-default h4 {
+    color: var(--color-heading) !important;
+  }
+  .dark .contract-portal hr, .dark .portal-template-default hr {
+    background-color: var(--color-border) !important;
+  }
+
+  .dark .prose { color: var(--color-body) !important; }
+  .dark .prose h1, .dark .prose h2, .dark .prose h3,
+  .dark .prose h4, .dark .prose h5, .dark .prose h6,
+  .dark .prose strong, .dark .prose th { color: var(--color-heading) !important; }
+
+  .dark aside span.bg-content-main {
+    background-color: #0b1620 !important;
+    color: #f1f5f9 !important;
+  }
+  .dark .bg-content-main {
+    background-color: #0b1620 !important;
+    color: #f1f5f9 !important;
+  }
+
+  .dark .scroll-thin::-webkit-scrollbar-thumb { background: var(--color-border) !important; }
+  .dark .scroll-thin::-webkit-scrollbar-thumb:hover { background: var(--color-subtle) !important; }
+}
+
+@layer utilities {
+  /* ============================================================
+     PRIMARY BUTTON GRADIENT
+  ============================================================ */
+  button.bg-brand, a.bg-brand, .btn-primary,
+  button.bg-blue-600, a.bg-blue-600, .bg-primary {
+    background: linear-gradient(90deg, #fcb873, #fedfdc) !important;
+    border: none !important;
+    color: black !important;
+    border-color: transparent !important;
+    border-radius: 0.5rem !important;
+  }
+  button.bg-brand:hover, a.bg-brand:hover, .btn-primary:hover,
+  button.bg-blue-600:hover, a.bg-blue-600:hover, .bg-primary:hover {
+    background: linear-gradient(90deg, #f5a85b, #f6cfcb) !important;
+    color: black !important;
+    border-color: transparent !important;
+    border-radius: 0.5rem !important;
+  }
+
+  /* ============================================================
+     ACTIVE TAB GRADIENT
+  ============================================================ */
+  .tab-active,
+  .active-tab,
+  [role="tab"][aria-selected="true"],
+  [role="tab"][data-state="active"],
+  .tab.active,
+  .nav-tab.active {
+    background: linear-gradient(90deg, #f5a85b, #f6cfcb) !important;
+    color: black !important;
+    border-color: transparent !important;
+    border-radius: 0.5rem !important;
+  }
+
+  .active-tab *,
+  .tab-active *,
+  .active-tab svg,
+  .tab-active svg {
+    color: black !important;
+    stroke: black !important;
+  }
+
+  /* ============================================================
+     SECONDARY BUTTONS (white bg + dark text) → light blue style
+  ============================================================ */
+  button.bg-white.text-black,
+  button.bg-white.text-slate-700, button.bg-white.text-slate-800,
+  button.bg-white.text-slate-900, button.bg-white.text-gray-700,
+  button.bg-white.text-gray-800, button.bg-white.text-gray-900,
+  button.bg-white.text-ink-700, button.bg-white.text-ink-800,
+  button.bg-white.text-ink-900, button.bg-white\/80.text-black,
+  a.bg-white.text-black, a.bg-white.text-slate-700,
+  a.bg-white.text-slate-800, a.bg-white.text-slate-900 {
+    background-color: #eef6ff !important;
+    color: #1f7ae0 !important;
+    border-color: #bfdbfe !important;
+  }
+
+  button.bg-white.text-black:hover,
+  button.bg-white.text-slate-700:hover, button.bg-white.text-slate-800:hover,
+  button.bg-white.text-slate-900:hover, button.bg-white.text-gray-700:hover,
+  button.bg-white.text-gray-800:hover, button.bg-white.text-gray-900:hover,
+  button.bg-white.text-ink-700:hover, button.bg-white.text-ink-800:hover,
+  button.bg-white.text-ink-900:hover, button.bg-white\/80.text-black:hover,
+  a.bg-white.text-black:hover, a.bg-white.text-slate-700:hover,
+  a.bg-white.text-slate-800:hover, a.bg-white.text-slate-900:hover {
+    background-color: #dbeafe !important;
+    color: #1658a1 !important;
+  }
+
+  button.bg-white.text-black svg,
+  button.bg-white.text-slate-700 svg, button.bg-white.text-slate-800 svg,
+  button.bg-white.text-slate-900 svg, button.bg-white.text-gray-700 svg,
+  button.bg-white.text-gray-800 svg, button.bg-white.text-gray-900 svg,
+  button.bg-white.text-ink-700 svg, button.bg-white.text-ink-800 svg,
+  button.bg-white.text-ink-900 svg, button.bg-white\/80.text-black svg {
+    color: #1f7ae0 !important;
+    stroke: #1f7ae0 !important;
+  }
+}
