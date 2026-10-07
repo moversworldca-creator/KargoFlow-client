@@ -5,7 +5,7 @@ import {
   Sparkles, RefreshCw, StopCircle, ArrowRight 
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
-import platformApi from '../api/platformApi';
+import api from '../services/api';
 import { useAuth } from '../auth/PlatformAuthContext';
 import { useNavigate } from 'react-router-dom';
 
@@ -37,12 +37,11 @@ export default function SupportSessionsTab({
 
     setIsSubmitting(true);
     try {
-      await platformApi.createSupportSession({
-        tenant_id: targetTenantId,
-        actor_email: user?.email || 'admin@fastmovers.com',
-        mode,
+      await api.tenantSessions.create({
+        tenant_company_id: Number(targetTenantId),
+        access_mode: mode === 'support_write' ? 'support_write' : 'read',
         reason: reason.trim(),
-        ticket_ref: ticketRef.trim() || undefined,
+        support_ticket_ref: ticketRef.trim(),
         duration_minutes: Number(durationMinutes) || 60,
       });
 
@@ -61,7 +60,7 @@ export default function SupportSessionsTab({
   const handleEndSession = async (sessionId) => {
     setIsEnding(true);
     try {
-      await platformApi.endSupportSession(sessionId);
+      await api.tenantSessions.end(sessionId);
       showToast('Support session terminated. Audit trail logged.', 'success');
       onRefresh?.();
     } catch (err) {

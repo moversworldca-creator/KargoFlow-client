@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useModal } from '../hooks/useModal';
-import platformApi from '../api/platformApi';
+import api from '../services/api';
 
 // Section 2.1 Approved Table
 const FUNCTIONAL_STATES = [
@@ -74,7 +74,7 @@ export default function TenantLifecycleModal({
 
     setIsSubmitting(true);
     try {
-      const res = await platformApi.updateTenantStatus(tenant.id, {
+      const res = await api.updateTenantStatus(tenant.id, {
         functional_state: selectedState,
         reason: reason.trim(),
       });

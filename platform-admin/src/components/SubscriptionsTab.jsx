@@ -5,7 +5,7 @@ import {
   Loader2, ShieldAlert, Sparkles, Filter 
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
-import platformApi from '../api/platformApi';
+import api from '../services/api';
 import SubscriptionLifecycleModal from './SubscriptionLifecycleModal';
 
 const ALLOWED_TRANSITIONS = {

@@ -78,8 +78,13 @@ const AuditLogRow = ({ log }) => {
   const action = String(log.action || '').toUpperCase();
   const meta = ACTION_META[action] || ACTION_META.UPDATE;
   const ActionIcon = meta.icon;
-  const fieldCount = countChangedFields(log.changes);
-  const changedFields = getChangePreview(log.changes);
+  const changes = log.changes || log.metadata || {};
+  const fieldCount = countChangedFields(changes);
+  const changedFields = getChangePreview(changes);
+  const timestamp = log.created_at || log.occurred_at;
+  const modelName = log.model_name || log.entity_type || 'record';
+  const objectId = log.object_id || log.entity_id;
+  const userDisplay = log.user_details?.full_name || log.user_email || (log.platform_user_id ? `Platform User #${log.platform_user_id}` : 'System');
 
   return (
     <div className="group rounded-3xl border border-white/70 bg-white/90 p-5 shadow-[0_14px_40px_rgba(15,23,42,0.06)] transition-all hover:-translate-y-0.5 hover:border-primary/15 hover:shadow-[0_20px_50px_rgba(15,23,42,0.10)]">
@@ -92,11 +97,11 @@ const AuditLogRow = ({ log }) => {
           <div className="min-w-0 space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="truncate font-heading text-base font-bold text-heading">
-                {log.user_details?.full_name || log.user_email || 'System'}{' '}
+                {userDisplay}{' '}
                 <span className="font-medium text-body">
                   {meta.label.toLowerCase()}
                 </span>{' '}
-                {log.model_name || 'record'}
+                {modelName}
               </h3>
               <span className="rounded-full border border-subtle bg-page px-2.5 py-1 text-[0.65rem] font-bold uppercase tracking-[0.16em] text-body">
                 {action || 'EVENT'}
@@ -106,26 +111,26 @@ const AuditLogRow = ({ log }) => {
             <div className="flex flex-wrap items-center gap-3 text-sm text-body">
               <span className="inline-flex items-center gap-1.5">
                 <User size={14} className="text-primary" />
-                {log.user_email || 'System'}
+                {log.user_email || (log.platform_user_id ? `Platform User #${log.platform_user_id}` : 'System')}
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <Calendar size={14} className="text-primary" />
-                {formatDateTime(log.created_at)}
+                {formatDateTime(timestamp)}
               </span>
-              {formatRelativeTime(log.created_at) && (
+              {formatRelativeTime(timestamp) && (
                 <span className="text-xs font-semibold text-disabled">
-                  {formatRelativeTime(log.created_at)}
+                  {formatRelativeTime(timestamp)}
                 </span>
               )}
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
               <div className="rounded-full bg-primary-tint/15 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.16em] text-primary">
-                {log.model_name || 'Unknown model'}
+                {modelName}
               </div>
-              {log.object_id && (
+              {objectId && (
                 <div className="rounded-full bg-page px-3 py-1.5 text-xs font-semibold text-body">
-                  Object #{log.object_id}
+                  Object #{objectId}
                 </div>
               )}
               {fieldCount > 0 && (
@@ -185,7 +190,8 @@ const AuditLogs = () => {
     const fetchLogs = async () => {
       try {
         const response = await getAuditLogs();
-        setLogs(Array.isArray(response) ? response : []);
+        const list = Array.isArray(response?.results) ? response.results : (Array.isArray(response) ? response : []);
+        setLogs(list);
       } catch (err) {
         console.error('Failed to fetch audit logs:', err);
         setError('Failed to load audit logs.');
@@ -200,7 +206,8 @@ const AuditLogs = () => {
   const modelOptions = useMemo(() => {
     const values = new Set();
     logs.forEach((log) => {
-      if (log?.model_name) values.add(log.model_name);
+      const name = log?.model_name || log?.entity_type;
+      if (name) values.add(name);
     });
     return ['all', ...Array.from(values).sort((a, b) => a.localeCompare(b))];
   }, [logs]);
@@ -210,10 +217,10 @@ const AuditLogs = () => {
 
     return logs.filter((log) => {
       const action = String(log.action || '').toUpperCase();
-      const modelName = String(log.model_name || '').toLowerCase();
-      const userName = String(log.user_details?.full_name || log.user_email || '').toLowerCase();
-      const objectId = String(log.object_id || '').toLowerCase();
-      const changeText = JSON.stringify(log.changes || {}).toLowerCase();
+      const modelName = String(log.model_name || log.entity_type || '').toLowerCase();
+      const userName = String(log.user_details?.full_name || log.user_email || (log.platform_user_id ? `Platform User #${log.platform_user_id}` : '')).toLowerCase();
+      const objectId = String(log.object_id || log.entity_id || '').toLowerCase();
+      const changeText = JSON.stringify(log.changes || log.metadata || {}).toLowerCase();
 
       const matchesSearch =
         !needle ||

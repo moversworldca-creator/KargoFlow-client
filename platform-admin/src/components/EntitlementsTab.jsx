@@ -5,7 +5,7 @@ import {
   Zap, PackagePlus, ArrowRight 
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
-import platformApi from '../api/platformApi';
+import api from '../services/api';
 
 export default function EntitlementsTab({ 
   tenants = [], 
@@ -40,7 +40,7 @@ export default function EntitlementsTab({
     if (!tId) return;
     setIsLoading(true);
     try {
-      const res = await platformApi.getTenantEntitlements(tId);
+      const res = await api.getTenantEntitlements(tId);
       setEntitlementsData(res.data);
     } catch (err) {
       showToast(err?.response?.data?.error || err?.message || 'Failed to load entitlements', 'error');
@@ -79,7 +79,7 @@ export default function EntitlementsTab({
         payload.value = Number(limitVal);
       }
 
-      await platformApi.createTenantOverride(selectedTenantId, payload);
+      await api.createTenantOverride(selectedTenantId, payload);
       showToast('Entitlement override applied successfully.', 'success');
       setShowOverrideModal(false);
       setOverrideReason('');
@@ -93,7 +93,7 @@ export default function EntitlementsTab({
 
   const handleDeleteOverride = async (overrideId) => {
     try {
-      await platformApi.deleteTenantOverride(selectedTenantId, overrideId);
+      await api.deleteTenantOverride(selectedTenantId, overrideId);
       showToast('Administrative override removed.', 'success');
       fetchEntitlements(selectedTenantId);
     } catch (err) {
@@ -105,7 +105,7 @@ export default function EntitlementsTab({
     e.preventDefault();
     setIsSubmittingAddon(true);
     try {
-      await platformApi.assignTenantAddon(selectedTenantId, {
+      await api.assignTenantAddon(selectedTenantId, {
         addon_id: selectedAddonId,
         quantity: Number(addonQuantity) || 1,
       });

@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Loader2, RefreshCw } from 'lucide-react';
-import platformApi from '../api/platformApi';
+import api from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { usePlatformAuth } from '../auth/PlatformAuthContext';
 import { PLATFORM_PERMISSIONS } from '../rbac/platformRbac';
-import { usePlans, useFeatures, useInvalidatePlatformQueries } from '../hooks/usePlatformData';
+import { usePlans, useFeatures, useLimits, useInvalidatePlatformQueries } from '../hooks/usePlatformData';
 import PlansCatalogTab from '../components/PlansCatalogTab';
 import AccessDenied from '../components/AccessDenied';
 
@@ -16,13 +16,14 @@ export default function PlansPage() {
 
   const { data: plans = [], isLoading: isPlansLoading, refetch: refetchPlans } = usePlans();
   const { data: features = [], isLoading: isFeaturesLoading, refetch: refetchFeatures } = useFeatures();
+  const { data: limits = [], isLoading: isLimitsLoading, refetch: refetchLimits } = useLimits();
   const { invalidatePlans, invalidateAll } = useInvalidatePlatformQueries();
 
-  const isLoading = isPlansLoading || isFeaturesLoading;
+  const isLoading = isPlansLoading || isFeaturesLoading || isLimitsLoading;
 
   const handleRefresh = async () => {
     try {
-      await Promise.all([refetchPlans(), refetchFeatures()]);
+      await Promise.all([refetchPlans(), refetchFeatures(), refetchLimits()]);
       showToast('Plans catalog refreshed.', 'success');
     } catch {
       showToast('Error syncing plans catalog.', 'error');
@@ -76,6 +77,7 @@ export default function PlansPage() {
       <PlansCatalogTab
         plans={plans}
         features={features}
+        limits={limits}
         onRefresh={handleRefresh}
       />
     </div>

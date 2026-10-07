@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Loader2, RefreshCw } from 'lucide-react';
-import platformApi from '../api/platformApi';
+import api from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { usePlatformAuth } from '../auth/PlatformAuthContext';
 import { PLATFORM_PERMISSIONS } from '../rbac/platformRbac';

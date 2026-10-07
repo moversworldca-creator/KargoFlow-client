@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useModal } from '../hooks/useModal';
-import platformApi from '../api/platformApi';
+import api from '../services/api';
 
 // Approved Section 2.10 Transition Matrix
 const ALLOWED_TRANSITIONS = {
@@ -86,10 +86,11 @@ export default function SubscriptionLifecycleModal({
 
     setIsSubmitting(true);
     try {
-      const res = await platformApi.transitionSubscription(subscription.id, {
-        next_status: targetStatus,
+      const res = await api.subscriptions.transition({
+        subscription_id: subscription.id,
+        new_status: targetStatus,
         reason: transitionReason.trim(),
-        grace_period_days: targetStatus === 'past_due' ? graceDays : undefined,
+        fields: targetStatus === 'past_due' ? { grace_period_days: graceDays } : {},
       });
       showToast(`Subscription transitioned to "${targetStatus}".`, 'success');
       onSubscriptionUpdated?.(res.data?.subscription || res.data);
@@ -111,7 +112,7 @@ export default function SubscriptionLifecycleModal({
 
     setIsSubmitting(true);
     try {
-      const res = await platformApi.changeSubscriptionPlan(subscription.id, {
+      const res = await api.changeSubscriptionPlan(subscription.id, {
         new_plan_id: newPlanId,
         billing_interval: billingInterval,
         effective_timing: effectiveTiming,
@@ -136,13 +137,14 @@ export default function SubscriptionLifecycleModal({
     setIsSubmitting(true);
     try {
       if (subscription.status === 'trialing' && trialEndsAt) {
-        await platformApi.updateSubscriptionTrial(subscription.id, {
+        await api.subscriptions.createTrial({
+          company_id: subscription.tenant_id || subscription.company_id,
+          plan_id: subscription.plan_id,
           trial_ends_at: new Date(trialEndsAt).toISOString(),
-          reason: datesReason.trim() || 'Admin trial adjustment',
         });
       }
       if (graceEndsAt) {
-        await platformApi.updateSubscriptionGracePeriod(subscription.id, {
+        await api.updateSubscriptionGracePeriod(subscription.id, {
           grace_period_ends_at: new Date(graceEndsAt).toISOString(),
           reason: datesReason.trim() || 'Admin grace adjustment',
         });
@@ -166,7 +168,7 @@ export default function SubscriptionLifecycleModal({
     }
     setIsSubmitting(true);
     try {
-      const res = await platformApi.cancelSubscription(subscription.id, {
+      const res = await api.cancelSubscription(subscription.id, {
         cancel_mode: cancelMode,
         reason: cancelReason.trim(),
       });
@@ -189,7 +191,7 @@ export default function SubscriptionLifecycleModal({
     }
     setIsSubmitting(true);
     try {
-      const res = await platformApi.reactivateSubscription(subscription.id, {
+      const res = await api.reactivateSubscription(subscription.id, {
         reason: reactivateReason.trim(),
       });
       showToast(res.data?.message || 'Subscription reactivated.', 'success');

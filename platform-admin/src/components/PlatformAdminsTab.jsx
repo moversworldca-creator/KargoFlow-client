@@ -10,7 +10,8 @@ import {
 import { useToast } from '../context/ToastContext';
 import { usePlatformAuth } from '../auth/PlatformAuthContext';
 import { useDebounce } from '../hooks/useDebounce';
-import platformApi from '../api/platformApi';
+import api from '../services/api';
+import auth from '../services/auth';
 import { 
   PLATFORM_PERMISSIONS, 
   PERMISSION_DEFINITIONS, 
@@ -66,7 +67,7 @@ export default function PlatformAdminsTab({
   // Load current platform staff auth context on mount
   const fetchCurrentAuth = async () => {
     try {
-      const res = await platformApi.getPlatformAuthMe();
+      const res = await auth.getPlatformAuthMe();
       if (res?.data?.user) {
         setActiveStaffUser(res.data.user);
       }
@@ -140,7 +141,7 @@ export default function PlatformAdminsTab({
 
     setIsSubmitting(true);
     try {
-      await platformApi.inviteAdmin({
+      await api.inviteAdmin({
         ...formData,
         email: formData.email.trim().toLowerCase(),
         assigned_companies: formData.company_scope_type === 'all' ? [] : formData.assigned_companies,
@@ -172,13 +173,9 @@ export default function PlatformAdminsTab({
 
     setIsSubmitting(true);
     try {
-      await platformApi.updateAdmin(editUser.id, {
-        name: editUser.name,
-        role: editUser.role,
-        company_scope_type: editUser.company_scope_type,
-        assigned_companies: editUser.company_scope_type === 'all' ? [] : editUser.assigned_companies,
-        expires_at: editUser.expires_at || null,
-        mfa_enforced: editUser.mfa_enforced,
+      await api.grantRole({
+        target_platform_user_id: Number(editUser.id),
+        role_code: editUser.role,
       });
       showToast(`Staff access for "${editUser.name}" updated successfully. Active sessions revoked.`, 'success');
       setEditUser(null);
@@ -195,7 +192,7 @@ export default function PlatformAdminsTab({
     if (!suspensionTarget) return;
     setIsSubmitting(true);
     try {
-      await platformApi.suspendAdmin(suspensionTarget.id, suspensionReason || 'Suspended by platform staff');
+      await api.suspendAdmin(suspensionTarget.id, suspensionReason || 'Suspended by platform staff');
       showToast(`Account "${suspensionTarget.name}" suspended. Active sessions revoked.`, 'success');
       setSuspensionTarget(null);
       setSuspensionReason('');
@@ -212,7 +209,7 @@ export default function PlatformAdminsTab({
     if (!reactivateTarget) return;
     setIsSubmitting(true);
     try {
-      await platformApi.reactivateAdmin(reactivateTarget.id, reactivateReason || 'Reactivated by platform staff');
+      await api.reactivateAdmin(reactivateTarget.id, reactivateReason || 'Reactivated by platform staff');
       showToast(`Account "${reactivateTarget.name}" reactivated.`, 'success');
       setReactivateTarget(null);
       setReactivateReason('');

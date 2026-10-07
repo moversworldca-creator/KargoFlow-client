@@ -200,8 +200,10 @@ export const PLATFORM_ROLES = {
  */
 export function hasPlatformPermission(user, permissionCode) {
   if (!user) return false;
-  if (user.status !== 'active') return false;
+  if (user.status && user.status !== 'active') return false;
+  if (user.is_active === false) return false;
   if (user.expires_at && new Date(user.expires_at).getTime() < Date.now()) return false;
+  if (user.identity_type === 'platform' && (!user.role || user.role === 'super_admin')) return true;
   if (user.role === 'super_admin') return true;
 
   const roleConfig = PLATFORM_ROLES[user.role];
@@ -214,9 +216,10 @@ export function hasPlatformPermission(user, permissionCode) {
  */
 export function isTenantInScope(user, tenantId) {
   if (!user) return false;
-  if (user.status !== 'active') return false;
+  if (user.status && user.status !== 'active') return false;
+  if (user.is_active === false) return false;
   if (user.expires_at && new Date(user.expires_at).getTime() < Date.now()) return false;
-  if (user.company_scope_type === 'all' || user.role === 'super_admin') return true;
+  if (user.identity_type === 'platform' || user.company_scope_type === 'all' || user.role === 'super_admin') return true;
 
   const tIdNum = Number(tenantId);
   const assigned = Array.isArray(user.assigned_companies)

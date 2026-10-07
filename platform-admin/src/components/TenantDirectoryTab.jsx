@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useDebounce } from '../hooks/useDebounce';
-import platformApi from '../api/platformApi';
+import api from '../services/api';
 import TenantLifecycleModal from './TenantLifecycleModal';
 
 export default function TenantDirectoryTab({ 
@@ -52,7 +52,7 @@ export default function TenantDirectoryTab({
 
     setIsUpdatingStatus(true);
     try {
-      await platformApi.updateTenantStatus(statusChangeTenant.id, {
+      await api.updateTenantStatus(statusChangeTenant.id, {
         functional_state: targetStatus,
         reason: statusReason.trim(),
       });

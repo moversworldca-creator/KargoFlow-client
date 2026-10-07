@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useModal } from '../hooks/useModal';
-import platformApi from '../api/platformApi';
+import api from '../services/api';
 
 export default function SeedDataModal({ isOpen, onClose, onDataSeeded }) {
   useModal(isOpen, onClose);
@@ -19,7 +19,7 @@ export default function SeedDataModal({ isOpen, onClose, onDataSeeded }) {
   const handleSeed = async () => {
     setIsSeeding(true);
     try {
-      const res = await platformApi.seedDemoData({ template: selectedPreset });
+      const res = await api.seedDemoData({ template: selectedPreset });
       showToast(
         res.data?.message || 'SaaS Platform Control Center seeded with test and presentation template data!',
         'success'

@@ -43,7 +43,88 @@ export const deleteRole = (id) => api.delete(`/roles/${id}/`);
 export const getPermissions = () => api.get("/permissions/");
 
 // Core APIs
-export const getAuditLogs = () => api.get("/audit-logs/");
+export const getCoreFeatures = (params) =>
+  api.get("/core/features/", { params });
+export const createCoreFeature = (data) =>
+  api.post("/core/features/", data);
+export const getCoreFeature = (id) =>
+  api.get(`/core/features/${id}/`);
+export const updateCoreFeature = (id, data) =>
+  api.patch(`/core/features/${id}/`, data);
+export const activateCoreFeature = (id) =>
+  api.post(`/core/features/${id}/activate/`);
+export const retireCoreFeature = (id) =>
+  api.post(`/core/features/${id}/retire/`);
+
+export const getCoreLimits = (params) =>
+  api.get("/core/limits/", { params });
+export const createCoreLimit = (data) =>
+  api.post("/core/limits/", data);
+export const getCoreLimit = (id) =>
+  api.get(`/core/limits/${id}/`);
+export const updateCoreLimit = (id, data) =>
+  api.patch(`/core/limits/${id}/`, data);
+export const activateCoreLimit = (id) =>
+  api.post(`/core/limits/${id}/activate/`);
+export const retireCoreLimit = (id) =>
+  api.post(`/core/limits/${id}/retire/`);
+
+export const getCorePlans = (params) =>
+  api.get("/core/plans/", { params });
+export const createCorePlan = (data) =>
+  api.post("/core/plans/", data);
+export const getCorePlan = (id) =>
+  api.get(`/core/plans/${id}/`);
+export const updateCorePlan = (id, data) =>
+  api.patch(`/core/plans/${id}/`, data);
+export const activateCorePlan = (id) =>
+  api.post(`/core/plans/${id}/activate/`);
+export const updateCorePlanFeatures = (id, data) =>
+  api.put(`/core/plans/${id}/features/`, data);
+export const updateCorePlanLimits = (id, data) =>
+  api.put(`/core/plans/${id}/limits/`, data);
+export const retireCorePlan = (id) =>
+  api.post(`/core/plans/${id}/retire/`);
+
+export const getPlatformUsers = (params) =>
+  api.get("/core/platform-users/", { params });
+export const createPlatformUser = (data) =>
+  api.post("/core/platform-users/", data);
+export const getPlatformUser = (id) =>
+  api.get(`/core/platform-users/${id}/`);
+export const getPlatformUserRoles = (id) =>
+  api.get(`/core/platform-users/${id}/roles/`);
+export const grantPlatformUserRole = (data) =>
+  api.post("/core/platform-users/grant-role/", data);
+
+export const getSubscription = (id) =>
+  api.get(`/core/subscriptions/${id}/`);
+export const getSubscriptionHistory = (id) =>
+  api.get(`/core/subscriptions/${id}/history/`);
+export const transitionSubscription = (data) =>
+  api.post("/core/subscriptions/transition/", data);
+export const createTrialSubscription = (data) =>
+  api.post("/core/subscriptions/trial/", data);
+
+export const getTenantAccess = (params) =>
+  api.get("/core/tenant-access/", { params });
+export const checkTenantAccess = (data) =>
+  api.post("/core/tenant-access/check/", data);
+export const getTenantAccessCompanies = (params) =>
+  api.get("/core/tenant-access/companies/", { params });
+export const setTenantAccess = (data) =>
+  api.post("/core/tenant-access/set/", data);
+
+export const createTenantSession = (data) =>
+  api.post("/core/tenant-sessions/", data);
+export const endTenantSession = (id) =>
+  api.post(`/core/tenant-sessions/${id}/end/`);
+
+export const getCompanyEntitlements = (id) =>
+  api.get(`/core/company-entitlements/${id}/`);
+
+export const getAuditLogs = (params) =>
+  api.get("/core/audit-logs/", { params });
 export const universalSearch = (params) => api.get("/search/", { params });
 export const getBranches = () => api.get("/branches/");
 export const getBranchLookups = (params = {limit: 50}) => api.get("/lookups/branches/", { params });
@@ -467,7 +548,66 @@ const API = {
   put: (url, data) => api.put(url, data),
   patch: (url, data) => api.patch(url, data),
   delete: (url) => api.delete(url),
-  
+
+  core: {
+    getFeatures: getCoreFeatures,
+    createFeature: createCoreFeature,
+    getFeature: getCoreFeature,
+    updateFeature: updateCoreFeature,
+    activateFeature: activateCoreFeature,
+    retireFeature: retireCoreFeature,
+
+    getLimits: getCoreLimits,
+    createLimit: createCoreLimit,
+    getLimit: getCoreLimit,
+    updateLimit: updateCoreLimit,
+    activateLimit: activateCoreLimit,
+    retireLimit: retireCoreLimit,
+
+    getPlans: getCorePlans,
+    createPlan: createCorePlan,
+    getPlan: getCorePlan,
+    updatePlan: updateCorePlan,
+    activatePlan: activateCorePlan,
+    updatePlanFeatures: updateCorePlanFeatures,
+    updatePlanLimits: updateCorePlanLimits,
+    retirePlan: retireCorePlan,
+  },
+
+  platformUsers: {
+    getUsers: getPlatformUsers,
+    createUser: createPlatformUser,
+    getUser: getPlatformUser,
+    getUserRoles: getPlatformUserRoles,
+    grantRole: grantPlatformUserRole,
+  },
+
+  subscriptions: {
+    get: getSubscription,
+    getHistory: getSubscriptionHistory,
+    transition: transitionSubscription,
+    createTrial: createTrialSubscription,
+  },
+
+  tenantAccess: {
+    get: getTenantAccess,
+    check: checkTenantAccess,
+    getCompanies: getTenantAccessCompanies,
+    set: setTenantAccess,
+  },
+
+  tenantSessions: {
+    create: createTenantSession,
+    end: endTenantSession,
+  },
+
+  companyEntitlements: {
+    get: getCompanyEntitlements,
+  },
+
+  auditLogs: {
+    get: getAuditLogs,
+  },
 
   auth: {
     login,

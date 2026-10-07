@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useModal } from '../hooks/useModal';
-import platformApi from '../api/platformApi';
+import api from '../services/api';
 
 const CURRENCIES = [
   { value: 'USD', label: 'USD ($) - US Dollar' },
@@ -128,7 +128,7 @@ export default function ProvisionTenantModal({ isOpen, onClose, onTenantProvisio
 
     setIsSubmitting(true);
     try {
-      const res = await platformApi.provisionTenant({
+      const res = await api.provisionTenant({
         company: {
           name: formData.name.trim(),
           legal_name: formData.legal_name.trim() || formData.name.trim(),

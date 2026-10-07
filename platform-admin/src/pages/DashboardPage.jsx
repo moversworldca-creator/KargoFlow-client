@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, Plus, Sparkles, RefreshCw } from 'lucide-react';
-import platformApi from '../api/platformApi';
+import api from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { useDashboardData, usePlans, useInvalidatePlatformQueries } from '../hooks/usePlatformData';
 import PlatformOverviewTab from '../components/PlatformOverviewTab';

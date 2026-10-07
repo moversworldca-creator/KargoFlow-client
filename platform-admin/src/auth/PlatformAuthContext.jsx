@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import platformApi from '../api/platformApi';
+import auth from '../services/auth';
 import { hasPlatformPermission } from '../rbac/platformRbac';
 
 const PlatformAuthContext = createContext(null);
@@ -30,15 +30,14 @@ export const PlatformAuthProvider = ({ children }) => {
   const navigate = useNavigate();
 
   const logout = useCallback(() => {
-    localStorage.removeItem('platform_access_token');
-    localStorage.removeItem('platform_user');
+    auth.logout();
     setPlatformUser(null);
     setPermissions([]);
     navigate('/login');
   }, [navigate]);
 
   const verifyAndRefreshUser = useCallback(async () => {
-    const token = localStorage.getItem('platform_access_token');
+    const token = localStorage.getItem('platform_access_token') || localStorage.getItem('access_token');
     if (!token) {
       setPlatformUser(null);
       setPermissions([]);
@@ -47,17 +46,18 @@ export const PlatformAuthProvider = ({ children }) => {
     }
 
     try {
-      const res = await platformApi.getPlatformAuthMe();
-      if (res?.data?.user) {
-        setPlatformUser(res.data.user);
-        setPermissions(res.data.permissions || []);
-        localStorage.setItem('platform_user', JSON.stringify(res.data.user));
+      const res = await auth.getPlatformAuthMe();
+      const user = res?.data?.user || res?.data;
+      if (user) {
+        setPlatformUser(user);
+        setPermissions(res?.data?.permissions || user?.permissions || []);
+        localStorage.setItem('platform_user', JSON.stringify(user));
       }
     } catch (err) {
       console.warn('Platform authentication verification failed:', err?.response?.data || err?.message);
-      // If unauthorized, clear state
       if (err?.response?.status === 401 || err?.response?.status === 403) {
         localStorage.removeItem('platform_access_token');
+        localStorage.removeItem('access_token');
         localStorage.removeItem('platform_user');
         setPlatformUser(null);
         setPermissions([]);
@@ -70,26 +70,40 @@ export const PlatformAuthProvider = ({ children }) => {
   useEffect(() => {
     verifyAndRefreshUser();
 
-    const handleSessionExpired = (e) => {
-      logout();
+    const handleSessionExpired = () => {
+      setPlatformUser(null);
+      setPermissions([]);
+      navigate('/login');
     };
 
     window.addEventListener('platform:session_expired', handleSessionExpired);
     return () => {
       window.removeEventListener('platform:session_expired', handleSessionExpired);
     };
-  }, [verifyAndRefreshUser, logout]);
+  }, [verifyAndRefreshUser, navigate]);
 
   const login = async (email, password) => {
-    const res = await platformApi.login({ email, password });
-    const { token, user, permissions: perms } = res.data;
-
-    localStorage.setItem('platform_access_token', token);
-    localStorage.setItem('platform_user', JSON.stringify(user));
+    const res = await auth.login({
+      email,
+      password,
+      identity_type: 'platform',
+    });
+    const data = res.data;
+    const user = data.user || {
+      id: data.user_id,
+      email,
+      role: 'super_admin',
+      name: email.split('@')[0],
+      status: 'active',
+      is_active: true,
+      company_scope_type: 'all',
+      identity_type: data.identity_type || 'platform',
+    };
+    const perms = data.permissions || [];
 
     setPlatformUser(user);
-    setPermissions(perms || []);
-    return res.data;
+    setPermissions(perms);
+    return data;
   };
 
   const checkPermission = useCallback(
@@ -101,17 +115,17 @@ export const PlatformAuthProvider = ({ children }) => {
   );
 
   const switchPersona = async (userId) => {
-    const res = await platformApi.switchPlatformUser(userId);
-    const { token, active_user } = res.data;
+    const res = await auth.switchPlatformUser(userId);
+    const { token, active_user } = res.data || {};
 
     if (token) {
       localStorage.setItem('platform_access_token', token);
+      localStorage.setItem('access_token', token);
     }
     if (active_user) {
       localStorage.setItem('platform_user', JSON.stringify(active_user));
       setPlatformUser(active_user);
     }
-    // Refresh to get full permissions, scope, and company details
     await verifyAndRefreshUser();
     return res.data;
   };
