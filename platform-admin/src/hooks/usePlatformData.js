@@ -14,12 +14,14 @@ export function useDashboardData() {
   });
 }
 
+const unpackResults = (res) => (Array.isArray(res?.data) ? res.data : (res?.data?.results || []));
+
 export function useTenants(params = {}) {
   return useQuery({
     queryKey: ['platform', 'tenants', params],
     queryFn: async () => {
       const res = await platformApi.getTenants(params);
-      return res.data?.results || [];
+      return unpackResults(res);
     },
     staleTime: DEFAULT_STALE_TIME,
   });
@@ -30,7 +32,7 @@ export function usePlans() {
     queryKey: ['platform', 'plans'],
     queryFn: async () => {
       const res = await platformApi.getPlans();
-      return res.data?.results || [];
+      return unpackResults(res);
     },
     staleTime: DEFAULT_STALE_TIME,
   });
@@ -41,7 +43,7 @@ export function useFeatures() {
     queryKey: ['platform', 'features'],
     queryFn: async () => {
       const res = await platformApi.getFeatures();
-      return res.data?.results || [];
+      return unpackResults(res);
     },
     staleTime: DEFAULT_STALE_TIME,
   });
@@ -52,7 +54,7 @@ export function useSubscriptions(params = {}) {
     queryKey: ['platform', 'subscriptions', params],
     queryFn: async () => {
       const res = await platformApi.getSubscriptions(params);
-      return res.data?.results || [];
+      return unpackResults(res);
     },
     staleTime: DEFAULT_STALE_TIME,
   });
@@ -63,7 +65,7 @@ export function useAddons() {
     queryKey: ['platform', 'addons'],
     queryFn: async () => {
       const res = await platformApi.getAddons();
-      return res.data?.results || [];
+      return unpackResults(res);
     },
     staleTime: DEFAULT_STALE_TIME,
   });
@@ -74,7 +76,7 @@ export function useSupportSessions() {
     queryKey: ['platform', 'support_sessions'],
     queryFn: async () => {
       const res = await platformApi.getSupportSessions();
-      return res.data?.results || [];
+      return unpackResults(res);
     },
     staleTime: 30 * 1000,
   });
@@ -85,7 +87,7 @@ export function usePlatformAdmins(params = {}) {
     queryKey: ['platform', 'admins', params],
     queryFn: async () => {
       const res = await platformApi.getAdmins(params);
-      return res.data?.results || [];
+      return unpackResults(res);
     },
     staleTime: DEFAULT_STALE_TIME,
   });
@@ -96,7 +98,7 @@ export function usePlatformAuditLogs(params = {}) {
     queryKey: ['platform', 'audit_logs', params],
     queryFn: async () => {
       const res = await platformApi.getAuditLogs(params);
-      return res.data?.results || [];
+      return unpackResults(res);
     },
     staleTime: 30 * 1000,
   });

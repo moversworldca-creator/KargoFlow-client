@@ -3,7 +3,7 @@ import platformAxios from './platformAxios';
 export const platformApi = {
   // Auth
   login: async (credentials) => {
-    return platformAxios.post('/auth/login/', credentials);
+    return platformAxios.post('/auth/login/', { identity_type: 'platform', ...credentials });
   },
   getPlatformAuthMe: async () => {
     return platformAxios.get('/auth/me/');
@@ -17,132 +17,135 @@ export const platformApi = {
 
   // Dashboard
   getDashboard: async () => {
-    return platformAxios.get('/dashboard/');
+    return platformAxios.get('/core/dashboard/');
   },
 
   // Tenants
   getTenants: async (params = {}) => {
-    return platformAxios.get('/tenants/', { params });
+    return platformAxios.get('/core/tenants/', { params });
   },
   getTenant: async (id) => {
-    return platformAxios.get(`/tenants/${id}/`);
+    return platformAxios.get(`/core/tenants/${id}/`);
   },
   provisionTenant: async (data = {}) => {
-    return platformAxios.post('/tenants/', data);
+    return platformAxios.post('/core/tenants/', data);
   },
   updateTenant: async (id, data = {}) => {
-    return platformAxios.patch(`/tenants/${id}/`, data);
+    return platformAxios.patch(`/core/tenants/${id}/`, data);
   },
   updateTenantStatus: async (id, data = {}) => {
-    return platformAxios.post(`/tenants/${id}/status/`, data);
+    return platformAxios.post(`/core/tenants/${id}/status/`, data);
   },
 
   // Plans
   getPlans: async () => {
-    return platformAxios.get('/plans/');
+    return platformAxios.get('/core/plans/');
   },
   createPlan: async (data = {}) => {
-    return platformAxios.post('/plans/', data);
+    return platformAxios.post('/core/plans/', data);
   },
   updatePlan: async (id, data = {}) => {
-    return platformAxios.patch(`/plans/${id}/`, data);
+    return platformAxios.patch(`/core/plans/${id}/`, data);
   },
 
-  // Features
+  // Features & Limits
   getFeatures: async () => {
-    return platformAxios.get('/features/');
+    return platformAxios.get('/core/features/');
+  },
+  getLimits: async () => {
+    return platformAxios.get('/core/limits/');
   },
 
   // Subscriptions
   getSubscriptions: async (params = {}) => {
-    return platformAxios.get('/subscriptions/', { params });
+    return platformAxios.get('/core/subscriptions/', { params });
   },
   transitionSubscription: async (id, data = {}) => {
-    return platformAxios.post(`/subscriptions/${id}/transition/`, data);
+    return platformAxios.post('/core/subscriptions/transition/', { subscription_id: id, ...data });
   },
   changeSubscriptionPlan: async (id, data = {}) => {
-    return platformAxios.post(`/subscriptions/${id}/plan-change/`, data);
+    return platformAxios.post('/core/subscriptions/transition/', { subscription_id: id, plan_id: data.plan_id, reason: data.reason });
   },
   cancelSubscription: async (id, data = {}) => {
-    return platformAxios.post(`/subscriptions/${id}/cancel/`, data);
+    return platformAxios.post('/core/subscriptions/transition/', { subscription_id: id, status: 'cancelled', ...data });
   },
   reactivateSubscription: async (id, data = {}) => {
-    return platformAxios.post(`/subscriptions/${id}/reactivate/`, data);
+    return platformAxios.post('/core/subscriptions/transition/', { subscription_id: id, status: 'active', ...data });
   },
   updateSubscriptionTrial: async (id, data = {}) => {
-    return platformAxios.post(`/subscriptions/${id}/trial/`, data);
+    return platformAxios.post('/core/subscriptions/trial/', { subscription_id: id, ...data });
   },
   updateSubscriptionGracePeriod: async (id, data = {}) => {
-    return platformAxios.post(`/subscriptions/${id}/grace-period/`, data);
+    return platformAxios.post('/core/subscriptions/transition/', { subscription_id: id, ...data });
   },
 
   // Entitlements & Overrides
   getTenantEntitlements: async (tenantId) => {
-    return platformAxios.get(`/tenants/${tenantId}/entitlements/`);
+    return platformAxios.get(`/core/company-entitlements/${tenantId}/`);
   },
   createTenantOverride: async (tenantId, data = {}) => {
-    return platformAxios.post(`/tenants/${tenantId}/overrides/`, data);
+    return platformAxios.post(`/core/company-entitlements/${tenantId}/overrides/`, data);
   },
   deleteTenantOverride: async (tenantId, overrideId) => {
-    return platformAxios.delete(`/tenants/${tenantId}/overrides/${overrideId}/`);
+    return platformAxios.delete(`/core/company-entitlements/${tenantId}/overrides/${overrideId}/`);
   },
 
   // Addons
   getAddons: async () => {
-    return platformAxios.get('/add-ons/');
+    return platformAxios.get('/core/add-ons/');
   },
   assignTenantAddon: async (tenantId, data = {}) => {
-    return platformAxios.post(`/tenants/${tenantId}/add-ons/`, data);
+    return platformAxios.post('/core/add-ons/assign/', { tenant_company_id: tenantId, ...data });
   },
 
   // Support Sessions
   getSupportSessions: async () => {
-    return platformAxios.get('/support-sessions/');
+    return platformAxios.get('/core/tenant-sessions/');
   },
   createSupportSession: async (data = {}) => {
-    return platformAxios.post('/support-sessions/', data);
+    return platformAxios.post('/core/tenant-sessions/', data);
   },
   endSupportSession: async (sessionId) => {
-    return platformAxios.post(`/support-sessions/${sessionId}/end/`);
+    return platformAxios.post(`/core/tenant-sessions/${sessionId}/end/`);
   },
 
   // Audit Logs
   getAuditLogs: async (params = {}) => {
-    return platformAxios.get('/audit-logs/', { params });
+    return platformAxios.get('/core/audit-logs/', { params });
   },
 
   // Admins & Roles
   getAdmins: async (params = {}) => {
-    return platformAxios.get('/admins/', { params });
+    return platformAxios.get('/core/platform-users/', { params });
   },
   getAdmin: async (id) => {
-    return platformAxios.get(`/admins/${id}/`);
+    return platformAxios.get(`/core/platform-users/${id}/`);
   },
   createAdmin: async (data = {}) => {
-    return platformAxios.post('/admins/', data);
+    return platformAxios.post('/core/platform-users/', data);
   },
   inviteAdmin: async (data = {}) => {
-    return platformAxios.post('/admins/invite/', data);
+    return platformAxios.post('/core/platform-users/', data);
   },
   updateAdmin: async (id, data = {}) => {
-    return platformAxios.patch(`/admins/${id}/`, data);
+    return platformAxios.patch(`/core/platform-users/${id}/`, data);
   },
   suspendAdmin: async (id, reason = '') => {
-    return platformAxios.post(`/admins/${id}/suspend/`, { reason });
+    return platformAxios.post(`/core/platform-users/${id}/suspend/`, { reason });
   },
   reactivateAdmin: async (id, reason = '') => {
-    return platformAxios.post(`/admins/${id}/reactivate/`, { reason });
+    return platformAxios.post(`/core/platform-users/${id}/reactivate/`, { reason });
   },
   getRoles: async () => {
-    return platformAxios.get('/roles/');
+    return platformAxios.get('/core/platform-users/roles/');
   },
 
   // Seed / Reset Presentation Data
   seedDemoData: async (data = {}) => {
-    return platformAxios.post('/seed-data/', data);
+    return platformAxios.post('/core/seed-data/', data);
   },
   resetDemoData: async () => {
-    return platformAxios.post('/reset-demo/');
+    return platformAxios.post('/core/reset-demo/');
   },
 };
 

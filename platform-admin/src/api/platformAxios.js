@@ -7,7 +7,7 @@ function getCsrfToken() {
 }
 
 const platformAxios = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '/api/platform',
+  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
   headers: {
     'Content-Type': 'application/json',
   },
