@@ -82,12 +82,22 @@ export const PlatformAuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     const res = await platformApi.login({ email, password });
-    const { token, user, permissions: perms } = res.data;
+    if (res.status === 202 || res.data?.mfa_required) {
+      return res.data;
+    }
+
+    const token = res.data.access_token || res.data.token;
+    const { user, permissions: perms } = res.data;
+    if (!token) {
+      throw new Error('Login response did not include an access token.');
+    }
 
     localStorage.setItem('platform_access_token', token);
-    localStorage.setItem('platform_user', JSON.stringify(user));
+    if (user) {
+      localStorage.setItem('platform_user', JSON.stringify(user));
+    }
 
-    setPlatformUser(user);
+    setPlatformUser(user || null);
     setPermissions(perms || []);
     return res.data;
   };
