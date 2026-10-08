@@ -22,11 +22,17 @@ export default function AdminsPage() {
 
   const handleRefresh = async () => {
     try {
+      invalidateAdmins();
       await Promise.all([refetchAdmins(), refetchTenants()]);
       showToast('Platform staff list refreshed.', 'success');
     } catch {
       showToast('Error syncing platform staff list.', 'error');
     }
+  };
+
+  const handleDataMutated = async () => {
+    invalidateAdmins();
+    await refetchAdmins();
   };
 
   if (!canView) {
@@ -76,7 +82,7 @@ export default function AdminsPage() {
       <PlatformAdminsTab
         admins={admins}
         tenants={tenants}
-        onRefresh={handleRefresh}
+        onRefresh={handleDataMutated}
       />
     </div>
   );

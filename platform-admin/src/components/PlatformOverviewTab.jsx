@@ -2,16 +2,14 @@ import React from 'react';
 import { 
   Building2, DollarSign, Users, ShieldAlert, 
   Layers, Activity, TrendingUp, AlertTriangle, 
-  Clock, Plus, Shield, CheckCircle2, ArrowRight,
-  Sparkles
+  Clock, Plus, Shield, CheckCircle2, ArrowRight
 } from 'lucide-react';
 
 export default function PlatformOverviewTab({ 
   dashboardData, 
   plans = [], 
   onNavigateTab, 
-  onOpenProvisionModal,
-  onOpenSeedModal
+  onOpenProvisionModal
 }) {
   const metrics = dashboardData?.metrics || {};
   const recentAudits = dashboardData?.recent_audits || [];
@@ -46,16 +44,6 @@ export default function PlatformOverviewTab({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            {onOpenSeedModal && (
-              <button
-                onClick={onOpenSeedModal}
-                className="px-4 py-2.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 hover:text-white font-bold text-xs backdrop-blur-md transition-colors border border-purple-400/30 flex items-center gap-1.5"
-                title="Seed presentation template data"
-              >
-                <Sparkles size={15} className="text-purple-300" />
-                <span>Presentation Template</span>
-              </button>
-            )}
             <button
               onClick={onOpenProvisionModal}
               className="px-5 py-2.5 rounded-xl bg-white text-[#043976] hover:bg-blue-50 font-bold text-xs flex items-center gap-2 shadow-lg transition-transform active:scale-95"

@@ -15,6 +15,7 @@ import {
   PLATFORM_PERMISSIONS, 
   PERMISSION_DEFINITIONS, 
   PLATFORM_ROLES, 
+  PLATFORM_ROLE_OPTIONS,
   hasPlatformPermission 
 } from '../rbac/platformRbac';
 
@@ -24,7 +25,8 @@ export default function PlatformAdminsTab({
   onRefresh 
 }) {
   const { showToast } = useToast();
-  const { switchPersona, platformUser } = usePlatformAuth();
+  const { switchPersona, platformUser, hasPermission } = usePlatformAuth();
+  const canManageUsers = hasPermission ? hasPermission(PLATFORM_PERMISSIONS.USERS_MANAGE) : true;
 
   // Navigation & Sub-views
   const [activeSubView, setActiveSubView] = useState('staff'); // 'staff' | 'matrix'
@@ -57,11 +59,32 @@ export default function PlatformAdminsTab({
     email: '',
     role: 'support_admin',
     company_scope_type: 'assigned',
-    assigned_companies: [1],
+    assigned_companies: [],
     expires_at: '',
     mfa_enforced: true,
     reason: '',
   });
+
+  const roleAllowsScope = (roleKey, scope) => {
+    const roleConfig = PLATFORM_ROLES[roleKey];
+    return Boolean(roleConfig?.allowedScopes?.includes(scope));
+  };
+
+  const defaultScopeForRole = (roleKey, fallback = 'assigned') => {
+    const roleConfig = PLATFORM_ROLES[roleKey];
+    if (!roleConfig?.allowedScopes?.length) return fallback;
+    if (roleConfig.allowedScopes.includes(fallback)) return fallback;
+    return roleConfig.allowedScopes[0];
+  };
+
+  const getAssignedCompanies = (user) => {
+    if (!user) return [];
+    if (user.company_details && user.company_details.length > 0) {
+      return user.company_details;
+    }
+    const ids = user.assigned_companies || [];
+    return tenants.filter((t) => ids.includes(t.id));
+  };
 
   // Load current platform staff auth context on mount
   const fetchCurrentAuth = async () => {
@@ -113,7 +136,12 @@ export default function PlatformAdminsTab({
         matchesStatus = u.status === statusFilter;
       }
 
-      const matchesScope = scopeFilter === 'all' || u.company_scope_type === scopeFilter;
+      let matchesScope = true;
+      if (scopeFilter === 'global') {
+        matchesScope = u.company_scope_type === 'all';
+      } else if (scopeFilter !== 'all') {
+        matchesScope = u.company_scope_type === scopeFilter;
+      }
 
       return matchesSearch && matchesRole && matchesStatus && matchesScope;
     });
@@ -138,12 +166,17 @@ export default function PlatformAdminsTab({
       return;
     }
 
+    if (formData.company_scope_type === 'assigned' && (!formData.assigned_companies || formData.assigned_companies.length === 0)) {
+      showToast('Please select at least one assigned company for scoped staff access.', 'warning');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       await platformApi.inviteAdmin({
         ...formData,
         email: formData.email.trim().toLowerCase(),
-        assigned_companies: formData.company_scope_type === 'all' ? [] : formData.assigned_companies,
+        assigned_companies: formData.company_scope_type === 'assigned' ? formData.assigned_companies : [],
       });
       showToast(`Platform staff member "${formData.name}" invited successfully.`, 'success');
       setShowInviteModal(false);
@@ -152,7 +185,7 @@ export default function PlatformAdminsTab({
         email: '',
         role: 'support_admin',
         company_scope_type: 'assigned',
-        assigned_companies: [1],
+        assigned_companies: [],
         expires_at: '',
         mfa_enforced: true,
         reason: '',
@@ -170,13 +203,18 @@ export default function PlatformAdminsTab({
     e.preventDefault();
     if (!editUser) return;
 
+    if (editUser.company_scope_type === 'assigned' && (!editUser.assigned_companies || editUser.assigned_companies.length === 0)) {
+      showToast('Please select at least one assigned company for scoped staff access.', 'warning');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       await platformApi.updateAdmin(editUser.id, {
         name: editUser.name,
         role: editUser.role,
         company_scope_type: editUser.company_scope_type,
-        assigned_companies: editUser.company_scope_type === 'all' ? [] : editUser.assigned_companies,
+        assigned_companies: editUser.company_scope_type === 'assigned' ? editUser.assigned_companies : [],
         expires_at: editUser.expires_at || null,
         mfa_enforced: editUser.mfa_enforced,
       });
@@ -296,10 +334,12 @@ export default function PlatformAdminsTab({
             </div>
             <div className="flex items-center gap-2 mt-0.5">
               <h3 className="text-base font-bold text-white">
-                {activeStaffUser?.name || 'System Administrator'}
+                {activeStaffUser?.name || platformUser?.name || 'Staff User'}
               </h3>
-              <span className="text-xs text-slate-400 font-mono">({activeStaffUser?.email || 'admin@fastmovers.com'})</span>
-              {getRoleBadge(activeStaffUser?.role || 'super_admin')}
+              {(activeStaffUser?.email || platformUser?.email) && (
+                <span className="text-xs text-slate-400 font-mono">({activeStaffUser?.email || platformUser?.email})</span>
+              )}
+              {getRoleBadge(activeStaffUser?.role || platformUser?.role || 'super_admin')}
             </div>
           </div>
         </div>
@@ -308,9 +348,9 @@ export default function PlatformAdminsTab({
         <div className="flex items-center gap-2 bg-slate-800/80 p-2 rounded-2xl border border-slate-700">
           <span className="text-xs font-medium text-slate-300 pl-1">Switch Test Actor:</span>
           <select
-            value={activeStaffUser?.id || 'pusr-1'}
+            value={activeStaffUser?.id || platformUser?.id || (admins[0]?.id || '')}
             onChange={(e) => handleSwitchPersona(e.target.value)}
-            disabled={isSwitchingPersona}
+            disabled={isSwitchingPersona || admins.length === 0}
             className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs font-bold text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500"
           >
             {admins.map((admin) => (
@@ -362,13 +402,15 @@ export default function PlatformAdminsTab({
             </button>
           </div>
 
-          <button
-            onClick={() => setShowInviteModal(true)}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors"
-          >
-            <Plus size={15} />
-            <span>Invite Staff</span>
-          </button>
+          {canManageUsers && (
+            <button
+              onClick={() => setShowInviteModal(true)}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors"
+            >
+              <Plus size={15} />
+              <span>Invite Staff</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -422,10 +464,9 @@ export default function PlatformAdminsTab({
                 className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950 text-xs font-bold text-slate-700 dark:text-slate-300 outline-hidden"
               >
                 <option value="all">All Roles</option>
-                <option value="super_admin">Super Admin</option>
-                <option value="support_admin">Support Admin</option>
-                <option value="support_agent">Support Agent</option>
-                <option value="auditor">Read Only Auditor</option>
+                {PLATFORM_ROLE_OPTIONS.map((role) => (
+                  <option key={role.id} value={role.id}>{role.name}</option>
+                ))}
               </select>
 
               <select
@@ -446,8 +487,9 @@ export default function PlatformAdminsTab({
                 className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950 text-xs font-bold text-slate-700 dark:text-slate-300 outline-hidden"
               >
                 <option value="all">All Company Scopes</option>
-                <option value="all">Global (All Companies)</option>
+                <option value="global">Global (All Companies)</option>
                 <option value="assigned">Assigned Companies Only</option>
+                <option value="none">No Company Access</option>
               </select>
 
               <button
@@ -558,36 +600,40 @@ export default function PlatformAdminsTab({
                               </button>
 
                               {/* Edit Access */}
-                              <button
-                                onClick={() => setEditUser({ ...user, assigned_companies: user.assigned_companies || [] })}
-                                className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
-                                title="Edit Role & Company Scope"
-                              >
-                                <Edit3 size={15} />
-                              </button>
+                              {canManageUsers && (
+                                <button
+                                  onClick={() => setEditUser({ ...user, assigned_companies: user.assigned_companies || [] })}
+                                  className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
+                                  title="Edit Role & Company Scope"
+                                >
+                                  <Edit3 size={15} />
+                                </button>
+                              )}
 
                               {/* Suspend / Reactivate */}
-                              {user.status === 'active' ? (
-                                <button
-                                  onClick={() => setSuspensionTarget(user)}
-                                  disabled={isLastSuperAdmin}
-                                  className={`p-1.5 rounded-lg transition-colors ${
-                                    isLastSuperAdmin
-                                      ? 'text-slate-300 dark:text-slate-700 cursor-not-allowed'
-                                      : 'text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40'
-                                  }`}
-                                  title={isLastSuperAdmin ? 'Cannot suspend last active Super Admin' : 'Suspend Account'}
-                                >
-                                  <UserX size={15} />
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => setReactivateTarget(user)}
-                                  className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors"
-                                  title="Reactivate Account"
-                                >
-                                  <UserCheck size={15} />
-                                </button>
+                              {canManageUsers && (
+                                user.status === 'active' ? (
+                                  <button
+                                    onClick={() => setSuspensionTarget(user)}
+                                    disabled={isLastSuperAdmin}
+                                    className={`p-1.5 rounded-lg transition-colors ${
+                                      isLastSuperAdmin
+                                        ? 'text-slate-300 dark:text-slate-700 cursor-not-allowed'
+                                        : 'text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                                    }`}
+                                    title={isLastSuperAdmin ? 'Cannot suspend last active Super Admin' : 'Suspend Account'}
+                                  >
+                                    <UserX size={15} />
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => setReactivateTarget(user)}
+                                    className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors"
+                                    title="Reactivate Account"
+                                  >
+                                    <UserCheck size={15} />
+                                  </button>
+                                )
                               )}
                             </div>
                           </td>
@@ -619,10 +665,9 @@ export default function PlatformAdminsTab({
                 <thead>
                   <tr className="border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 text-[11px] font-black text-slate-500 uppercase tracking-wider">
                     <th className="py-3.5 px-4 w-1/3">Platform Permission Key</th>
-                    <th className="py-3.5 px-3 text-center">Super Admin</th>
-                    <th className="py-3.5 px-3 text-center">Support Admin</th>
-                    <th className="py-3.5 px-3 text-center">Support Agent</th>
-                    <th className="py-3.5 px-3 text-center">Read Only Auditor</th>
+                    {PLATFORM_ROLE_OPTIONS.map((role) => (
+                      <th key={role.id} className="py-3.5 px-3 text-center">{role.name}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -634,51 +679,19 @@ export default function PlatformAdminsTab({
                         <span className="text-[11px] text-slate-400 mt-0.5 block">{perm.description}</span>
                       </td>
 
-                      {/* Super Admin */}
-                      <td className="py-3 px-3 text-center">
-                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-400">
-                          <Check size={14} />
-                        </span>
-                      </td>
-
-                      {/* Support Admin */}
-                      <td className="py-3 px-3 text-center">
-                        {PLATFORM_ROLES.support_admin.permissions.includes(perm.code) ? (
-                          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-400">
-                            <Check size={14} />
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400">
-                            ✕
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Support Agent */}
-                      <td className="py-3 px-3 text-center">
-                        {PLATFORM_ROLES.support_agent.permissions.includes(perm.code) ? (
-                          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-400">
-                            <Check size={14} />
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400">
-                            ✕
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Read Only Auditor */}
-                      <td className="py-3 px-3 text-center">
-                        {PLATFORM_ROLES.auditor.permissions.includes(perm.code) ? (
-                          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-400">
-                            <Check size={14} />
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400">
-                            ✕
-                          </span>
-                        )}
-                      </td>
+                      {PLATFORM_ROLE_OPTIONS.map((role) => (
+                        <td key={role.id} className="py-3 px-3 text-center">
+                          {role.id === 'super_admin' || role.permissions.includes(perm.code) ? (
+                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-400">
+                              <Check size={14} />
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400">
+                              ✕
+                            </span>
+                          )}
+                        </td>
+                      ))}
                     </tr>
                   ))}
                 </tbody>
@@ -738,15 +751,14 @@ export default function PlatformAdminsTab({
                     setFormData({
                       ...formData,
                       role: r,
-                      company_scope_type: r === 'super_admin' ? 'all' : formData.company_scope_type,
+                      company_scope_type: defaultScopeForRole(r, formData.company_scope_type),
                     });
                   }}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-800 dark:text-slate-200 outline-hidden"
                 >
-                  <option value="super_admin">Super Admin (Global Authority)</option>
-                  <option value="support_admin">Support Admin (Operational Lead)</option>
-                  <option value="support_agent">Support Agent (Frontline Technical)</option>
-                  <option value="auditor">Read Only Auditor (Compliance)</option>
+                  {PLATFORM_ROLE_OPTIONS.map((role) => (
+                    <option key={role.id} value={role.id}>{role.name}</option>
+                  ))}
                 </select>
                 <p className="text-[11px] text-slate-500 mt-1">
                   {PLATFORM_ROLES[formData.role]?.description}
@@ -762,7 +774,7 @@ export default function PlatformAdminsTab({
                       type="radio"
                       name="scope_type"
                       checked={formData.company_scope_type === 'all'}
-                      disabled={formData.role === 'support_agent'}
+                      disabled={!roleAllowsScope(formData.role, 'all')}
                       onChange={() => setFormData({ ...formData, company_scope_type: 'all' })}
                       className="text-blue-600"
                     />
@@ -777,13 +789,28 @@ export default function PlatformAdminsTab({
                       type="radio"
                       name="scope_type"
                       checked={formData.company_scope_type === 'assigned'}
-                      disabled={formData.role === 'super_admin'}
+                      disabled={!roleAllowsScope(formData.role, 'assigned')}
                       onChange={() => setFormData({ ...formData, company_scope_type: 'assigned' })}
                       className="text-blue-600"
                     />
                     <div>
                       <span className="font-bold text-slate-800 dark:text-slate-200 block">Specific Assigned Companies Only</span>
                       <span className="text-[10px] text-slate-400">Restricted strictly to explicitly assigned tenant companies.</span>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-2 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="scope_type"
+                      checked={formData.company_scope_type === 'none'}
+                      disabled={!roleAllowsScope(formData.role, 'none')}
+                      onChange={() => setFormData({ ...formData, company_scope_type: 'none', assigned_companies: [] })}
+                      className="text-blue-600"
+                    />
+                    <div>
+                      <span className="font-bold text-slate-800 dark:text-slate-200 block">No Tenant Company Access</span>
+                      <span className="text-[10px] text-slate-400">Can work only with platform-level billing or catalog data.</span>
                     </div>
                   </label>
                 </div>
@@ -919,13 +946,19 @@ export default function PlatformAdminsTab({
                 <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Platform Role</label>
                 <select
                   value={editUser.role}
-                  onChange={(e) => setEditUser({ ...editUser, role: e.target.value })}
+                  onChange={(e) => {
+                    const r = e.target.value;
+                    setEditUser({
+                      ...editUser,
+                      role: r,
+                      company_scope_type: defaultScopeForRole(r, editUser.company_scope_type),
+                    });
+                  }}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs font-bold text-slate-800 dark:text-slate-200 outline-hidden"
                 >
-                  <option value="super_admin">Super Admin</option>
-                  <option value="support_admin">Support Admin</option>
-                  <option value="support_agent">Support Agent</option>
-                  <option value="auditor">Read Only Auditor</option>
+                  {PLATFORM_ROLE_OPTIONS.map((role) => (
+                    <option key={role.id} value={role.id}>{role.name}</option>
+                  ))}
                 </select>
               </div>
 
@@ -937,7 +970,7 @@ export default function PlatformAdminsTab({
                       type="radio"
                       name="edit_scope"
                       checked={editUser.company_scope_type === 'all'}
-                      disabled={editUser.role === 'support_agent'}
+                      disabled={!roleAllowsScope(editUser.role, 'all')}
                       onChange={() => setEditUser({ ...editUser, company_scope_type: 'all' })}
                     />
                     <span className="font-bold text-slate-800 dark:text-slate-200">Global (All Companies)</span>
@@ -947,10 +980,20 @@ export default function PlatformAdminsTab({
                       type="radio"
                       name="edit_scope"
                       checked={editUser.company_scope_type === 'assigned'}
-                      disabled={editUser.role === 'super_admin'}
+                      disabled={!roleAllowsScope(editUser.role, 'assigned')}
                       onChange={() => setEditUser({ ...editUser, company_scope_type: 'assigned' })}
                     />
                     <span className="font-bold text-slate-800 dark:text-slate-200">Assigned Companies Only</span>
+                  </label>
+                  <label className="flex items-center gap-2 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="edit_scope"
+                      checked={editUser.company_scope_type === 'none'}
+                      disabled={!roleAllowsScope(editUser.role, 'none')}
+                      onChange={() => setEditUser({ ...editUser, company_scope_type: 'none', assigned_companies: [] })}
+                    />
+                    <span className="font-bold text-slate-800 dark:text-slate-200">No Tenant Company Access</span>
                   </label>
                 </div>
 
@@ -1218,10 +1261,10 @@ export default function PlatformAdminsTab({
                   </div>
                 ) : (
                   <div className="space-y-1.5">
-                    {(detailUser.company_details || []).length === 0 ? (
+                    {getAssignedCompanies(detailUser).length === 0 ? (
                       <p className="text-slate-400 py-2">No companies currently assigned.</p>
                     ) : (
-                      (detailUser.company_details || []).map((c) => (
+                      getAssignedCompanies(detailUser).map((c) => (
                         <div key={c.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 flex items-center justify-between">
                           <span className="font-bold text-slate-800 dark:text-slate-200">{c.name}</span>
                           <span className="text-slate-400 font-mono">{c.subdomain} • ID: {c.id}</span>
@@ -1261,10 +1304,10 @@ export default function PlatformAdminsTab({
             </div>
 
             <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-              {(viewAssignedCompaniesUser.company_details || []).length === 0 ? (
+              {getAssignedCompanies(viewAssignedCompaniesUser).length === 0 ? (
                 <p className="text-slate-400 py-4 text-center">No assigned companies configured.</p>
               ) : (
-                (viewAssignedCompaniesUser.company_details || []).map((comp) => (
+                getAssignedCompanies(viewAssignedCompaniesUser).map((comp) => (
                   <div key={comp.id} className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 flex items-center justify-between">
                     <div>
                       <span className="font-bold text-slate-800 dark:text-slate-200 block">{comp.name}</span>

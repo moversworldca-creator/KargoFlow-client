@@ -47,6 +47,9 @@ export const platformApi = {
   updatePlan: async (id, data = {}) => {
     return platformAxios.patch(`/core/plans/${id}/`, data);
   },
+  updatePlanFeatures: async (id, features = []) => {
+    return platformAxios.put(`/core/plans/${id}/features/`, { features });
+  },
 
   // Features & Limits
   getFeatures: async () => {
@@ -107,6 +110,12 @@ export const platformApi = {
   },
   endSupportSession: async (sessionId) => {
     return platformAxios.post(`/core/tenant-sessions/${sessionId}/end/`);
+  },
+  checkTenantAccess: async (tenantCompanyId, requestedAccessMode = 'read') => {
+    return platformAxios.post('/core/tenant-access/check/', {
+      tenant_company_id: tenantCompanyId,
+      requested_access_mode: requestedAccessMode,
+    });
   },
 
   // Audit Logs

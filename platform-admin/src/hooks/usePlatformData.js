@@ -49,6 +49,17 @@ export function useFeatures() {
   });
 }
 
+export function useLimits() {
+  return useQuery({
+    queryKey: ['platform', 'limits'],
+    queryFn: async () => {
+      const res = await platformApi.getLimits();
+      return unpackResults(res);
+    },
+    staleTime: DEFAULT_STALE_TIME,
+  });
+}
+
 export function useSubscriptions(params = {}) {
   return useQuery({
     queryKey: ['platform', 'subscriptions', params],
@@ -113,6 +124,8 @@ export function useInvalidatePlatformQueries() {
     invalidateTenants: () => queryClient.invalidateQueries({ queryKey: ['platform', 'tenants'] }),
     invalidateSubscriptions: () => queryClient.invalidateQueries({ queryKey: ['platform', 'subscriptions'] }),
     invalidatePlans: () => queryClient.invalidateQueries({ queryKey: ['platform', 'plans'] }),
+    invalidateFeatures: () => queryClient.invalidateQueries({ queryKey: ['platform', 'features'] }),
+    invalidateLimits: () => queryClient.invalidateQueries({ queryKey: ['platform', 'limits'] }),
     invalidateAdmins: () => queryClient.invalidateQueries({ queryKey: ['platform', 'admins'] }),
     invalidateSupportSessions: () => queryClient.invalidateQueries({ queryKey: ['platform', 'support_sessions'] }),
     invalidateAuditLogs: () => queryClient.invalidateQueries({ queryKey: ['platform', 'audit_logs'] }),

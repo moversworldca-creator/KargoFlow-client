@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { usePlatformAuth } from '../auth/PlatformAuthContext';
 import { PLATFORM_ROLES, PLATFORM_PERMISSIONS } from '../rbac/platformRbac';
+import kargoflowLogo from '../assets/logo.png';
+import kargoflowIcon from '../assets/comapny_logo.png';
 
 export default function PlatformShell() {
   const { platformUser, logout, hasPermission } = usePlatformAuth();
@@ -110,15 +112,16 @@ export default function PlatformShell() {
             {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
 
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center shadow-md shadow-blue-500/20 text-white font-black text-sm">
-              <ShieldCheck size={20} />
+          <NavLink to="/" className="flex items-center gap-3 group">
+            <div className="flex items-center justify-center p-1 sm:p-1.5 rounded-xl bg-white dark:bg-white/95 shadow-xs border border-slate-200/80 dark:border-slate-700/60 transition-transform group-hover:scale-[1.02]">
+              <img
+                src={kargoflowLogo}
+                alt="KargoFlow Logo"
+                className="h-6 sm:h-7 w-auto max-w-[120px] sm:max-w-[145px] object-contain shrink-0"
+              />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-black text-slate-900 dark:text-white tracking-tight text-sm sm:text-base">
-                  KargoFlow
-                </span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300">
                   Platform Admin
                 </span>
@@ -127,7 +130,7 @@ export default function PlatformShell() {
                 Multi-Tenant SaaS Control Center
               </p>
             </div>
-          </div>
+          </NavLink>
         </div>
 
         {/* Staff User Badge & Controls */}
@@ -219,12 +222,13 @@ export default function PlatformShell() {
             <div className="w-72 bg-white dark:bg-slate-900 h-full p-4 flex flex-col justify-between shadow-2xl">
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800 mb-2">
-                  <span className="text-xs font-black uppercase tracking-wider text-slate-500">
-                    Control Navigation
-                  </span>
+                  <div className="p-1 rounded-xl bg-white dark:bg-white/95 border border-slate-200 dark:border-slate-700/60 shadow-2xs">
+                    <img src={kargoflowLogo} alt="KargoFlow" className="h-6 w-auto object-contain" />
+                  </div>
                   <button
                     onClick={() => setMobileMenuOpen(false)}
-                    className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                    className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                    title="Close navigation"
                   >
                     <X size={18} />
                   </button>

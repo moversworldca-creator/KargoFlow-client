@@ -83,7 +83,7 @@ export default function SeedDataModal({ isOpen, onClose, onDataSeeded }) {
     {
       icon: Users,
       title: '7 Platform Admin Accounts',
-      desc: 'Super Admin, support leads, support agent, auditor, expired, and suspended personas with MFA and scopes.',
+      desc: 'Super Admin, SaaS Admin, Support Admin, Billing Admin, expired, and suspended personas with MFA and scopes.',
       badge: 'RBAC Governed',
       badgeColor: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-400',
     },

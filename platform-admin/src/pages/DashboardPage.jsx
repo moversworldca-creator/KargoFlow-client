@@ -1,19 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, Plus, Sparkles, RefreshCw } from 'lucide-react';
+import { Loader2, Plus, RefreshCw } from 'lucide-react';
 import platformApi from '../api/platformApi';
 import { useToast } from '../context/ToastContext';
 import { useDashboardData, usePlans, useInvalidatePlatformQueries } from '../hooks/usePlatformData';
 import PlatformOverviewTab from '../components/PlatformOverviewTab';
 import ProvisionTenantModal from '../components/ProvisionTenantModal';
-import SeedDataModal from '../components/SeedDataModal';
 
 export default function DashboardPage() {
   const navigate = useNavigate();
   const { showToast } = useToast();
 
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [showSeedModal, setShowSeedModal] = useState(false);
   const [showProvisionModal, setShowProvisionModal] = useState(false);
 
   const { data: dashboardData, isLoading: isDashLoading, refetch: refetchDash } = useDashboardData();
@@ -76,15 +74,6 @@ export default function DashboardPage() {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setShowSeedModal(true)}
-            className="px-3.5 py-2.5 rounded-xl border border-purple-200 dark:border-purple-900/60 bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 dark:hover:bg-purple-900/50 text-purple-700 dark:text-purple-300 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-            title="Seed Test & Presentation Template Data"
-          >
-            <Sparkles size={14} className="text-purple-600 dark:text-purple-400" />
-            <span className="hidden sm:inline">Seed Presentation Data</span>
-          </button>
-
-          <button
             onClick={handleRefresh}
             disabled={isRefreshing}
             className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5 text-xs font-bold cursor-pointer"
@@ -109,7 +98,6 @@ export default function DashboardPage() {
         plans={plans}
         onNavigateTab={handleNavigateTab}
         onOpenProvisionModal={() => setShowProvisionModal(true)}
-        onOpenSeedModal={() => setShowSeedModal(true)}
       />
 
       <ProvisionTenantModal
@@ -117,12 +105,6 @@ export default function DashboardPage() {
         onClose={() => setShowProvisionModal(false)}
         plans={plans}
         onTenantProvisioned={() => invalidateAll()}
-      />
-
-      <SeedDataModal
-        isOpen={showSeedModal}
-        onClose={() => setShowSeedModal(false)}
-        onDataSeeded={() => invalidateAll()}
       />
     </div>
   );

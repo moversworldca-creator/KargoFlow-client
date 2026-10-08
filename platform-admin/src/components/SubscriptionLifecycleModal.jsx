@@ -42,26 +42,26 @@ export default function SubscriptionLifecycleModal({
 }) {
   useModal(isOpen, onClose);
   const { showToast } = useToast();
-  if (!isOpen || !subscription) return null;
+  const activeSubscription = subscription || {};
 
   const [activeSubTab, setActiveSubTab] = useState('transition'); // 'transition', 'plan_change', 'dates', 'cancel_reactivate', 'history'
 
   // Transition form
-  const allowedNextStatuses = ALLOWED_TRANSITIONS[subscription.status] || [];
+  const allowedNextStatuses = ALLOWED_TRANSITIONS[activeSubscription.status] || [];
   const [targetStatus, setTargetStatus] = useState(allowedNextStatuses[0] || 'active');
   const [transitionReason, setTransitionReason] = useState('');
   const [graceDays, setGraceDays] = useState(7);
 
   // Plan change form (Section 2.9)
-  const currentPlan = plans.find((p) => p.id === subscription.plan_id) || { name: subscription.plan_id };
+  const currentPlan = plans.find((p) => p.id === activeSubscription.plan_id) || { name: activeSubscription.plan_id };
   const [newPlanId, setNewPlanId] = useState(plans[0]?.id || '');
-  const [billingInterval, setBillingInterval] = useState(subscription.billing_interval || 'month');
+  const [billingInterval, setBillingInterval] = useState(activeSubscription.billing_interval || 'month');
   const [effectiveTiming, setEffectiveTiming] = useState('immediate');
   const [planChangeReason, setPlanChangeReason] = useState('');
 
   // Dates form (Trial & Grace)
-  const [trialEndsAt, setTrialEndsAt] = useState(subscription.trial_ends_at ? subscription.trial_ends_at.slice(0, 10) : '');
-  const [graceEndsAt, setGraceEndsAt] = useState(subscription.grace_period_ends_at ? subscription.grace_period_ends_at.slice(0, 10) : '');
+  const [trialEndsAt, setTrialEndsAt] = useState(activeSubscription.trial_ends_at ? activeSubscription.trial_ends_at.slice(0, 10) : '');
+  const [graceEndsAt, setGraceEndsAt] = useState(activeSubscription.grace_period_ends_at ? activeSubscription.grace_period_ends_at.slice(0, 10) : '');
   const [datesReason, setDatesReason] = useState('');
 
   // Cancel / Reactivate form
@@ -73,8 +73,10 @@ export default function SubscriptionLifecycleModal({
 
   // Quota check for plan change
   const targetPlan = plans.find((p) => p.id === newPlanId);
-  const targetTenant = tenants.find((t) => String(t.id) === String(subscription.tenant_id));
+  const targetTenant = tenants.find((t) => String(t.id) === String(activeSubscription.tenant_id));
   const isDowngrade = targetPlan && currentPlan && (targetPlan.base_price_cents || 0) < (currentPlan.base_price_cents || 0);
+
+  if (!isOpen || !subscription) return null;
 
   // 1. Submit Status Transition
   const handleTransitionSubmit = async (e) => {

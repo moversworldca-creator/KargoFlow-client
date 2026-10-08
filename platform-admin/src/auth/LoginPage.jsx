@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Shield, Lock, Mail, AlertCircle, ArrowRight, Loader2, Sparkles, Building2, Key } from 'lucide-react';
 import { usePlatformAuth } from './PlatformAuthContext';
+import kargoflowLogo from '../assets/full_logo.png';
 
 const DEMO_ACCOUNTS = [
   {
@@ -82,12 +83,16 @@ export default function LoginPage() {
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md relative z-10">
         <div className="flex justify-center">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/20 ring-1 ring-white/20">
-            <Shield className="w-7 h-7 text-white" />
+          <div className="px-5 py-3 rounded-2xl bg-white/95 backdrop-blur-md shadow-xl border border-white/20 flex items-center justify-center transition-transform hover:scale-105">
+            <img
+              src={kargoflowLogo}
+              alt="KargoFlow"
+              className="h-9 sm:h-10 w-auto object-contain"
+            />
           </div>
         </div>
         <h2 className="mt-5 text-center text-2xl font-black tracking-tight text-white">
-          KargoFlow Platform Admin
+          Platform Admin
         </h2>
         <p className="mt-1 text-center text-xs text-slate-400 font-medium">
           Internal SaaS Control Plane & Multi-Tenant Management Portal

@@ -68,6 +68,20 @@ export default function ProvisionTenantModal({ isOpen, onClose, onTenantProvisio
 
   if (!isOpen) return null;
 
+  const formatApiError = (data, fallback) => {
+    if (!data) return fallback;
+    if (typeof data === 'string') return data;
+    if (data.detail || data.error || data.message) {
+      return data.detail || data.error || data.message;
+    }
+    if (typeof data === 'object') {
+      return Object.entries(data)
+        .map(([field, value]) => `${field}: ${Array.isArray(value) ? value.join(', ') : String(value)}`)
+        .join(' ');
+    }
+    return fallback;
+  };
+
   const handleChange = (field, value) => {
     setFormData((prev) => {
       const updated = { ...prev, [field]: value };
@@ -164,7 +178,7 @@ export default function ProvisionTenantModal({ isOpen, onClose, onTenantProvisio
       onTenantProvisioned?.(res.data);
       onClose();
     } catch (err) {
-      const errDetail = err?.response?.data?.error || err?.message || 'Failed to provision tenant';
+      const errDetail = formatApiError(err?.response?.data, err?.message || 'Failed to provision tenant');
       setErrorMsg(errDetail);
       showToast(errDetail, 'error');
     } finally {
