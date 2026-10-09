@@ -174,9 +174,9 @@ export default function PlatformShell() {
         </div>
       </header>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex max-h- overflow-hidden">
         {/* Desktop Sidebar */}
-        <aside className="w-64 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hidden md:flex flex-col justify-between shrink-0">
+        <aside className="w-64 border-r max-h-lvh border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hidden md:flex flex-col justify-between shrink-0">
           <div className="p-4 space-y-1.5 overflow-y-auto">
             <div className="px-3 py-2 text-[10px] font-black uppercase tracking-wider text-slate-400">
               Control Plane Navigation
