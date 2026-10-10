@@ -64,22 +64,55 @@ export const platformApi = {
     return platformAxios.get('/core/subscriptions/', { params });
   },
   transitionSubscription: async (id, data = {}) => {
-    return platformAxios.post('/core/subscriptions/transition/', { subscription_id: id, ...data });
+    const newStatus = data.new_status || data.next_status || data.status;
+    return platformAxios.post('/core/subscriptions/transition/', {
+      subscription_id: Number(id),
+      new_status: newStatus,
+      reason: data.reason || 'Status transition',
+      fields: data.fields,
+      metadata: data.metadata,
+      ...data,
+      new_status: newStatus,
+    });
   },
-  changeSubscriptionPlan: async (id, data = {}) => {
-    return platformAxios.post('/core/subscriptions/transition/', { subscription_id: id, plan_id: data.plan_id, reason: data.reason });
+  changeSubscriptionPlan: async (companyOrSubId, data = {}) => {
+    return platformAxios.post(`/core/subscriptions/${companyOrSubId}/change-plan/`, {
+      plan_id: Number(data.new_plan_id || data.plan_id),
+      effective: data.effective || data.effective_timing || 'immediate',
+      reason: data.reason || 'Commercial plan change',
+    });
   },
   cancelSubscription: async (id, data = {}) => {
-    return platformAxios.post('/core/subscriptions/transition/', { subscription_id: id, status: 'cancelled', ...data });
+    return platformAxios.post('/core/subscriptions/transition/', {
+      subscription_id: Number(id),
+      new_status: 'cancelled',
+      reason: data.reason || 'Subscription cancelled',
+      ...data,
+      new_status: 'cancelled',
+    });
   },
   reactivateSubscription: async (id, data = {}) => {
-    return platformAxios.post('/core/subscriptions/transition/', { subscription_id: id, status: 'active', ...data });
+    return platformAxios.post('/core/subscriptions/transition/', {
+      subscription_id: Number(id),
+      new_status: 'active',
+      reason: data.reason || 'Subscription reactivated',
+      ...data,
+      new_status: 'active',
+    });
   },
   updateSubscriptionTrial: async (id, data = {}) => {
-    return platformAxios.post('/core/subscriptions/trial/', { subscription_id: id, ...data });
+    return platformAxios.post('/core/subscriptions/trial/', {
+      company_id: data.company_id || data.tenant_id,
+      plan_id: data.plan_id,
+      trial_ends_at: data.trial_ends_at,
+      ...data,
+    });
   },
-  updateSubscriptionGracePeriod: async (id, data = {}) => {
-    return platformAxios.post('/core/subscriptions/transition/', { subscription_id: id, ...data });
+  updateSubscriptionGracePeriod: async (companyOrSubId, data = {}) => {
+    return platformAxios.post(`/core/subscriptions/${companyOrSubId}/grace/`, {
+      grace_days: Number(data.grace_days || data.grace_period_days || 7),
+      reason: data.reason || 'Grace period adjusted',
+    });
   },
 
   // Entitlements & Overrides

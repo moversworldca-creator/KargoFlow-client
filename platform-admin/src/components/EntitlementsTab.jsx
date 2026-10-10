@@ -7,34 +7,135 @@ import {
 import { useToast } from '../context/ToastContext';
 import platformApi from '../api/platformApi';
 
+const DEFAULT_FEATURES = [
+  { feature_key: 'crm.leads', name: 'Leads' },
+  { feature_key: 'crm.sales', name: 'Sales CRM' },
+  { feature_key: 'crm.estimates', name: 'Estimates' },
+  { feature_key: 'crm.customer_portal', name: 'Customer Portal' },
+  { feature_key: 'crm.documents', name: 'Documents' },
+  { feature_key: 'crm.esign', name: 'E-signatures' },
+  { feature_key: 'crm.payments', name: 'Payments' },
+  { feature_key: 'crm.jobs', name: 'Jobs' },
+  { feature_key: 'crm.dispatch', name: 'Dispatch' },
+  { feature_key: 'crm.crew_app', name: 'Crew App' },
+  { feature_key: 'crm.accounting', name: 'Accounting' },
+  { feature_key: 'crm.automations', name: 'Automations' },
+  { feature_key: 'crm.integrations', name: 'Integrations' },
+  { feature_key: 'crm.advanced_reports', name: 'Advanced Reports' },
+  { feature_key: 'crm.api', name: 'API Access' },
+  { feature_key: 'crm.multi_branch', name: 'Multi-branch' },
+  { feature_key: 'crm.custom_roles', name: 'Custom Roles' },
+  { feature_key: 'crm.white_label', name: 'White Label' },
+  { feature_key: 'crm.sms', name: 'SMS' },
+  { feature_key: 'crm.email', name: 'Email' },
+  { feature_key: 'ops.dispatch', name: 'Dispatch & Resource Scheduling' },
+  { feature_key: 'ops.storage', name: 'Storage & Warehouse' },
+  { feature_key: 'ops.claims', name: 'Claims Management' },
+  { feature_key: 'ops.premove_surveys', name: 'Pre-Move Surveys' },
+  { feature_key: 'analytics.bi', name: 'Reporting & BI' },
+  { feature_key: 'platform.files', name: 'Files & Document Storage' },
+  { feature_key: 'platform.template_engine', name: 'Template & Builder Engine' },
+  { feature_key: 'platform.template_library', name: 'Template Library & Starter Packs' },
+];
+
+const DEFAULT_LIMITS = [
+  { limit_key: 'users.max_active', name: 'Active Users (users.max_active)' },
+  { limit_key: 'branches.max_active', name: 'Active Branches (branches.max_active)' },
+  { limit_key: 'sms.monthly', name: 'Monthly SMS (sms.monthly)' },
+  { limit_key: 'email.monthly', name: 'Monthly Email (email.monthly)' },
+  { limit_key: 'api.monthly_requests', name: 'Monthly API Requests (api.monthly_requests)' },
+  { limit_key: 'automation.monthly_runs', name: 'Monthly Automation Runs (automation.monthly_runs)' },
+  { limit_key: 'storage.bytes', name: 'Storage Quota in Bytes (storage.bytes)' },
+];
+
 export default function EntitlementsTab({ 
   tenants = [], 
   initialTenantId = null,
   addons = [],
-  features = []
+  features = [],
+  limits = []
 }) {
   const { showToast } = useToast();
   const [selectedTenantId, setSelectedTenantId] = useState(initialTenantId || (tenants[0]?.id ? String(tenants[0].id) : '1'));
   const [entitlementsData, setEntitlementsData] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Features and Limits catalogue
+  const displayFeatures = React.useMemo(() => {
+    if (features && features.length > 0) return features;
+    return DEFAULT_FEATURES;
+  }, [features]);
+
+  const displayLimits = React.useMemo(() => {
+    if (limits && limits.length > 0) return limits;
+    return DEFAULT_LIMITS;
+  }, [limits]);
+
   // Override Modal
   const [showOverrideModal, setShowOverrideModal] = useState(false);
   const [overrideType, setOverrideType] = useState('feature'); // 'feature' or 'limit'
-  const [featureKey, setFeatureKey] = useState(features[0]?.key || 'crm_leads');
+  const [featureKey, setFeatureKey] = useState(
+    () => (features[0]?.feature_key || features[0]?.key || 'crm.leads')
+  );
   const [featureMode, setFeatureMode] = useState('write');
-  const [limitKey, setLimitKey] = useState('active_users');
+  const [limitKey, setLimitKey] = useState(
+    () => (limits[0]?.limit_key || limits[0]?.key || 'users.max_active')
+  );
   const [limitVal, setLimitVal] = useState(10);
   const [limitAction, setLimitAction] = useState('replace'); // 'replace' or 'add'
   const [overrideReason, setOverrideReason] = useState('');
   const [overrideExpiresAt, setOverrideExpiresAt] = useState('');
   const [isSubmittingOverride, setIsSubmittingOverride] = useState(false);
 
+  // Synchronize featureKey whenever features/displayFeatures are loaded
+  useEffect(() => {
+    if (displayFeatures.length > 0) {
+      const exists = displayFeatures.some((f) => (f.feature_key || f.key) === featureKey);
+      if (!featureKey || !exists) {
+        setFeatureKey(displayFeatures[0].feature_key || displayFeatures[0].key);
+      }
+    }
+  }, [displayFeatures, featureKey]);
+
+  // Synchronize limitKey whenever limits/displayLimits are loaded
+  useEffect(() => {
+    if (displayLimits.length > 0) {
+      const exists = displayLimits.some((l) => (l.limit_key || l.key) === limitKey);
+      if (!limitKey || !exists) {
+        setLimitKey(displayLimits[0].limit_key || displayLimits[0].key);
+      }
+    }
+  }, [displayLimits, limitKey]);
+
   // Addon Modal
   const [showAddonModal, setShowAddonModal] = useState(false);
-  const [selectedAddonId, setSelectedAddonId] = useState(addons[0]?.id || '');
+  const displayAddons = React.useMemo(() => {
+    if (addons && addons.length > 0) return addons;
+    return [
+      { id: 1, code: 'extra_users_5', name: '5 Extra Users Pack', price_cents: 1500, interval: 'month' },
+      { id: 2, code: 'extra_storage_10gb', name: '10 GB Cloud Storage Pack', price_cents: 1000, interval: 'month' },
+      { id: 3, code: 'extra_branches_1', name: '1 Additional Branch Terminal', price_cents: 4900, interval: 'month' },
+      { id: 4, code: 'extra_sms_1000', name: '1,000 SMS Message Pack', price_cents: 2000, interval: 'month' },
+      { id: 5, code: 'addon_premium_support', name: '24/7 Priority Support SLA', price_cents: 9900, interval: 'month' },
+    ];
+  }, [addons]);
+
+  const [selectedAddonId, setSelectedAddonId] = useState(
+    () => (addons[0]?.id ? String(addons[0].id) : '1')
+  );
   const [addonQuantity, setAddonQuantity] = useState(1);
+  const [addonReason, setAddonReason] = useState('Administrative add-on allocation');
   const [isSubmittingAddon, setIsSubmittingAddon] = useState(false);
+
+  // Synchronize selectedAddonId whenever addons/displayAddons are available
+  useEffect(() => {
+    if (displayAddons.length > 0) {
+      const exists = displayAddons.some((a) => String(a.id) === String(selectedAddonId));
+      if (!selectedAddonId || !exists) {
+        setSelectedAddonId(String(displayAddons[0].id));
+      }
+    }
+  }, [displayAddons, selectedAddonId]);
 
   const fetchEntitlements = async (tId) => {
     if (!tId) return;
@@ -64,10 +165,15 @@ export default function EntitlementsTab({
 
     setIsSubmittingOverride(true);
     try {
+      let expiresAt = null;
+      if (overrideExpiresAt && !isNaN(new Date(overrideExpiresAt).getTime())) {
+        expiresAt = new Date(overrideExpiresAt).toISOString();
+      }
+
       const payload = {
         type: overrideType,
         reason: overrideReason.trim(),
-        expires_at: overrideExpiresAt ? new Date(overrideExpiresAt).toISOString() : null,
+        expires_at: expiresAt,
       };
 
       if (overrideType === 'feature') {
@@ -75,17 +181,24 @@ export default function EntitlementsTab({
         payload.access_mode = featureMode;
       } else {
         payload.limit_key = limitKey;
-        payload.override_type = limitAction;
-        payload.value = Number(limitVal);
+        payload.limit_action = limitAction;
+        payload.limit_value = Number(limitVal);
       }
 
       await platformApi.createTenantOverride(selectedTenantId, payload);
       showToast('Entitlement override applied successfully.', 'success');
       setShowOverrideModal(false);
       setOverrideReason('');
+      setOverrideExpiresAt('');
       fetchEntitlements(selectedTenantId);
     } catch (err) {
-      showToast(err?.response?.data?.error || err?.message || 'Failed to apply override', 'error');
+      const errorMsg =
+        err?.response?.data?.detail ||
+        err?.response?.data?.error ||
+        (typeof err?.response?.data === 'object' ? Object.values(err.response.data).flat().join(', ') : null) ||
+        err?.message ||
+        'Failed to apply override';
+      showToast(errorMsg, 'error');
     } finally {
       setIsSubmittingOverride(false);
     }
@@ -103,24 +216,43 @@ export default function EntitlementsTab({
 
   const handleAssignAddon = async (e) => {
     e.preventDefault();
+    const parsedAddonId = Number(selectedAddonId);
+    if (!parsedAddonId || isNaN(parsedAddonId)) {
+      showToast('Please select a valid add-on package.', 'warning');
+      return;
+    }
+    if (!addonReason.trim()) {
+      showToast('Reason is required to assign an add-on.', 'warning');
+      return;
+    }
+
     setIsSubmittingAddon(true);
     try {
       await platformApi.assignTenantAddon(selectedTenantId, {
-        addon_id: selectedAddonId,
-        quantity: Number(addonQuantity) || 1,
+        tenant_company_id: Number(selectedTenantId),
+        addon_id: parsedAddonId,
+        quantity: Math.max(1, Number(addonQuantity) || 1),
+        reason: addonReason.trim(),
       });
       showToast('Add-on assigned to tenant.', 'success');
       setShowAddonModal(false);
       fetchEntitlements(selectedTenantId);
     } catch (err) {
-      showToast(err?.response?.data?.error || err?.message || 'Failed to assign add-on', 'error');
+      showToast(
+        err?.response?.data?.error || 
+        err?.response?.data?.detail || 
+        (typeof err?.response?.data === 'object' ? Object.values(err.response.data).flat().join(', ') : null) ||
+        err?.message || 
+        'Failed to assign add-on', 
+        'error'
+      );
     } finally {
       setIsSubmittingAddon(false);
     }
   };
 
   const formatQuota = (key, val) => {
-    if (key === 'storage_bytes') {
+    if (key === 'storage_bytes' || key === 'storage.bytes') {
       return `${Math.round(val / 1073741824)} GB`;
     }
     return val?.toLocaleString?.() ?? val;
@@ -155,7 +287,14 @@ export default function EntitlementsTab({
           </select>
 
           <button
-            onClick={() => setShowAddonModal(true)}
+            onClick={() => {
+              if (displayAddons.length > 0 && !selectedAddonId) {
+                setSelectedAddonId(String(displayAddons[0].id));
+              }
+              setAddonQuantity(1);
+              setAddonReason('Administrative add-on allocation');
+              setShowAddonModal(true);
+            }}
             className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
           >
             <PackagePlus size={15} />
@@ -223,7 +362,7 @@ export default function EntitlementsTab({
                 return (
                   <div key={key} className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 space-y-2 text-xs">
                     <div className="flex items-center justify-between">
-                      <span className="font-bold text-slate-700 dark:text-slate-300 capitalize">{key.replace(/_/g, ' ')}</span>
+                      <span className="font-bold text-slate-700 dark:text-slate-300 capitalize">{key.replace(/[._]/g, ' ')}</span>
                       <span className="font-mono font-bold text-blue-600">
                         {formatQuota(key, usage)} / {formatQuota(key, limit)}
                       </span>
@@ -351,9 +490,14 @@ export default function EntitlementsTab({
                       onChange={(e) => setFeatureKey(e.target.value)}
                       className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-mono font-bold"
                     >
-                      {features.map((f) => (
-                        <option key={f.key} value={f.key}>{f.name} ({f.key})</option>
-                      ))}
+                      {displayFeatures.map((f) => {
+                        const key = f.feature_key || f.key;
+                        return (
+                          <option key={key} value={key}>
+                            {f.name} ({key})
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
                   <div>
@@ -382,13 +526,14 @@ export default function EntitlementsTab({
                       onChange={(e) => setLimitKey(e.target.value)}
                       className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-mono font-bold"
                     >
-                      <option value="active_users">active_users</option>
-                      <option value="active_branches">active_branches</option>
-                      <option value="monthly_sms">monthly_sms</option>
-                      <option value="monthly_email">monthly_email</option>
-                      <option value="monthly_api_requests">monthly_api_requests</option>
-                      <option value="monthly_automations">monthly_automations</option>
-                      <option value="storage_bytes">storage_bytes</option>
+                      {displayLimits.map((l) => {
+                        const key = l.limit_key || l.key;
+                        return (
+                          <option key={key} value={key}>
+                            {l.name || key}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
@@ -487,11 +632,19 @@ export default function EntitlementsTab({
                   onChange={(e) => setSelectedAddonId(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
                 >
-                  {addons.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name} (${(a.price_cents / 100).toFixed(0)}/{a.interval})
-                    </option>
-                  ))}
+                  {displayAddons.length === 0 ? (
+                    <option value="">No add-on packages available</option>
+                  ) : (
+                    displayAddons.map((a) => {
+                      const priceCents = a.price_cents ?? a.unit_price_minor ?? 0;
+                      const priceDisplay = (priceCents / 100).toFixed(0);
+                      return (
+                        <option key={a.id} value={a.id}>
+                          {a.name} (${priceDisplay}/{a.interval || 'month'})
+                        </option>
+                      );
+                    })
+                  )}
                 </select>
               </div>
 
@@ -509,6 +662,20 @@ export default function EntitlementsTab({
                 />
               </div>
 
+              <div>
+                <label className="block text-slate-700 dark:text-slate-300 font-bold uppercase tracking-wider mb-1.5">
+                  Administrative Reason <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={addonReason}
+                  onChange={(e) => setAddonReason(e.target.value)}
+                  placeholder="e.g. Approved capacity expansion"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-medium"
+                />
+              </div>
+
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
@@ -519,8 +686,8 @@ export default function EntitlementsTab({
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmittingAddon}
-                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center gap-1.5 shadow-sm"
+                  disabled={isSubmittingAddon || !selectedAddonId || displayAddons.length === 0}
+                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSubmittingAddon ? <Loader2 size={14} className="animate-spin" /> : null}
                   <span>Assign Add-on</span>
