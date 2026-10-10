@@ -49,7 +49,7 @@ export default function FeaturesPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto pb-10">
+    <div className="max-w-7xl mx-auto pb-6">
       <FeaturesCatalogTab
         features={features}
         plans={plans}

@@ -4,7 +4,7 @@ import platformApi from '../api/platformApi';
 import { useToast } from '../context/ToastContext';
 import { usePlatformAuth } from '../auth/PlatformAuthContext';
 import { PLATFORM_PERMISSIONS } from '../rbac/platformRbac';
-import { usePlatformAuditLogs, useInvalidatePlatformQueries } from '../hooks/usePlatformData';
+import { usePlatformAuditLogs, useTenants, usePlatformAdmins, useInvalidatePlatformQueries } from '../hooks/usePlatformData';
 import PlatformAuditLogsTab from '../components/PlatformAuditLogsTab';
 import AccessDenied from '../components/AccessDenied';
 
@@ -15,6 +15,8 @@ export default function AuditPage() {
   const canView = hasPermission(PLATFORM_PERMISSIONS.AUDIT_VIEW);
 
   const { data: auditLogs = [], isLoading, refetch } = usePlatformAuditLogs();
+  const { data: tenants = [] } = useTenants();
+  const { data: admins = [] } = usePlatformAdmins();
   const { invalidateAuditLogs } = useInvalidatePlatformQueries();
 
   const handleRefresh = async () => {
@@ -46,25 +48,19 @@ export default function AuditPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-12">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="space-y-3.5 max-w-7xl mx-auto pb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300">
-              Compliance & Security
-            </span>
-            <span className="text-xs text-slate-400 font-mono">Immutable Append-only Footprint</span>
           </div>
           <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
             Platform Audit Trail
           </h1>
         </div>
-
         <button
           onClick={handleRefresh}
           className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5 text-xs font-bold self-start sm:self-auto cursor-pointer"
-          title="Reload audit records"
-        >
+          title="Reload audit records">
           <RefreshCw size={14} />
           <span>Refresh</span>
         </button>
@@ -72,6 +68,8 @@ export default function AuditPage() {
 
       <PlatformAuditLogsTab
         auditLogs={auditLogs}
+        tenants={tenants}
+        admins={admins}
         onRefresh={handleRefresh}
       />
     </div>

@@ -669,7 +669,7 @@ export default function PlansCatalogTab({
   }
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-150">
+    <div className="space-y-4 animate-in fade-in duration-150">
       {/* 1. Page Header with Breadcrumb */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -682,9 +682,6 @@ export default function PlansCatalogTab({
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
             Plans & Pricing
           </h1>
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Manage plan versions, pricing, and included limits.
-          </p>
         </div>
 
         <div className="flex items-center gap-2.5">
@@ -800,7 +797,7 @@ export default function PlansCatalogTab({
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3.5">
             {filteredPlans.map((plan) => {
               const price = getPlanPrice(plan);
               const activeUsers = getPlanLimit(plan, 'active_users');
@@ -819,10 +816,10 @@ export default function PlansCatalogTab({
               return (
                 <div
                   key={plan.id}
-                  className="p-6 rounded-[14px] bg-white dark:bg-slate-900 border border-[#E2E8F0] dark:border-slate-800 shadow-xs hover:shadow-md hover:border-slate-300 dark:hover:border-slate-700 transition flex flex-col justify-between space-y-4 relative"
+                  className="p-4 sm:p-4.5 rounded-xl bg-white dark:bg-slate-900 border border-[#E2E8F0] dark:border-slate-800 shadow-xs hover:shadow-md hover:border-slate-300 dark:hover:border-slate-700 transition flex flex-col justify-between space-y-3.5 relative"
                 >
                   {/* Top Content */}
-                  <div className="space-y-4">
+                  <div className="space-y-3">
                     {/* Top row: Plan code badge, Version badge, Status badge, Visibility badge */}
                     <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
                       <div className="flex items-center gap-1.5 font-mono text-xs">
@@ -1050,9 +1047,9 @@ export default function PlansCatalogTab({
 
       {/* VIEW MODE 2: Version History Timeline / Tree */}
       {viewMode === 'timeline' && (
-        <div className="space-y-6">
+        <div className="space-y-3.5">
           {/* Family Code Quick Filter Bar */}
-          <div className="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 flex flex-wrap items-center gap-2 text-xs">
+          <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 flex flex-wrap items-center gap-2 text-xs">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mr-1">Plan Family:</span>
             <button
               type="button"
@@ -1097,7 +1094,7 @@ export default function PlansCatalogTab({
               return (
                 <div
                   key={code}
-                  className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-6"
+                  className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-4"
                 >
                   {/* Family Header */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">

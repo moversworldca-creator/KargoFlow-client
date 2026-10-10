@@ -50,7 +50,7 @@ export default function PlansPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto pb-12">
+    <div className="max-w-7xl mx-auto pb-6">
       <PlansCatalogTab
         plans={plans}
         features={features}

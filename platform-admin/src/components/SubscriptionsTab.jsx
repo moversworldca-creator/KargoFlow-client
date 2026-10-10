@@ -58,57 +58,57 @@ export default function SubscriptionsTab({
   };
 
   return (
-    <div className="space-y-4 animate-in fade-in duration-150">
+    <div className="space-y-3 animate-in fade-in duration-150">
       {/* Top Banner Notice */}
-      <div className="p-4 rounded-2xl bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200/80 dark:border-blue-900/40 flex items-center justify-between text-xs text-blue-900 dark:text-blue-300">
-        <div className="flex items-center gap-2.5">
-          <CreditCard size={18} className="text-blue-600 shrink-0" />
+      <div className="p-3 rounded-xl bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200/80 dark:border-blue-900/40 flex items-center justify-between text-xs text-blue-900 dark:text-blue-300">
+        <div className="flex items-center gap-2">
+          <CreditCard size={16} className="text-blue-600 shrink-0" />
           <span>
             <strong>Controlled State Transitions:</strong> Every status transition follows the specification matrix (Section 2.10) and appends immutable audit events (Section 2.11).
           </span>
         </div>
         <button
           onClick={onRefresh}
-          className="p-1.5 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+          className="p-1 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
           title="Refresh subscriptions"
         >
-          <RefreshCw size={14} />
+          <RefreshCw size={13} />
         </button>
       </div>
 
       {/* Search Bar */}
-      <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs flex items-center justify-between">
+      <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs flex items-center justify-between">
         <div className="relative flex-1 max-w-md">
-          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search tenant name, subscription ID, provider customer..."
-            className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950 text-xs font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 outline-none"
+            className="w-full pl-9 pr-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950 text-xs font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 outline-none"
           />
         </div>
       </div>
 
       {/* Subscriptions Table */}
-      <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden">
+      <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 text-[11px] font-black text-slate-500 uppercase tracking-wider">
-                <th className="py-3.5 px-4">Sub ID</th>
-                <th className="py-3.5 px-4">Tenant</th>
-                <th className="py-3.5 px-4">Plan / Interval</th>
-                <th className="py-3.5 px-4">Current Status</th>
-                <th className="py-3.5 px-4">Billing Period</th>
-                <th className="py-3.5 px-4">Provider Ref</th>
-                <th className="py-3.5 px-4 text-right">Transition Action</th>
+                <th className="py-2.5 px-3.5">Sub ID</th>
+                <th className="py-2.5 px-3.5">Tenant</th>
+                <th className="py-2.5 px-3.5">Plan / Interval</th>
+                <th className="py-2.5 px-3.5">Current Status</th>
+                <th className="py-2.5 px-3.5">Billing Period</th>
+                <th className="py-2.5 px-3.5">Provider Ref</th>
+                <th className="py-2.5 px-3.5 text-right">Transition Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
               {filteredSubs.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-400">
+                  <td colSpan={7} className="py-8 text-center text-slate-400">
                     No subscriptions found.
                   </td>
                 </tr>
@@ -118,15 +118,15 @@ export default function SubscriptionsTab({
                   const allowed = ALLOWED_TRANSITIONS[sub.status] || [];
                   return (
                     <tr key={sub.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
-                      <td className="py-3 px-4 font-mono font-bold text-[11px] text-slate-600 dark:text-slate-400">
+                      <td className="py-2.5 px-3.5 font-mono font-bold text-[11px] text-slate-600 dark:text-slate-400">
                         {sub.id}
                       </td>
 
-                      <td className="py-3 px-4 font-bold text-slate-900 dark:text-white">
+                      <td className="py-2.5 px-3.5 font-bold text-slate-900 dark:text-white">
                         {sub.tenant_name}
                       </td>
 
-                      <td className="py-3 px-4">
+                      <td className="py-2.5 px-3.5">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-bold text-slate-800 dark:text-slate-200">{planObj.name}</span>
                           {planObj.version && (

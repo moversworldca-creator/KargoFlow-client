@@ -117,24 +117,24 @@ export default function TenantDirectoryTab({
   };
 
   return (
-    <div className="space-y-4 animate-in fade-in duration-150">
+    <div className="space-y-3 animate-in fade-in duration-150">
       {/* Controls Bar */}
-      <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3">
         {/* Search */}
         <div className="relative flex-1 max-w-md">
-          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search tenant name, subdomain, admin email..."
-            className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950 text-xs font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 outline-none"
+            className="w-full pl-9 pr-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950 text-xs font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 outline-none"
           />
         </div>
 
         {/* Filters & Actions */}
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-bold">
+          <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl text-xs font-bold">
             {[
               { id: 'all', label: 'All' },
               { id: 'active', label: 'Active' },
@@ -146,7 +146,7 @@ export default function TenantDirectoryTab({
               <button
                 key={f.id}
                 onClick={() => setStatusFilter(f.id)}
-                className={`px-3 py-1 rounded-lg transition-colors ${
+                className={`px-2.5 py-1 rounded-lg transition-colors text-[11px] ${
                   statusFilter === f.id
                     ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-2xs'
                     : 'text-slate-500 hover:text-slate-700'
@@ -159,33 +159,33 @@ export default function TenantDirectoryTab({
 
           <button
             onClick={onOpenProvisionModal}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors"
+            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
           >
-            <Plus size={15} />
+            <Plus size={14} />
             <span>Provision Tenant</span>
           </button>
         </div>
       </div>
 
       {/* Tenants Table */}
-      <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden">
+      <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 text-[11px] font-black text-slate-500 uppercase tracking-wider">
-                <th className="py-3.5 px-4">Organization / Tenant</th>
-                <th className="py-3.5 px-4">Company ID</th>
-                <th className="py-3.5 px-4">Current Plan</th>
-                <th className="py-3.5 px-4">Subscription</th>
-                <th className="py-3.5 px-4">Derived Access</th>
-                <th className="py-3.5 px-4">Capacity</th>
-                <th className="py-3.5 px-4 text-right">Actions</th>
+                <th className="py-2.5 px-3.5">Organization / Tenant</th>
+                <th className="py-2.5 px-3.5">Company ID</th>
+                <th className="py-2.5 px-3.5">Current Plan</th>
+                <th className="py-2.5 px-3.5">Subscription</th>
+                <th className="py-2.5 px-3.5">Derived Access</th>
+                <th className="py-2.5 px-3.5">Capacity</th>
+                <th className="py-2.5 px-3.5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
               {filteredTenants.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-400">
+                  <td colSpan={7} className="py-8 text-center text-slate-400">
                     No matching tenants found.
                   </td>
                 </tr>
@@ -194,15 +194,15 @@ export default function TenantDirectoryTab({
                   const planObj = plans.find((p) => p.id === tenant.plan_id) || { name: tenant.subscription_plan || 'Custom' };
                   return (
                     <tr key={tenant.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
-                      <td className="py-3 px-4">
-                        <div className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                          <Building2 size={16} className="text-blue-600 shrink-0" />
+                      <td className="py-2.5 px-3.5">
+                        <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <Building2 size={15} className="text-blue-600 shrink-0" />
                           <span>{tenant.name}</span>
                         </div>
                         <div className="text-[11px] text-slate-400">{tenant.email} • {tenant.phone}</div>
                       </td>
 
-                      <td className="py-3 px-4 font-mono text-[11px] text-slate-600 dark:text-slate-300">
+                      <td className="py-2.5 px-3.5 font-mono text-[11px] text-slate-600 dark:text-slate-300">
                         {tenant.company_id || tenant.subdomain || `ID #${tenant.id}`}
                       </td>
 

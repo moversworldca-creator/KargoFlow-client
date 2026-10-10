@@ -259,16 +259,16 @@ export default function EntitlementsTab({
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-150">
+    <div className="space-y-3.5 animate-in fade-in duration-150">
       {/* Top Tenant Selector & Action Header */}
-      <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-purple-50 dark:bg-purple-950/40 text-purple-600 flex items-center justify-center">
-            <Sliders size={20} />
+      <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-purple-600 flex items-center justify-center">
+            <Sliders size={18} />
           </div>
           <div>
-            <h2 className="text-base font-bold text-slate-900 dark:text-white">Effective Entitlements & Overrides</h2>
-            <p className="text-xs text-slate-500">Live computed capacity: Base Plan + Add-ons + Administrative Overrides</p>
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white">Effective Entitlements & Overrides</h2>
+            <p className="text-[11px] text-slate-500">Live computed capacity: Base Plan + Add-ons + Administrative Overrides</p>
           </div>
         </div>
 
@@ -277,7 +277,7 @@ export default function EntitlementsTab({
           <select
             value={selectedTenantId}
             onChange={(e) => setSelectedTenantId(e.target.value)}
-            className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950 text-xs font-bold focus:ring-2 focus:ring-blue-500/20 outline-none"
+            className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950 text-xs font-bold focus:ring-2 focus:ring-blue-500/20 outline-none cursor-pointer"
           >
             {tenants.map((t) => (
               <option key={t.id} value={t.id}>
@@ -295,75 +295,75 @@ export default function EntitlementsTab({
               setAddonReason('Administrative add-on allocation');
               setShowAddonModal(true);
             }}
-            className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
+            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            <PackagePlus size={15} />
+            <PackagePlus size={14} />
             <span>Add-on</span>
           </button>
 
           <button
             onClick={() => setShowOverrideModal(true)}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors"
+            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
           >
-            <Plus size={15} />
+            <Plus size={14} />
             <span>Grant Override</span>
           </button>
         </div>
       </div>
 
       {isLoading ? (
-        <div className="p-12 text-center text-slate-400 flex items-center justify-center gap-2">
+        <div className="p-8 text-center text-slate-400 flex items-center justify-center gap-2">
           <Loader2 size={18} className="animate-spin text-blue-600" />
           <span>Computing effective entitlements...</span>
         </div>
       ) : entitlementsData ? (
-        <div className="space-y-6">
+        <div className="space-y-3.5">
           {/* Summary Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-1">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-1">
               <span className="text-[10px] uppercase font-bold text-slate-400">Assigned Base Tier</span>
-              <div className="text-lg font-bold text-slate-900 dark:text-white">
+              <div className="text-base font-bold text-slate-900 dark:text-white">
                 {entitlementsData.plan?.name}
               </div>
-              <p className="text-xs text-slate-500">
+              <p className="text-[11px] text-slate-500">
                 Code: <span className="font-mono font-bold text-blue-600">{entitlementsData.plan?.code}</span> • ${(entitlementsData.plan?.base_price_cents / 100).toFixed(0)}/{entitlementsData.plan?.billing_interval}
               </p>
             </div>
 
-            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-1">
+            <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-1">
               <span className="text-[10px] uppercase font-bold text-slate-400">Effective Access Status</span>
-              <div className="text-lg font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-                <CheckCircle2 size={18} />
+              <div className="text-base font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                <CheckCircle2 size={16} />
                 <span>{entitlementsData.access_behavior?.access}</span>
               </div>
-              <p className="text-xs text-slate-500">
+              <p className="text-[11px] text-slate-500">
                 Derived: {entitlementsData.access_behavior?.label}
               </p>
             </div>
 
-            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-1">
+            <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-1">
               <span className="text-[10px] uppercase font-bold text-slate-400">Modifications Active</span>
-              <div className="text-lg font-bold text-slate-900 dark:text-white">
+              <div className="text-base font-bold text-slate-900 dark:text-white">
                 {entitlementsData.active_addons?.length || 0} Add-ons • {entitlementsData.active_overrides?.length || 0} Overrides
               </div>
-              <p className="text-xs text-slate-500">
+              <p className="text-[11px] text-slate-500">
                 Calculated live per Section 1.7 specification
               </p>
             </div>
           </div>
 
           {/* Quotas & Limits Progress */}
-          <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Effective Usage & Quota Caps</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-3">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">Effective Usage & Quota Caps</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {Object.entries(entitlementsData.effective_limits || {}).map(([key, limit]) => {
                 const usage = entitlementsData.current_usage?.[key] || 0;
                 const pct = limit ? Math.min(Math.round((usage / limit) * 100), 100) : 0;
                 return (
-                  <div key={key} className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 space-y-2 text-xs">
+                  <div key={key} className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 space-y-1.5 text-xs">
                     <div className="flex items-center justify-between">
-                      <span className="font-bold text-slate-700 dark:text-slate-300 capitalize">{key.replace(/[._]/g, ' ')}</span>
-                      <span className="font-mono font-bold text-blue-600">
+                      <span className="font-bold text-slate-700 dark:text-slate-300 capitalize text-[11px]">{key.replace(/[._]/g, ' ')}</span>
+                      <span className="font-mono font-bold text-blue-600 text-[11px]">
                         {formatQuota(key, usage)} / {formatQuota(key, limit)}
                       </span>
                     </div>
@@ -380,11 +380,11 @@ export default function EntitlementsTab({
           </div>
 
           {/* Active Overrides Table */}
-          <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-4">
+          <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-3">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">Active Administrative Overrides</h3>
-                <p className="text-xs text-slate-500">Targeted adjustments bypassing base tier limits</p>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">Active Administrative Overrides</h3>
+                <p className="text-[11px] text-slate-500">Targeted adjustments bypassing base tier limits</p>
               </div>
               <button
                 onClick={() => setShowOverrideModal(true)}

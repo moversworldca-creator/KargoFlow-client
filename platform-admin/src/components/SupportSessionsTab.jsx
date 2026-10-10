@@ -231,9 +231,9 @@ export default function SupportSessionsTab({
   };
 
   return (
-    <div className="space-y-4 animate-in fade-in duration-150">
+    <div className="space-y-3 animate-in fade-in duration-150">
       {/* Top Banner Notice */}
-      <div className="p-4 rounded-2xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-900 dark:text-amber-300">
+      <div className="p-3 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-900 dark:text-amber-300">
         <div className="flex items-center gap-2.5">
           <Shield size={18} className="text-amber-600 shrink-0" />
           <span>
@@ -243,7 +243,7 @@ export default function SupportSessionsTab({
         {canCreate && (
           <button
             onClick={() => setShowCreateModal(true)}
-            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors shrink-0 cursor-pointer"
+            className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors shrink-0 cursor-pointer"
           >
             <Plus size={15} />
             <span>New Support Session</span>
@@ -252,9 +252,9 @@ export default function SupportSessionsTab({
       </div>
 
       {/* Active Sessions List */}
-      <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-          <h3 className="text-base font-bold text-slate-900 dark:text-white">Active & Recent Support Sessions</h3>
+      <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white">Active & Recent Support Sessions</h3>
           <span className="text-xs font-bold text-slate-500">
             {activeCount} active
           </span>
@@ -264,13 +264,13 @@ export default function SupportSessionsTab({
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 text-[11px] font-black text-slate-500 uppercase tracking-wider">
-                <th className="py-3.5 px-4">Session ID</th>
-                <th className="py-3.5 px-4">Target Tenant</th>
-                <th className="py-3.5 px-4">Operator & Role</th>
-                <th className="py-3.5 px-4">Access Mode</th>
-                <th className="py-3.5 px-4">Ticket & Reason</th>
-                <th className="py-3.5 px-4">Status / Time Left</th>
-                <th className="py-3.5 px-4 text-right">Actions</th>
+                <th className="py-2.5 px-3.5">Session ID</th>
+                <th className="py-2.5 px-3.5">Target Tenant</th>
+                <th className="py-2.5 px-3.5">Operator & Role</th>
+                <th className="py-2.5 px-3.5">Access Mode</th>
+                <th className="py-2.5 px-3.5">Ticket & Reason</th>
+                <th className="py-2.5 px-3.5">Status / Time Left</th>
+                <th className="py-2.5 px-3.5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -284,18 +284,18 @@ export default function SupportSessionsTab({
                 normalizedSessions.map((sess) => {
                   return (
                     <tr key={sess.normalizedId} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
-                      <td className="py-3 px-4 font-mono font-bold text-[11px] text-slate-600 dark:text-slate-400">
+                      <td className="py-2 px-3.5 font-mono font-bold text-[11px] text-slate-600 dark:text-slate-400">
                         <span title={sess.normalizedId} className="cursor-help">
                           {sess.normalizedId.length > 8 ? `${sess.normalizedId.substring(0, 8)}…` : sess.normalizedId}
                         </span>
                       </td>
 
-                      <td className="py-3 px-4">
+                      <td className="py-2 px-3.5">
                         <span className="font-bold text-slate-900 dark:text-white block">{sess.tenantName}</span>
                         <span className="text-[10px] text-slate-400 font-mono">Tenant #{sess.tenantId}</span>
                       </td>
 
-                      <td className="py-3 px-4">
+                      <td className="py-2 px-3.5">
                         <span className="font-bold text-slate-800 dark:text-slate-200 block">{sess.operatorName}</span>
                         <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
                           {sess.operatorEmail && sess.operatorEmail !== sess.operatorName && (
@@ -305,7 +305,7 @@ export default function SupportSessionsTab({
                         </div>
                       </td>
 
-                      <td className="py-3 px-4">
+                      <td className="py-2 px-3.5">
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold inline-flex items-center gap-1 ${
                           sess.isFullAdmin
                             ? 'bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-400'
@@ -317,7 +317,7 @@ export default function SupportSessionsTab({
                         </span>
                       </td>
 
-                      <td className="py-3 px-4 max-w-xs">
+                      <td className="py-2 px-3.5 max-w-xs">
                         {sess.ticket && (
                           <span className="font-mono font-bold text-[10px] bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded mr-1">
                             {sess.ticket}
@@ -326,7 +326,7 @@ export default function SupportSessionsTab({
                         <span className="text-slate-600 dark:text-slate-300 break-words">{sess.reason}</span>
                       </td>
 
-                      <td className="py-3 px-4 text-[11px]">
+                      <td className="py-2 px-3.5 text-[11px]">
                         {sess.isCurrentlyActive ? (
                           <div className="space-y-0.5">
                             <span className="text-emerald-600 font-bold flex items-center gap-1">
@@ -345,7 +345,7 @@ export default function SupportSessionsTab({
                         )}
                       </td>
 
-                      <td className="py-3 px-4 text-right">
+                      <td className="py-2 px-3.5 text-right">
                         <div className="flex items-center justify-end gap-2">
                           {sess.isCurrentlyActive && (
                             <>
