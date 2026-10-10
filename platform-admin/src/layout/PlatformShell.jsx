@@ -1,24 +1,27 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { 
   Building2, Layers, Sliders, Shield, Key, 
   History, Users, CreditCard, Activity, 
   LogOut, Sun, Moon, ShieldCheck, ChevronRight, ChevronDown, User, Bell,
-  Menu, X, Sparkles, AlertCircle, CheckCircle2, CheckCheck
+  Menu, X, Sparkles, AlertCircle, CheckCircle2, CheckCheck, Trash2
 } from 'lucide-react';
 import { usePlatformAuth } from '../auth/PlatformAuthContext';
 import { PLATFORM_ROLES, PLATFORM_PERMISSIONS } from '../rbac/platformRbac';
+import platformApi from '../api/platformApi';
 import kargoflowLogo from '../assets/full_logo.png';
 import kargoflowIcon from '../assets/comapny_logo.png';
 
 export default function PlatformShell() {
   const { platformUser, logout, hasPermission } = usePlatformAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const profileDropdownRef = useRef(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const notificationsRef = useRef(null);
+  const [notificationFilter, setNotificationFilter] = useState('all'); // 'all' | 'unread'
   const [notificationsList, setNotificationsList] = useState([
     {
       id: 1,
@@ -27,16 +30,18 @@ export default function PlatformShell() {
       time: '10m ago',
       unread: true,
       type: 'success',
+      link: '/audit',
       icon: CheckCircle2,
       iconColor: 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200/60 dark:border-emerald-800/40',
     },
     {
       id: 2,
       title: 'New Tenant Provisioned',
-      message: 'Apex Freight Logistics onboarded with Enterprise Tier tier.',
+      message: 'Apex Freight Logistics onboarded with Enterprise tier.',
       time: '1h ago',
       unread: true,
       type: 'tenant',
+      link: '/tenants',
       icon: Building2,
       iconColor: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 border-blue-200/60 dark:border-blue-800/40',
     },
@@ -47,6 +52,7 @@ export default function PlatformShell() {
       time: '4h ago',
       unread: false,
       type: 'system',
+      link: '/audit',
       icon: ShieldCheck,
       iconColor: 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 border-indigo-200/60 dark:border-indigo-800/40',
     },
@@ -65,6 +71,60 @@ export default function PlatformShell() {
       localStorage.setItem('platform_theme', 'light');
     }
   }, [darkMode]);
+
+  // Load recent audit events as control plane notifications on mount
+  useEffect(() => {
+    const fetchRecentAuditEvents = async () => {
+      try {
+        const res = await platformApi.getAuditLogs({ page_size: 4 });
+        const events = res?.data?.results || (Array.isArray(res?.data) ? res.data : []);
+        if (events && events.length > 0) {
+          const mapped = events.map((log, idx) => ({
+            id: `audit-${log.id || idx}`,
+            title: log.action_display || log.action || 'Control Plane Activity',
+            message: log.description || log.details || `Action recorded for ${log.actor_email || 'platform staff'}`,
+            time: log.created_at ? new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recently',
+            unread: idx < 2,
+            type: 'audit',
+            link: '/audit',
+            icon: History,
+            iconColor: 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 border-indigo-200/60 dark:border-indigo-800/40',
+          }));
+          setNotificationsList((prev) => {
+            const existingIds = new Set(prev.map((p) => p.id));
+            const newItems = mapped.filter((m) => !existingIds.has(m.id));
+            return [...newItems, ...prev].slice(0, 10);
+          });
+        }
+      } catch {
+        // Retain initial notifications
+      }
+    };
+    fetchRecentAuditEvents();
+  }, []);
+
+  const handleNotificationClick = (item) => {
+    setNotificationsList((prev) =>
+      prev.map((n) => (n.id === item.id ? { ...n, unread: false } : n))
+    );
+    if (item.link) {
+      navigate(item.link);
+      setNotificationsOpen(false);
+    }
+  };
+
+  const handleDismissNotification = (e, id) => {
+    e.stopPropagation();
+    setNotificationsList((prev) => prev.filter((n) => n.id !== id));
+  };
+
+  const handleMarkAllRead = () => {
+    setNotificationsList((prev) => prev.map((item) => ({ ...item, unread: false })));
+  };
+
+  const handleClearAll = () => {
+    setNotificationsList([]);
+  };
 
   // Close profile dropdown & notifications on click outside or Escape
   useEffect(() => {
@@ -209,20 +269,19 @@ export default function PlatformShell() {
             >
               <Bell size={17} strokeWidth={1.8} />
               {notificationsList.some((n) => n.unread) && (
-                <span className="absolute top-2 right-2 flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-600" />
+                <span className="absolute -top-1 -right-1 px-1 min-w-[17px] h-[17px] text-[10px] font-black rounded-full bg-blue-600 text-white flex items-center justify-center border-2 border-white dark:border-slate-900 shadow-xs pointer-events-none">
+                  {notificationsList.filter((n) => n.unread).length}
                 </span>
               )}
             </button>
 
             {notificationsOpen && (
-              <div className="fixed inset-x-4 top-16 sm:absolute sm:inset-x-auto sm:right-0 mt-2.5 w-auto sm:w-84 max-w-[calc(100vw-2rem)] rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+              <div className="fixed inset-x-4 top-16 sm:absolute sm:inset-x-auto sm:right-[-4.5rem] sm:top-full mt-2.5 w-auto sm:w-88 max-w-[calc(100vw-2rem)] rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                 {/* Header */}
                 <div className="px-4 py-3 bg-slate-50/80 dark:bg-slate-800/60 border-b border-slate-200/80 dark:border-slate-800 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-slate-900 dark:text-white">
-                      Notifications
+                      Platform Notifications
                     </span>
                     {notificationsList.some((n) => n.unread) && (
                       <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
@@ -233,15 +292,51 @@ export default function PlatformShell() {
                   {notificationsList.some((n) => n.unread) && (
                     <button
                       type="button"
-                      onClick={() =>
-                        setNotificationsList((prev) =>
-                          prev.map((item) => ({ ...item, unread: false }))
-                        )
-                      }
+                      onClick={handleMarkAllRead}
                       className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 flex items-center gap-1 cursor-pointer transition-colors"
                     >
                       <CheckCheck size={13} />
                       <span>Mark all read</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Filter Tabs & Quick Actions */}
+                <div className="px-3 py-2 bg-slate-50/50 dark:bg-slate-900/60 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                  <div className="flex items-center gap-1 p-0.5 rounded-xl bg-slate-200/60 dark:bg-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setNotificationFilter('all')}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                        notificationFilter === 'all'
+                          ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      All ({notificationsList.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNotificationFilter('unread')}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                        notificationFilter === 'unread'
+                          ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      Unread ({notificationsList.filter((n) => n.unread).length})
+                    </button>
+                  </div>
+
+                  {notificationsList.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleClearAll}
+                      className="text-[11px] font-medium text-slate-400 hover:text-rose-500 transition-colors flex items-center gap-1 cursor-pointer pr-1"
+                      title="Clear all notifications"
+                    >
+                      <Trash2 size={12} />
+                      <span>Clear</span>
                     </button>
                   )}
                 </div>
@@ -261,19 +356,16 @@ export default function PlatformShell() {
                       </p>
                     </div>
                   ) : (
-                    notificationsList.map((item) => {
+                    (notificationFilter === 'unread'
+                      ? notificationsList.filter((n) => n.unread)
+                      : notificationsList
+                    ).map((item) => {
                       const IconComponent = item.icon || Bell;
                       return (
                         <div
                           key={item.id}
-                          onClick={() =>
-                            setNotificationsList((prev) =>
-                              prev.map((n) =>
-                                n.id === item.id ? { ...n, unread: false } : n
-                              )
-                            )
-                          }
-                          className={`p-3.5 flex items-start gap-3 transition-colors cursor-pointer ${
+                          onClick={() => handleNotificationClick(item)}
+                          className={`group p-3.5 flex items-start gap-3 transition-colors cursor-pointer relative ${
                             item.unread
                               ? 'bg-blue-50/30 dark:bg-blue-950/20 hover:bg-blue-50/50 dark:hover:bg-blue-950/40'
                               : 'hover:bg-slate-50 dark:hover:bg-slate-800/40 opacity-85 hover:opacity-100'
@@ -287,7 +379,7 @@ export default function PlatformShell() {
                           </div>
 
                           {/* Details */}
-                          <div className="flex-1 min-w-0">
+                          <div className="flex-1 min-w-0 pr-4">
                             <div className="flex items-center justify-between gap-1">
                               <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
                                 {item.title}
@@ -299,10 +391,28 @@ export default function PlatformShell() {
                             <p className="text-[11px] text-slate-600 dark:text-slate-400 line-clamp-2 mt-0.5">
                               {item.message}
                             </p>
-                            <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 mt-1 inline-block">
-                              {item.time}
-                            </span>
+                            <div className="flex items-center justify-between mt-1">
+                              <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500">
+                                {item.time}
+                              </span>
+                              {item.link && (
+                                <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <span>View</span>
+                                  <ChevronRight size={10} />
+                                </span>
+                              )}
+                            </div>
                           </div>
+
+                          {/* Dismiss Button on Hover */}
+                          <button
+                            type="button"
+                            onClick={(e) => handleDismissNotification(e, item.id)}
+                            className="absolute top-3 right-3 w-5 h-5 rounded-md flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-700 opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+                            title="Dismiss notification"
+                          >
+                            <X size={12} />
+                          </button>
                         </div>
                       );
                     })
@@ -317,7 +427,7 @@ export default function PlatformShell() {
                   <NavLink
                     to="/audit"
                     onClick={() => setNotificationsOpen(false)}
-                    className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 flex items-center gap-0.5"
+                    className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 flex items-center gap-0.5 cursor-pointer"
                   >
                     <span>Audit Trail</span>
                     <ChevronRight size={12} />
