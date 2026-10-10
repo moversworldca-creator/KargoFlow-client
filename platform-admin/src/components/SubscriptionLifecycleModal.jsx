@@ -88,10 +88,18 @@ export default function SubscriptionLifecycleModal({
 
     setIsSubmitting(true);
     try {
+      const fields = {};
+      if (targetStatus === 'past_due' && graceDays) {
+        const d = new Date();
+        d.setDate(d.getDate() + Number(graceDays));
+        fields.grace_period_ends_at = d.toISOString();
+      }
+
       const res = await platformApi.transitionSubscription(subscription.id, {
+        new_status: targetStatus,
         next_status: targetStatus,
         reason: transitionReason.trim(),
-        grace_period_days: targetStatus === 'past_due' ? graceDays : undefined,
+        fields: Object.keys(fields).length > 0 ? fields : undefined,
       });
       showToast(`Subscription transitioned to "${targetStatus}".`, 'success');
       onSubscriptionUpdated?.(res.data?.subscription || res.data);
@@ -113,9 +121,12 @@ export default function SubscriptionLifecycleModal({
 
     setIsSubmitting(true);
     try {
-      const res = await platformApi.changeSubscriptionPlan(subscription.id, {
+      const companyId = subscription.tenant_id || subscription.company_id || subscription.id;
+      const res = await platformApi.changeSubscriptionPlan(companyId, {
+        plan_id: newPlanId,
         new_plan_id: newPlanId,
         billing_interval: billingInterval,
+        effective: effectiveTiming,
         effective_timing: effectiveTiming,
         reason: planChangeReason.trim(),
       });
@@ -137,16 +148,22 @@ export default function SubscriptionLifecycleModal({
     e.preventDefault();
     setIsSubmitting(true);
     try {
+      const companyId = subscription.tenant_id || subscription.company_id || subscription.id;
       if (subscription.status === 'trialing' && trialEndsAt) {
         await platformApi.updateSubscriptionTrial(subscription.id, {
+          company_id: companyId,
+          plan_id: subscription.plan_id,
           trial_ends_at: new Date(trialEndsAt).toISOString(),
           reason: datesReason.trim() || 'Admin trial adjustment',
         });
       }
       if (graceEndsAt) {
-        await platformApi.updateSubscriptionGracePeriod(subscription.id, {
-          grace_period_ends_at: new Date(graceEndsAt).toISOString(),
+        await platformApi.transitionSubscription(subscription.id, {
+          new_status: subscription.status || 'past_due',
           reason: datesReason.trim() || 'Admin grace adjustment',
+          fields: {
+            grace_period_ends_at: new Date(graceEndsAt).toISOString(),
+          },
         });
       }
       showToast('Subscription lifecycle dates updated.', 'success');
