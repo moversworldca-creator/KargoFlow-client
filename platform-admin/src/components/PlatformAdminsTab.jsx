@@ -4,7 +4,7 @@ import {
   Key, Lock, Mail, Loader2, Sparkles, Filter, 
   Eye, EyeOff, Edit3, UserX, UserCheck, AlertTriangle, 
   Building2, Calendar, Clock, RefreshCw, ShieldAlert, 
-  Info, Check, ChevronRight, Search, SlidersHorizontal, 
+  Info, Check, ChevronRight, ChevronDown, Search, SlidersHorizontal, 
   Fingerprint, ArrowRight, ShieldCheck, Copy 
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
@@ -379,93 +379,69 @@ export default function PlatformAdminsTab({
 
   return (
     <div className="space-y-4 animate-in fade-in duration-150">
-      {/* Active Persona & Live Simulation Toolbar */}
-      <div className="p-4 rounded-3xl bg-linear-to-r from-slate-900 via-indigo-950 to-slate-900 text-white border border-slate-800 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-2xl bg-blue-500/20 text-blue-400 border border-blue-400/30">
-            <Fingerprint size={22} />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Active Platform Actor Context</span>
-              <span className="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 font-mono text-[10px] border border-blue-500/30">
-                Session v{activeStaffUser?.session_version || 1}
-              </span>
-            </div>
-            <div className="flex items-center gap-2 mt-0.5">
-              <h3 className="text-base font-bold text-white">
-                {activeStaffUser?.name || platformUser?.name || 'Staff User'}
-              </h3>
-              {(activeStaffUser?.email || platformUser?.email) && (
-                <span className="text-xs text-slate-400 font-mono">({activeStaffUser?.email || platformUser?.email})</span>
-              )}
-              {getRoleBadge(activeStaffUser?.role || platformUser?.role || 'super_admin')}
-            </div>
-          </div>
-        </div>
-
-        {/* Persona Switcher Selector */}
-        <div className="flex items-center gap-2 bg-slate-800/80 p-2 rounded-2xl border border-slate-700">
-          <span className="text-xs font-medium text-slate-300 pl-1">Switch Test Actor:</span>
-          <select
-            value={activeStaffUser?.id || platformUser?.id || (admins[0]?.id || '')}
-            onChange={(e) => handleSwitchPersona(e.target.value)}
-            disabled={isSwitchingPersona || admins.length === 0}
-            className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs font-bold text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500"
-          >
-            {admins.map((admin) => (
-              <option key={admin.id} value={admin.id}>
-                {admin.name} ({admin.role_name || admin.role}) - {admin.status}
-              </option>
-            ))}
-          </select>
-          {isSwitchingPersona && <Loader2 size={14} className="animate-spin text-blue-400" />}
-        </div>
-      </div>
-
-      {/* Main Header & Sub-Navigation */}
-      <div className="p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* 1. Page Header with Breadcrumb & Unified Action Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-base font-bold text-slate-900 dark:text-white">Platform Staff & Access Control (Section 1.1)</h2>
-            <span className="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-mono font-bold">
-              Isolated Platform RBAC
-            </span>
-          </div>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Cross-tenant support staff, scoped company boundaries, and strict privilege isolation from company-level <code className="text-xs font-mono text-blue-600">crm.*</code> permissions.
+          {/* Breadcrumb: Platform Admin / Staff & RBAC */}
+          <nav className="flex items-center gap-1.5 text-xs text-slate-400 font-medium mb-1">
+            <span>Platform Admin</span>
+            <span>/</span>
+            <span className="text-slate-600 dark:text-slate-300 font-semibold">Staff & RBAC</span>
+          </nav>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
+            Platform Staff & RBAC
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+            Manage administrative staff accounts, tenant scoping, and role-based access control.
           </p>
         </div>
 
-        <div className="flex items-center gap-2 self-start md:self-auto">
+        <div className="flex items-center gap-2 flex-wrap">
           {/* Sub-view switcher */}
-          <div className="flex p-1 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/60">
+          <div className="flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 text-xs">
             <button
+              type="button"
               onClick={() => setActiveSubView('staff')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${
                 activeSubView === 'staff'
-                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-2xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
               }`}
             >
-              Staff Accounts ({admins.length})
+              <Users size={13} />
+              <span>Staff Accounts ({admins.length})</span>
             </button>
             <button
+              type="button"
               onClick={() => setActiveSubView('matrix')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${
                 activeSubView === 'matrix'
-                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-2xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
               }`}
             >
-              Roles & Permission Matrix
+              <Shield size={13} />
+              <span>Permission Matrix</span>
             </button>
           </div>
 
+          {/* Refresh Button */}
+          {onRefresh && (
+            <button
+              type="button"
+              onClick={onRefresh}
+              className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer shadow-xs"
+              title="Refresh staff list"
+            >
+              <RefreshCw size={14} />
+            </button>
+          )}
+
           {canManageUsers && (
             <button
+              type="button"
               onClick={() => setShowInviteModal(true)}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors"
+              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
             >
               <Plus size={15} />
               <span>Invite Staff</span>
@@ -476,63 +452,69 @@ export default function PlatformAdminsTab({
 
       {activeSubView === 'staff' ? (
         <>
-          {/* Metric Stats Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs">
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Total Staff</span>
-              <span className="text-xl font-black text-slate-900 dark:text-white mt-1 block">{stats.total}</span>
+          {/* 2. Metric Stats Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+            <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Total Staff</span>
+              <span className="text-lg font-black text-slate-900 dark:text-white mt-0.5 block">{stats.total}</span>
             </div>
-            <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs">
-              <span className="text-[10px] font-black uppercase tracking-wider text-emerald-600 block">Active Access</span>
-              <span className="text-xl font-black text-emerald-700 dark:text-emerald-400 mt-1 block">{stats.active}</span>
+            <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block">Active Access</span>
+              <span className="text-lg font-black text-emerald-600 dark:text-emerald-400 mt-0.5 block">{stats.active}</span>
             </div>
-            <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs">
-              <span className="text-[10px] font-black uppercase tracking-wider text-rose-500 block">Suspended</span>
-              <span className="text-xl font-black text-rose-600 dark:text-rose-400 mt-1 block">{stats.suspended}</span>
+            <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-rose-500 block">Suspended</span>
+              <span className="text-lg font-black text-rose-600 dark:text-rose-400 mt-0.5 block">{stats.suspended}</span>
             </div>
-            <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs">
-              <span className="text-[10px] font-black uppercase tracking-wider text-amber-500 block">Expired Access</span>
-              <span className="text-xl font-black text-amber-600 dark:text-amber-400 mt-1 block">{stats.expired}</span>
+            <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-500 block">Expired Access</span>
+              <span className="text-lg font-black text-amber-600 dark:text-amber-400 mt-0.5 block">{stats.expired}</span>
             </div>
-            <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs">
-              <span className="text-[10px] font-black uppercase tracking-wider text-blue-500 block">Global Scope</span>
-              <span className="text-xl font-black text-blue-600 dark:text-blue-400 mt-1 block">{stats.globalScope}</span>
+            <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-500 block">Global Scope</span>
+              <span className="text-lg font-black text-blue-600 dark:text-blue-400 mt-0.5 block">{stats.globalScope}</span>
             </div>
-            <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs">
-              <span className="text-[10px] font-black uppercase tracking-wider text-indigo-500 block">Assigned Scope</span>
-              <span className="text-xl font-black text-indigo-600 dark:text-indigo-400 mt-1 block">{stats.assignedScope}</span>
+            <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-500 block">Assigned Scope</span>
+              <span className="text-lg font-black text-indigo-600 dark:text-indigo-400 mt-0.5 block">{stats.assignedScope}</span>
             </div>
           </div>
 
-          {/* Search & Filters */}
-          <div className="p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div className="relative flex-1 max-w-md">
-              <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          {/* 3. Search & Filters */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+            {/* Search Input */}
+            <div className="relative flex-1 min-w-[200px]">
+              <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search staff name, email, or user ID..."
-                className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950 text-xs font-medium focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 outline-hidden"
+                className="w-full pl-9 pr-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-xs"
               />
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            {/* Role Filter */}
+            <div className="relative">
               <select
                 value={roleFilter}
                 onChange={(e) => setRoleFilter(e.target.value)}
-                className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950 text-xs font-bold text-slate-700 dark:text-slate-300 outline-hidden"
+                className="w-full sm:w-auto pl-3.5 pr-8 py-2 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-xs appearance-none cursor-pointer"
               >
                 <option value="all">All Roles</option>
                 {PLATFORM_ROLE_OPTIONS.map((role) => (
                   <option key={role.id} value={role.id}>{role.name}</option>
                 ))}
               </select>
+              <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
 
+            {/* Status Filter */}
+            <div className="relative">
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950 text-xs font-bold text-slate-700 dark:text-slate-300 outline-hidden"
+                className="w-full sm:w-auto pl-3.5 pr-8 py-2 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-xs appearance-none cursor-pointer"
               >
                 <option value="all">All Statuses</option>
                 <option value="active">Active Only</option>
@@ -540,47 +522,44 @@ export default function PlatformAdminsTab({
                 <option value="invited">Invited Only</option>
                 <option value="expired">Expired Only</option>
               </select>
+              <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
 
+            {/* Scope Filter */}
+            <div className="relative">
               <select
                 value={scopeFilter}
                 onChange={(e) => setScopeFilter(e.target.value)}
-                className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950 text-xs font-bold text-slate-700 dark:text-slate-300 outline-hidden"
+                className="w-full sm:w-auto pl-3.5 pr-8 py-2 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-xs appearance-none cursor-pointer"
               >
                 <option value="all">All Company Scopes</option>
                 <option value="global">Global (All Companies)</option>
                 <option value="assigned">Assigned Companies Only</option>
                 <option value="none">No Company Access</option>
               </select>
-
-              <button
-                onClick={onRefresh}
-                className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 transition-colors"
-                title="Refresh staff list"
-              >
-                <RefreshCw size={14} />
-              </button>
+              <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             </div>
           </div>
 
-          {/* Platform Staff Table */}
-          <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden">
+          {/* 4. Platform Staff Table */}
+          <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 text-[11px] font-black text-slate-500 uppercase tracking-wider">
-                    <th className="py-3.5 px-4">Staff Member</th>
-                    <th className="py-3.5 px-4">Platform Role</th>
-                    <th className="py-3.5 px-4">Tenant Scope</th>
-                    <th className="py-3.5 px-4">MFA State</th>
-                    <th className="py-3.5 px-4">Access Expiry</th>
-                    <th className="py-3.5 px-4">Status</th>
-                    <th className="py-3.5 px-4 text-right">Actions</th>
+                  <tr className="border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    <th className="py-2.5 px-3.5">Staff Member</th>
+                    <th className="py-2.5 px-3.5">Platform Role</th>
+                    <th className="py-2.5 px-3.5">Tenant Scope</th>
+                    <th className="py-2.5 px-3.5">MFA State</th>
+                    <th className="py-2.5 px-3.5">Access Expiry</th>
+                    <th className="py-2.5 px-3.5">Status</th>
+                    <th className="py-2.5 px-3.5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {filteredUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-12 text-center text-slate-400">
+                      <td colSpan={7} className="py-10 text-center text-slate-400">
                         No platform staff accounts match the filter criteria.
                       </td>
                     </tr>
@@ -592,23 +571,23 @@ export default function PlatformAdminsTab({
 
                       return (
                         <tr key={user.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
-                          <td className="py-3 px-4">
+                          <td className="py-2.5 px-3.5">
                             <div className="flex items-center gap-2.5">
-                              <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-slate-700 dark:text-slate-300">
+                              <div className="w-7 h-7 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-slate-700 dark:text-slate-300 text-xs shrink-0">
                                 {user.name.charAt(0)}
                               </div>
-                              <div>
-                                <span className="font-bold text-slate-900 dark:text-white block">{user.name}</span>
-                                <span className="text-[11px] text-slate-400 font-mono">{user.email}</span>
+                              <div className="min-w-0">
+                                <span className="font-bold text-slate-900 dark:text-white block truncate">{user.name}</span>
+                                <span className="text-[11px] text-slate-400 font-mono block truncate">{user.email}</span>
                               </div>
                             </div>
                           </td>
 
-                          <td className="py-3 px-4">
+                          <td className="py-2.5 px-3.5">
                             {getRoleBadge(user.role)}
                           </td>
 
-                          <td className="py-3 px-4">
+                          <td className="py-2.5 px-3.5">
                             {user.company_scope_type === 'all' ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400 border border-blue-200/50">
                                 <Building2 size={11} />
@@ -616,8 +595,9 @@ export default function PlatformAdminsTab({
                               </span>
                             ) : (
                               <button
+                                type="button"
                                 onClick={() => setViewAssignedCompaniesUser(user)}
-                                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-400 border border-indigo-200/50 hover:bg-indigo-100 transition-colors"
+                                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-400 border border-indigo-200/50 hover:bg-indigo-100 transition-colors cursor-pointer"
                                 title="Click to view assigned companies"
                               >
                                 <Building2 size={11} />
@@ -627,14 +607,14 @@ export default function PlatformAdminsTab({
                             )}
                           </td>
 
-                          <td className="py-3 px-4">
+                          <td className="py-2.5 px-3.5">
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/50">
                               <ShieldCheck size={11} />
                               Enforced
                             </span>
                           </td>
 
-                          <td className="py-3 px-4 text-slate-600 dark:text-slate-400 font-mono text-[11px]">
+                          <td className="py-2.5 px-3.5 text-slate-600 dark:text-slate-400 font-mono text-[11px]">
                             {user.expires_at ? (
                               <span className={isExpired ? 'text-rose-600 font-bold' : ''}>
                                 {new Date(user.expires_at).toLocaleDateString()}
@@ -644,29 +624,31 @@ export default function PlatformAdminsTab({
                             )}
                           </td>
 
-                          <td className="py-3 px-4">
+                          <td className="py-2.5 px-3.5">
                             {getStatusBadge(user)}
                           </td>
 
-                          <td className="py-3 px-4 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
+                          <td className="py-2.5 px-3.5 text-right">
+                            <div className="flex items-center justify-end gap-1">
                               {/* View Details */}
                               <button
+                                type="button"
                                 onClick={() => setDetailUser(user)}
-                                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                                 title="View effective permissions & activity"
                               >
-                                <Eye size={15} />
+                                <Eye size={14} />
                               </button>
 
                               {/* Edit Access */}
                               {canManageUsers && (
                                 <button
+                                  type="button"
                                   onClick={() => setEditUser({ ...user, assigned_companies: user.assigned_companies || [] })}
-                                  className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
+                                  className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors cursor-pointer"
                                   title="Edit Role & Company Scope"
                                 >
-                                  <Edit3 size={15} />
+                                  <Edit3 size={14} />
                                 </button>
                               )}
 
@@ -674,24 +656,26 @@ export default function PlatformAdminsTab({
                               {canManageUsers && (
                                 user.status === 'active' ? (
                                   <button
+                                    type="button"
                                     onClick={() => setSuspensionTarget(user)}
                                     disabled={isLastSuperAdmin}
-                                    className={`p-1.5 rounded-lg transition-colors ${
+                                    className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
                                       isLastSuperAdmin
                                         ? 'text-slate-300 dark:text-slate-700 cursor-not-allowed'
                                         : 'text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40'
                                     }`}
                                     title={isLastSuperAdmin ? 'Cannot suspend last active Super Admin' : 'Suspend Account'}
                                   >
-                                    <UserX size={15} />
+                                    <UserX size={14} />
                                   </button>
                                 ) : (
                                   <button
+                                    type="button"
                                     onClick={() => setReactivateTarget(user)}
-                                    className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors"
+                                    className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors cursor-pointer"
                                     title="Reactivate Account"
                                   >
-                                    <UserCheck size={15} />
+                                    <UserCheck size={14} />
                                   </button>
                                 )
                               )}
@@ -708,45 +692,45 @@ export default function PlatformAdminsTab({
         </>
       ) : (
         /* Roles & Permissions Matrix Sub-View */
-        <div className="space-y-4">
-          <div className="p-4 rounded-3xl bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200/80 dark:border-blue-900/40 text-xs text-blue-900 dark:text-blue-300 flex items-start gap-3">
-            <Info size={18} className="text-blue-600 shrink-0 mt-0.5" />
+        <div className="space-y-3.5">
+          <div className="p-3.5 rounded-2xl bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200/80 dark:border-blue-900/40 text-xs text-blue-900 dark:text-blue-300 flex items-start gap-2.5 shadow-2xs">
+            <Info size={16} className="text-blue-600 shrink-0 mt-0.5" />
             <div>
-              <p className="font-bold text-sm">Specification Section 1.1: Platform vs. Tenant RBAC Isolation</p>
-              <p className="mt-1 leading-relaxed">
+              <p className="font-bold text-xs">Specification Section 1.1: Platform vs. Tenant RBAC Isolation</p>
+              <p className="mt-1 leading-relaxed text-[11px]">
                 Platform staff permissions (<code>platform.*</code>) govern operations <em>across</em> customer accounts, multi-tenant billing, support impersonation sessions, and global audit trails. They are <strong>strictly separated</strong> from tenant-internal (<code>crm.*</code>) permissions, which are scoped only within an individual mover company's database and business rules.
               </p>
             </div>
           </div>
 
-          <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden">
+          <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 text-[11px] font-black text-slate-500 uppercase tracking-wider">
-                    <th className="py-3.5 px-4 w-1/3">Platform Permission Key</th>
+                  <tr className="border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    <th className="py-2.5 px-3.5 w-1/3">Platform Permission Key</th>
                     {PLATFORM_ROLE_OPTIONS.map((role) => (
-                      <th key={role.id} className="py-3.5 px-3 text-center">{role.name}</th>
+                      <th key={role.id} className="py-2.5 px-3 text-center">{role.name}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {PERMISSION_DEFINITIONS.map((perm) => (
                     <tr key={perm.code} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
-                      <td className="py-3 px-4">
+                      <td className="py-2.5 px-3.5">
                         <span className="font-bold text-slate-900 dark:text-white block">{perm.name}</span>
                         <code className="text-[11px] font-mono text-blue-600 dark:text-blue-400 block">{perm.code}</code>
                         <span className="text-[11px] text-slate-400 mt-0.5 block">{perm.description}</span>
                       </td>
 
                       {PLATFORM_ROLE_OPTIONS.map((role) => (
-                        <td key={role.id} className="py-3 px-3 text-center">
+                        <td key={role.id} className="py-2.5 px-3 text-center">
                           {role.id === 'super_admin' || role.permissions.includes(perm.code) ? (
-                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-400">
-                              <Check size={14} />
+                            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-400">
+                              <Check size={12} />
                             </span>
                           ) : (
-                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400">
+                            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 text-xs">
                               ✕
                             </span>
                           )}
@@ -766,16 +750,16 @@ export default function PlatformAdminsTab({
       {/* ---------------------------------------------------------------------- */}
       {showInviteModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">Invite Platform Staff Member</h3>
                 <p className="text-xs text-slate-500">Create login identity and assign multi-tenant company scope</p>
               </div>
-              <button onClick={() => setShowInviteModal(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+              <button onClick={() => setShowInviteModal(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer p-1">✕</button>
             </div>
 
-            <form onSubmit={handleInviteSubmit} className="p-6 overflow-y-auto space-y-4 text-xs">
+            <form onSubmit={handleInviteSubmit} className="p-4 sm:p-5 overflow-y-auto space-y-3.5 text-xs">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Full Name *</label>
@@ -1018,16 +1002,16 @@ export default function PlatformAdminsTab({
       {/* ---------------------------------------------------------------------- */}
       {editUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">Edit Platform Staff Access</h3>
                 <p className="text-xs text-slate-500">{editUser.name} ({editUser.email})</p>
               </div>
-              <button onClick={() => setEditUser(null)} className="text-slate-400 hover:text-slate-600">✕</button>
+              <button onClick={() => setEditUser(null)} className="text-slate-400 hover:text-slate-600 cursor-pointer p-1">✕</button>
             </div>
 
-            <form onSubmit={handleEditSubmit} className="p-6 overflow-y-auto space-y-4 text-xs">
+            <form onSubmit={handleEditSubmit} className="p-4 sm:p-5 overflow-y-auto space-y-3.5 text-xs">
               <div>
                 <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Full Name</label>
                 <input
@@ -1095,7 +1079,7 @@ export default function PlatformAdminsTab({
                 </div>
 
                 {editUser.company_scope_type === 'assigned' && (
-                  <div className="mt-3 p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2">
+                  <div className="mt-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2">
                     <span className="font-bold text-slate-700 dark:text-slate-300 block text-[11px]">Assigned Companies:</span>
                     <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
                       {tenants.map((t) => {
@@ -1146,14 +1130,14 @@ export default function PlatformAdminsTab({
                 <button
                   type="button"
                   onClick={() => setEditUser(null)}
-                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold"
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm"
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
                 >
                   {isSubmitting && <Loader2 size={13} className="animate-spin" />}
                   <span>Save Access Changes</span>
@@ -1169,10 +1153,10 @@ export default function PlatformAdminsTab({
       {/* ---------------------------------------------------------------------- */}
       {suspensionTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden p-6 space-y-4 text-xs">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl w-full max-w-md overflow-hidden p-5 space-y-3.5 text-xs">
             <div className="flex items-center gap-3">
-              <div className="p-3 rounded-2xl bg-rose-100 dark:bg-rose-950/50 text-rose-600">
-                <ShieldAlert size={24} />
+              <div className="p-2.5 rounded-xl bg-rose-100 dark:bg-rose-950/50 text-rose-600">
+                <ShieldAlert size={22} />
               </div>
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">Suspend Platform Staff Account</h3>
@@ -1200,7 +1184,7 @@ export default function PlatformAdminsTab({
               <button
                 type="button"
                 onClick={() => setSuspensionTarget(null)}
-                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold"
+                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold cursor-pointer"
               >
                 Cancel
               </button>
@@ -1208,7 +1192,7 @@ export default function PlatformAdminsTab({
                 type="button"
                 disabled={isSubmitting || !suspensionReason.trim()}
                 onClick={handleConfirmSuspend}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-sm"
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
               >
                 {isSubmitting && <Loader2 size={13} className="animate-spin" />}
                 <span>Confirm Suspension</span>
@@ -1223,10 +1207,10 @@ export default function PlatformAdminsTab({
       {/* ---------------------------------------------------------------------- */}
       {reactivateTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden p-6 space-y-4 text-xs">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl w-full max-w-md overflow-hidden p-5 space-y-3.5 text-xs">
             <div className="flex items-center gap-3">
-              <div className="p-3 rounded-2xl bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600">
-                <UserCheck size={24} />
+              <div className="p-2.5 rounded-xl bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600">
+                <UserCheck size={22} />
               </div>
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">Reactivate Staff Account</h3>
@@ -1253,7 +1237,7 @@ export default function PlatformAdminsTab({
               <button
                 type="button"
                 onClick={() => setReactivateTarget(null)}
-                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold"
+                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold cursor-pointer"
               >
                 Cancel
               </button>
@@ -1261,7 +1245,7 @@ export default function PlatformAdminsTab({
                 type="button"
                 disabled={isSubmitting}
                 onClick={handleConfirmReactivate}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-sm"
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
               >
                 {isSubmitting && <Loader2 size={13} className="animate-spin" />}
                 <span>Reactivate Account</span>
@@ -1276,36 +1260,36 @@ export default function PlatformAdminsTab({
       {/* ---------------------------------------------------------------------- */}
       {detailUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh] text-xs">
-            <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh] text-xs">
+            <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-base">
+                <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-sm">
                   {detailUser.name.charAt(0)}
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-900 dark:text-white">{detailUser.name}</h3>
-                  <p className="text-slate-500">{detailUser.email} • ID: {detailUser.id}</p>
+                  <p className="text-slate-500 text-xs">{detailUser.email} • ID: {detailUser.id}</p>
                 </div>
               </div>
-              <button onClick={() => setDetailUser(null)} className="text-slate-400 hover:text-slate-600">✕</button>
+              <button onClick={() => setDetailUser(null)} className="text-slate-400 hover:text-slate-600 cursor-pointer p-1">✕</button>
             </div>
 
-            <div className="p-6 overflow-y-auto space-y-5">
+            <div className="p-4 sm:p-5 overflow-y-auto space-y-4">
               {/* Profile summary cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800">
                   <span className="text-[10px] uppercase font-bold text-slate-400 block">Role</span>
                   <span className="font-bold text-slate-800 dark:text-slate-200 block mt-0.5">{PLATFORM_ROLES[detailUser.role]?.name || detailUser.role}</span>
                 </div>
-                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800">
+                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800">
                   <span className="text-[10px] uppercase font-bold text-slate-400 block">Status</span>
                   <span className="mt-0.5 block">{getStatusBadge(detailUser)}</span>
                 </div>
-                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800">
+                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800">
                   <span className="text-[10px] uppercase font-bold text-slate-400 block">MFA State</span>
                   <span className="font-bold text-emerald-600 block mt-0.5">Enforced / Active</span>
                 </div>
-                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800">
+                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800">
                   <span className="text-[10px] uppercase font-bold text-slate-400 block">Session Token</span>
                   <span className="font-mono text-slate-600 dark:text-slate-400 block mt-0.5">v{detailUser.session_version || 1}</span>
                 </div>
@@ -1353,7 +1337,7 @@ export default function PlatformAdminsTab({
                   <span>Assigned Companies Scope</span>
                 </h4>
                 {detailUser.company_scope_type === 'all' ? (
-                  <div className="p-3 rounded-2xl bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200/60 text-blue-900 dark:text-blue-300">
+                  <div className="p-3 rounded-xl bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200/60 text-blue-900 dark:text-blue-300">
                     <strong>Global Administrative Scope:</strong> This user has unrestricted operational access across all {tenants.length} customer tenant companies.
                   </div>
                 ) : (
@@ -1373,11 +1357,11 @@ export default function PlatformAdminsTab({
               </div>
             </div>
 
-            <div className="p-4 border-t border-slate-100 dark:border-slate-800 flex justify-end">
+            <div className="p-3.5 sm:p-4 border-t border-slate-100 dark:border-slate-800 flex justify-end">
               <button
                 type="button"
                 onClick={() => setDetailUser(null)}
-                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold"
+                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold cursor-pointer"
               >
                 Close Details
               </button>
@@ -1391,13 +1375,13 @@ export default function PlatformAdminsTab({
       {/* ---------------------------------------------------------------------- */}
       {viewAssignedCompaniesUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden p-6 space-y-4 text-xs">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl w-full max-w-md overflow-hidden p-5 space-y-3.5 text-xs">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">Assigned Companies Scope</h3>
                 <p className="text-slate-500">{viewAssignedCompaniesUser.name} ({viewAssignedCompaniesUser.role_name || viewAssignedCompaniesUser.role})</p>
               </div>
-              <button onClick={() => setViewAssignedCompaniesUser(null)} className="text-slate-400 hover:text-slate-600">✕</button>
+              <button onClick={() => setViewAssignedCompaniesUser(null)} className="text-slate-400 hover:text-slate-600 cursor-pointer p-1">✕</button>
             </div>
 
             <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
@@ -1405,7 +1389,7 @@ export default function PlatformAdminsTab({
                 <p className="text-slate-400 py-4 text-center">No assigned companies configured.</p>
               ) : (
                 getAssignedCompanies(viewAssignedCompaniesUser).map((comp) => (
-                  <div key={comp.id} className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                  <div key={comp.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 flex items-center justify-between">
                     <div>
                       <span className="font-bold text-slate-800 dark:text-slate-200 block">{comp.name}</span>
                       <span className="text-[10px] text-slate-400 font-mono">{comp.subdomain}</span>
@@ -1422,7 +1406,7 @@ export default function PlatformAdminsTab({
               <button
                 type="button"
                 onClick={() => setViewAssignedCompaniesUser(null)}
-                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold"
+                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold cursor-pointer"
               >
                 Close
               </button>
@@ -1436,10 +1420,10 @@ export default function PlatformAdminsTab({
       {/* ---------------------------------------------------------------------- */}
       {createdCredentials && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden p-6 space-y-4 text-xs">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl w-full max-w-md overflow-hidden p-5 space-y-3.5 text-xs">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-2xl bg-emerald-500/20 text-emerald-500 border border-emerald-500/30">
-                <CheckCircle2 size={24} />
+              <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-500 border border-emerald-500/30">
+                <CheckCircle2 size={22} />
               </div>
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">Staff Member Created</h3>
@@ -1447,7 +1431,7 @@ export default function PlatformAdminsTab({
               </div>
             </div>
 
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
+            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2.5">
               <div>
                 <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Staff Name</span>
                 <span className="font-bold text-slate-800 dark:text-slate-200">{createdCredentials.name}</span>
@@ -1483,7 +1467,7 @@ export default function PlatformAdminsTab({
                   showToast('Credentials copied to clipboard!', 'success');
                   setTimeout(() => setCopiedCredentials(false), 2000);
                 }}
-                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition-colors"
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
               >
                 {copiedCredentials ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
                 <span>{copiedCredentials ? 'Copied!' : 'Copy Credentials'}</span>
@@ -1491,7 +1475,7 @@ export default function PlatformAdminsTab({
               <button
                 type="button"
                 onClick={() => setCreatedCredentials(null)}
-                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors"
+                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
               >
                 Done
               </button>

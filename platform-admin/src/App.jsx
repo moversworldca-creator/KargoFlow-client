@@ -48,7 +48,7 @@ export default function App() {
           <Route path="/tenants" element={<TenantsPage />} />
           <Route path="/subscriptions" element={<SubscriptionsPage />} />
           <Route path="/plans" element={<PlansPage />} />
-          <Route path="/features" element={<FeaturesPage />} />
+          {/* <Route path="/features" element={<FeaturesPage />} /> */}
           <Route path="/entitlements" element={<EntitlementsPage />} />
           <Route path="/support" element={<SupportPage />} />
           <Route path="/admins" element={<AdminsPage />} />

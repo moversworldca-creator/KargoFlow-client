@@ -50,6 +50,12 @@ export const platformApi = {
   updatePlanFeatures: async (id, features = []) => {
     return platformAxios.put(`/core/plans/${id}/features/`, { features });
   },
+  activatePlan: async (id) => {
+    return platformAxios.post(`/core/plans/${id}/activate/`);
+  },
+  retirePlan: async (id) => {
+    return platformAxios.post(`/core/plans/${id}/retire/`);
+  },
 
   // Features & Limits
   getFeatures: async () => {

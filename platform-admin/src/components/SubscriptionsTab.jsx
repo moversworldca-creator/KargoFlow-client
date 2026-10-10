@@ -127,7 +127,19 @@ export default function SubscriptionsTab({
                       </td>
 
                       <td className="py-3 px-4">
-                        <span className="font-bold text-slate-800 dark:text-slate-200">{planObj.name}</span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-bold text-slate-800 dark:text-slate-200">{planObj.name}</span>
+                          {planObj.version && (
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 font-bold">
+                              v{planObj.version}
+                            </span>
+                          )}
+                          {planObj.status === 'retired' && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200/50">
+                              Grandfathered
+                            </span>
+                          )}
+                        </div>
                         <span className="text-[10px] text-slate-400 block uppercase font-mono">{sub.billing_interval}</span>
                       </td>
 

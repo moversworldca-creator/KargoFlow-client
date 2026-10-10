@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { ArrowLeft, Search, Save, Check, X, Filter, Layers } from 'lucide-react';
+import { ArrowLeft, Search, Save, Check, X, Filter, Layers, Plus, Sparkles } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 
 // Master catalog of all 28 platform modules requested
@@ -202,28 +202,109 @@ export const ALL_PLATFORM_FEATURES = [
   },
 ];
 
+// Bidirectional mapping between frontend UI keys and backend database saas_feature keys
+export const FEATURE_KEY_BACKEND_MAP = {
+  crm_leads: 'crm.leads',
+  crm_sales: 'crm.sales',
+  crm_estimates: 'crm.estimates',
+  customer_portal: 'crm.customer_portal',
+  documents_storage: 'crm.documents',
+  documents_signatures: 'crm.esign',
+  finance_payments: 'crm.payments',
+  operations_jobs: 'crm.jobs',
+  operations_dispatch: 'crm.dispatch',
+  crm_dispatch_scheduling: 'crm.dispatch',
+  operations_crew_app: 'crm.crew_app',
+  finance_accounting: 'crm.accounting',
+  automation_automations: 'crm.automations',
+  integration_integrations: 'crm.integrations',
+  reporting_advanced: 'crm.advanced_reports',
+  integration_api: 'crm.api',
+  platform_multibranch: 'crm.multi_branch',
+  security_custom_roles: 'crm.custom_roles',
+  platform_white_label: 'crm.white_label',
+  comms_sms: 'crm.sms',
+  comms_email: 'crm.email',
+  crm_reporting_bi: 'crm.advanced_reports',
+  platform_files_storage: 'crm.documents',
+};
+
+export const REVERSE_FEATURE_MAP = Object.entries(FEATURE_KEY_BACKEND_MAP).reduce((acc, [k, v]) => {
+  if (!acc[v]) acc[v] = k;
+  return acc;
+}, {});
+
 export default function PlanFeatureMatrixPage({
   plan,
+  features = [],
   onBack,
   onSaveMatrix,
 }) {
   const { showToast } = useToast();
+
+  // Custom features loaded from local cache
+  const [customFeatures, setCustomFeatures] = useState(() => {
+    try {
+      const stored = localStorage.getItem('kargoflow_custom_features');
+      if (stored) return JSON.parse(stored);
+    } catch {
+      // fallback
+    }
+    return [];
+  });
+
+  const [showAddFeatureModal, setShowAddFeatureModal] = useState(false);
+  const [newFeatureName, setNewFeatureName] = useState('');
+  const [newFeatureKey, setNewFeatureKey] = useState('');
+  const [newFeatureCategory, setNewFeatureCategory] = useState('Core');
+  const [newFeatureDescription, setNewFeatureDescription] = useState('');
+  const [newFeatureMode, setNewFeatureMode] = useState('write');
+  const [customCategoryInput, setCustomCategoryInput] = useState('');
+
+  // Combined feature list
+  const allFeaturesList = useMemo(() => {
+    const list = [...ALL_PLATFORM_FEATURES];
+    customFeatures.forEach((cf) => {
+      if (!list.some((f) => f.key === cf.key)) {
+        list.push(cf);
+      }
+    });
+    return list;
+  }, [customFeatures]);
 
   // Initialize matrix state: default to plan features or Full (Write)
   const [matrixState, setMatrixState] = useState(() => {
     const state = {};
     const isTrial = plan?.code?.toUpperCase() === 'TRIAL' || plan?.name?.toLowerCase().includes('trial');
     
+    // First initialize from master catalog
     ALL_PLATFORM_FEATURES.forEach((item) => {
-      if (plan?.features && !Array.isArray(plan.features) && plan.features[item.key]) {
-        state[item.key] = plan.features[item.key];
+      const bKey = FEATURE_KEY_BACKEND_MAP[item.key] || item.key;
+      if (plan?.features && !Array.isArray(plan.features)) {
+        state[item.key] = plan.features[item.key] || plan.features[bKey] || (isTrial ? 'write' : item.defaultMode);
       } else if (Array.isArray(plan?.features)) {
-        const found = plan.features.find((f) => f.feature_key === item.key);
+        const found = plan.features.find((f) => f.feature_key === item.key || f.feature_key === bKey || f.key === item.key || f.key === bKey);
         state[item.key] = found ? found.access_mode : (isTrial ? 'write' : item.defaultMode);
       } else {
-        state[item.key] = isTrial ? 'write' : (plan?.features?.[item.key] || 'write');
+        state[item.key] = isTrial ? 'write' : item.defaultMode;
       }
     });
+
+    // Also initialize custom features
+    try {
+      const stored = localStorage.getItem('kargoflow_custom_features');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        parsed.forEach((item) => {
+          if (!state[item.key]) {
+            state[item.key] = item.defaultMode || 'write';
+          }
+        });
+      }
+    } catch {
+      // ignore
+    }
+
     return state;
   });
 
@@ -234,8 +315,8 @@ export default function PlanFeatureMatrixPage({
 
   // Derive distinct categories list
   const categories = useMemo(() => {
-    return Array.from(new Set(ALL_PLATFORM_FEATURES.map((f) => f.category)));
-  }, []);
+    return Array.from(new Set(allFeaturesList.map((f) => f.category)));
+  }, [allFeaturesList]);
 
   // Top Statistics Counters: Selected vs Not Selected
   const stats = useMemo(() => {
@@ -244,7 +325,7 @@ export default function PlanFeatureMatrixPage({
     let writeCount = 0;
     let readCount = 0;
 
-    ALL_PLATFORM_FEATURES.forEach((item) => {
+    allFeaturesList.forEach((item) => {
       const mode = matrixState[item.key] || 'write';
       if (mode === 'none') {
         notSelected++;
@@ -256,18 +337,18 @@ export default function PlanFeatureMatrixPage({
     });
 
     return {
-      total: ALL_PLATFORM_FEATURES.length,
+      total: allFeaturesList.length,
       selected,
       notSelected,
       writeCount,
       readCount,
     };
-  }, [matrixState]);
+  }, [matrixState, allFeaturesList]);
 
   // Filter features based on search query, category filter, and selected status filter
   const filteredFeatures = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return ALL_PLATFORM_FEATURES.filter((f) => {
+    return allFeaturesList.filter((f) => {
       const mode = matrixState[f.key] || 'write';
       const isSelected = mode !== 'none';
 
@@ -313,20 +394,83 @@ export default function PlanFeatureMatrixPage({
     }));
   };
 
+  const handleNameChange = (name) => {
+    setNewFeatureName(name);
+    if (!newFeatureKey || newFeatureKey === newFeatureName.toLowerCase().replace(/[^a-z0-9_]/g, '_')) {
+      const generated = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+      setNewFeatureKey(generated);
+    }
+  };
+
+  const handleCreateFeature = (e) => {
+    if (e) e.preventDefault();
+    const finalName = newFeatureName.trim();
+    const finalKey = (newFeatureKey.trim() || finalName.toLowerCase().replace(/[^a-z0-9_]/g, '_')).replace(/\s+/g, '_');
+    const finalCat = newFeatureCategory === '__custom__' ? (customCategoryInput.trim() || 'Custom') : newFeatureCategory;
+
+    if (!finalName) {
+      showToast('Please provide a feature module name.', 'error');
+      return;
+    }
+    if (!finalKey) {
+      showToast('Please provide a unique feature key.', 'error');
+      return;
+    }
+
+    if (allFeaturesList.some((f) => f.key === finalKey)) {
+      showToast(`A module with key "${finalKey}" already exists.`, 'error');
+      return;
+    }
+
+    const created = {
+      key: finalKey,
+      name: finalName,
+      category: finalCat,
+      description: newFeatureDescription.trim() || `${finalName} module for freight operations.`,
+      defaultMode: newFeatureMode,
+      isCustom: true,
+      created_at: new Date().toISOString(),
+    };
+
+    const nextCustom = [...customFeatures, created];
+    setCustomFeatures(nextCustom);
+    try {
+      localStorage.setItem('kargoflow_custom_features', JSON.stringify(nextCustom));
+    } catch {
+      // ignore
+    }
+
+    setMatrixState((prev) => ({
+      ...prev,
+      [finalKey]: newFeatureMode,
+    }));
+
+    showToast(`Feature "${finalName}" added to ${plan.name} matrix!`, 'success');
+    setShowAddFeatureModal(false);
+    setNewFeatureName('');
+    setNewFeatureKey('');
+    setNewFeatureDescription('');
+    setCustomCategoryInput('');
+  };
+
   const handleEnableAllWrite = () => {
     const updated = {};
-    ALL_PLATFORM_FEATURES.forEach((f) => {
+    allFeaturesList.forEach((f) => {
       updated[f.key] = 'write';
     });
     setMatrixState(updated);
-    showToast('All 28 platform modules set to Full (Write).', 'info');
+    showToast(`All ${allFeaturesList.length} platform modules set to Full (Write).`, 'info');
   };
 
   const handleSave = () => {
     if (onSaveMatrix) {
-      onSaveMatrix(plan, matrixState);
+      const enrichedMatrix = { ...matrixState };
+      Object.entries(matrixState).forEach(([k, mode]) => {
+        const bKey = FEATURE_KEY_BACKEND_MAP[k];
+        if (bKey) enrichedMatrix[bKey] = mode;
+      });
+      onSaveMatrix(plan, enrichedMatrix);
     }
-    showToast(`Feature matrix saved for "${plan.name}".`, 'success');
   };
 
   // Helper to render an item row
@@ -432,13 +576,22 @@ export default function PlanFeatureMatrixPage({
               </span>
             </div>
             <p className="text-xs text-slate-500">
-              Configure access permissions for all 28 modules in this plan
+              Configure access permissions for all {allFeaturesList.length} modules in this plan
             </p>
           </div>
         </div>
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => setShowAddFeatureModal(true)}
+            className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/70 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/60 flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+          >
+            <Plus size={13} className="stroke-[2.5]" />
+            <span>Add Feature</span>
+          </button>
+
           <button
             type="button"
             onClick={handleEnableAllWrite}
@@ -708,6 +861,146 @@ export default function PlanFeatureMatrixPage({
           </table>
         </div>
       </div>
+
+      {/* 4. Add Feature Modal */}
+      {showAddFeatureModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full p-5 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
+                  <Sparkles size={16} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Add Feature to Plan
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Define a new feature module and configure its access for {plan.name}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddFeatureModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateFeature} className="space-y-3.5 text-xs">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Feature Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. AI Dispatch Assistant"
+                  value={newFeatureName}
+                  onChange={(e) => handleNameChange(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  System Key <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. ai_dispatch_assistant"
+                  value={newFeatureKey}
+                  onChange={(e) => setNewFeatureKey(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'))}
+                  className="w-full px-3 py-2 font-mono text-[11px] rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Category
+                  </label>
+                  <select
+                    value={newFeatureCategory}
+                    onChange={(e) => setNewFeatureCategory(e.target.value)}
+                    className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  >
+                    {categories.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                    <option value="__custom__">+ Custom Category</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Access on {plan.code || plan.name}
+                  </label>
+                  <select
+                    value={newFeatureMode}
+                    onChange={(e) => setNewFeatureMode(e.target.value)}
+                    className="w-full px-2.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  >
+                    <option value="write">Full (Write)</option>
+                    <option value="read">Read-Only</option>
+                    <option value="none">None (Disabled)</option>
+                  </select>
+                </div>
+              </div>
+
+              {newFeatureCategory === '__custom__' && (
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Custom Category Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. AI & Intelligence"
+                    value={customCategoryInput}
+                    onChange={(e) => setCustomCategoryInput(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    required
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Description
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Short summary of module capabilities..."
+                  value={newFeatureDescription}
+                  onChange={(e) => setNewFeatureDescription(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowAddFeatureModal(false)}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold cursor-pointer shadow-xs"
+                >
+                  Add Module
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

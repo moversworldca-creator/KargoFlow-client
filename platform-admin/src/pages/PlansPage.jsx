@@ -50,30 +50,7 @@ export default function PlansPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-12">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300">
-              Packaging & Pricing
-            </span>
-            <span className="text-xs text-slate-400 font-mono">Plan templates</span>
-          </div>
-          <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-            Plans Catalog
-          </h1>
-        </div>
-
-        <button
-          onClick={handleRefresh}
-          className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5 text-xs font-bold self-start sm:self-auto cursor-pointer"
-          title="Reload plans catalog"
-        >
-          <RefreshCw size={14} />
-          <span>Refresh</span>
-        </button>
-      </div>
-
+    <div className="max-w-7xl mx-auto pb-12">
       <PlansCatalogTab
         plans={plans}
         features={features}
