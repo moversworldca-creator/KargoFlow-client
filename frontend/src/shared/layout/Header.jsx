@@ -716,14 +716,37 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
     setOpenDropdown(openDropdown === name ? null : name);
   };
 
+  const fullName = useMemo(() => {
+    if (!user) return 'User';
+    if (user.full_name && typeof user.full_name === 'string') return user.full_name.trim();
+    if (user.name && typeof user.name === 'string') return user.name.trim();
+    const parts = [user.first_name, user.last_name]
+      .filter((part) => part && typeof part === 'string' && part.trim() !== 'undefined' && part.trim() !== 'null');
+    if (parts.length > 0) return parts.join(' ').trim();
+    return user.email || 'User';
+  }, [user]);
+
+  const roleLabel = useMemo(() => {
+    if (!user) return 'Team Member';
+    return (
+      user.employee_type ||
+      user.role_name ||
+      (typeof user.role === 'string' ? user.role : user.role?.name) ||
+      (user.is_superuser || user.is_system_admin ? 'System Administrator' : 'Team Member')
+    );
+  }, [user]);
+
   const getInitials = () => {
     if (!user) return '??';
-    const first = user.first_name?.[0] || '';
-    const last = user.last_name?.[0] || '';
-    return (first + last).toUpperCase() || user.email?.[0].toUpperCase() || 'U';
+    const parts = fullName.split(' ').filter(Boolean);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+    if (parts.length === 1 && parts[0].length >= 2) {
+      return parts[0].slice(0, 2).toUpperCase();
+    }
+    return (user.email?.[0] || 'U').toUpperCase();
   };
-
-  const fullName = user ? `${user.first_name} ${user.last_name}`.trim() || user.email : 'User';
 
   const commands = useMemo(
     () => [
@@ -1462,7 +1485,7 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
                   <>
                     <div className="p-4 bg-brand-sidebar">
                       <p className="text-sm font-bold text-content-main truncate">{fullName}</p>
-                      <p className="text-xs text-content-sec truncate">{user?.employee_type || 'Team Member'}</p>
+                      <p className="text-xs text-content-sec truncate">{roleLabel}</p>
                     </div>
                     <div className="p-1">
                       <DropdownItem 

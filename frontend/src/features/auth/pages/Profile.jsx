@@ -163,15 +163,16 @@ const Profile = () => {
     }
   };
 
-  const getInitials = () => {
-    const first = formData.first_name?.[0] || '';
-    const last = formData.last_name?.[0] || '';
-    return (first + last).toUpperCase() || formData.email?.[0].toUpperCase() || '?';
-  };
-
-  const fullName = `${formData.first_name || ''} ${formData.last_name || ''}`.trim() || 'Your Profile';
+  const fullName = formData.full_name || formData.name || `${formData.first_name || ''} ${formData.last_name || ''}`.trim() || formData.email || 'Your Profile';
   const email = formData.email || 'No email available';
-  const roleLabel = formData.employee_type || 'Team Member';
+  const roleLabel = formData.employee_type || formData.role_name || (typeof formData.role === 'string' ? formData.role : formData.role?.name) || (formData.is_superuser || formData.is_system_admin ? 'System Administrator' : 'Team Member');
+
+  const getInitials = () => {
+    const parts = fullName.split(' ').filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    if (parts.length === 1 && parts[0].length >= 2) return parts[0].slice(0, 2).toUpperCase();
+    return (formData.email?.[0] || '?').toUpperCase();
+  };
   const passwordStrength = getPasswordStrength(passwordData.new_password);
 
   return (

@@ -1427,16 +1427,27 @@ const db = {
 };
 
 const buildUserPayload = (user = db.users[0]) => {
-  const company = db.companies[0];
+  const company = db.companies.find((c) => c.id === user.company) || db.companies[0];
+  const roleObj = db.roles.find((r) => user.roles?.includes(r.id)) || db.roles[0];
+  const roleName = roleObj?.name || 'Admin';
+  const employeeType = user.employee_type || (user.is_superuser || user.is_system_admin ? 'System Administrator' : roleName);
+  const fullName = user.full_name || `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email || 'Test Admin';
   return {
     ...user,
+    first_name: user.first_name || 'Test',
+    last_name: user.last_name || 'Admin',
+    full_name: fullName,
+    name: fullName,
+    employee_type: employeeType,
+    role: roleName,
+    role_name: roleName,
     company,
     company_details: company,
     active_company: company,
     active_company_details: company,
     active_company_id: company.id,
     branch_details: db.branches,
-    role_details: db.roles.filter((r) => user.roles.includes(r.id)),
+    role_details: db.roles.filter((r) => user.roles?.includes(r.id)),
   };
 };
 
@@ -1469,17 +1480,18 @@ app.post(['/api/auth/login/', '/api/login/'], async (req, res) => {
 
   const matchedUser = db.users.find((u) => u.email.toLowerCase() === email) || db.users[0];
   const userPayload = buildUserPayload(matchedUser);
+  const token = `jwt-${matchedUser.id}-${Buffer.from(matchedUser.email).toString('hex')}`;
   res.json({
-    access: 'demo-jwt-access-token',
-    access_token: 'demo-jwt-access-token',
-    token: 'demo-jwt-access-token',
-    refresh: 'demo-jwt-refresh-token',
-    refresh_token: 'demo-jwt-refresh-token',
+    access: token,
+    access_token: token,
+    token: token,
+    refresh: `refresh-${matchedUser.id}`,
+    refresh_token: `refresh-${matchedUser.id}`,
     user: userPayload,
-    active_company: db.companies[0],
-    active_company_details: db.companies[0],
-    active_company_id: db.companies[0].id,
-    company: db.companies[0],
+    active_company: userPayload.company,
+    active_company_details: userPayload.company,
+    active_company_id: userPayload.company.id,
+    company: userPayload.company,
   });
 });
 
@@ -1499,8 +1511,39 @@ app.post('/api/token/refresh/', (_req, res) => {
   res.json({ access: 'demo-jwt-access-token' });
 });
 
-app.get(['/api/users/me/', '/api/auth/me/'], (_req, res) => {
-  const userPayload = buildUserPayload(db.users[0]);
+app.get(['/api/users/me/', '/api/auth/me/'], async (req, res) => {
+  const authHeader = req.headers.authorization || '';
+  const companyHeader = req.headers['x-company-id'] || '';
+
+  // Proxy to real Django backend if token present
+  if (authHeader && !authHeader.includes('demo-jwt-access-token')) {
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+        Authorization: authHeader,
+      };
+      if (companyHeader) headers['X-Company-ID'] = companyHeader;
+
+      const backendRes = await fetch('http://127.0.0.1:8000/api/auth/me/', {
+        method: 'GET',
+        headers,
+      });
+      if (backendRes.ok) {
+        const data = await backendRes.json();
+        return res.status(200).json(data);
+      }
+    } catch (err) {
+      // Django offline, fallback to local match
+    }
+  }
+
+  let currentUser = db.users[0];
+  if (authHeader.startsWith('Bearer ')) {
+    const token = authHeader.slice(7);
+    const foundUser = db.users.find((u) => token.includes(String(u.id)) || token.includes(u.email));
+    if (foundUser) currentUser = foundUser;
+  }
+  const userPayload = buildUserPayload(currentUser);
   res.json({
     ...userPayload,
     user: userPayload,
