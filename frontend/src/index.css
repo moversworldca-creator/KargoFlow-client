@@ -12,7 +12,10 @@
 
   /* === THEME COLORS === */
   --color-brand: #1f7ae0;
-  --color-brand-dark: #1658a1;
+  --color-brand-navy: #043976;
+  --color-brand-blue: #1363df;
+  --color-brand-dark: #03254c;
+  --color-brand-light: #eef2f6;
   --color-brand-tint: #eef5fa;
   --color-brand-soft: #dbeafe;
   --color-brand-forest: #00513f;

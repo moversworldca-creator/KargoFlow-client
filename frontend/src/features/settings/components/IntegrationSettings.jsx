@@ -357,12 +357,22 @@ const money = (value, currency = 'CAD') => {
   return amount.toLocaleString('en-CA', { style: 'currency', currency, minimumFractionDigits: 2 });
 };
 
-const IntegrationSettings = ({ branchId = null }) => {
+const IntegrationSettings = ({ branchId = null, view = null }) => {
   const { hasPermission, isLoading: authLoading, user } = useAuth();
   const { canAll } = useCan();
   const { showToast } = useToast();
   const fetchSequenceRef = useRef(0);
-  const [activeCategory, setActiveCategory] = useState('overview');
+  const [activeCategory, setActiveCategory] = useState(() => {
+    if (view === 'gateways') return 'payments';
+    if (view === 'delivery') return 'email';
+    return 'overview';
+  });
+
+  useEffect(() => {
+    if (view === 'gateways') setActiveCategory('payments');
+    else if (view === 'delivery') setActiveCategory('email');
+    else if (view === 'webhooks' || view === 'diagnostics') setActiveCategory('overview');
+  }, [view]);
   const [sgConfig, setSgConfig] = useState(EMPTY_SG);
   const [rsConfig, setRsConfig] = useState(EMPTY_RS);
   const [smtpConfig, setSmtpConfig] = useState(EMPTY_SMTP);

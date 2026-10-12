@@ -66,7 +66,7 @@ describe('BranchSettings', () => {
   it('shows inactive status for disabled branches', async () => {
     const queryClient = new QueryClient();
 
-    branchesLookupMock.mockReturnValueOnce({
+    branchesLookupMock.mockReturnValue({
       data: [
         {
           id: 2,

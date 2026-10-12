@@ -31,6 +31,7 @@ const Automation = React.lazy(() => import('./features/automation/pages/Automati
 const AutomationTemplateEditor = React.lazy(() => import('./features/automation/components/TemplateEditor'));
 const PaymentsPage = React.lazy(() => import('./features/payments/pages/Payments'));
 const Settings = React.lazy(() => import('./features/settings/pages/Settings'));
+const SettingsHub = React.lazy(() => import('./features/settings/pages/SettingsHub'));
 const SuperuserCreateCompanyPage = React.lazy(() => import('./features/settings/pages/SuperuserCreateCompanyPage'));
 import LoginPage from './features/auth/pages/LoginPage';
 import Profile from './features/auth/pages/Profile';
@@ -47,13 +48,15 @@ const isPlaywrightHarnessEnabled =
 const MainLayout = () => {
   const { logout, user } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
+  const location = useLocation();
+  const isSettingsRoute = location.pathname.startsWith('/settings');
 
   return (
     <div className="flex h-screen font-body text-heading bg-page overflow-hidden selection:bg-primary-tint selection:text-primary">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
         <Header onLogout={logout} user={user} onMenuToggle={() => setIsSidebarOpen(true)} />
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-10">
+        <main className={`flex-1 ${isSettingsRoute ? 'overflow-hidden p-2 sm:p-3' : 'overflow-y-auto p-4 md:p-6 lg:p-10'}`}>
           <Suspense fallback={<div role="status" className="flex h-64 items-center justify-center text-slate-500">Loading...</div>}>
             <Outlet />
           </Suspense>
@@ -307,10 +310,10 @@ function App() {
 
             <Route path="crm/activities" element={withPermission('/crm/activities', <CRMHub defaultTab="activities" />)} />
 
-            <Route path="settings" element={withPermission('/settings', <Settings />)} />
-            <Route path="settings/:tabId" element={withPermission('/settings', <Settings />)} />
-            <Route path="settings/:tabId/:subView" element={withPermission('/settings', <Settings />)} />
-            <Route path="settings/:tabId/:itemId/:subView" element={withPermission('/settings', <Settings />)} />
+            <Route path="settings" element={withPermission('/settings', <SettingsHub />)} />
+            <Route path="settings/:mainGroup" element={withPermission('/settings', <SettingsHub />)} />
+            <Route path="settings/:mainGroup/:subTab" element={withPermission('/settings', <SettingsHub />)} />
+            <Route path="settings/:tabId/:itemId/:subView" element={withPermission('/settings', <SettingsHub />)} />
             <Route path="superuser/settings/company" element={<SuperuserRoute><SuperuserCreateCompanyPage /></SuperuserRoute>} />
             <Route path="profile" element={<Profile />} />
           </Route>

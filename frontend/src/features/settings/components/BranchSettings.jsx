@@ -677,7 +677,7 @@ const normalizeBranches = (payload) => {
   return [];
 };
 
-const BranchSettings = () => {
+const BranchSettings = ({ activeBranchId = null, view = null }) => {
   const { user } = useAuth();
   const { data: branchRows = [], refetch: refetchBranches } = useBranchesLookup();
   const [branches, setBranches] = useState([]);
