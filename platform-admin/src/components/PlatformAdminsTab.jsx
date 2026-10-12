@@ -57,6 +57,7 @@ export default function PlatformAdminsTab({
   const [formData, setFormData] = useState({
     name: '',
     email: '',
+    password: '',
     role: 'support_admin',
     company_scope_type: 'assigned',
     assigned_companies: [],
@@ -161,8 +162,8 @@ export default function PlatformAdminsTab({
   // Invite / Create handler
   const handleInviteSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.name.trim() || !formData.email.trim()) {
-      showToast('Name and email are required.', 'warning');
+    if (!formData.name.trim() || !formData.email.trim() || !formData.password) {
+      showToast('Name, email, and temporary password are required.', 'warning');
       return;
     }
 
@@ -183,6 +184,7 @@ export default function PlatformAdminsTab({
       setFormData({
         name: '',
         email: '',
+        password: '',
         role: 'support_admin',
         company_scope_type: 'assigned',
         assigned_companies: [],
@@ -739,6 +741,18 @@ export default function PlatformAdminsTab({
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs font-medium outline-hidden"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Temporary Password *</label>
+                <input
+                  type="password"
+                  required
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  placeholder="Set an initial password"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs font-medium outline-hidden"
+                />
               </div>
 
               {/* Role selection */}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   CreditCard, Search, ArrowRight, Clock, AlertTriangle, 
   CheckCircle2, XCircle, PauseCircle, RefreshCw, History, 
@@ -21,13 +21,33 @@ const ALLOWED_TRANSITIONS = {
 export default function SubscriptionsTab({ 
   subscriptions = [], 
   plans = [], 
-  tenants = [],
+  tenants = [], 
   onRefresh 
 }) {
   const { showToast } = useToast();
   const [search, setSearch] = useState('');
   const [selectedSubForLifecycle, setSelectedSubForLifecycle] = useState(null);
   const [viewHistorySub, setViewHistorySub] = useState(null);
+  const [historyRecords, setHistoryRecords] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  useEffect(() => {
+    if (viewHistorySub?.id) {
+      setHistoryLoading(true);
+      platformApi.getSubscriptionHistory(viewHistorySub.id)
+        .then((res) => {
+          setHistoryRecords(res.data || []);
+        })
+        .catch(() => {
+          setHistoryRecords(viewHistorySub.status_history || []);
+        })
+        .finally(() => {
+          setHistoryLoading(false);
+        });
+    } else {
+      setHistoryRecords([]);
+    }
+  }, [viewHistorySub]);
 
   const filteredSubs = subscriptions.filter((s) => {
     return (
@@ -205,10 +225,14 @@ export default function SubscriptionsTab({
             </div>
 
             <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
-              {(viewHistorySub.status_history || []).length === 0 ? (
+              {historyLoading ? (
+                <div className="py-8 flex justify-center items-center text-slate-400">
+                  <Loader2 size={20} className="animate-spin text-blue-600" />
+                </div>
+              ) : (historyRecords || []).length === 0 ? (
                 <p className="text-xs text-slate-400 py-6 text-center">No recorded status changes yet.</p>
               ) : (
-                viewHistorySub.status_history.map((h, i) => (
+                historyRecords.map((h, i) => (
                   <div key={h.id || i} className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 text-xs space-y-1">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -216,13 +240,13 @@ export default function SubscriptionsTab({
                         <ArrowRight size={13} className="text-slate-400" />
                         <span className="font-bold text-blue-600 dark:text-blue-400 uppercase">{h.new_status}</span>
                       </div>
-                      <span className="text-[11px] text-slate-400">{new Date(h.timestamp).toLocaleString()}</span>
+                      <span className="text-[11px] text-slate-400">{new Date(h.timestamp || h.created_at).toLocaleString()}</span>
                     </div>
                     <p className="text-slate-700 dark:text-slate-300 font-medium pt-1">
                       {h.reason || 'Reason not recorded'}
                     </p>
                     <p className="text-[10px] text-slate-400">
-                      Actor: {h.actor || 'system'}
+                      Actor: {h.actor || (h.actor_platform_user_id ? `Platform Admin #${h.actor_platform_user_id}` : 'system')}
                     </p>
                   </div>
                 ))

@@ -191,38 +191,26 @@ export default function SupportSessionsTab({
       const tenantName = targetTenant?.name || session.tenantName || `Tenant #${session.tenantId}`;
       const tenantIdNum = Number(session.tenantId);
 
-      // Verify access grant with backend API
-      try {
-        await platformApi.checkTenantAccess(tenantIdNum, session.accessMode || 'read');
-      } catch (checkErr) {
-        const errorMsg = checkErr?.response?.data?.detail || checkErr?.response?.data?.error;
-        if (errorMsg) {
-          showToast(`Access check failed: ${errorMsg}`, 'error');
-          return;
-        }
-      }
-
-      // Establish session binding state for tenant console
-      localStorage.setItem('active_support_session', JSON.stringify({
-        sessionId: session.normalizedId,
-        tenantId: tenantIdNum,
-        tenantName,
-        mode: session.accessMode,
-        expiresAt: session.expiresAt,
-        operator: session.operatorEmail,
-      }));
-      localStorage.setItem('active_company_id', String(tenantIdNum));
-      if (targetTenant) {
-        localStorage.setItem('active_company', JSON.stringify(targetTenant));
+      const response = await platformApi.createTenantConsoleToken(session.normalizedId);
+      const token = response.data?.access_token;
+      if (!token) {
+        throw new Error('The platform did not return a tenant-console credential.');
       }
 
       showToast(`Launching ${tenantName} workspace (${session.isSupportWrite ? 'Write' : 'Read-only'})...`, 'info');
 
-      // Tenant APIs are isolated and fail-closed for direct platform tokens; inform user if in hybrid environment
       const crmUrl = window.location.port === '5174'
         ? 'http://localhost:3000/dashboard'
         : `${window.location.origin}/dashboard`;
-      window.open(crmUrl, '_blank');
+      const handoff = new URL(crmUrl, window.location.origin);
+      handoff.hash = new URLSearchParams({
+        support_token: token,
+        tenant_id: String(tenantIdNum),
+        tenant_name: tenantName,
+        access_mode: response.data?.access_mode || session.accessMode,
+        expires_at: response.data?.expires_at || session.expiresAt,
+      }).toString();
+      window.open(handoff.toString(), '_blank', 'noopener');
     } catch (err) {
       showToast(err?.message || 'Failed to launch tenant console', 'error');
     } finally {
@@ -349,31 +337,35 @@ export default function SupportSessionsTab({
                         <div className="flex items-center justify-end gap-2">
                           {sess.isCurrentlyActive && (
                             <>
-                              <button
-                                onClick={() => handleEnterTenantConsole(sess)}
-                                disabled={enteringSessionId === sess.normalizedId}
-                                className="px-3 py-1 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 rounded-xl text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                              >
-                                {enteringSessionId === sess.normalizedId ? (
-                                  <Loader2 size={12} className="animate-spin" />
-                                ) : (
-                                  <ExternalLink size={12} />
-                                )}
-                                <span>Enter Tenant</span>
-                              </button>
+                              {Number(sess.platform_user_id) === Number(platformUser?.id) && (
+                                <button
+                                  onClick={() => handleEnterTenantConsole(sess)}
+                                  disabled={enteringSessionId === sess.normalizedId}
+                                  className="px-3 py-1 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 rounded-xl text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                                >
+                                  {enteringSessionId === sess.normalizedId ? (
+                                    <Loader2 size={12} className="animate-spin" />
+                                  ) : (
+                                    <ExternalLink size={12} />
+                                  )}
+                                  <span>Enter Tenant</span>
+                                </button>
+                              )}
 
-                              <button
-                                onClick={() => handleEndSession(sess.normalizedId)}
-                                disabled={endingSessionId === sess.normalizedId}
-                                className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer disabled:opacity-50"
-                                title="End session now"
-                              >
-                                {endingSessionId === sess.normalizedId ? (
-                                  <Loader2 size={15} className="animate-spin" />
-                                ) : (
-                                  <StopCircle size={15} />
-                                )}
-                              </button>
+                              {Number(sess.platform_user_id) === Number(platformUser?.id) && (
+                                <button
+                                  onClick={() => handleEndSession(sess.normalizedId)}
+                                  disabled={endingSessionId === sess.normalizedId}
+                                  className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer disabled:opacity-50"
+                                  title="End session now"
+                                >
+                                  {endingSessionId === sess.normalizedId ? (
+                                    <Loader2 size={15} className="animate-spin" />
+                                  ) : (
+                                    <StopCircle size={15} />
+                                  )}
+                                </button>
+                              )}
                             </>
                           )}
                         </div>
