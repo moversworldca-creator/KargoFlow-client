@@ -53,8 +53,9 @@ export default function SubscriptionLifecycleModal({
   const [graceDays, setGraceDays] = useState(7);
 
   // Plan change form (Section 2.9)
-  const currentPlan = plans.find((p) => p.id === activeSubscription.plan_id) || { name: activeSubscription.plan_id };
-  const [newPlanId, setNewPlanId] = useState(plans[0]?.id || '');
+  const currentPlan = plans.find((p) => p.id === activeSubscription.plan_id) || { name: activeSubscription.plan_name || activeSubscription.plan_code || activeSubscription.plan_id };
+  const activePlans = React.useMemo(() => plans.filter((p) => p.status === 'active' || p.is_current), [plans]);
+  const [newPlanId, setNewPlanId] = useState(() => (activePlans[0]?.id || plans[0]?.id || ''));
   const [billingInterval, setBillingInterval] = useState(activeSubscription.billing_interval || 'month');
   const [effectiveTiming, setEffectiveTiming] = useState('immediate');
   const [planChangeReason, setPlanChangeReason] = useState('');
@@ -386,9 +387,26 @@ export default function SubscriptionLifecycleModal({
                   Select Target Commercial Plan
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {plans.map((p) => {
-                    const isSel = newPlanId === p.id;
-                    const price = (p.base_price_cents / 100).toFixed(0);
+                  {activePlans.map((p) => {
+                    const isSel = String(newPlanId) === String(p.id);
+                    const price = Math.round((p.base_price_cents ?? p.base_price_minor ?? 0) / 100);
+
+                    const getL = (key) => {
+                      if (Array.isArray(p.limits)) {
+                        const aliases = {
+                          active_users: ['users.max_active', 'active_users'],
+                          active_branches: ['branches.max_active', 'active_branches'],
+                        };
+                        const keys = aliases[key] || [key];
+                        const item = p.limits.find((l) => keys.includes(l.limit_key) || keys.includes(l.key));
+                        return item ? item.limit_value : null;
+                      }
+                      return p.limits?.[key] ?? null;
+                    };
+
+                    const users = getL('active_users') ?? '—';
+                    const branches = getL('active_branches') ?? '—';
+
                     return (
                       <div
                         key={p.id}
@@ -400,11 +418,18 @@ export default function SubscriptionLifecycleModal({
                         }`}
                       >
                         <div className="flex items-center justify-between">
-                          <span className="font-bold text-slate-900 dark:text-white">{p.name}</span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-slate-900 dark:text-white">{p.name}</span>
+                            {p.version && (
+                              <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-500">
+                                v{p.version}
+                              </span>
+                            )}
+                          </div>
                           <span className="font-mono font-bold text-blue-600">${price}</span>
                         </div>
                         <div className="text-[10px] text-slate-500 mt-1">
-                          Users: {p.limits?.active_users} • Branches: {p.limits?.active_branches}
+                          Users: {users} • Branches: {branches} • {p.billing_interval || 'month'}
                         </div>
                       </div>
                     );

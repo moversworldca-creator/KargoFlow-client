@@ -28,24 +28,21 @@ export default function PlatformOverviewTab({
   });
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-150">
-      {/* Top Banner with Quick Actions */}
-     
-
+    <div className="space-y-3.5 animate-in fade-in duration-150">
       {/* Metrics Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-3">
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+        <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-2">
           <div className="flex items-center justify-between text-slate-500 text-xs font-bold uppercase tracking-wider">
             <span>Total Tenants</span>
-            <div className="w-8 h-8 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 flex items-center justify-center">
-              <Building2 size={16} />
+            <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-950/40 text-blue-600 flex items-center justify-center">
+              <Building2 size={15} />
             </div>
           </div>
           <div className="flex items-baseline justify-between">
-            <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">
+            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">
               {metrics.total_tenants ?? 0}
             </div>
-            <span className="text-xs font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full">
+            <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full">
               {metrics.active_tenants ?? 0} Active
             </span>
           </div>
@@ -54,18 +51,18 @@ export default function PlatformOverviewTab({
           </p>
         </div>
 
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-3">
+        <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-2">
           <div className="flex items-center justify-between text-slate-500 text-xs font-bold uppercase tracking-wider">
             <span>Platform MRR</span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 flex items-center justify-center">
-              <DollarSign size={16} />
+            <div className="w-7 h-7 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 flex items-center justify-center">
+              <DollarSign size={15} />
             </div>
           </div>
           <div className="flex items-baseline justify-between">
-            <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">
+            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">
               {mrrDollars}
             </div>
-            <span className="text-xs font-bold text-blue-600 bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 rounded-full">
+            <span className="text-[11px] font-bold text-blue-600 bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 rounded-full">
               ARR {arrDollars}
             </span>
           </div>
@@ -74,15 +71,15 @@ export default function PlatformOverviewTab({
           </p>
         </div>
 
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-3">
+        <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-2">
           <div className="flex items-center justify-between text-slate-500 text-xs font-bold uppercase tracking-wider">
             <span>Subscriptions Health</span>
-            <div className="w-8 h-8 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-purple-600 flex items-center justify-center">
-              <Layers size={16} />
+            <div className="w-7 h-7 rounded-lg bg-purple-50 dark:bg-purple-950/40 text-purple-600 flex items-center justify-center">
+              <Layers size={15} />
             </div>
           </div>
           <div className="flex items-baseline gap-2">
-            <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">
+            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">
               {metrics.total_subscriptions ?? 0}
             </div>
             <span className="text-xs text-slate-400 font-medium">accounts</span>
@@ -100,18 +97,18 @@ export default function PlatformOverviewTab({
           </div>
         </div>
 
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-3">
+        <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-2">
           <div className="flex items-center justify-between text-slate-500 text-xs font-bold uppercase tracking-wider">
             <span>Active Sessions</span>
-            <div className="w-8 h-8 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 flex items-center justify-center">
-              <Activity size={16} />
+            <div className="w-7 h-7 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-600 flex items-center justify-center">
+              <Activity size={15} />
             </div>
           </div>
           <div className="flex items-baseline justify-between">
-            <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">
+            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">
               {metrics.active_support_sessions ?? 0}
             </div>
-            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+            <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
               (metrics.active_support_sessions || 0) > 0 
                 ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 animate-pulse' 
                 : 'bg-slate-100 text-slate-500'
@@ -126,9 +123,9 @@ export default function PlatformOverviewTab({
       </div>
 
       {/* Two Column Layout: Plan Distribution + Recent Platform Audits */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5">
         {/* Plans Distribution Card */}
-        <div className="lg:col-span-5 p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-5">
+        <div className="lg:col-span-5 p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-3.5">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-base font-bold text-slate-900 dark:text-white">Plan Adoption Distribution</h3>
@@ -173,7 +170,7 @@ export default function PlatformOverviewTab({
         </div>
 
         {/* Recent Platform Audit Trail Card */}
-        <div className="lg:col-span-7 p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-4">
+        <div className="lg:col-span-7 p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-3">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-base font-bold text-slate-900 dark:text-white">Recent Platform Audits</h3>

@@ -8,6 +8,8 @@ import { useDebounce } from '../hooks/useDebounce';
 
 export default function PlatformAuditLogsTab({ 
   auditLogs = [], 
+  tenants = [],
+  admins = [],
   onRefresh 
 }) {
   const [search, setSearch] = useState('');
@@ -17,22 +19,82 @@ export default function PlatformAuditLogsTab({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
-  const actions = Array.from(new Set(auditLogs.map((a) => a.action)));
+  // Normalize all audit events to guarantee safe dates, tenant scopes, and staff actors
+  const normalizedLogs = useMemo(() => {
+    return auditLogs.map((log) => {
+      // 1. Safe Date & Timestamp Parsing
+      const rawDate = log.occurred_at || log.timestamp || log.created_at || log.recorded_at || log.time;
+      let timestampFormatted = '—';
+      let timestampIso = '';
+      if (rawDate) {
+        const d = new Date(rawDate);
+        if (!isNaN(d.getTime())) {
+          timestampFormatted = d.toLocaleString();
+          timestampIso = d.toISOString();
+        }
+      }
+
+      // 2. Tenant Scoping: differentiate tenant actions from global platform catalog actions
+      const tenantId = log.tenant_company_id ?? log.tenant_id ?? log.company_id ?? null;
+      const tenantObj = tenantId ? (tenants || []).find((t) => String(t.id) === String(tenantId)) : null;
+      const tenantName = log.tenant_name || log.company_name || tenantObj?.name || null;
+      const isGlobalPlatform = !tenantId;
+
+      // 3. Actor & Staff resolution
+      const actorId = log.platform_user_id ?? log.user_id ?? log.actor_id ?? null;
+      const adminObj = actorId ? (admins || []).find((a) => String(a.id) === String(actorId)) : null;
+      const actorEmail = log.actor_email || adminObj?.email || null;
+      const actorName = log.actor_name || adminObj?.name || (actorEmail ? actorEmail.split('@')[0] : (actorId ? `Staff #${actorId}` : 'Platform System'));
+
+      // 4. Reason & Metadata Context
+      let reasonText = log.reason || '';
+      if (!reasonText && log.metadata) {
+        if (log.metadata.code || log.metadata.version) {
+          reasonText = `${(log.action || '').replace(/[._]/g, ' ')}: ${log.metadata.code || ''}${log.metadata.version ? ` v${log.metadata.version}` : ''}`.trim();
+        }
+      }
+
+      return {
+        ...log,
+        timestampFormatted,
+        timestampIso,
+        tenantId,
+        tenantName,
+        isGlobalPlatform,
+        actorId,
+        actorEmail,
+        actorName,
+        reasonText: reasonText || '—',
+        entityType: log.entity_type || '',
+        entityId: log.entity_id || '',
+        ipAddress: log.ip_address || '—',
+      };
+    });
+  }, [auditLogs, tenants, admins]);
+
+  const actions = useMemo(() => {
+    return Array.from(new Set(normalizedLogs.map((a) => a.action).filter(Boolean)));
+  }, [normalizedLogs]);
 
   const filteredLogs = useMemo(() => {
-    return auditLogs.filter((log) => {
+    return normalizedLogs.filter((log) => {
       const q = debouncedSearch.toLowerCase().trim();
       const matchesSearch = !q ||
-        log.actor_email?.toLowerCase().includes(q) ||
-        log.tenant_name?.toLowerCase().includes(q) ||
-        log.reason?.toLowerCase().includes(q) ||
-        log.action?.toLowerCase().includes(q);
+        log.actorEmail?.toLowerCase().includes(q) ||
+        log.actorName?.toLowerCase().includes(q) ||
+        log.tenantName?.toLowerCase().includes(q) ||
+        (log.tenantId && String(log.tenantId).includes(q)) ||
+        log.reasonText?.toLowerCase().includes(q) ||
+        log.action?.toLowerCase().includes(q) ||
+        log.entityType?.toLowerCase().includes(q) ||
+        log.entityId?.toLowerCase().includes(q) ||
+        log.ipAddress?.toLowerCase().includes(q);
 
       if (!matchesSearch) return false;
       if (actionFilter !== 'all' && log.action !== actionFilter) return false;
       return true;
     });
-  }, [auditLogs, debouncedSearch, actionFilter]);
+  }, [normalizedLogs, debouncedSearch, actionFilter]);
 
   const totalCount = filteredLogs.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
@@ -66,16 +128,15 @@ export default function PlatformAuditLogsTab({
 
   const exportToCsv = () => {
     if (!filteredLogs.length) return;
-    const headers = ['ID', 'Timestamp', 'Actor Email', 'Tenant Name', 'Action', 'Entity', 'Reason', 'IP Address'];
+    const headers = ['ID', 'Timestamp', 'Action', 'Target Scope', 'Actor', 'Reason', 'IP Address'];
     const rows = filteredLogs.map((log) => [
       log.id || '',
-      log.timestamp || '',
-      `"${(log.actor_email || '').replace(/"/g, '""')}"`,
-      `"${(log.tenant_name || '').replace(/"/g, '""')}"`,
+      log.timestampFormatted !== '—' ? log.timestampFormatted : '',
       `"${(log.action || '').replace(/"/g, '""')}"`,
-      `"${(log.entity || '').replace(/"/g, '""')}"`,
-      `"${(log.reason || '').replace(/"/g, '""')}"`,
-      log.ip_address || '',
+      `"${(log.tenantName ? `${log.tenantName} (#${log.tenantId})` : (log.entityType ? `Platform (${log.entityType} #${log.entityId})` : 'Global Platform')).replace(/"/g, '""')}"`,
+      `"${(log.actorEmail || log.actorName || '').replace(/"/g, '""')}"`,
+      `"${(log.reasonText || '').replace(/"/g, '""')}"`,
+      log.ipAddress || '',
     ]);
 
     const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
@@ -90,9 +151,9 @@ export default function PlatformAuditLogsTab({
   };
 
   return (
-    <div className="space-y-4 animate-in fade-in duration-150">
+    <div className="space-y-3 animate-in fade-in duration-150">
       {/* Search and Filters Bar */}
-      <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-2.5">
         <div className="relative flex-1 max-w-md">
           <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
@@ -137,18 +198,18 @@ export default function PlatformAuditLogsTab({
       </div>
 
       {/* Audit Log Table */}
-      <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden">
+      <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 text-[11px] font-black text-slate-500 uppercase tracking-wider">
-                <th className="py-3.5 px-4">Timestamp</th>
-                <th className="py-3.5 px-4">Action Type</th>
-                <th className="py-3.5 px-4">Tenant Target</th>
-                <th className="py-3.5 px-4">Actor</th>
-                <th className="py-3.5 px-4">Audit Reason & Summary</th>
-                <th className="py-3.5 px-4">IP Address</th>
-                <th className="py-3.5 px-4 text-right">Payload</th>
+                <th className="py-2.5 px-3.5">Timestamp</th>
+                <th className="py-2.5 px-3.5">Action Type</th>
+                <th className="py-2.5 px-3.5">Tenant Target</th>
+                <th className="py-2.5 px-3.5">Actor</th>
+                <th className="py-2.5 px-3.5">Audit Reason & Summary</th>
+                <th className="py-2.5 px-3.5">IP Address</th>
+                <th className="py-2.5 px-3.5 text-right">Payload</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -161,33 +222,61 @@ export default function PlatformAuditLogsTab({
               ) : (
                 paginatedLogs.map((log) => (
                   <tr key={log.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
-                    <td className="py-3 px-4 font-mono text-[11px] text-slate-500 shrink-0">
-                      {new Date(log.timestamp).toLocaleString()}
+                    <td className="py-2 px-3.5 font-mono text-[11px] text-slate-500 shrink-0 whitespace-nowrap">
+                      {log.timestampFormatted}
                     </td>
 
-                    <td className="py-3 px-4">
+                    <td className="py-2 px-3.5">
                       <span className="px-2 py-0.5 rounded-full font-mono font-bold text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200">
                         {log.action}
                       </span>
                     </td>
 
-                    <td className="py-3 px-4 font-bold text-slate-900 dark:text-white">
-                      {log.tenant_name || `Tenant #${log.tenant_id}`}
+                    <td className="py-2 px-3.5">
+                      {log.tenantId ? (
+                        <div>
+                          <span className="font-bold text-slate-900 dark:text-white block">
+                            {log.tenantName || `Tenant #${log.tenantId}`}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            Tenant #{log.tenantId}
+                          </span>
+                        </div>
+                      ) : (
+                        <div>
+                          <span className="inline-flex items-center gap-1.5 font-bold text-slate-800 dark:text-slate-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                            <span>Platform (Global)</span>
+                          </span>
+                          {log.entityType && (
+                            <span className="text-[10px] text-slate-400 font-mono block">
+                              {log.entityType}{log.entityId ? ` #${log.entityId}` : ''}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </td>
 
-                    <td className="py-3 px-4 text-slate-600 dark:text-slate-300">
-                      {log.actor_email}
+                    <td className="py-2 px-3.5">
+                      <span className="font-medium text-slate-800 dark:text-slate-200 block">
+                        {log.actorEmail || log.actorName}
+                      </span>
+                      {log.actorEmail && log.actorName && log.actorEmail !== log.actorName && (
+                        <span className="text-[10px] text-slate-400 font-mono block">
+                          {log.actorName}
+                        </span>
+                      )}
                     </td>
 
-                    <td className="py-3 px-4 max-w-sm text-slate-700 dark:text-slate-300">
-                      {log.reason || '—'}
+                    <td className="py-2 px-3.5 max-w-sm text-slate-700 dark:text-slate-300">
+                      {log.reasonText}
                     </td>
 
-                    <td className="py-3 px-4 font-mono text-[10px] text-slate-400">
-                      {log.ip_address}
+                    <td className="py-2 px-3.5 font-mono text-[10px] text-slate-400">
+                      {log.ipAddress}
                     </td>
 
-                    <td className="py-3 px-4 text-right">
+                    <td className="py-2 px-3.5 text-right">
                       {log.metadata ? (
                         <button
                           onClick={() => setInspectAudit(log)}
@@ -209,7 +298,7 @@ export default function PlatformAuditLogsTab({
 
         {/* Table Pagination Footer */}
         {totalCount > 0 && (
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-t border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950 text-xs text-slate-500">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-3.5 py-2.5 border-t border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950 text-xs text-slate-500">
             <div className="flex items-center gap-3">
               <span>
                 Showing <strong>{startIndex}</strong> to <strong>{endIndex}</strong> of <strong>{totalCount}</strong> entries

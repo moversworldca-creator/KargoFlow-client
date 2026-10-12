@@ -8,8 +8,8 @@ export default function LoginPage() {
   const { login } = usePlatformAuth();
   const navigate = useNavigate();
 
-  const [email, setEmail] = useState('admin@fastmovers.com');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('admin@example.com');
+  const [password, setPassword] = useState('PlatformAdmin2026!');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);

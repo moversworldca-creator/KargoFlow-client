@@ -66,6 +66,16 @@ export default function ProvisionTenantModal({ isOpen, onClose, onTenantProvisio
     admin_phone: '',
   });
 
+  // Default plan_id to the first active/available plan if present
+  React.useEffect(() => {
+    if (plans && plans.length > 0) {
+      const activePlan = plans.find((p) => p.status === 'active' || p.is_current) || plans[0];
+      if (activePlan && (!formData.plan_id || formData.plan_id === 'plan-professional')) {
+        setFormData((prev) => ({ ...prev, plan_id: activePlan.id }));
+      }
+    }
+  }, [plans]);
+
   if (!isOpen) return null;
 
   const formatApiError = (data, fallback) => {
@@ -416,8 +426,33 @@ export default function ProvisionTenantModal({ isOpen, onClose, onTenantProvisio
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {plans.map((p) => {
-                  const isSelected = formData.plan_id === p.id;
-                  const price = (p.base_price_cents / 100).toFixed(0);
+                  const isSelected = String(formData.plan_id) === String(p.id);
+                  const price = Math.round((p.base_price_cents ?? p.base_price_minor ?? 0) / 100);
+
+                  const getL = (key) => {
+                    if (Array.isArray(p.limits)) {
+                      const aliases = {
+                        active_users: ['users.max_active', 'active_users'],
+                        active_branches: ['branches.max_active', 'active_branches'],
+                        monthly_sms: ['sms.monthly', 'monthly_sms'],
+                        storage_bytes: ['storage.bytes', 'storage_bytes'],
+                      };
+                      const keys = aliases[key] || [key];
+                      const item = p.limits.find((l) => keys.includes(l.limit_key) || keys.includes(l.key));
+                      return item ? item.limit_value : null;
+                    }
+                    return p.limits?.[key] ?? null;
+                  };
+
+                  const users = getL('active_users') ?? '—';
+                  const branches = getL('active_branches') ?? '—';
+                  const sms = getL('monthly_sms');
+                  const smsFormatted = typeof sms === 'number' ? sms.toLocaleString() : (sms ?? '—');
+                  const storage = getL('storage_bytes');
+                  const storageFormatted = typeof storage === 'number' && !isNaN(storage)
+                    ? `${Math.round(storage / 1073741824)} GB`
+                    : (storage ? `${storage}` : '—');
+
                   return (
                     <div
                       key={p.id}
@@ -430,22 +465,29 @@ export default function ProvisionTenantModal({ isOpen, onClose, onTenantProvisio
                     >
                       <div className="flex items-start justify-between">
                         <div>
-                          <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                            {p.code}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                              {p.code}
+                            </span>
+                            {p.version && (
+                              <span className="text-[10px] font-mono text-slate-400 font-bold">
+                                v{p.version}
+                              </span>
+                            )}
+                          </div>
                           <h4 className="text-sm font-bold text-slate-900 dark:text-white mt-1.5">{p.name}</h4>
                         </div>
                         <div className="text-right">
                           <span className="text-lg font-black text-slate-900 dark:text-white">${price}</span>
-                          <span className="text-[10px] text-slate-400">/{p.billing_interval}</span>
+                          <span className="text-[10px] text-slate-400">/{p.billing_interval || 'month'}</span>
                         </div>
                       </div>
 
                       <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 grid grid-cols-2 gap-2 text-[11px] text-slate-600 dark:text-slate-400">
-                        <div>Users: <span className="font-bold text-slate-900 dark:text-slate-200">{p.limits?.active_users}</span></div>
-                        <div>Branches: <span className="font-bold text-slate-900 dark:text-slate-200">{p.limits?.active_branches}</span></div>
-                        <div>SMS/mo: <span className="font-bold text-slate-900 dark:text-slate-200">{p.limits?.monthly_sms?.toLocaleString()}</span></div>
-                        <div>Storage: <span className="font-bold text-slate-900 dark:text-slate-200">{Math.round(p.limits?.storage_bytes / 1073741824)} GB</span></div>
+                        <div>Users: <span className="font-bold text-slate-900 dark:text-slate-200">{users}</span></div>
+                        <div>Branches: <span className="font-bold text-slate-900 dark:text-slate-200">{branches}</span></div>
+                        <div>SMS/mo: <span className="font-bold text-slate-900 dark:text-slate-200">{smsFormatted}</span></div>
+                        <div>Storage: <span className="font-bold text-slate-900 dark:text-slate-200">{storageFormatted}</span></div>
                       </div>
                     </div>
                   );
