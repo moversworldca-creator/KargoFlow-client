@@ -2,9 +2,15 @@ import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { 
   Building2, Layers, Sliders, Shield, Key, 
+<<<<<<< Updated upstream
   History, Users, CreditCard, Activity, 
   LogOut, Sun, Moon, ShieldCheck, ChevronRight, ChevronDown, User, Bell,
   Menu, X, Sparkles, AlertCircle, CheckCircle2, CheckCheck, Trash2
+=======
+  History, Users, CreditCard, Activity, Radio,
+  LogOut, Sun, Moon, ShieldCheck, ChevronRight,
+  Menu, X, Sparkles, AlertCircle
+>>>>>>> Stashed changes
 } from 'lucide-react';
 import { usePlatformAuth } from '../auth/PlatformAuthContext';
 import { PLATFORM_ROLES, PLATFORM_PERMISSIONS } from '../rbac/platformRbac';
@@ -206,6 +212,12 @@ export default function PlatformShell() {
       permission: PLATFORM_PERMISSIONS.SUPPORT_SESSIONS_VIEW 
     },
     { 
+      to: '/communication', 
+      label: 'Communication Infrastructure', 
+      icon: Radio, 
+      permission: PLATFORM_PERMISSIONS.COMMUNICATION_VIEW 
+    },
+    { 
       to: '/admins', 
       label: 'Platform Staff & RBAC', 
       icon: Users, 
@@ -228,7 +240,7 @@ export default function PlatformShell() {
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col transition-colors">
       {/* Top Header Bar */}
-      <header className="h-16 border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-30 px-4 sm:px-8 lg:px-10 flex items-center justify-between">
+      <header className="h-14 border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-30 px-4 sm:px-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -512,7 +524,7 @@ export default function PlatformShell() {
       <div className="flex-1 flex max-h- overflow-hidden">
         {/* Desktop Sidebar */}
         <aside className="w-64 border-r max-h-lvh border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hidden md:flex flex-col justify-between shrink-0">
-          <div className="p-4 space-y-1.5 overflow-y-auto">
+          <div className="p-3 space-y-1 overflow-y-auto">
             <div className="px-3 py-2 text-[10px] font-black uppercase tracking-wider text-slate-400">
               Control Plane Navigation
             </div>
@@ -635,7 +647,7 @@ export default function PlatformShell() {
         )}
 
         {/* Main Routed Page Area */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+        <main className="flex-1 overflow-y-auto p-3.5 sm:p-4.5 lg:p-5">
           <Outlet />
         </main>
       </div>

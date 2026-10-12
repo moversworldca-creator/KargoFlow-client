@@ -3039,4 +3039,450 @@ export function setupPlatformRoutes(app, db, nextId, nowIso) {
       message: 'SaaS Platform Control Center reset to standard demo presentation template data.',
     });
   });
+
+  // ============================================================================
+  // Communication Infrastructure Console Routes (Section 2.4)
+  // ============================================================================
+  const communicationState = {
+    resend: {
+      status: 'operational',
+      organization_id: 'org_kg_01HX9882A',
+      region: 'US-East-1',
+      api_key_masked: 're_live_••••••••••••••••9aF4',
+      last_validated_mins_ago: 14,
+      last_rotated_days_ago: 18,
+      last_rotated_by: 'Admin #04',
+      default_sender: 'system@kargoflow.com',
+      verified_domains: 142,
+      pending_domains: 3,
+      sent_today: 284910,
+      sent_change_pct: 4.2,
+      peak_rate_per_min: 1840,
+      bounce_rate_pct: 0.04,
+      reputation_pct: 99.8,
+      webhook_health_pct: 99.98,
+      webhook_endpoint: 'https://api.kargoflow.com/v1/internal/webhooks/resend',
+      webhook_secret_masked: 'whsec_8849••••••••0091',
+      monthly_quota: {
+        used: 8410210,
+        total: 15000000,
+        utilization_pct: 56,
+      },
+    },
+    telnyx: {
+      status: 'operational',
+      messaging_profile: 'kg_mp_910032',
+      carrier_tier: 'Tier 1 Carrier',
+      profile_id: '40018892-0044-42ea-9941-kargoflowMasterProfile',
+      api_key_masked: 'KEY01849••••••••••••kgMaster',
+      last_validated_mins_ago: 6,
+      dlsr_webhook_health_pct: 100,
+      active_did_numbers: 1280,
+      provisioning_pending: 14,
+      tenant_count: 89,
+      dispatched_today: 189420,
+      dispatched_change_pct: 11.8,
+      carrier_rejection_pct: 0.12,
+      campaign_status: '10DLC Campaign: Verified',
+      costs: {
+        wholesale_expense_monthly: 1894.20,
+        base_rentals_expense: 1280.00,
+        saas_metered_billing_monthly: 4720.00,
+        margin_pct: 59.8,
+      },
+      pipeline_queue: {
+        awaiting_count: 14,
+        avg_cycle_minutes: 8,
+      },
+    },
+    domains: [
+      {
+        id: 'dom-1',
+        domain: 'mail.apexlogistics.io',
+        tenant_name: 'Apex Global Logistics',
+        tenant_code: 'TN-102',
+        dkim_status: 'Verified (2048b)',
+        spf_status: 'Pass (include:resend)',
+        sending_status: 'Active',
+        last_check: '3 mins ago',
+        dkim_host: 'resend._domainkey.mail.apexlogistics.io',
+        spf_value: 'v=spf1 include:resend.com ~all',
+      },
+      {
+        id: 'dom-2',
+        domain: 'dispatch.swifthaul.net',
+        tenant_name: 'SwiftHaul Freight Inc',
+        tenant_code: 'TN-088',
+        dkim_status: 'Verified (2048b)',
+        spf_status: 'Pass',
+        sending_status: 'Active',
+        last_check: '11 mins ago',
+        dkim_host: 'resend._domainkey.dispatch.swifthaul.net',
+        spf_value: 'v=spf1 include:resend.com ~all',
+      },
+      {
+        id: 'dom-3',
+        domain: 'notify.blueharborlines.com',
+        tenant_name: 'Blue Harbor Intermodal',
+        tenant_code: 'TN-194',
+        dkim_status: 'Pending DNS',
+        spf_status: 'Pending',
+        sending_status: 'Provisioning',
+        last_check: '2 mins ago',
+        dkim_host: 'resend._domainkey.notify.blueharborlines.com',
+        spf_value: 'v=spf1 include:resend.com ~all',
+      },
+      {
+        id: 'dom-4',
+        domain: 'tracking.californialogistics.org',
+        tenant_name: 'CalExpress Cargo',
+        tenant_code: 'TN-043',
+        dkim_status: 'Verified (2048b)',
+        spf_status: 'Pass',
+        sending_status: 'Active',
+        last_check: '24 mins ago',
+        dkim_host: 'resend._domainkey.tracking.californialogistics.org',
+        spf_value: 'v=spf1 include:resend.com ~all',
+      },
+    ],
+    numbers: [
+      {
+        id: 'num-1',
+        phone_number: '+1 (415) 890-3412',
+        country: 'US',
+        type: 'Local (10DLC)',
+        tenant_name: 'Apex Relocation Group',
+        tenant_org_id: 'org_kg_apex8891',
+        assignment_type: 'Branch Automation',
+        provider_number_id: 'num_telnyx_v3_98a71b40e',
+        provisioning_status: 'Active',
+        sms_eligibility: '10DLC Verified',
+        monthly_cost: '$1.15 / mo',
+        branch_hub: 'San Francisco Bay Area Hub (Branch ID: br_sf_001)',
+        tcr_campaign_id: 'CAMP_TCR_98317A_MIGR',
+        mps_limit: 30,
+        cnam: 'APEX RELOCATIONS',
+      },
+      {
+        id: 'num-2',
+        phone_number: '+1 (512) 744-9021',
+        country: 'US',
+        type: 'Local (10DLC)',
+        tenant_name: 'Apex Global Logistics',
+        tenant_org_id: 'org_kg_apex102',
+        assignment_type: 'Driver SMS Bot',
+        provider_number_id: 'num_tln_994102',
+        provisioning_status: 'Active',
+        sms_eligibility: '10DLC Verified',
+        monthly_cost: '$1.15 / mo',
+        branch_hub: 'Austin Logistics Hub (Branch ID: br_atx_002)',
+        tcr_campaign_id: 'CAMP_TCR_99410A_AUTO',
+        mps_limit: 25,
+        cnam: 'APEX DRIVER BOT',
+      },
+      {
+        id: 'num-3',
+        phone_number: '+1 (212) 555-0198',
+        country: 'US',
+        type: 'Toll-Free',
+        tenant_name: 'SwiftHaul Freight Inc',
+        tenant_org_id: 'org_kg_swift088',
+        assignment_type: 'Hotline Verification',
+        provider_number_id: 'num_tln_800914',
+        provisioning_status: 'Active',
+        sms_eligibility: 'TF Verified',
+        monthly_cost: '$2.00 / mo',
+        branch_hub: 'East Coast Operations Hub (Branch ID: br_nyc_001)',
+        tcr_campaign_id: 'TF_AUTH_800_SWIFT',
+        mps_limit: 50,
+        cnam: 'SWIFTHAUL HOTLINE',
+      },
+      {
+        id: 'num-4',
+        phone_number: '+1 (604) 991-8842',
+        country: 'CA',
+        type: 'Local',
+        tenant_name: 'Cascadia Haulers',
+        tenant_org_id: 'org_kg_casc019',
+        assignment_type: 'Dispatch Line',
+        provider_number_id: 'num_tln_ca_01',
+        provisioning_status: 'Regulatory Review',
+        sms_eligibility: 'Hold',
+        monthly_cost: '$1.25 / mo',
+        branch_hub: 'Vancouver Gateway Hub (Branch ID: br_yvr_001)',
+        tcr_campaign_id: 'CA_PENDING_VETTING',
+        mps_limit: 15,
+        cnam: 'CASCADIA DISPATCH',
+      },
+    ],
+    email_logs: [
+      {
+        id: 'msg_res_998124',
+        tenant: 'Apex Global',
+        event: 'BOL #9042 Document Ready',
+        recipient: 'd••••@consignee.corp',
+        status: 'Delivered (250 OK)',
+        latency: '412 ms',
+        timestamp: '14:28:12 UTC',
+      },
+      {
+        id: 'msg_res_998125',
+        tenant: 'SwiftHaul',
+        event: 'Driver Assignment Alert',
+        recipient: 'j••••@carrierfleet.com',
+        status: 'Delivered (250 OK)',
+        latency: '389 ms',
+        timestamp: '14:25:01 UTC',
+      },
+      {
+        id: 'msg_res_998126',
+        tenant: 'CalExpress',
+        event: 'Invoice #KG-4410 Overdue',
+        recipient: 'a••••@invalid-domain-404.com',
+        status: 'Hard Bounce (550)',
+        latency: '1,210 ms',
+        timestamp: '14:18:40 UTC',
+      },
+    ],
+    sms_logs: [
+      {
+        id: 'sms_tln_009914',
+        tenant: 'Pacific Coast Freight',
+        sending_did: '+1 (415) 890-4401',
+        destination: '+1 (415) •••-1290',
+        status: 'Delivered (DLSR)',
+        dlsr_code: '000 (Carrier OK)',
+        timestamp: '14:28:12 UTC',
+      },
+      {
+        id: 'sms_tln_009915',
+        tenant: 'Apex Global',
+        sending_did: '+1 (512) 330-9941',
+        destination: '+1 (737) •••-0044',
+        status: 'Delivered (DLSR)',
+        dlsr_code: '000 (Carrier OK)',
+        timestamp: '14:25:01 UTC',
+      },
+    ],
+    telemetry_events: [
+      {
+        id: 'evt_telnyx_99218',
+        severity: 'Warning',
+        timestamp: '14:28:12 UTC',
+        provider: 'Telnyx (SMS)',
+        event_type: 'delivery.carrier_rejected',
+        target: '+1 (512) •••-9182',
+        details: 'Carrier Code 30007: Unregistered Campaign route attempt',
+      },
+      {
+        id: 'mail.apexlogistics.io',
+        severity: 'Normal',
+        timestamp: '14:25:01 UTC',
+        provider: 'Resend (Email)',
+        event_type: 'domain.verified',
+        target: 'mail.apexlogistics.io',
+        details: 'DKIM 2048-bit keys validated via Cloudflare DNS resolver',
+      },
+      {
+        id: '+1 (415) 890-4401',
+        severity: 'Normal',
+        timestamp: '14:18:40 UTC',
+        provider: 'Telnyx (SMS)',
+        event_type: 'number.provisioned',
+        target: '+1 (415) •••-4401',
+        details: 'Assigned to tenant \'Pacific Coast Freight\' (Branch Dispatch)',
+      },
+      {
+        id: 'evt_resend_throttle_112',
+        severity: 'Notice',
+        timestamp: '13:59:11 UTC',
+        provider: 'Resend (Email)',
+        event_type: 'rate_limit.warning',
+        target: 'Tenant: SwiftHaul Ltd',
+        details: 'Tier quota reached 85% of 10,000/hr limit. Throttling guard ready.',
+      },
+      {
+        id: 'evt_hb_0091',
+        severity: 'Normal',
+        timestamp: '13:40:22 UTC',
+        provider: 'Platform API',
+        event_type: 'credentials.health_check',
+        target: 'Resend & Telnyx',
+        details: 'Hourly automated token & webhook TLS 1.3 heartbeat passed',
+      },
+    ],
+    health_matrix: [
+      { name: 'Resend API Edge (US-East)', uptime_pct: 99.99, avg_latency_ms: 62, status: 'operational' },
+      { name: 'Resend Webhook Dispatch', uptime_pct: 99.98, avg_latency_ms: 94, status: 'operational' },
+      { name: 'Telnyx SMS Gateway', uptime_pct: 99.95, avg_latency_ms: 112, status: 'operational' },
+      { name: 'Telnyx Number Provisioning API', uptime_pct: 100.0, avg_latency_ms: 180, status: 'operational' },
+      { name: 'Carrier Route 10DLC Registry', uptime_pct: 100.0, sync_status: 'Healthy', status: 'operational' },
+      { name: 'Tenant Queue Backlog', messages_count: 0, delay: '< 1 sec', status: 'operational' },
+    ],
+    audit_logs: [
+      {
+        id: 'aud_998102',
+        timestamp: 'Today, 14:14:02 UTC',
+        operator: 'alex.admin@kargoflow.com',
+        action: 'api_key.test_connection',
+        provider: 'Resend (US-East)',
+        ip: '104.28.19.2 (2FA Ok)',
+      },
+      {
+        id: 'aud_998044',
+        timestamp: 'Today, 11:02:18 UTC',
+        operator: 'sarah.secops@kargoflow.com',
+        action: 'domain_dns.reverify_trigger',
+        provider: 'Resend (mail.apexlogistics.io)',
+        ip: '198.51.100.4 (VPN Guard)',
+      },
+      {
+        id: 'aud_997991',
+        timestamp: 'Yesterday, 19:40:55 UTC',
+        operator: 'platform_service_worker',
+        action: 'number.automatic_bind',
+        provider: 'Telnyx (+1 415 890-4401)',
+        ip: 'Internal Mesh Cluster',
+      },
+    ],
+  };
+
+  const registerCommHandler = (routePath, handler) => {
+    app.get(`/api/platform/communication${routePath}`, handler);
+    app.get(`/api/core/communication${routePath}`, handler);
+  };
+
+  const registerCommPostHandler = (routePath, handler) => {
+    app.post(`/api/platform/communication${routePath}`, handler);
+    app.post(`/api/core/communication${routePath}`, handler);
+  };
+
+  registerCommHandler('/overview/', authenticatePlatformStaff, requirePlatformPermission('platform.communication.view'), (_req, res) => {
+    res.json({
+      resend: communicationState.resend,
+      telnyx: communicationState.telnyx,
+      telemetry_events: communicationState.telemetry_events,
+      health_matrix: communicationState.health_matrix,
+    });
+  });
+
+  registerCommHandler('/resend/', authenticatePlatformStaff, requirePlatformPermission('platform.communication.view'), (_req, res) => {
+    res.json({
+      config: communicationState.resend,
+      domains: communicationState.domains,
+      delivery_logs: communicationState.email_logs,
+    });
+  });
+
+  registerCommHandler('/telnyx/', authenticatePlatformStaff, requirePlatformPermission('platform.communication.view'), (_req, res) => {
+    res.json({
+      config: communicationState.telnyx,
+      numbers: communicationState.numbers,
+      sms_logs: communicationState.sms_logs,
+      pipeline_queue: communicationState.telnyx.pipeline_queue,
+      costs: communicationState.telnyx.costs,
+    });
+  });
+
+  registerCommHandler('/health/', authenticatePlatformStaff, requirePlatformPermission('platform.communication.view'), (_req, res) => {
+    res.json({
+      health_matrix: communicationState.health_matrix,
+      all_operational: true,
+      last_check: nowIso(),
+    });
+  });
+
+  registerCommHandler('/audit/', authenticatePlatformStaff, requirePlatformPermission('platform.communication.view'), (_req, res) => {
+    res.json({
+      hmac_chain: 'VERIFIED',
+      results: communicationState.audit_logs,
+      count: communicationState.audit_logs.length,
+    });
+  });
+
+  registerCommPostHandler('/test-connection/', authenticatePlatformStaff, requirePlatformPermission('platform.communication.manage'), (req, res) => {
+    const { provider = 'Resend' } = req.body || {};
+    const auditEntry = {
+      id: `aud_${nextId()}`,
+      timestamp: nowIso(),
+      operator: req.user?.email || 'admin@fastmovers.com',
+      action: 'api_key.test_connection',
+      provider: `${provider} API Edge`,
+      ip: req.ip || '127.0.0.1',
+    };
+    communicationState.audit_logs.unshift(auditEntry);
+    res.json({
+      success: true,
+      provider,
+      roundtrip_ms: 74,
+      tls_version: 'TLS 1.3',
+      message: `${provider} API edge probe successful. Handshake verified.`,
+    });
+  });
+
+  registerCommPostHandler('/rotate-key/', authenticatePlatformStaff, requirePlatformPermission('platform.communication.manage'), (req, res) => {
+    const { provider = 'Resend' } = req.body || {};
+    const auditEntry = {
+      id: `aud_${nextId()}`,
+      timestamp: nowIso(),
+      operator: req.user?.email || 'admin@fastmovers.com',
+      action: 'api_key.rotate',
+      provider,
+      ip: req.ip || '127.0.0.1',
+    };
+    communicationState.audit_logs.unshift(auditEntry);
+    res.json({
+      success: true,
+      provider,
+      message: `API secret key rotated successfully for ${provider}. 30-minute zero-downtime rolling grace period active.`,
+    });
+  });
+
+  registerCommPostHandler('/suspend-provider/', authenticatePlatformStaff, requirePlatformPermission('platform.communication.manage'), (req, res) => {
+    const { provider = 'Resend', confirmation } = req.body || {};
+    if (confirmation !== 'CONFIRM SUSPENSION') {
+      return res.status(400).json({ error: 'Exact confirmation string "CONFIRM SUSPENSION" is required.' });
+    }
+    const auditEntry = {
+      id: `aud_${nextId()}`,
+      timestamp: nowIso(),
+      operator: req.user?.email || 'admin@fastmovers.com',
+      action: 'provider.emergency_suspend',
+      provider,
+      ip: req.ip || '127.0.0.1',
+    };
+    communicationState.audit_logs.unshift(auditEntry);
+    res.json({
+      success: true,
+      provider,
+      message: `Emergency suspension enacted for ${provider}. Outbound message buffers held safely.`,
+    });
+  });
+
+  registerCommPostHandler('/verify-dns/', authenticatePlatformStaff, requirePlatformPermission('platform.communication.manage'), (req, res) => {
+    const { domain } = req.body || {};
+    const targetDomain = communicationState.domains.find((d) => d.domain === domain);
+    if (targetDomain) {
+      targetDomain.dkim_status = 'Verified (2048b)';
+      targetDomain.spf_status = 'Pass';
+      targetDomain.sending_status = 'Active';
+      targetDomain.last_check = 'Just now';
+    }
+    const auditEntry = {
+      id: `aud_${nextId()}`,
+      timestamp: nowIso(),
+      operator: req.user?.email || 'admin@fastmovers.com',
+      action: 'domain_dns.reverify_trigger',
+      provider: `Resend (${domain || 'all'})`,
+      ip: req.ip || '127.0.0.1',
+    };
+    communicationState.audit_logs.unshift(auditEntry);
+    res.json({
+      success: true,
+      domain,
+      status: 'Verified',
+      message: `DNS verification completed for ${domain}. DKIM and SPF aligned.`,
+    });
+  });
 }
+
