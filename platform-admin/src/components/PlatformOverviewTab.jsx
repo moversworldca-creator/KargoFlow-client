@@ -30,37 +30,7 @@ export default function PlatformOverviewTab({
   return (
     <div className="space-y-6 animate-in fade-in duration-150">
       {/* Top Banner with Quick Actions */}
-      <div className="relative overflow-hidden rounded-3xl bg-linear-to-r from-[#043976] via-[#094d9c] to-[#043976] p-6 sm:p-8 text-white shadow-xl">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2 max-w-xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md text-[11px] font-bold tracking-wider uppercase">
-              <Shield size={14} className="text-amber-300" />
-              <span>Multi-Tenant Platform Control Plane</span>
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight">Super Admin Governance</h1>
-            <p className="text-xs sm:text-sm text-blue-100/80 leading-relaxed">
-              Global tenant orchestration, subscription lifecycle transition control, granular entitlement overrides, and audited support sessions.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              onClick={onOpenProvisionModal}
-              className="px-5 py-2.5 rounded-xl bg-white text-[#043976] hover:bg-blue-50 font-bold text-xs flex items-center gap-2 shadow-lg transition-transform active:scale-95"
-            >
-              <Plus size={16} />
-              <span>Provision Tenant</span>
-            </button>
-            <button
-              onClick={() => onNavigateTab('support')}
-              className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs backdrop-blur-md transition-colors border border-white/10 flex items-center gap-2"
-            >
-              <Activity size={16} className="text-emerald-400" />
-              <span>Support Session ({metrics.active_support_sessions || 0})</span>
-            </button>
-          </div>
-        </div>
-      </div>
+     
 
       {/* Metrics Row */}
       <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-4">

@@ -5,7 +5,7 @@ import platformApi from '../api/platformApi';
 import { useToast } from '../context/ToastContext';
 import { usePlatformAuth } from '../auth/PlatformAuthContext';
 import { PLATFORM_PERMISSIONS } from '../rbac/platformRbac';
-import { useTenants, useAddons, useFeatures, useInvalidatePlatformQueries } from '../hooks/usePlatformData';
+import { useTenants, useAddons, useFeatures, useLimits, useInvalidatePlatformQueries } from '../hooks/usePlatformData';
 import EntitlementsTab from '../components/EntitlementsTab';
 import AccessDenied from '../components/AccessDenied';
 
@@ -21,13 +21,14 @@ export default function EntitlementsPage() {
   const { data: tenants = [], isLoading: isTenantsLoading, refetch: refetchTenants } = useTenants();
   const { data: addons = [], isLoading: isAddonsLoading, refetch: refetchAddons } = useAddons();
   const { data: features = [], isLoading: isFeaturesLoading, refetch: refetchFeatures } = useFeatures();
+  const { data: limits = [], isLoading: isLimitsLoading, refetch: refetchLimits } = useLimits();
   const { invalidateAll } = useInvalidatePlatformQueries();
 
-  const isLoading = isTenantsLoading || isAddonsLoading || isFeaturesLoading;
+  const isLoading = isTenantsLoading || isAddonsLoading || isFeaturesLoading || isLimitsLoading;
 
   const handleRefresh = async () => {
     try {
-      await Promise.all([refetchTenants(), refetchAddons(), refetchFeatures()]);
+      await Promise.all([refetchTenants(), refetchAddons(), refetchFeatures(), refetchLimits()]);
       showToast('Entitlements refreshed.', 'success');
     } catch {
       showToast('Error syncing entitlements state.', 'error');
@@ -83,6 +84,7 @@ export default function EntitlementsPage() {
         initialTenantId={initialTenantId ? Number(initialTenantId) : undefined}
         addons={addons}
         features={features}
+        limits={limits}
       />
     </div>
   );

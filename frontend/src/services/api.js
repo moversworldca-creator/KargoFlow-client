@@ -43,7 +43,7 @@ export const deleteRole = (id) => api.delete(`/roles/${id}/`);
 export const getPermissions = () => api.get("/permissions/");
 
 // Core APIs
-export const getAuditLogs = () => api.get("/audit-logs/");
+export const getAuditLogs = (params = {}) => api.get("/tenant/audit-logs/", { params });
 export const universalSearch = (params) => api.get("/search/", { params });
 export const getBranches = () => api.get("/branches/");
 export const getBranchLookups = (params = {limit: 50}) => api.get("/lookups/branches/", { params });

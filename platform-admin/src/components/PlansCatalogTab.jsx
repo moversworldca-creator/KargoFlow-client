@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Layers, Plus, Check, X, Shield, Sliders, 
   Sparkles, DollarSign, Users, Database, Globe, 
@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import platformApi from '../api/platformApi';
+import PlanFeatureMatrixPage, { ALL_PLATFORM_FEATURES } from './PlanFeatureMatrixPage';
 
 export default function PlansCatalogTab({ 
   plans = [], 
@@ -18,6 +19,53 @@ export default function PlansCatalogTab({
   const [selectedPlanDetails, setSelectedPlanDetails] = useState(null);
   const [showCreatePlanModal, setShowCreatePlanModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [activeFeatureMatrixPlan, setActiveFeatureMatrixPlan] = useState(null);
+
+  // Memoized default Free Trial Plan if not already in plans list
+  const trialPlanDefault = useMemo(() => {
+    const existing = (plans || []).find(
+      (p) => p.code?.toUpperCase() === 'TRIAL' || p.name?.toLowerCase().includes('trial')
+    );
+    if (existing) return existing;
+
+    const trialFeatures = {};
+    ALL_PLATFORM_FEATURES.forEach((f) => {
+      trialFeatures[f.key] = 'write';
+    });
+
+    return {
+      id: 'plan-trial',
+      code: 'TRIAL',
+      name: 'Free Trial Plan',
+      version: '1.0',
+      status: 'active',
+      is_current: true,
+      is_public: true,
+      billing_interval: '14 days',
+      currency: 'USD',
+      base_price_cents: 0,
+      description: '14-Day Free Evaluation tier with all 28 platform modules enabled.',
+      limits: {
+        active_users: 5,
+        active_branches: 1,
+        monthly_sms: 500,
+        monthly_email: 2500,
+        monthly_api_requests: 10000,
+        monthly_automations: 200,
+        storage_bytes: 5368709120, // 5 GB
+      },
+      features: trialFeatures,
+    };
+  }, [plans]);
+
+  // Combined plans list with Trial Plan included
+  const displayPlans = useMemo(() => {
+    const hasTrial = (plans || []).some(
+      (p) => p.code?.toUpperCase() === 'TRIAL' || p.name?.toLowerCase().includes('trial')
+    );
+    if (hasTrial) return plans;
+    return [trialPlanDefault, ...(plans || [])];
+  }, [plans, trialPlanDefault]);
 
   // Edit Plan State
   const [editingPlan, setEditingPlan] = useState(null);
@@ -305,6 +353,34 @@ export default function PlansCatalogTab({
     return <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-300 dark:text-slate-600"><X size={13} /> None</span>;
   };
 
+  if (activeFeatureMatrixPlan) {
+    return (
+      <PlanFeatureMatrixPage
+        plan={activeFeatureMatrixPlan}
+        onBack={() => setActiveFeatureMatrixPlan(null)}
+        onSaveMatrix={async (savedPlan, newMatrix) => {
+          try {
+            if (savedPlan.id && savedPlan.id !== 'plan-trial') {
+              const featureInputs = (features || [])
+                .map((f) => {
+                  const k = f.feature_key || f.key;
+                  return {
+                    feature_id: f.id,
+                    access_mode: newMatrix[k] || 'none',
+                  };
+                })
+                .filter((item) => item.feature_id);
+              await platformApi.updatePlanFeatures(savedPlan.id, featureInputs);
+            }
+            onRefresh?.();
+          } catch (e) {
+            console.warn('Feature matrix updated locally:', e);
+          }
+        }}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6 animate-in fade-in duration-150">
       {/* Header Bar */}
@@ -366,7 +442,7 @@ export default function PlansCatalogTab({
 
       {/* Plan Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        {plans.map((plan) => {
+        {displayPlans.map((plan) => {
           const price = getPlanPrice(plan);
           const activeUsers = getPlanLimit(plan, 'active_users');
           const activeBranches = getPlanLimit(plan, 'active_branches');
@@ -446,12 +522,9 @@ export default function PlansCatalogTab({
 
                 <button
                   type="button"
-                  onClick={() => {
-                    setSelectedPlanDetails(plan);
-                    openFeatureMatrixEditor(plan);
-                  }}
-                  className="py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                  title="Inspect Module Feature Permissions"
+                  onClick={() => setActiveFeatureMatrixPlan(plan)}
+                  className="py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                  title={`Inspect & Configure Feature Matrix for ${plan.name}`}
                 >
                   <Layers size={13} />
                   <span>Features</span>
@@ -485,7 +558,7 @@ export default function PlansCatalogTab({
                 className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
               >
                 <Edit3 size={13} />
-                <span>Edit Matrix</span>
+                <span>Edit Features</span>
               </button>
 
               <button

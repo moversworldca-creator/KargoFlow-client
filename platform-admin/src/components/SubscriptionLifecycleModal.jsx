@@ -145,6 +145,7 @@ export default function SubscriptionLifecycleModal({
     try {
       const payload = {
         new_status: targetStatus,
+        next_status: targetStatus,
         reason: transitionReason.trim(),
       };
       if (targetStatus === 'past_due' && graceDays) {
@@ -173,10 +174,13 @@ export default function SubscriptionLifecycleModal({
 
     setIsSubmitting(true);
     try {
-      const res = await platformApi.changeSubscriptionPlan(subscription.id, {
+      const companyId = subscription.tenant_id || subscription.company_id || subscription.id;
+      const res = await platformApi.changeSubscriptionPlan(companyId, {
+        plan_id: newPlanId,
         new_plan_id: newPlanId,
         plan_id: newPlanId,
         billing_interval: billingInterval,
+        effective: effectiveTiming,
         effective_timing: effectiveTiming,
         reason: planChangeReason.trim(),
         tenant_id: subscription.tenant_id || subscription.company_id,
@@ -201,18 +205,24 @@ export default function SubscriptionLifecycleModal({
     e.preventDefault();
     setIsSubmitting(true);
     try {
+      const companyId = subscription.tenant_id || subscription.company_id || subscription.id;
       if (subscription.status === 'trialing' && trialEndsAt) {
         await platformApi.updateSubscriptionTrial(subscription.id, {
+          company_id: companyId,
+          plan_id: subscription.plan_id,
           trial_ends_at: new Date(trialEndsAt).toISOString(),
           reason: datesReason.trim() || 'Admin trial adjustment',
           current_status: subscription.status,
         });
       }
       if (graceEndsAt) {
-        await platformApi.updateSubscriptionGracePeriod(subscription.id, {
-          grace_period_ends_at: new Date(graceEndsAt).toISOString(),
+        await platformApi.transitionSubscription(subscription.id, {
+          new_status: subscription.status || 'past_due',
           reason: datesReason.trim() || 'Admin grace adjustment',
           current_status: subscription.status,
+          fields: {
+            grace_period_ends_at: new Date(graceEndsAt).toISOString(),
+          },
         });
       }
       showToast('Subscription lifecycle dates updated.', 'success');

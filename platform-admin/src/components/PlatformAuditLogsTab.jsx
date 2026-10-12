@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   History, Search, Filter, Shield, Clock, 
-  ExternalLink, Code, RefreshCw, Download 
+  ExternalLink, Code, RefreshCw, Download,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
 } from 'lucide-react';
 import { useDebounce } from '../hooks/useDebounce';
 
@@ -13,21 +14,55 @@ export default function PlatformAuditLogsTab({
   const debouncedSearch = useDebounce(search, 200);
   const [actionFilter, setActionFilter] = useState('all');
   const [inspectAudit, setInspectAudit] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   const actions = Array.from(new Set(auditLogs.map((a) => a.action)));
 
-  const filteredLogs = auditLogs.filter((log) => {
-    const q = debouncedSearch.toLowerCase().trim();
-    const matchesSearch = !q ||
-      log.actor_email?.toLowerCase().includes(q) ||
-      log.tenant_name?.toLowerCase().includes(q) ||
-      log.reason?.toLowerCase().includes(q) ||
-      log.action?.toLowerCase().includes(q);
+  const filteredLogs = useMemo(() => {
+    return auditLogs.filter((log) => {
+      const q = debouncedSearch.toLowerCase().trim();
+      const matchesSearch = !q ||
+        log.actor_email?.toLowerCase().includes(q) ||
+        log.tenant_name?.toLowerCase().includes(q) ||
+        log.reason?.toLowerCase().includes(q) ||
+        log.action?.toLowerCase().includes(q);
 
-    if (!matchesSearch) return false;
-    if (actionFilter !== 'all' && log.action !== actionFilter) return false;
-    return true;
-  });
+      if (!matchesSearch) return false;
+      if (actionFilter !== 'all' && log.action !== actionFilter) return false;
+      return true;
+    });
+  }, [auditLogs, debouncedSearch, actionFilter]);
+
+  const totalCount = filteredLogs.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const startIndex = totalCount === 0 ? 0 : (page - 1) * pageSize + 1;
+  const endIndex = Math.min(page * pageSize, totalCount);
+
+  const paginatedLogs = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredLogs.slice(start, start + pageSize);
+  }, [filteredLogs, page, pageSize]);
+
+  const pageNumbers = useMemo(() => {
+    const pages = [];
+    const maxVisible = 5;
+    if (totalPages <= maxVisible) {
+      for (let i = 1; i <= totalPages; i += 1) pages.push(i);
+    } else {
+      let start = Math.max(1, page - 2);
+      let end = Math.min(totalPages, page + 2);
+      if (page <= 3) {
+        start = 1;
+        end = maxVisible;
+      } else if (page >= totalPages - 2) {
+        start = totalPages - maxVisible + 1;
+        end = totalPages;
+      }
+      for (let i = start; i <= end; i += 1) pages.push(i);
+    }
+    return pages;
+  }, [page, totalPages]);
 
   const exportToCsv = () => {
     if (!filteredLogs.length) return;
@@ -117,14 +152,14 @@ export default function PlatformAuditLogsTab({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {filteredLogs.length === 0 ? (
+              {paginatedLogs.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-12 text-center text-slate-400">
                     No matching audit logs found.
                   </td>
                 </tr>
               ) : (
-                filteredLogs.map((log) => (
+                paginatedLogs.map((log) => (
                   <tr key={log.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
                     <td className="py-3 px-4 font-mono text-[11px] text-slate-500 shrink-0">
                       {new Date(log.timestamp).toLocaleString()}
@@ -171,6 +206,90 @@ export default function PlatformAuditLogsTab({
             </tbody>
           </table>
         </div>
+
+        {/* Table Pagination Footer */}
+        {totalCount > 0 && (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 border-t border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950 text-xs text-slate-500">
+            <div className="flex items-center gap-3">
+              <span>
+                Showing <strong>{startIndex}</strong> to <strong>{endIndex}</strong> of <strong>{totalCount}</strong> entries
+              </span>
+              <div className="flex items-center gap-1.5 border-l border-slate-200 dark:border-slate-800 pl-3">
+                <span>Per page:</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(1);
+                  }}
+                  className="px-2 py-0.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-bold outline-none"
+                >
+                  <option value={10}>10</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setPage(1)}
+                disabled={page === 1}
+                title="First Page"
+                className="p-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ChevronsLeft size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                title="Previous Page"
+                className="p-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft size={14} />
+              </button>
+
+              <div className="flex items-center gap-1 px-1">
+                {pageNumbers.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setPage(p)}
+                    className={`h-6 min-w-[1.5rem] rounded-lg px-1.5 text-[11px] font-bold ${
+                      p === page
+                        ? 'bg-blue-600 text-white'
+                        : 'border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                title="Next Page"
+                className="p-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ChevronRight size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage(totalPages)}
+                disabled={page >= totalPages}
+                title="Last Page"
+                className="p-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ChevronsRight size={14} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Inspect Audit JSON Modal */}

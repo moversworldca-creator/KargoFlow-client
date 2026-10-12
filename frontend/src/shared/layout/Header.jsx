@@ -8,7 +8,7 @@ import {
   Sun, Moon, Target, Layers, Truck, Zap, Building2, ChevronDown, ChevronRight, ChevronLeft, Check, X
 } from 'lucide-react';
 import { getActivities, getLeadActivities, getTasks, universalSearch, getNotifications, markAllNotificationsRead, markNotificationRead, markNotificationUnread, getCompanies } from '../../services/api';
-import logo from '../../assets/logo.png';
+import logo from '../../assets/full_logo.png';
 import { getLegacyRecordDetailPath } from '../../features/crm/utils/recordRoutes';
 import { toast } from 'sonner';
 import { useAuth } from '../../features/auth/context/AuthContext';
@@ -915,11 +915,18 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
         >
           <Menu size={22} className="sm:w-6 sm:h-6" />
         </button>
-        <img
-          src={logo}
-          alt="KargoFlow"
-          className="crm-header-logo block h-7 sm:h-8 md:h-10 w-auto max-w-[110px] xs:max-w-[130px] sm:max-w-[160px] md:max-w-[188px] shrink-0 object-contain"
-        />
+        <button
+          type="button"
+          onClick={() => navigate('/dashboard')}
+          className="flex items-center focus:outline-none transition-transform hover:opacity-95 cursor-pointer"
+          title="KargoFlow CRM"
+        >
+          <img
+            src={logo}
+            alt="KargoFlow"
+            className="crm-header-logo block h-8 sm:h-9 md:h-10 w-auto max-w-[140px] xs:max-w-[160px] sm:max-w-[190px] md:max-w-[220px] shrink-0 object-contain"
+          />
+        </button>
       </div>
       
       {/* Right Controls & Actions */}
