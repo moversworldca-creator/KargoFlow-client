@@ -19,6 +19,8 @@ export const PLATFORM_PERMISSIONS = {
   SUPPORT_SESSIONS_VIEW: 'platform.support_sessions.view',
   SUPPORT_SESSIONS_CREATE: 'platform.support_sessions.create',
   AUDIT_VIEW: 'platform.audit.view',
+  COMMUNICATION_VIEW: 'platform.communication.view',
+  COMMUNICATION_MANAGE: 'platform.communication.manage',
 };
 
 export const PERMISSION_DEFINITIONS = [
@@ -106,6 +108,18 @@ export const PERMISSION_DEFINITIONS = [
     category: 'Governance & Audit',
     description: 'Access the immutable global audit log recording cross-tenant and staff actions.',
   },
+  {
+    code: 'platform.communication.view',
+    name: 'View Communication Infrastructure',
+    category: 'Communication Infrastructure',
+    description: 'Monitor Resend and Telnyx centralized platform infrastructure, DIDs, and carrier telemetry.',
+  },
+  {
+    code: 'platform.communication.manage',
+    name: 'Manage Communication Infrastructure',
+    category: 'Communication Infrastructure',
+    description: 'Rotate carrier keys, test API connection probes, and manage provider emergency suspension.',
+  },
 ];
 
 export const PLATFORM_ROLES = {
@@ -132,6 +146,8 @@ export const PLATFORM_ROLES = {
       'platform.support_sessions.view',
       'platform.support_sessions.create',
       'platform.audit.view',
+      'platform.communication.view',
+      'platform.communication.manage',
     ],
   },
   support_admin: {
@@ -154,6 +170,7 @@ export const PLATFORM_ROLES = {
       'platform.support_sessions.view',
       'platform.support_sessions.create',
       'platform.audit.view',
+      'platform.communication.view',
     ],
   },
   support_agent: {
@@ -187,6 +204,7 @@ export const PLATFORM_ROLES = {
       'platform.subscriptions.view',
       'platform.plans.view',
       'platform.audit.view',
+      'platform.communication.view',
     ],
   },
 };

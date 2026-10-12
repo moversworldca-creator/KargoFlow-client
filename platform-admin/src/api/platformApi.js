@@ -195,6 +195,35 @@ export const platformApi = {
   resetDemoData: async () => {
     return platformAxios.post('/core/reset-demo/');
   },
+
+  // Communication Infrastructure Console (Section 2.4)
+  getCommunicationOverview: async () => {
+    return platformAxios.get('/platform/communication/overview/');
+  },
+  getCommunicationResend: async () => {
+    return platformAxios.get('/platform/communication/resend/');
+  },
+  getCommunicationTelnyx: async () => {
+    return platformAxios.get('/platform/communication/telnyx/');
+  },
+  getCommunicationHealth: async () => {
+    return platformAxios.get('/platform/communication/health/');
+  },
+  getCommunicationAuditLogs: async (params = {}) => {
+    return platformAxios.get('/platform/communication/audit/', { params });
+  },
+  testCommunicationConnection: async (provider) => {
+    return platformAxios.post('/platform/communication/test-connection/', { provider });
+  },
+  rotateCommunicationKey: async (provider, newKey) => {
+    return platformAxios.post('/platform/communication/rotate-key/', { provider, new_key: newKey });
+  },
+  suspendCommunicationProvider: async (provider, confirmation) => {
+    return platformAxios.post('/platform/communication/suspend-provider/', { provider, confirmation });
+  },
+  verifyCommunicationDomainDns: async (domain) => {
+    return platformAxios.post('/platform/communication/verify-dns/', { domain });
+  },
 };
 
 export default platformApi;

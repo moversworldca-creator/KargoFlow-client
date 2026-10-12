@@ -115,6 +115,61 @@ export function usePlatformAuditLogs(params = {}) {
   });
 }
 
+export function useCommunicationOverview() {
+  return useQuery({
+    queryKey: ['platform', 'communication', 'overview'],
+    queryFn: async () => {
+      const res = await platformApi.getCommunicationOverview();
+      return res?.data || {};
+    },
+    staleTime: DEFAULT_STALE_TIME,
+  });
+}
+
+export function useCommunicationResend() {
+  return useQuery({
+    queryKey: ['platform', 'communication', 'resend'],
+    queryFn: async () => {
+      const res = await platformApi.getCommunicationResend();
+      return res?.data || {};
+    },
+    staleTime: DEFAULT_STALE_TIME,
+  });
+}
+
+export function useCommunicationTelnyx() {
+  return useQuery({
+    queryKey: ['platform', 'communication', 'telnyx'],
+    queryFn: async () => {
+      const res = await platformApi.getCommunicationTelnyx();
+      return res?.data || {};
+    },
+    staleTime: DEFAULT_STALE_TIME,
+  });
+}
+
+export function useCommunicationHealth() {
+  return useQuery({
+    queryKey: ['platform', 'communication', 'health'],
+    queryFn: async () => {
+      const res = await platformApi.getCommunicationHealth();
+      return res?.data || {};
+    },
+    staleTime: DEFAULT_STALE_TIME,
+  });
+}
+
+export function useCommunicationAuditLogs(params = {}) {
+  return useQuery({
+    queryKey: ['platform', 'communication', 'audit', params],
+    queryFn: async () => {
+      const res = await platformApi.getCommunicationAuditLogs(params);
+      return unpackResults(res);
+    },
+    staleTime: 30 * 1000,
+  });
+}
+
 export function useInvalidatePlatformQueries() {
   const queryClient = useQueryClient();
 
@@ -129,5 +184,6 @@ export function useInvalidatePlatformQueries() {
     invalidateAdmins: () => queryClient.invalidateQueries({ queryKey: ['platform', 'admins'] }),
     invalidateSupportSessions: () => queryClient.invalidateQueries({ queryKey: ['platform', 'support_sessions'] }),
     invalidateAuditLogs: () => queryClient.invalidateQueries({ queryKey: ['platform', 'audit_logs'] }),
+    invalidateCommunication: () => queryClient.invalidateQueries({ queryKey: ['platform', 'communication'] }),
   };
 }
