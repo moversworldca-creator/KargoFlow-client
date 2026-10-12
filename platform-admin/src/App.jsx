@@ -13,6 +13,7 @@ import PlansPage from './pages/PlansPage';
 import FeaturesPage from './pages/FeaturesPage';
 import EntitlementsPage from './pages/EntitlementsPage';
 import SupportPage from './pages/SupportPage';
+import CommunicationPage from './pages/CommunicationPage';
 import AdminsPage from './pages/AdminsPage';
 import AuditPage from './pages/AuditPage';
 
@@ -51,6 +52,7 @@ export default function App() {
           {/* <Route path="/features" element={<FeaturesPage />} /> */}
           <Route path="/entitlements" element={<EntitlementsPage />} />
           <Route path="/support" element={<SupportPage />} />
+          <Route path="/communication" element={<CommunicationPage />} />
           <Route path="/admins" element={<AdminsPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

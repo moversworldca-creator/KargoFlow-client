@@ -2,9 +2,15 @@ import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { 
   Building2, Layers, Sliders, Shield, Key, 
+<<<<<<< Updated upstream
   History, Users, CreditCard, Activity, 
   LogOut, Sun, Moon, ShieldCheck, ChevronRight, ChevronDown, User, Bell,
   Menu, X, Sparkles, AlertCircle, CheckCircle2, CheckCheck, Trash2
+=======
+  History, Users, CreditCard, Activity, Radio,
+  LogOut, Sun, Moon, ShieldCheck, ChevronRight,
+  Menu, X, Sparkles, AlertCircle
+>>>>>>> Stashed changes
 } from 'lucide-react';
 import { usePlatformAuth } from '../auth/PlatformAuthContext';
 import { PLATFORM_ROLES, PLATFORM_PERMISSIONS } from '../rbac/platformRbac';
@@ -204,6 +210,12 @@ export default function PlatformShell() {
       label: 'Support Sessions', 
       icon: Key, 
       permission: PLATFORM_PERMISSIONS.SUPPORT_SESSIONS_VIEW 
+    },
+    { 
+      to: '/communication', 
+      label: 'Communication Infrastructure', 
+      icon: Radio, 
+      permission: PLATFORM_PERMISSIONS.COMMUNICATION_VIEW 
     },
     { 
       to: '/admins', 
