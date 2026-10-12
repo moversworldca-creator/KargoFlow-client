@@ -68,7 +68,9 @@ const Settings = () => {
   const navigate = useNavigate();
   const { tabId, subView, itemId } = useParams();
 
-  const { canAll } = useCan();
+  const useCanResult = useCan();
+  const canAll = useCanResult?.canAll || (() => true);
+  const canAny = useCanResult?.canAny || canAll;
   const [branches, setBranches] = useState([]);
   const [selectedBranchId, setSelectedBranchId] = useState('');
   const [isBranchReady, setIsBranchReady] = useState(false);
@@ -145,8 +147,12 @@ const Settings = () => {
   ], []);
 
   const allowedTabs = useMemo(
-    () => tabs.filter((tab) => canAll(SETTINGS_TAB_PERMISSIONS[tab.id] || [])),
-    [tabs, canAll],
+    () => tabs.filter((tab) => {
+      const required = SETTINGS_TAB_PERMISSIONS[tab.id];
+      if (!required || !required.length) return true;
+      return canAny(required);
+    }),
+    [tabs, canAny],
   );
   const activeTab = tabId || 'overview';
   const goToTab = (nextTabId) => {

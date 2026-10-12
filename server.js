@@ -15,6 +15,12 @@ const PORT = Number(process.env.PORT) || 3000;
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && 'body' in err) {
+    return res.status(400).json({ error: 'Malformed JSON payload' });
+  }
+  next(err);
+});
 
 // ============================================================================
 // Helper Utilities
@@ -32,54 +38,103 @@ const dateOffsetIso = (daysOffset = 0) => {
 };
 
 const ALL_PERMISSIONS = [
-  'crm.admin',
-  'crm.dashboard.view',
-  'crm.leads.view',
-  'crm.leads.create',
+  'template_library.create',
+  'crew_photos.view',
+  'rbac_roles.view',
+  'leads.update',
+  'opportunities.mark_lost',
+  'lead_reports.view',
+  'users.manage',
   'crm.leads.edit',
-  'crm.leads.assign',
-  'crm.leads.change_branch',
-  'crm.leads.convert',
-  'crm.pipeline.view',
-  'crm.reports.view',
-  'crm.opportunities.view',
-  'crm.opportunities.edit',
-  'crm.opportunities.create',
-  'crm.opportunities.duplicate',
-  'crm.opportunities.book',
-  'crm.opportunities.mark_lost',
+  'lead_activities.view',
+  'leads.view',
+  'opportunities.update',
+  'crew_identity.manage',
   'crm.tasks.view',
-  'crm.tasks.create',
-  'crm.tasks.edit',
-  'crm.estimates.view',
+  'opportunities.book_without_acceptance',
+  'opportunities.complete',
+  'opportunities.reopen',
+  'crew_signatures.create',
+  'opportunities.create',
+  'customers.view',
+  'crm.pipeline.view',
+  'lead_activities.create',
+  'users.assign_role',
+  'opportunity_reports.view',
+  'catalog.manage',
+  'lead_providers.manage',
+  'branches.view',
   'crm.payments.view',
-  'crm.audit.view',
+  'rbac_roles.create',
+  'leads.assign',
+  'compensation.view',
+  'leads.restore',
+  'crm.reports.view',
+  'opportunities.set_binding_type',
+  'rbac_overrides.manage',
+  'opportunities.cancel',
+  'opportunities.book',
+  'leads.qualify',
+  'lead_duplicates.manage',
+  'settings.view',
+  'crew_issues.report',
+  'opportunities.book_without_deposit',
+  'crew_time.update',
+  'crew_dispatch.view',
+  'lead_imports.view',
+  'lead_providers.view',
   'crm.settings.users.view',
-  'crm.settings.users.manage',
+  'crew_inventory.view',
+  'rbac_roles.manage',
+  'catalog.view',
+  'customers.create',
+  'employees.manage',
+  'employees.view',
+  'customers.update',
+  'compensation.manage',
+  '*',
+  'opportunities.change_branch',
+  'crm.admin',
+  'crm.estimates.view',
+  'template_library.view',
+  'opportunities.assign',
+  'customers.merge',
+  'opportunities.change_branch_booked',
+  'crew_time.view',
+  'lead_imports.create',
+  'settings.manage',
+  'branches.manage',
+  'lead_settings.manage',
+  'opportunities.book_without_signature',
+  'opportunities.view',
+  'crew_jobs.update',
+  'crm.leads.view',
+  'leads.close',
+  'lead_settings.view',
+  'crew_job_completion.complete',
+  'audit_logs.view',
+  'entitlements.view',
+  'rbac_permissions.view',
+  'crm.dashboard.view',
+  'crew_signatures.view',
+  'leads.create',
+  'customers.block',
+  'template_library.update',
+  'branches.delete',
+  'crew_photos.create',
+  'crm.leads.create',
+  'opportunity_settings.manage',
+  'crew_inventory.update',
+  'audit_logs.manage',
+  'crm.opportunities.view',
+  'crew_jobs.view',
+  'leads.convert',
+  'companies.view',
   'crm.settings.roles.view',
-  'crm.settings.roles.manage',
-  'crm.settings.status_codes.view',
-  'crm.settings.status_codes.manage',
-  'crm.settings.integrations.view',
-  'crm.settings.integrations.manage',
-  'crm.settings.fleet.view',
-  'crm.settings.fleet.manage',
-  'crm.settings.catalog.view',
-  'crm.settings.catalog.manage',
-  'crm.settings.portal_templates.view',
-  'crm.settings.portal_templates.manage',
-  'crm.settings.customer_portals.view',
-  'crm.settings.customer_portals.manage',
-  'crm.settings.communication_templates.view',
-  'crm.settings.communication_templates.manage',
-  'crm.settings.discounts.view',
-  'crm.settings.discounts.manage',
-  'crm.settings.automations.view',
-  'crm.settings.automations.manage',
-  'crm.communications.email.send',
-  'crm.communications.sms.send',
-  'crm.communications.call.log',
-  'crm.communications.history.view',
+  'branches.create',
+  'users.view',
+  'rbac_overrides.view',
+  'lead_duplicates.view',
 ];
 
 // ============================================================================
@@ -92,9 +147,9 @@ const db = {
   companies: [
     {
       id: 1,
-      name: 'KargoFlow',
-      subdomain: 'fastmovers',
-      email: 'admin@fastmovers.com',
+      name: 'Test',
+      subdomain: 'test',
+      email: 'admin@tent.com',
       phone: '512-555-0100',
       address_line1: '123 Moving Way',
       city: 'Austin',
@@ -176,10 +231,10 @@ const db = {
   users: [
     {
       id: 1,
-      email: 'admin@fastmovers.com',
-      first_name: 'System',
-      last_name: 'Administrator',
-      full_name: 'System Administrator',
+      email: 'admin@tent.com',
+      first_name: 'Test',
+      last_name: 'Admin',
+      full_name: 'Test Admin',
       phone: '512-555-0101',
       employee_type: 'System Administrator',
       is_staff: true,
@@ -1393,13 +1448,33 @@ app.get('/health/', (_req, res) => res.json({ status: 'ok' }));
 app.get('/api/health/', (_req, res) => res.json({ status: 'ok' }));
 
 // Auth
-app.post('/api/login/', (req, res) => {
+app.post(['/api/auth/login/', '/api/login/'], async (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
+  const password = String(req.body?.password || '');
+
+  // Try proxying to real Django backend on port 8000
+  try {
+    const backendRes = await fetch('http://127.0.0.1:8000/api/auth/login/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, identity_type: 'auto' }),
+    });
+    if (backendRes.ok) {
+      const data = await backendRes.json();
+      return res.status(200).json(data);
+    }
+  } catch (err) {
+    // Django offline, fallback to local match
+  }
+
   const matchedUser = db.users.find((u) => u.email.toLowerCase() === email) || db.users[0];
   const userPayload = buildUserPayload(matchedUser);
   res.json({
     access: 'demo-jwt-access-token',
+    access_token: 'demo-jwt-access-token',
+    token: 'demo-jwt-access-token',
     refresh: 'demo-jwt-refresh-token',
+    refresh_token: 'demo-jwt-refresh-token',
     user: userPayload,
     active_company: db.companies[0],
     active_company_details: db.companies[0],
@@ -1424,11 +1499,12 @@ app.post('/api/token/refresh/', (_req, res) => {
   res.json({ access: 'demo-jwt-access-token' });
 });
 
-app.get('/api/users/me/', (_req, res) => {
+app.get(['/api/users/me/', '/api/auth/me/'], (_req, res) => {
   const userPayload = buildUserPayload(db.users[0]);
   res.json({
     ...userPayload,
     user: userPayload,
+    permissions: userPayload.permissions || ALL_PERMISSIONS,
   });
 });
 

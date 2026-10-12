@@ -15,14 +15,19 @@ export const authService = {
   login: async (email, password) => {
     // Use API.accounts.login
     const data = await API.auth.login({ email, password });
-    if (data.access) {
-      localStorage.setItem('access_token', data.access);
-      localStorage.setItem('refresh_token', data.refresh);
-      localStorage.setItem('user', JSON.stringify(data.user));
-      localStorage.setItem(
-        'active_company_id',
-        authService._resolveCompanyId(data.active_company_id ?? data.active_company ?? data.company ?? data.user?.company)
+    const token = data?.access || data?.access_token || data?.token;
+    if (token) {
+      localStorage.setItem('access_token', token);
+      if (data.refresh || data.refresh_token) {
+        localStorage.setItem('refresh_token', data.refresh || data.refresh_token);
+      }
+      if (data.user) {
+        localStorage.setItem('user', JSON.stringify(data.user));
+      }
+      const companyId = authService._resolveCompanyId(
+        data.active_company_id ?? data.active_company ?? data.company ?? data.company_id ?? data.user?.company ?? 1
       );
+      localStorage.setItem('active_company_id', companyId);
       authService._persistActiveCompany(data.active_company || data.active_company_details || data.company || data.user?.company);
       localStorage.setItem('isAuthenticated', 'true');
     }

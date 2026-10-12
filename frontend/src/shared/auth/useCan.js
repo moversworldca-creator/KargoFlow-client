@@ -7,10 +7,10 @@ export const useCan = () => {
 
   const ctx = useMemo(() => ({
     permissions: permissionSet,
-    isSuperuser: Boolean(user?.is_superuser),
+    isSuperuser: Boolean(user?.is_superuser) || Boolean(permissionSet?.has?.('*')),
     isSystemAdmin: Boolean(user?.is_system_admin),
-    isCompanyAdmin: Boolean(permissionSet?.has?.('crm.admin')),
-  }), [permissionSet, user?.is_superuser, user?.is_system_admin]);
+    isCompanyAdmin: Boolean(user?.is_company_owner) || Boolean(permissionSet?.has?.('crm.admin')) || Boolean(permissionSet?.has?.('settings.manage')) || Boolean(permissionSet?.has?.('*')),
+  }), [permissionSet, user?.is_superuser, user?.is_system_admin, user?.is_company_owner]);
 
   return useMemo(() => ({
     can: (required) => can(required, ctx),

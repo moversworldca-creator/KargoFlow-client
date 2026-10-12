@@ -65,4 +65,55 @@ describe('Permissions Registry normalization tests', () => {
     const nav = getAllowedNavItems(NAV_ITEMS, ctx).map((item) => item.path);
     expect(nav).not.toContain('/leads');
   });
+
+  it('should contain all 97 settings permissions in SETTINGS_PERMISSIONS_LIST', async () => {
+    const { SETTINGS_PERMISSIONS_LIST, FEATURE_PERMISSION_CATALOG } = await import('./registry');
+    expect(SETTINGS_PERMISSIONS_LIST).toHaveLength(97);
+    
+    // Check every single permission exists in the catalog with module and label
+    for (const perm of SETTINGS_PERMISSIONS_LIST) {
+      const entry = FEATURE_PERMISSION_CATALOG[perm];
+      expect(entry, `Permission "${perm}" should exist in FEATURE_PERMISSION_CATALOG`).toBeDefined();
+      expect(entry.label, `Permission "${perm}" should have a non-empty label`).toBeTruthy();
+      expect(entry.module, `Permission "${perm}" should have a non-empty module`).toBeTruthy();
+      expect(entry.action, `Permission "${perm}" should have a valid action category`).toBeTruthy();
+    }
+  });
+
+  it('should grant access via wildcard * permission', async () => {
+    const { canAll, canAny } = await import('./registry');
+    const wildcardCtx = {
+      permissions: ['*'],
+      isSuperuser: false,
+      isSystemAdmin: false,
+    };
+    expect(canAll(['template_library.create', 'opportunities.book_without_acceptance'], wildcardCtx)).toBe(true);
+    expect(canAny(['crew_photos.view'], wildcardCtx)).toBe(true);
+  });
+
+  it('should resolve bidirectional permission aliases between canonical and legacy keys', async () => {
+    const { canAll } = await import('./registry');
+    // User has canonical 'leads.view', checks 'crm.leads.view'
+    expect(canAll(['crm.leads.view'], { permissions: ['leads.view'] })).toBe(true);
+    // User has legacy 'crm.leads.view', checks canonical 'leads.view'
+    expect(canAll(['leads.view'], { permissions: ['crm.leads.view'] })).toBe(true);
+    // User has 'rbac_roles.view', checks 'crm.settings.roles.view'
+    expect(canAll(['crm.settings.roles.view'], { permissions: ['rbac_roles.view'] })).toBe(true);
+  });
+
+  it('should include Settings in allowed nav items for users with settings permissions or admin flags', () => {
+    expect(NAV_ITEMS.some((item) => item.path === '/settings')).toBe(true);
+
+    const settingsViewNav = getAllowedNavItems(NAV_ITEMS, { permissions: ['settings.view'] }).map((i) => i.path);
+    expect(settingsViewNav).toContain('/settings');
+
+    const rbacRolesNav = getAllowedNavItems(NAV_ITEMS, { permissions: ['rbac_roles.view'] }).map((i) => i.path);
+    expect(rbacRolesNav).toContain('/settings');
+
+    const wildcardNav = getAllowedNavItems(NAV_ITEMS, { permissions: ['*'] }).map((i) => i.path);
+    expect(wildcardNav).toContain('/settings');
+
+    const adminNav = getAllowedNavItems(NAV_ITEMS, { permissions: [], isCompanyAdmin: true }).map((i) => i.path);
+    expect(adminNav).toContain('/settings');
+  });
 });

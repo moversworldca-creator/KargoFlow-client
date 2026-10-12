@@ -17,12 +17,55 @@ const normalizeFileTargetType = (value) => {
 };
 
 // Auth APIs
-export const login = (credentials) => api.post("/login/", credentials);
-export const switchCompany = (data) => api.post("/switch-company/", data);
-export const refreshToken = (token) => api.post("/token/refresh/", { refresh: token });
-export const me = () => api.get("/users/me/");
-export const updateMe = (data) => api.patch("/users/me/", data);
-export const changePassword = (data) => api.post("/users/change-password/", data);
+export const login = async (credentials) => {
+  try {
+    const data = await api.post("/auth/login/", credentials);
+    const token = data?.access_token || data?.token || data?.access;
+    return {
+      ...data,
+      access: token || data?.access,
+      access_token: token || data?.access_token,
+      token: token || data?.token,
+    };
+  } catch (error) {
+    if (error?.response?.status === 404) {
+      const data = await api.post("/login/", credentials);
+      const token = data?.access || data?.access_token || data?.token;
+      return {
+        ...data,
+        access: token || data?.access,
+        access_token: token || data?.access_token,
+        token: token || data?.token,
+      };
+    }
+    throw error;
+  }
+};
+export const logout = async () => {
+  try {
+    return await api.post("/auth/logout/");
+  } catch (error) {
+    if (error?.response?.status === 404) {
+      return await api.post("/logout/").catch(() => {});
+    }
+    return null;
+  }
+};
+export const switchCompany = (data) =>
+  api.post("/auth/switch-company/", data).catch((err) => (err?.response?.status === 404 ? api.post("/switch-company/", data) : Promise.reject(err)));
+export const refreshToken = (token) =>
+  api.post("/auth/token/refresh/", { refresh: token }).catch((err) => (err?.response?.status === 404 ? api.post("/token/refresh/", { refresh: token }) : Promise.reject(err)));
+export const me = () =>
+  api.get("/auth/me/").then((res) => {
+    if (res && (res.id || res.email || res.user || (Array.isArray(res.permissions) && res.permissions.length))) {
+      return res;
+    }
+    return api.get("/users/me/");
+  }).catch((err) => (err?.response?.status === 404 ? api.get("/users/me/") : Promise.reject(err)));
+export const updateMe = (data) =>
+  api.patch("/auth/me/", data).catch((err) => (err?.response?.status === 404 ? api.patch("/users/me/", data) : Promise.reject(err)));
+export const changePassword = (data) =>
+  api.post("/auth/change-password/", data).catch((err) => (err?.response?.status === 404 ? api.post("/users/change-password/", data) : Promise.reject(err)));
 
 // User APIs
 export const getUsers = (params) => api.get("/users/", { params });
@@ -471,6 +514,7 @@ const API = {
 
   auth: {
     login,
+    logout,
     switchCompany,
     refreshToken,
     me,

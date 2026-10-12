@@ -10,7 +10,7 @@ import useCan from '../../../shared/auth/useCan';
 import { useToast } from '../../../shared/context/ToastContext';
 import { filterAccessibleBranches, resolveRoleBranchId } from '../../../shared/utils/branchScope';
 import { useAuth } from '../../auth/context/AuthContext';
-import { FEATURE_PERMISSION_CATALOG, PERMISSIONS } from '../../../shared/permissions/registry';
+import { FEATURE_PERMISSION_CATALOG, PERMISSIONS, SETTINGS_PERMISSIONS_LIST } from '../../../shared/permissions/registry';
 
 // --- LOGIC HELPER FUNCTIONS ---
 const ACTION_KEYS = ['view', 'create', 'edit', 'delete', 'other'];
@@ -28,35 +28,89 @@ const LEAD_ACTION_CODENAMES = new Set([
   PERMISSIONS.LEAD_EDIT,
   PERMISSIONS.LEAD_ASSIGN,
   PERMISSIONS.LEAD_CONVERT,
+  'leads.view',
+  'leads.create',
+  'leads.update',
+  'leads.assign',
+  'leads.convert',
 ]);
 
+export const extractRolePerms = (role) => {
+  if (!role) return [];
+  const roleName = String(role.name || '').trim().toLowerCase();
+  const isAdminRole = roleName === 'admin' || roleName === 'company admin' || roleName === 'company owner' || roleName === 'super admin' || Boolean(role.is_system_role) || Boolean(role.is_company_owner);
+  let perms = [];
+  if (Array.isArray(role.permissions_details) && role.permissions_details.length) {
+    perms = role.permissions_details.map(p => typeof p === 'string' ? p : (p?.codename || p?.permission_key || '')).filter(Boolean);
+  } else if (Array.isArray(role.permissions) && role.permissions.length) {
+    perms = role.permissions.map(p => typeof p === 'string' ? p : (p?.codename || p?.permission_key || '')).filter(Boolean);
+  }
+  if (perms.includes('*') || isAdminRole) {
+    return Array.from(new Set([...SETTINGS_PERMISSIONS_LIST, ...perms]));
+  }
+  return perms;
+};
+
 const actionFromCodename = (codename) => {
-  if (!codename) return 'other';
+  if (!codename || codename === '*') return 'other';
+  const canonical = FEATURE_PERMISSION_CATALOG[codename];
+  if (canonical?.action) return canonical.action;
+
   const tail = codename.includes('.') ? codename.split('.').pop() : codename;
   const head = tail.includes('_') ? tail.split('_')[0] : tail;
-  const normalized = String(head).toLowerCase();
-  if (normalized === 'view' || normalized === 'read' || normalized === 'list') return 'view';
-  if (normalized === 'add' || normalized === 'create') return 'create';
-  if (normalized === 'change' || normalized === 'edit' || normalized === 'update') return 'edit';
-  if (normalized === 'delete' || normalized === 'remove') return 'delete';
+  const normalizedTail = String(tail).toLowerCase();
+  const normalizedHead = String(head).toLowerCase();
+
+  if (['view', 'read', 'list'].includes(normalizedTail) || ['view', 'read', 'list'].includes(normalizedHead)) return 'view';
+  if (['add', 'create'].includes(normalizedTail) || ['add', 'create'].includes(normalizedHead)) return 'create';
+  if (['change', 'edit', 'update', 'manage', 'assign', 'qualify'].includes(normalizedTail) || ['change', 'edit', 'update', 'manage'].includes(normalizedHead)) return 'edit';
+  if (['delete', 'remove', 'destroy'].includes(normalizedTail) || ['delete', 'remove', 'destroy'].includes(normalizedHead)) return 'delete';
   return 'other';
+};
+
+const normalizePermissionRow = (perm, index = 0) => {
+  if (typeof perm === 'string') {
+    const canonical = FEATURE_PERMISSION_CATALOG[perm] || {};
+    return {
+      id: index + 1,
+      codename: perm,
+      permission_key: perm,
+      name: canonical.label || perm,
+      label: canonical.label || perm,
+      module: canonical.module || 'Other',
+      action: canonical.action || actionFromCodename(perm),
+    };
+  }
+  const codename = perm.codename || perm.permission_key || `perm_${index + 1}`;
+  const canonical = FEATURE_PERMISSION_CATALOG[codename] || {};
+  return {
+    ...perm,
+    id: perm.id ?? (index + 1),
+    codename,
+    permission_key: perm.permission_key || codename,
+    name: canonical.label || perm.name || perm.label || codename,
+    label: canonical.label || perm.name || perm.label || codename,
+    module: canonical.module || perm.module || 'Other',
+    action: canonical.action || perm.action || actionFromCodename(codename),
+  };
 };
 
 const groupPermissionsByModule = (permissions, query) => {
   const q = (query || '').trim().toLowerCase();
+  const normalizedList = (permissions || []).map((p, idx) => normalizePermissionRow(p, idx));
+
   const filtered = q
-    ? permissions.filter(p =>
+    ? normalizedList.filter(p =>
         String(p.module || '').toLowerCase().includes(q) ||
         String(p.name || '').toLowerCase().includes(q) ||
-        String(p.codename || '').toLowerCase().includes(q)
+        String(p.codename || '').toLowerCase().includes(q) ||
+        String(p.permission_key || '').toLowerCase().includes(q)
       )
-    : permissions;
+    : normalizedList;
 
   const modules = new Map();
   for (const perm of filtered) {
-    const canonical = FEATURE_PERMISSION_CATALOG[perm.codename] || {};
-    const moduleName = canonical.module || perm.module || 'Other';
-    const label = canonical.label || perm.name || perm.label || perm.codename;
+    const moduleName = perm.module || 'Other';
     if (!modules.has(moduleName)) {
       modules.set(moduleName, {
         module: moduleName,
@@ -65,14 +119,10 @@ const groupPermissionsByModule = (permissions, query) => {
       });
     }
     const group = modules.get(moduleName);
-    const normalizedPerm = {
-      ...perm,
-      module: moduleName,
-      name: label,
-      label,
-    };
-    group.all.push(normalizedPerm);
-    group.actions[actionFromCodename(normalizedPerm.codename)].push(normalizedPerm);
+    group.all.push(perm);
+    const act = perm.action || actionFromCodename(perm.codename);
+    const targetAction = ACTION_KEYS.includes(act) ? act : 'other';
+    group.actions[targetAction].push(perm);
   }
 
   return Array.from(modules.values())
@@ -113,15 +163,19 @@ const normalizeRoleDisplayName = (role) => {
   const lower = rawName.toLowerCase();
   if (lower === 'lead') return 'Leads';
 
-  const perms = Array.isArray(role?.permissions_details) ? role.permissions_details : [];
-  const hasLeadView = perms.some((perm) => perm?.codename === PERMISSIONS.LEAD_VIEW);
-  const hasLeadActions = perms.some((perm) =>
+  const rolePermList = extractRolePerms(role);
+  const hasLeadView = rolePermList.includes(PERMISSIONS.LEAD_VIEW) || rolePermList.includes('leads.view');
+  const hasLeadActions = rolePermList.some((codename) =>
     [
       PERMISSIONS.LEAD_CREATE,
       PERMISSIONS.LEAD_EDIT,
       PERMISSIONS.LEAD_ASSIGN,
       PERMISSIONS.LEAD_CONVERT,
-    ].includes(perm?.codename)
+      'leads.create',
+      'leads.update',
+      'leads.assign',
+      'leads.convert',
+    ].includes(codename)
   );
 
   if (lower === 'lead' || (hasLeadView && hasLeadActions)) {
@@ -325,7 +379,28 @@ const RolesPermissions = ({ branchId }) => {
           getBranches(),
         ]);
         const roleRows = normalizeListResponse(rolesRes);
-        const permissionRows = normalizeListResponse(permsRes);
+        const rawPerms = normalizeListResponse(permsRes);
+
+        // Build strictly the 97 canonical settings permissions catalog for the Settings page
+        const backendMap = new Map();
+        rawPerms.forEach((p) => {
+          const code = typeof p === 'string' ? p : (p?.codename || p?.permission_key);
+          if (code) backendMap.set(code, p);
+        });
+
+        const permissionRows = SETTINGS_PERMISSIONS_LIST.map((code, idx) => {
+          const backendItem = backendMap.get(code);
+          const canonical = FEATURE_PERMISSION_CATALOG[code] || {};
+          return normalizePermissionRow({
+            id: backendItem?.id ?? (idx + 1),
+            codename: code,
+            permission_key: code,
+            name: canonical.label || backendItem?.name || code,
+            label: canonical.label || backendItem?.name || code,
+            module: canonical.module || 'Other',
+            action: canonical.action,
+          }, idx);
+        });
         const branchRows = filterAccessibleBranches(user, normalizeListResponse(branchesRes));
         setRoles(roleRows);
         setPermissions(permissionRows);
@@ -339,7 +414,7 @@ const RolesPermissions = ({ branchId }) => {
         if (roleRows.length > 0) {
           const nextRole = roleRows[0];
           setSelectedRole(nextRole.id);
-          setRolePerms(nextRole.permissions_details?.map((p) => p.codename) || []);
+          setRolePerms(extractRolePerms(nextRole));
         } else {
           setSelectedRole(null);
           setRolePerms([]);
@@ -376,29 +451,44 @@ const RolesPermissions = ({ branchId }) => {
     }
     setIsLoadingSaving(true);
     try {
-      const permIds = permissions.filter(p => rolePerms.includes(p.codename)).map(p => p.id);
-      const response = await updateRole(selectedRoleId, { permissions: permIds });
-      setRoles((prev) => prev.map(r => r.id === selectedRoleId ? response : r));
+      const permIds = permissions
+        .filter(p => rolePerms.includes(p.codename) || rolePerms.includes(p.permission_key))
+        .map(p => p.id);
+      const response = await updateRole(selectedRoleId, {
+        permissions: permIds,
+        permission_keys: rolePerms,
+        codenames: rolePerms,
+      });
+      setRoles((prev) => prev.map(r => r.id === selectedRoleId ? {
+        ...r,
+        ...(response || {}),
+        permissions: rolePerms,
+        permissions_details: permissions.filter(p => rolePerms.includes(p.codename)),
+      } : r));
       setMessage({ type: 'success', text: 'Changes updated!' });
+      showToast('Permissions updated successfully.', 'success');
       setTimeout(() => setMessage({ type: '', text: '' }), 3000);
-    } catch (err) { setMessage({ type: 'error', text: 'Error syncing.' }); }
-    finally { setIsLoadingSaving(false); }
+    } catch (err) {
+      console.error(err);
+      setMessage({ type: 'error', text: 'Error syncing.' });
+      showToast('Error syncing permissions.', 'error');
+    } finally {
+      setIsLoadingSaving(false);
+    }
   };
 
   const moduleGroups = useMemo(() => groupPermissionsByModule(permissions, permSearch), [permissions, permSearch]);
   const currentRole = roles.find(r => r.id === selectedRoleId);
   const currentRoleLeadPerms = useMemo(
-    () => (Array.isArray(currentRole?.permissions_details) ? currentRole.permissions_details : [])
-      .map((perm) => perm?.codename)
-      .filter((codename) => LEAD_ACTION_CODENAMES.has(codename)),
+    () => extractRolePerms(currentRole).filter((codename) => LEAD_ACTION_CODENAMES.has(codename)),
     [currentRole]
   );
   const hasLeadView = useMemo(
-    () => currentRoleLeadPerms.includes(PERMISSIONS.LEAD_VIEW),
+    () => currentRoleLeadPerms.includes(PERMISSIONS.LEAD_VIEW) || currentRoleLeadPerms.includes('leads.view'),
     [currentRoleLeadPerms]
   );
   const hasLeadActionsWithoutView = useMemo(
-    () => currentRoleLeadPerms.some((codename) => codename !== PERMISSIONS.LEAD_VIEW) && !hasLeadView,
+    () => currentRoleLeadPerms.some((codename) => codename !== PERMISSIONS.LEAD_VIEW && codename !== 'leads.view') && !hasLeadView,
     [currentRoleLeadPerms, hasLeadView]
   );
   const branchNameById = useMemo(
@@ -496,7 +586,7 @@ const RolesPermissions = ({ branchId }) => {
           <div className="p-4 space-y-3 overflow-y-auto max-h-[calc(100vh-200px)] bg-subtle/50">
             {moduleGroups.map((group) => {
               const allCodenames = group.all.map(p => p.codename);
-              const selectedCount = group.all.filter(p => rolePerms.includes(p.codename)).length;
+              const selectedCount = group.all.filter(p => rolePerms.includes(p.codename) || rolePerms.includes('*')).length;
               const isAllSelected = selectedCount === group.all.length && group.all.length > 0;
 
               return (
@@ -521,7 +611,7 @@ const RolesPermissions = ({ branchId }) => {
                         <PermissionPill
                           key={perm.codename}
                           label={perm.name || `${ACTION_LABEL[action]}: ${perm.codename}`}
-                          isGranted={rolePerms.includes(perm.codename)}
+                          isGranted={rolePerms.includes('*') || rolePerms.includes(perm.codename)}
                           onToggle={() => handleTogglePerm(perm.codename)}
                           disabled={currentRole?.is_system_role}
                         />
@@ -581,7 +671,7 @@ const RolesPermissions = ({ branchId }) => {
                 tabIndex={0}
                 onClick={() => { 
                   setSelectedRole(role.id); 
-                  setRolePerms(role.permissions_details?.map(p => p.codename) || []);
+                  setRolePerms(extractRolePerms(role));
                   setIsRolesOpen(false);
                 }}
                 className={`w-full text-left p-4 rounded-xl transition-all border relative overflow-hidden group cursor-pointer min-h-[88px] ${
@@ -675,7 +765,7 @@ const RolesPermissions = ({ branchId }) => {
               setRoles(Array.isArray(rolesRes) ? rolesRes : rolesRes?.results || []);
               if (res?.id) {
                 setSelectedRole(res.id);
-                setRolePerms(res.permissions_details?.map(p => p.codename) || []);
+                setRolePerms(extractRolePerms(res));
               }
               setShowRoleModal(false);
               setRoleDraft(null);
@@ -706,7 +796,7 @@ const RolesPermissions = ({ branchId }) => {
               setRoles(rolesArray);
               const nextRole = rolesArray[0];
               setSelectedRole(nextRole?.id || null);
-              setRolePerms(nextRole?.permissions_details?.map(p => p.codename) || []);
+              setRolePerms(extractRolePerms(nextRole));
               setShowDeleteConfirm(false);
               setRoleToDelete(null);
               setIsRolesOpen(false); 

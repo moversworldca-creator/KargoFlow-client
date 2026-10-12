@@ -55,12 +55,34 @@ export const AuthProvider = ({ children }) => {
       if (isAuthenticated) {
         try {
           const userData = await authService.me();
+          const cachedUser = (() => {
+            try {
+              const u = localStorage.getItem('user');
+              return u ? JSON.parse(u) : null;
+            } catch {
+              return null;
+            }
+          })();
+
+          const baseUser = (userData && userData.user && typeof userData.user === 'object' && (userData.user.id || userData.user.email))
+            ? { ...cachedUser, ...userData.user, ...userData }
+            : (userData && (userData.id || userData.email || (Array.isArray(userData.permissions) && userData.permissions.length)))
+              ? { ...cachedUser, ...userData }
+              : (cachedUser || null);
+
+          if (!baseUser) {
+            throw new Error('No user data returned');
+          }
+
           const storedActiveCompany = readStoredActiveCompany();
-          setUser({
-            ...userData,
-            company: userData?.active_company || userData?.active_company_details || userData?.company_details || storedActiveCompany || userData?.user?.company || null,
-          });
-          activeCompanyIdRef.current = resolveCompanyId(userData?.active_company || userData?.active_company_details || userData?.company_details || storedActiveCompany || userData?.user?.company);
+          const activeComp = baseUser?.active_company || baseUser?.active_company_details || baseUser?.company_details || storedActiveCompany || baseUser?.company || null;
+          const mergedUser = {
+            ...baseUser,
+            company: activeComp,
+            active_company: activeComp,
+          };
+          setUser(mergedUser);
+          activeCompanyIdRef.current = resolveCompanyId(activeComp);
         } catch (error) {
           console.warn("Auth initialization backend check failed, using stored or demo session:", error);
           const cachedUser = (() => {
@@ -168,16 +190,65 @@ export const AuthProvider = ({ children }) => {
   };
 
   const permissionSet = useMemo(() => {
-    const rows = Array.isArray(user?.permissions) ? user.permissions : [];
-    return new Set(rows.filter(Boolean).map(normalizePermissionName));
+    const set = new Set();
+    const addPerm = (item) => {
+      if (!item) return;
+      const codename = typeof item === 'string' ? item : (item.codename || item.permission_key || item.name || '');
+      if (codename) {
+        set.add(codename);
+        const norm = normalizePermissionName(codename);
+        if (norm) set.add(norm);
+      }
+    };
+
+    const sources = [
+      user?.permissions,
+      user?.permissions_details,
+      user?.user_permissions,
+      user?.user?.permissions,
+      user?.user?.permissions_details,
+      user?.user?.user_permissions,
+    ];
+    sources.forEach((src) => {
+      if (Array.isArray(src)) {
+        src.forEach(addPerm);
+      }
+    });
+
+    if (Array.isArray(user?.role_details)) {
+      user.role_details.forEach((r) => {
+        const rPerms = r?.permissions || r?.permissions_details || [];
+        (Array.isArray(rPerms) ? rPerms : []).forEach(addPerm);
+      });
+    }
+
+    if (Array.isArray(user?.roles)) {
+      user.roles.forEach((r) => {
+        if (typeof r === 'object' && r !== null) {
+          const rPerms = r?.permissions || r?.permissions_details || [];
+          (Array.isArray(rPerms) ? rPerms : []).forEach(addPerm);
+        }
+      });
+    }
+
+    return set;
   }, [user]);
 
-  const permissionContext = useMemo(() => ({
-    permissions: permissionSet,
-    isSuperuser: Boolean(user?.is_superuser),
-    isSystemAdmin: Boolean(user?.is_system_admin),
-    isCompanyAdmin: permissionSet.has('crm.admin'),
-  }), [permissionSet, user?.is_superuser, user?.is_system_admin]);
+  const permissionContext = useMemo(() => {
+    const isSuperuser = Boolean(user?.is_superuser || user?.user?.is_superuser) || permissionSet.has('*');
+    const isSystemAdmin = Boolean(user?.is_system_admin || user?.user?.is_system_admin);
+    const isCompanyAdmin = Boolean(user?.is_company_owner || user?.user?.is_company_owner || user?.is_company_admin || user?.user?.is_company_admin)
+      || permissionSet.has('crm.admin')
+      || permissionSet.has('settings.manage')
+      || permissionSet.has('*');
+
+    return {
+      permissions: permissionSet,
+      isSuperuser,
+      isSystemAdmin,
+      isCompanyAdmin,
+    };
+  }, [permissionSet, user]);
 
   const hasRole = (roleNames) => {
     if (!user || !user.role_details) return false;

@@ -5,7 +5,7 @@ import heroTruckBg from '../../../assets/hero_truck_bg.png';
 
 
 export default function LoginPage({ onLogin }) {
-  const [email, setEmail] = useState('admin@fastmovers.com');
+  const [email, setEmail] = useState('admin@tent.com');
   const [password, setPassword] = useState('password123');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
@@ -62,7 +62,7 @@ export default function LoginPage({ onLogin }) {
               <label className="text-[10px] font-bold text-[#1d2939] uppercase tracking-wider pl-1">Work Email</label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-[#98A2B3]" size={14} strokeWidth={1.5} />
-                <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@fastmovers.com" autoComplete="email" required className="h-[44px] w-full rounded-[10px] border border-[#FDE68A] bg-[#FFFBEB] pl-9 pr-3 text-[13px] font-medium text-[#1d2939] outline-none transition-all placeholder:text-[#98A2B3] focus:border-[#F59E0B] focus:ring-[3px] focus:ring-[#F59E0B]/20" />
+                <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@tent.com" autoComplete="email" required className="h-[44px] w-full rounded-[10px] border border-[#FDE68A] bg-[#FFFBEB] pl-9 pr-3 text-[13px] font-medium text-[#1d2939] outline-none transition-all placeholder:text-[#98A2B3] focus:border-[#F59E0B] focus:ring-[3px] focus:ring-[#F59E0B]/20" />
               </div>
             </div>
 
@@ -94,7 +94,7 @@ export default function LoginPage({ onLogin }) {
 
             <button
               type="button"
-              onClick={() => onLogin('admin@fastmovers.com', 'demo')}
+              onClick={() => onLogin('admin@tent.com', 'password123')}
               className="mt-2 flex h-[38px] w-full items-center justify-center gap-2 rounded-[10px] border border-amber-300 bg-amber-50 text-[13px] font-semibold text-amber-800 transition-all hover:bg-amber-100 cursor-pointer"
             >
               Test Template Without Backend (Demo Mode)

@@ -6,7 +6,7 @@ import API from '../../../services/api';
 
 const navigate = vi.fn();
 const authUser = vi.hoisted(() => ({ id: 1, is_superuser: true }));
-const permissions = vi.hoisted(() => ({ canAll: () => true }));
+const permissions = vi.hoisted(() => ({ canAll: () => true, canAny: () => true }));
 const routeState = vi.hoisted(() => ({ params: {} }));
 const estimatePortalTemplatesState = vi.hoisted(() => ({ props: null }));
 

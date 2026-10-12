@@ -11,6 +11,7 @@ import {
   getAutomationRuns,
   getAutomationSteps,
   getAutomationWorkflows,
+  getBranches,
 } from '../../../services/api';
 import API from '../../../services/api';
 import { useAuth } from '../../auth/context/AuthContext';
@@ -126,13 +127,23 @@ const Automation = () => {
     { id: 'logs', label: 'Automation Logs', icon: Clock3 },
   ];
 
+  const toList = (res) => {
+    if (Array.isArray(res)) return res;
+    if (Array.isArray(res?.results)) return res.results;
+    if (Array.isArray(res?.data)) return res.data;
+    return [];
+  };
+
   const load = async (branchId = selectedBranchId, scope = activeTab) => {
     setIsLoading(true);
     try {
       const params = {};
       if (scope !== 'notifications' && branchId) params.branch = branchId;
       const res = await getAutomationWorkflows(params);
-      setWorkflows(res?.results || res || []);
+      setWorkflows(toList(res));
+    } catch (err) {
+      console.error('Failed to load workflows:', err);
+      setWorkflows([]);
     } finally {
       setIsLoading(false);
     }
@@ -146,7 +157,10 @@ const Automation = () => {
       if (nextFilters.status) params.status = nextFilters.status;
       if (nextFilters.target_type) params.target_type = nextFilters.target_type;
       const res = await getAutomationRuns(params);
-      setRuns(res?.results || res || []);
+      setRuns(toList(res));
+    } catch (err) {
+      console.error('Failed to load automation runs:', err);
+      setRuns([]);
     } finally {
       setRunsLoading(false);
     }
@@ -155,8 +169,9 @@ const Automation = () => {
   useEffect(() => {
     const fetchBranches = async () => {
       try {
-        const res = await API.general.getBranches();
-        const list = res?.results || res || [];
+        const branchFn = getBranches || API?.general?.getBranches;
+        const res = branchFn ? await branchFn() : [];
+        const list = toList(res);
         setBranches(list);
         const defaultBranch = list.find(b => b.id === user?.branch_id) || list[0];
         if (defaultBranch) {
@@ -167,6 +182,7 @@ const Automation = () => {
         }
       } catch (err) {
         console.error('Failed to load branches:', err);
+        setBranches([]);
         load('', 'notifications');
       }
     };
@@ -187,15 +203,15 @@ const Automation = () => {
   }, [activeTab]);
 
   const filtered = useMemo(() => {
-    let list = workflows;
+    let list = Array.isArray(workflows) ? workflows : [];
     if (activeTab === 'notifications') {
-      list = list.filter(w => w.is_notifications);
+      list = list.filter(w => w?.is_notifications);
     } else if (activeTab === 'rules') {
-      list = list.filter(w => !w.is_notifications);
+      list = list.filter(w => !w?.is_notifications);
     }
     const q = String(search || '').toLowerCase().trim();
     if (!q) return list;
-    return list.filter((w) => String(w.name || '').toLowerCase().includes(q));
+    return list.filter((w) => String(w?.name || '').toLowerCase().includes(q));
   }, [search, workflows, activeTab]);
 
   const notificationGroups = useMemo(() => {
