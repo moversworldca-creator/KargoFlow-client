@@ -398,6 +398,32 @@ export const createTelnyxSMSConfig = (data) => api.post("/integrations/telnyx-sm
 export const updateTelnyxSMSConfig = (id, data) => api.patch(`/integrations/telnyx-sms-configs/${id}/`, data);
 export const testTelnyxSMS = (id, phone) => api.post(`/integrations/telnyx-sms-configs/${id}/test-send-sms/`, { test_phone_number: phone });
 
+// Tenant Communications onboarding APIs
+export const getCommunicationEmailDomains = () => api.get("/tenant/communications/email-domains/");
+export const createCommunicationEmailDomain = (data) => api.post("/tenant/communications/email-domains/", data);
+export const updateCommunicationEmailDomain = (id, data) => api.patch(`/tenant/communications/email-domains/${id}/`, data);
+export const refreshCommunicationEmailDomain = (id) => api.post(`/tenant/communications/email-domains/${id}/refresh/`);
+export const getBranchCommunicationSettings = (branchId) => api.get(`/tenant/communications/branch-settings/${branchId}/`);
+export const createBranchEmailIdentity = (branchId, data) =>
+  api.post(`/tenant/communications/branch-settings/${branchId}/email-identities/`, data);
+export const updateBranchEmailIdentity = (branchId, identityId, data) =>
+  api.patch(`/tenant/communications/branch-settings/${branchId}/email-identities/${identityId}/`, data);
+export const getCommunicationMailboxes = () => api.get("/tenant/communications/mailboxes/");
+export const startMailboxOAuth = (data) => api.post("/tenant/communications/mailboxes/oauth/start/", data);
+export const syncCommunicationMailbox = (id) => api.post(`/tenant/communications/mailboxes/${id}/sync/`);
+export const updateCommunicationMailbox = (id, data) => api.patch(`/tenant/communications/mailboxes/${id}/`, data);
+export const deleteCommunicationMailbox = (id) => api.delete(`/tenant/communications/mailboxes/${id}/`);
+export const getSmsNumbers = (params) => api.get("/tenant/communications/sms-numbers/", { params });
+export const getSmsNumberOrders = () => api.get("/tenant/communications/sms-numbers/orders/");
+export const searchSmsNumbers = (params) => api.get("/tenant/communications/sms-numbers/search/", { params });
+export const quoteSmsNumberOrder = (data) => api.post("/tenant/communications/sms-numbers/orders/", data);
+export const purchaseSmsNumberOrder = (orderId, data) =>
+  api.post(`/tenant/communications/sms-numbers/orders/${orderId}/purchase/`, data);
+export const refreshSmsNumberOrder = (orderId) => api.get(`/tenant/communications/sms-numbers/orders/${orderId}/`);
+export const assignSmsNumber = (id, data) => api.post(`/tenant/communications/sms-numbers/${id}/assign/`, data);
+export const unassignSmsNumber = (id) => api.post(`/tenant/communications/sms-numbers/${id}/unassign/`);
+export const releaseSmsNumber = (id) => api.post(`/tenant/communications/sms-numbers/${id}/release/`);
+
 export const getPaymentGateways = (params) => api.get("/integrations/payment-gateways/", { params });
 export const createPaymentGateway = (data) => api.post("/integrations/payment-gateways/", data);
 export const updatePaymentGateway = (id, data) => api.patch(`/integrations/payment-gateways/${id}/`, data);

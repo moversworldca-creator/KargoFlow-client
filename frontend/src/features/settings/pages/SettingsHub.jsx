@@ -17,6 +17,7 @@ import {
   ListChecks,
   Mail,
   MapPin,
+  MessageSquare,
   PackageOpen,
   Plug,
   Search,
@@ -39,6 +40,7 @@ import BranchSettings from "../components/BranchSettings";
 import AuditLogs from "../components/AuditLogs";
 import CatalogPackageBuilder from "../components/CatalogPackageBuilder";
 import CommunicationTemplates from "../components/CommunicationTemplates";
+import CommunicationSetup from "../components/CommunicationSetup";
 import CompanySettings from "../components/CompanySettings";
 import CrewDirectory from "../components/CrewDirectory";
 import CustomerPortalSettings from "../components/CustomerPortalSettings";
@@ -198,6 +200,7 @@ const SETTINGS_GROUPS = [
     tabs: [
       { id: "gateways", label: "Payment Gateways", description: "Stripe and payment providers.", icon: CreditCard, render: (branchId) => <IntegrationSettings branchId={branchId} view="gateways" /> },
       { id: "delivery", label: "Email Delivery", description: "Email and SMS delivery providers.", icon: Mail, render: (branchId) => <IntegrationSettings branchId={branchId} view="delivery" /> },
+      { id: "communication-setup", label: "Email & SMS Setup", description: "Sending domains, branch senders, Telnyx numbers, and reply mailboxes.", icon: MessageSquare, render: (branchId) => <CommunicationSetup branchId={Number(branchId) || null} /> },
       { id: "webhooks", label: "API & Webhooks", description: "Connected APIs and outbound events.", icon: Webhook, render: (branchId) => <IntegrationSettings branchId={branchId} view="webhooks" /> },
       { id: "diagnostics", label: "System Diagnostics", description: "Service status and diagnostics.", icon: Activity, render: (branchId) => <IntegrationSettings branchId={branchId} view="diagnostics" /> },
     ],
@@ -229,6 +232,7 @@ const LEGACY_ROUTES = {
   "customer-portals": ["portals", "customer-portal"],
   "document-templates": ["templates", "documents"],
   integrations: ["system", "gateways"],
+  communications: ["system", "communication-setup"],
 };
 
 function fuzzyMatch(query, value) {
