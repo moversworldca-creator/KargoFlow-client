@@ -19,10 +19,18 @@ export default function LoginPage({ onLogin }) {
     try {
       await onLogin(email, password);
     } catch (err) {
+      const status = err?.response?.status;
+      const code = err?.response?.data?.error;
       setError(
-        err?.response?.data?.detail || 
-        err?.response?.data?.non_field_errors?.[0] || 
-        'An error occurred during authentication. Please check your credentials.'
+        code === 'tenant_not_active'
+          ? 'Your company account is not active yet. Please contact KargoFlow support or your account administrator to have it activated.'
+          : code === 'invalid_credentials' || status === 401
+            ? 'The email address or password is incorrect.'
+            : code === 'too_many_attempts' || status === 429
+              ? 'Too many sign-in attempts. Please wait a few minutes and try again.'
+              : err?.response?.data?.detail ||
+                err?.response?.data?.non_field_errors?.[0] ||
+                'An error occurred during authentication. Please check your credentials.'
       );
     } finally {
       setIsLoading(false);
