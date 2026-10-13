@@ -51,6 +51,7 @@ export const createBranch = (data) => api.post("/branches/", data);
 export const updateBranch = (id, data) => api.patch(`/branches/${id}/`, data);
 export const deleteBranch = (id) => api.delete(`/branches/${id}/`);
 export const getCompany = (id) => api.get(`/companies/${id}/`);
+export const getTenantCompany = () => api.get('/tenant/companies/');
 export const getCompanies = (params) => api.get("/companies/", { params });
 export const createCompany = (data) => api.post("/companies/", data);
 export const onboardCompany = (data) => api.post("/companies/onboard/", data);

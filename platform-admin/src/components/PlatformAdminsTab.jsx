@@ -184,8 +184,8 @@ export default function PlatformAdminsTab({
   // Invite / Create handler
   const handleInviteSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.name.trim() || !formData.email.trim()) {
-      showToast('Name and email are required.', 'warning');
+    if (!formData.name.trim() || !formData.email.trim() || !formData.password) {
+      showToast('Name, email, and temporary password are required.', 'warning');
       return;
     }
 

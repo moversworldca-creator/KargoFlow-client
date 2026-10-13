@@ -14,7 +14,29 @@ const normalizePermissionName = (permission) => {
   return permission;
 };
 
+const consumeSupportConsoleHandoff = () => {
+  if (typeof window === 'undefined' || !window.location.hash) return null;
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  const token = params.get('support_token');
+  if (!token) return null;
+
+  const context = {
+    tenantId: params.get('tenant_id'),
+    tenantName: params.get('tenant_name') || 'Tenant workspace',
+    accessMode: params.get('access_mode') || 'read',
+    expiresAt: params.get('expires_at'),
+  };
+  localStorage.setItem('access_token', token);
+  localStorage.removeItem('refresh_token');
+  localStorage.setItem('support_console_context', JSON.stringify(context));
+  localStorage.setItem('active_company_id', context.tenantId || '');
+  localStorage.setItem('isAuthenticated', 'true');
+  window.history.replaceState(null, document.title, `${window.location.pathname}${window.location.search}`);
+  return context;
+};
+
 export const AuthProvider = ({ children }) => {
+  const [supportConsoleContext] = useState(() => consumeSupportConsoleHandoff());
   const [user, setUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     if (typeof window !== 'undefined' && localStorage.getItem('access_token') === null && sessionStorage.getItem('explicit_logout') !== 'true') {
@@ -52,6 +74,20 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     const initAuth = async () => {
+      if (supportConsoleContext) {
+        const company = { id: Number(supportConsoleContext.tenantId), name: supportConsoleContext.tenantName };
+        setUser({
+          id: 'platform-support',
+          email: 'platform-support-session',
+          is_active: true,
+          is_platform_support_session: true,
+          company,
+          permissions: [],
+        });
+        activeCompanyIdRef.current = company.id;
+        setIsLoading(false);
+        return;
+      }
       if (isAuthenticated) {
         try {
           const userData = await authService.me();
@@ -91,7 +127,25 @@ export const AuthProvider = ({ children }) => {
     };
 
     initAuth();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, supportConsoleContext]);
+
+  useEffect(() => {
+    if (!supportConsoleContext?.expiresAt) return undefined;
+    const delay = new Date(supportConsoleContext.expiresAt).getTime() - Date.now();
+    if (delay <= 0) {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('support_console_context');
+      setIsAuthenticated(false);
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('support_console_context');
+      setIsAuthenticated(false);
+      setUser(null);
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [supportConsoleContext]);
 
   useEffect(() => {
     const nextCompanyId = resolveCompanyId(user?.company);

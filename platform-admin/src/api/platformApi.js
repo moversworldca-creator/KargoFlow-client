@@ -69,55 +69,103 @@ export const platformApi = {
   getSubscriptions: async (params = {}) => {
     return platformAxios.get('/core/subscriptions/', { params });
   },
-  transitionSubscription: async (id, data = {}) => {
-    const newStatus = data.new_status || data.next_status || data.status;
-    return platformAxios.post('/core/subscriptions/transition/', {
-      subscription_id: Number(id),
-      new_status: newStatus,
-      reason: data.reason || 'Status transition',
-      fields: data.fields,
-      metadata: data.metadata,
-      ...data,
-      new_status: newStatus,
-    });
+  getSubscriptionHistory: async (id) => {
+    return platformAxios.get(`/core/subscriptions/${id}/history/`);
   },
-  changeSubscriptionPlan: async (companyOrSubId, data = {}) => {
-    return platformAxios.post(`/core/subscriptions/${companyOrSubId}/change-plan/`, {
-      plan_id: Number(data.new_plan_id || data.plan_id),
-      effective: data.effective || data.effective_timing || 'immediate',
-      reason: data.reason || 'Commercial plan change',
+  transitionSubscription: async (id, data = {}) => {
+    const { next_status, new_status, status, reason, grace_period_days, fields = {}, metadata, ...rest } = data;
+    const finalNewStatus = new_status || next_status || status;
+    const transitionFields = { ...fields };
+    if (grace_period_days && !transitionFields.grace_period_ends_at) {
+      transitionFields.grace_period_ends_at = new Date(Date.now() + Number(grace_period_days) * 86400000).toISOString();
+    }
+    const payload = {
+      subscription_id: id,
+      new_status: finalNewStatus,
+      reason: reason || '',
+      ...rest,
+    };
+    if (metadata) {
+      payload.metadata = metadata;
+    }
+    if (Object.keys(transitionFields).length > 0) {
+      payload.fields = transitionFields;
+    }
+    return platformAxios.post('/core/subscriptions/transition/', payload);
+  },
+  changeSubscriptionPlan: async (id, data = {}) => {
+    const planId = data.new_plan_id || data.plan_id;
+    const companyId = data.company_id || data.tenant_id;
+    const effective = data.effective_timing || data.effective || 'immediate';
+    const reason = data.reason || 'Commercial plan change';
+
+    if (companyId) {
+      try {
+        return await platformAxios.post(`/core/subscriptions/${companyId}/change-plan/`, {
+          plan_id: Number(planId),
+          effective,
+          reason,
+        });
+      } catch (err) {
+        if (err?.response?.status !== 400 && err?.response?.status !== 404) {
+          throw err;
+        }
+      }
+    }
+
+    return platformAxios.post('/core/subscriptions/transition/', {
+      subscription_id: id,
+      new_status: data.current_status || 'active',
+      reason,
+      fields: {
+        plan_id: Number(planId),
+      },
     });
   },
   cancelSubscription: async (id, data = {}) => {
+    const companyId = data.company_id || data.tenant_id;
+    const reason = data.reason || 'Subscription cancelled';
+    if (data.cancel_mode === 'period_end' && companyId) {
+      try {
+        return await platformAxios.post(`/core/subscriptions/${companyId}/cancel-at-period-end/`, {
+          reason,
+        });
+      } catch (err) {
+        // Fall back to transition
+      }
+    }
     return platformAxios.post('/core/subscriptions/transition/', {
-      subscription_id: Number(id),
+      subscription_id: id,
       new_status: 'cancelled',
-      reason: data.reason || 'Subscription cancelled',
-      ...data,
-      new_status: 'cancelled',
+      reason,
+      ...(data.cancel_mode === 'period_end' ? { fields: { cancel_at_period_end: true } } : {}),
     });
   },
   reactivateSubscription: async (id, data = {}) => {
     return platformAxios.post('/core/subscriptions/transition/', {
-      subscription_id: Number(id),
+      subscription_id: id,
       new_status: 'active',
       reason: data.reason || 'Subscription reactivated',
-      ...data,
-      new_status: 'active',
     });
   },
   updateSubscriptionTrial: async (id, data = {}) => {
-    return platformAxios.post('/core/subscriptions/trial/', {
-      company_id: data.company_id || data.tenant_id,
-      plan_id: data.plan_id,
-      trial_ends_at: data.trial_ends_at,
-      ...data,
+    return platformAxios.post('/core/subscriptions/transition/', {
+      subscription_id: id,
+      new_status: data.current_status || 'trialing',
+      reason: data.reason || 'Admin trial adjustment',
+      fields: {
+        trial_ends_at: data.trial_ends_at,
+      },
     });
   },
-  updateSubscriptionGracePeriod: async (companyOrSubId, data = {}) => {
-    return platformAxios.post(`/core/subscriptions/${companyOrSubId}/grace/`, {
-      grace_days: Number(data.grace_days || data.grace_period_days || 7),
-      reason: data.reason || 'Grace period adjusted',
+  updateSubscriptionGracePeriod: async (id, data = {}) => {
+    return platformAxios.post('/core/subscriptions/transition/', {
+      subscription_id: id,
+      new_status: data.current_status || 'past_due',
+      reason: data.reason || 'Admin grace adjustment',
+      fields: {
+        grace_period_ends_at: data.grace_period_ends_at,
+      },
     });
   },
 
@@ -149,6 +197,9 @@ export const platformApi = {
   },
   endSupportSession: async (sessionId) => {
     return platformAxios.post(`/core/tenant-sessions/${sessionId}/end/`);
+  },
+  createTenantConsoleToken: async (sessionId) => {
+    return platformAxios.post(`/core/tenant-sessions/${sessionId}/console-token/`);
   },
   checkTenantAccess: async (tenantCompanyId, requestedAccessMode = 'read') => {
     return platformAxios.post('/core/tenant-access/check/', {
