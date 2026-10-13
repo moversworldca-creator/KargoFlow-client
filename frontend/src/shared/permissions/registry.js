@@ -329,7 +329,22 @@ const normalizeRequired = (required) => {
   return Array.isArray(required) ? required.filter(Boolean) : [required];
 };
 
-const PERMISSION_ALIASES = {};
+// Backend permission names for the tenant navigation. API authorization remains server-side.
+const PERMISSION_ALIASES = {
+  'crm.leads.view': ['leads.view'],
+  'crm.leads.create': ['leads.create'],
+  'crm.leads.edit': ['leads.edit'],
+  'crm.leads.assign': ['leads.assign'],
+  'crm.leads.convert': ['leads.convert'],
+  'crm.opportunities.view': ['opportunities.view'],
+  'crm.opportunities.create': ['opportunities.create'],
+  'crm.opportunities.edit': ['opportunities.edit'],
+  'crm.opportunities.book': ['opportunities.book'],
+  'crm.settings.users.view': ['users.view'],
+  'crm.settings.users.manage': ['users.manage'],
+  'crm.settings.roles.view': ['rbac_roles.view'],
+  'crm.audit.view': ['audit_logs.view'],
+};
 
 const buildSiblingCandidates = (perm) => {
   if (!perm || typeof perm !== 'string') return [];

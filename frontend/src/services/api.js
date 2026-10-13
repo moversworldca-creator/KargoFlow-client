@@ -17,12 +17,10 @@ const normalizeFileTargetType = (value) => {
 };
 
 // Auth APIs
-export const login = (credentials) => api.post("/login/", credentials);
-export const switchCompany = (data) => api.post("/switch-company/", data);
-export const refreshToken = (token) => api.post("/token/refresh/", { refresh: token });
-export const me = () => api.get("/users/me/");
+export const login = (credentials) => api.post("/auth/login/", { ...credentials, identity_type: 'tenant' }, { skipAuth: true });
+export const me = () => api.get("/tenant/users/me/");
 export const updateMe = (data) => api.patch("/users/me/", data);
-export const changePassword = (data) => api.post("/users/change-password/", data);
+export const changePassword = (data) => api.post("/auth/password-change/", data);
 
 // User APIs
 export const getUsers = (params) => api.get("/users/", { params });
@@ -45,13 +43,13 @@ export const getPermissions = () => api.get("/permissions/");
 // Core APIs
 export const getAuditLogs = (params = {}) => api.get("/tenant/audit-logs/", { params });
 export const universalSearch = (params) => api.get("/search/", { params });
-export const getBranches = () => api.get("/branches/");
+export const getBranches = () => api.get("/tenant/branches/");
 export const getBranchLookups = (params = {limit: 50}) => api.get("/lookups/branches/", { params });
 export const createBranch = (data) => api.post("/branches/", data);
 export const updateBranch = (id, data) => api.patch(`/branches/${id}/`, data);
 export const deleteBranch = (id) => api.delete(`/branches/${id}/`);
-export const getCompany = (id) => api.get(`/companies/${id}/`);
-export const getCompanies = (params) => api.get("/companies/", { params });
+export const getCompany = (id) => api.get(`/tenant/companies/${id}/`);
+export const getCompanies = (params) => api.get("/tenant/companies/", { params });
 export const createCompany = (data) => api.post("/companies/", data);
 export const onboardCompany = (data) => api.post("/companies/onboard/", data);
 export const getCompanyLookups = (params) => api.get("/lookups/companies/", { params });
@@ -65,11 +63,15 @@ export const uploadBranchLogo = (id, file) => {
 export const removeBranchLogo = (id) => api.post(`/branches/${id}/remove-logo/`);
 
 // Notifications APIs
-export const getNotifications = (params) => api.get("/notifications/", { params });
-export const getUnreadNotificationsCount = () => api.get("/notifications/unread-count/");
-export const markNotificationRead = (id) => api.post(`/notifications/${id}/mark-read/`);
-export const markNotificationUnread = (id) => api.post(`/notifications/${id}/mark-unread/`);
-export const markAllNotificationsRead = () => api.post("/notifications/mark-all-read/");
+const notificationPayload = (record) => record?.data ?? record;
+export const getNotifications = async (params) => {
+  const records = await api.get("/tenant/notifications/", { params });
+  return records.map(notificationPayload);
+};
+export const getUnreadNotificationsCount = () => api.get("/tenant/notifications/unread-count/");
+export const markNotificationRead = async (id) => notificationPayload(await api.post(`/tenant/notifications/${id}/mark-read/`));
+export const markNotificationUnread = async (id) => notificationPayload(await api.post(`/tenant/notifications/${id}/mark-unread/`));
+export const markAllNotificationsRead = () => api.post("/tenant/notifications/mark-all-read/");
 
 // Lead APIs
 export const getLeads = (params) => api.get("/leads/leads/", { params });
@@ -497,8 +499,6 @@ const API = {
 
   auth: {
     login,
-    switchCompany,
-    refreshToken,
     me,
     getUsers,
     getLookupUsers,

@@ -5,6 +5,8 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import { setupPlatformRoutes } from './serverPlatformRoutes.js';
+import http from 'node:http';
+import https from 'node:https';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,6 +15,27 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
 app.use(cors());
+// Tenant APIs must reach the real backend before any mock routes or body parsers.
+app.use('/api', (req, res, next) => {
+  if (req.path.startsWith('/platform/')) return next();
+  const target = new URL(process.env.BACKEND_URL || 'http://127.0.0.1:8000');
+  const transport = target.protocol === 'https:' ? https : http;
+  const upstream = transport.request({
+    protocol: target.protocol, hostname: target.hostname, port: target.port,
+    path: req.originalUrl, method: req.method,
+    headers: { ...req.headers, host: target.host },
+  }, (response) => {
+    res.writeHead(response.statusCode, response.headers);
+    response.pipe(res);
+  });
+  upstream.setTimeout(30000, () => upstream.destroy(new Error('Backend timeout')));
+  upstream.on('error', () => {
+    if (!res.headersSent) res.status(502).json({ detail: 'Tenant backend is unavailable.' });
+    else res.destroy();
+  });
+  req.on('aborted', () => upstream.destroy());
+  req.pipe(upstream);
+});
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -1393,58 +1416,6 @@ app.get('/health/', (_req, res) => res.json({ status: 'ok' }));
 app.get('/api/health/', (_req, res) => res.json({ status: 'ok' }));
 
 // Auth
-app.post('/api/login/', (req, res) => {
-  const email = String(req.body?.email || '').trim().toLowerCase();
-  const matchedUser = db.users.find((u) => u.email.toLowerCase() === email) || db.users[0];
-  const userPayload = buildUserPayload(matchedUser);
-  res.json({
-    access: 'demo-jwt-access-token',
-    refresh: 'demo-jwt-refresh-token',
-    user: userPayload,
-    active_company: db.companies[0],
-    active_company_details: db.companies[0],
-    active_company_id: db.companies[0].id,
-    company: db.companies[0],
-  });
-});
-
-app.post('/api/switch-company/', (req, res) => {
-  const userPayload = buildUserPayload(db.users[0]);
-  res.json({
-    access: 'demo-jwt-access-token',
-    refresh: 'demo-jwt-refresh-token',
-    user: userPayload,
-    active_company: db.companies[0],
-    active_company_id: db.companies[0].id,
-    company: db.companies[0],
-  });
-});
-
-app.post('/api/token/refresh/', (_req, res) => {
-  res.json({ access: 'demo-jwt-access-token' });
-});
-
-app.get('/api/users/me/', (_req, res) => {
-  const userPayload = buildUserPayload(db.users[0]);
-  res.json({
-    ...userPayload,
-    user: userPayload,
-  });
-});
-
-app.patch('/api/users/me/', (req, res) => {
-  Object.assign(db.users[0], req.body || {});
-  db.users[0].full_name = `${db.users[0].first_name || ''} ${db.users[0].last_name || ''}`.trim();
-  const userPayload = buildUserPayload(db.users[0]);
-  res.json({
-    ...userPayload,
-    user: userPayload,
-  });
-});
-
-app.post('/api/users/change-password/', (_req, res) => {
-  res.json({ detail: 'Password changed successfully.' });
-});
 
 // Permissions
 app.get('/api/permissions/', (_req, res) => {
