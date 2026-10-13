@@ -81,32 +81,33 @@ const StatusPill = ({ state, goodWhen = ['active', 'verified', 'ready', 'connect
 };
 
 const TextInput = ({ label, value, onChange, placeholder, type = 'text', className = '' }) => (
-  <label className={`block space-y-1.5 ${className}`}>
-    <span className="ml-1 text-[10px] font-bold uppercase tracking-widest text-body">{label}</span>
+  <label className={`block space-y-1 ${className}`}>
+    <span className="ml-0.5 text-[10px] font-bold uppercase tracking-widest text-body">{label}</span>
     <input
       type={type}
       value={value ?? ''}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+      className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
     />
   </label>
 );
 
-const SelectField = ({ label, value, onChange, children }) => (
-  <label className="block space-y-1.5">
-    <span className="ml-1 text-[10px] font-bold uppercase tracking-widest text-body">{label}</span>
+const SelectField = ({ label, value, onChange, children, className = '' }) => (
+  <label className={`block space-y-1 ${className}`}>
+    <span className="ml-0.5 text-[10px] font-bold uppercase tracking-widest text-body">{label}</span>
     <select
       value={value ?? ''}
       onChange={(e) => onChange(e.target.value)}
-      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+      className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
     >
       {children}
     </select>
   </label>
 );
 
-const ActionButton = ({ children, onClick, disabled, icon: Icon, type = 'button', variant = 'primary' }) => {
+const ActionButton = ({ children, onClick, disabled, icon: Icon, type = 'button', variant = 'primary', size = 'md', className = '' }) => {
+  const sizeClasses = size === 'sm' ? 'px-2.5 py-1 text-xs' : 'px-3 py-1.5 text-xs';
   const classes = variant === 'ghost'
     ? 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'
     : variant === 'danger'
@@ -117,18 +118,18 @@ const ActionButton = ({ children, onClick, disabled, icon: Icon, type = 'button'
       type={type}
       onClick={onClick}
       disabled={disabled}
-      className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${classes}`}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-lg font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${sizeClasses} ${classes} ${className}`}
     >
-      {Icon && <Icon size={14} />}
+      {Icon && <Icon size={size === 'sm' ? 13 : 14} />}
       {children}
     </button>
   );
 };
 
 const EmptyState = ({ title, message }) => (
-  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center dark:border-slate-700 dark:bg-slate-900/60">
-    <p className="text-sm font-bold text-heading">{title}</p>
-    <p className="mt-1 text-xs text-body">{message}</p>
+  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-center dark:border-slate-700 dark:bg-slate-900/60">
+    <p className="text-xs font-bold text-heading">{title}</p>
+    <p className="mt-0.5 text-[11px] text-body">{message}</p>
   </div>
 );
 
@@ -344,134 +345,159 @@ export default function CommunicationSetup({ branchId = null }) {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 md:flex-row md:items-center md:justify-between">
-        <div>
-          <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-primary">
-            <MessageSquare size={13} /> Tenant Communication Setup
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1.5 border-r border-slate-200 pr-3 dark:border-slate-700">
+            <MessageSquare size={15} className="text-primary" />
+            <span className="text-xs font-bold text-heading dark:text-white">Email & SMS Setup</span>
           </div>
-          <h2 className="mt-2 text-xl font-black text-heading dark:text-white">Email and SMS onboarding</h2>
-          <p className="mt-1 max-w-2xl text-sm text-body">
-            Configure tenant sending domains, branch sender identities, Telnyx numbers, assignments, and reply mailboxes.
-          </p>
+          <div className="flex items-center gap-1 overflow-x-auto">
+            {tabs.map((tab) => {
+              const Icon = tab.icon;
+              const active = activeTab === tab.id;
+              return (
+                <button
+                  type="button"
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-bold transition ${active ? 'bg-primary text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}
+                >
+                  <Icon size={13} />
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
-        <ActionButton onClick={refreshAll} icon={RefreshCw} variant="ghost">Refresh</ActionButton>
-      </div>
-
-      <div className="flex gap-2 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-800 dark:bg-slate-900">
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          const active = activeTab === tab.id;
-          return (
-            <button
-              type="button"
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex min-w-fit items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold transition ${active ? 'bg-primary text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`}
-            >
-              <Icon size={14} />
-              {tab.label}
-            </button>
-          );
-        })}
+        <ActionButton onClick={refreshAll} icon={RefreshCw} variant="ghost" size="sm">Refresh</ActionButton>
       </div>
 
       {activeTab === 'overview' && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1.3fr]">
-          <Card className="space-y-4">
-            <div>
-              <h3 className="text-lg font-black text-heading">Setup readiness</h3>
-              <p className="mt-1 text-xs text-body">{readyCount} of {checklist.length} onboarding steps are complete.</p>
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1.1fr_1.2fr]">
+          <Card className="!p-4 !rounded-xl space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-heading">Setup readiness</h3>
+                <p className="text-[11px] text-body">{readyCount} of {checklist.length} onboarding steps complete.</p>
+              </div>
+              <span className="text-xs font-bold text-primary">{Math.round((readyCount / checklist.length) * 100)}%</span>
             </div>
-            <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+            <div className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
               <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.round((readyCount / checklist.length) * 100)}%` }} />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {checklist.map((item) => (
-                <div key={item.label} className="flex items-start gap-3 rounded-xl border border-slate-100 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
-                  {item.ready ? <CheckCircle2 className="mt-0.5 text-emerald-600" size={17} /> : <AlertCircle className="mt-0.5 text-amber-500" size={17} />}
-                  <div>
-                    <p className="text-sm font-bold text-heading dark:text-white">{item.label}</p>
-                    <p className="text-xs text-body">{item.detail}</p>
+                <div key={item.label} className="flex items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 px-2.5 py-1.5 dark:border-slate-800 dark:bg-slate-950">
+                  {item.ready ? <CheckCircle2 className="text-emerald-600 shrink-0" size={14} /> : <AlertCircle className="text-amber-500 shrink-0" size={14} />}
+                  <div className="min-w-0 flex-1 flex items-center justify-between gap-2">
+                    <p className="text-xs font-bold text-heading dark:text-white truncate">{item.label}</p>
+                    <p className="text-[11px] text-body truncate text-right">{item.detail}</p>
                   </div>
                 </div>
               ))}
             </div>
           </Card>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Card className="space-y-2">
-              <Mail className="text-primary" size={22} />
-              <p className="text-sm font-black text-heading">Default domain</p>
-              <p className="text-xl font-black text-heading dark:text-white">{defaultDomain?.domain_name || 'Not configured'}</p>
-              <StatusPill state={defaultDomain?.verification_state}>{defaultDomain?.verification_state || 'Missing'}</StatusPill>
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+            <Card className="!p-3.5 !rounded-xl">
+              <div className="flex items-start justify-between">
+                <div className="min-w-0 flex-1 pr-2">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-body">Default domain</p>
+                  <p className="mt-1 text-sm font-black text-heading dark:text-white truncate">{defaultDomain?.domain_name || 'Not configured'}</p>
+                  <div className="mt-1.5">
+                    <StatusPill state={defaultDomain?.verification_state}>{defaultDomain?.verification_state || 'Missing'}</StatusPill>
+                  </div>
+                </div>
+                <div className="rounded-lg bg-primary/10 p-2 text-primary shrink-0">
+                  <Mail size={16} />
+                </div>
+              </div>
             </Card>
-            <Card className="space-y-2">
-              <Send className="text-primary" size={22} />
-              <p className="text-sm font-black text-heading">Branch senders</p>
-              <p className="text-xl font-black text-heading dark:text-white">{branchIdentities.length}</p>
-              <p className="text-xs text-body">{branchId ? `Selected branch #${branchId}` : 'No branch selected'}</p>
+            <Card className="!p-3.5 !rounded-xl">
+              <div className="flex items-start justify-between">
+                <div className="min-w-0 flex-1 pr-2">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-body">Branch senders</p>
+                  <p className="mt-1 text-sm font-black text-heading dark:text-white truncate">{branchIdentities.length}</p>
+                  <p className="mt-1 text-[11px] text-body truncate">{branchId ? `Branch #${branchId}` : 'No branch selected'}</p>
+                </div>
+                <div className="rounded-lg bg-primary/10 p-2 text-primary shrink-0">
+                  <Send size={16} />
+                </div>
+              </div>
             </Card>
-            <Card className="space-y-2">
-              <Phone className="text-primary" size={22} />
-              <p className="text-sm font-black text-heading">SMS numbers</p>
-              <p className="text-xl font-black text-heading dark:text-white">{numbers.length}</p>
-              <p className="text-xs text-body">{readyNumbers.length} ready for messaging</p>
+            <Card className="!p-3.5 !rounded-xl">
+              <div className="flex items-start justify-between">
+                <div className="min-w-0 flex-1 pr-2">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-body">SMS numbers</p>
+                  <p className="mt-1 text-sm font-black text-heading dark:text-white truncate">{numbers.length}</p>
+                  <p className="mt-1 text-[11px] text-body truncate">{readyNumbers.length} ready for messaging</p>
+                </div>
+                <div className="rounded-lg bg-primary/10 p-2 text-primary shrink-0">
+                  <Phone size={16} />
+                </div>
+              </div>
             </Card>
-            <Card className="space-y-2">
-              <Inbox className="text-primary" size={22} />
-              <p className="text-sm font-black text-heading">Connected mailboxes</p>
-              <p className="text-xl font-black text-heading dark:text-white">{mailboxes.length}</p>
-              <p className="text-xs text-body">Optional inbound and reply handling</p>
+            <Card className="!p-3.5 !rounded-xl">
+              <div className="flex items-start justify-between">
+                <div className="min-w-0 flex-1 pr-2">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-body">Connected mailboxes</p>
+                  <p className="mt-1 text-sm font-black text-heading dark:text-white truncate">{mailboxes.length}</p>
+                  <p className="mt-1 text-[11px] text-body truncate">Inbound & reply handling</p>
+                </div>
+                <div className="rounded-lg bg-primary/10 p-2 text-primary shrink-0">
+                  <Inbox size={16} />
+                </div>
+              </div>
             </Card>
           </div>
         </div>
       )}
 
       {activeTab === 'domains' && (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.8fr_1.2fr]">
-          <Card>
-            <form onSubmit={addDomain} className="space-y-4">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[300px_1fr]">
+          <Card className="!p-4 !rounded-xl">
+            <form onSubmit={addDomain} className="space-y-3">
               <div>
-                <h3 className="text-lg font-black text-heading">Add Resend sending domain</h3>
-                <p className="mt-1 text-xs text-body">Tenant domains are verified under the platform-managed Resend account.</p>
+                <h3 className="text-sm font-bold text-heading">Add Resend sending domain</h3>
+                <p className="mt-0.5 text-[11px] text-body">Tenant domains are verified under the platform Resend account.</p>
               </div>
               <TextInput label="Domain" value={domainName} onChange={setDomainName} placeholder="example.com" />
-              <ActionButton type="submit" icon={Plus} disabled={savingKey === 'domain'}>{savingKey === 'domain' ? 'Adding...' : 'Add Domain'}</ActionButton>
+              <ActionButton type="submit" icon={Plus} size="sm" disabled={savingKey === 'domain'}>{savingKey === 'domain' ? 'Adding...' : 'Add Domain'}</ActionButton>
             </form>
           </Card>
-          <Card className="space-y-3">
-            <h3 className="text-lg font-black text-heading">Domain inventory</h3>
+          <Card className="!p-4 !rounded-xl space-y-2.5">
+            <h3 className="text-sm font-bold text-heading">Domain inventory</h3>
             {domains.length === 0 ? (
               <EmptyState title="No domains yet" message="Add a domain to generate provider verification requirements." />
             ) : domains.map((domain) => (
-              <div key={domain.id || domain.domain_name} className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
-                <div className="flex flex-wrap items-start justify-between gap-3">
+              <div key={domain.id || domain.domain_name} className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <p className="text-sm font-black text-heading dark:text-white">{domain.domain_name}</p>
-                    <div className="mt-2 flex flex-wrap gap-2">
+                    <p className="text-xs font-black text-heading dark:text-white">{domain.domain_name}</p>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
                       <StatusPill state={domain.verification_state} />
                       {domain.is_default && <StatusPill state="verified">Default</StatusPill>}
                       {domain.sending_enabled && <StatusPill state="active">Sending enabled</StatusPill>}
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <ActionButton onClick={() => refreshDomain(domain.id)} icon={RefreshCw} variant="ghost" disabled={savingKey === `domain-${domain.id}`}>Refresh</ActionButton>
-                    {!domain.is_default && <ActionButton onClick={() => setDefaultDomain(domain)} icon={CheckCircle2} variant="ghost">Set Default</ActionButton>}
+                  <div className="flex flex-wrap gap-1.5">
+                    <ActionButton onClick={() => refreshDomain(domain.id)} icon={RefreshCw} variant="ghost" size="sm" disabled={savingKey === `domain-${domain.id}`}>Refresh</ActionButton>
+                    {!domain.is_default && <ActionButton onClick={() => setDefaultDomain(domain)} icon={CheckCircle2} variant="ghost" size="sm">Set Default</ActionButton>}
                   </div>
                 </div>
                 {Array.isArray(domain.dns_records) && domain.dns_records.length > 0 && (
-                  <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-50 text-[10px] uppercase tracking-widest text-body dark:bg-slate-950">
-                        <tr><th className="px-3 py-2">Type</th><th className="px-3 py-2">Name</th><th className="px-3 py-2">Value</th><th className="px-3 py-2" /></tr>
+                  <div className="mt-2.5 overflow-hidden rounded-md border border-slate-200 dark:border-slate-800">
+                    <table className="w-full text-left text-[11px]">
+                      <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-body dark:bg-slate-950">
+                        <tr><th className="px-2.5 py-1.5">Type</th><th className="px-2.5 py-1.5">Name</th><th className="px-2.5 py-1.5">Value</th><th className="px-2 py-1.5" /></tr>
                       </thead>
                       <tbody>
                         {domain.dns_records.map((record, idx) => (
                           <tr key={`${record.name}-${idx}`} className="border-t border-slate-100 dark:border-slate-800">
-                            <td className="px-3 py-2 font-bold">{record.type}</td>
-                            <td className="px-3 py-2">{record.name}</td>
-                            <td className="max-w-[280px] truncate px-3 py-2 font-mono">{record.value}</td>
-                            <td className="px-3 py-2 text-right"><button type="button" onClick={() => copyValue(record.value)} className="text-primary"><Copy size={14} /></button></td>
+                            <td className="px-2.5 py-1 font-bold">{record.type}</td>
+                            <td className="px-2.5 py-1 font-mono text-[10px]">{record.name}</td>
+                            <td className="max-w-[260px] truncate px-2.5 py-1 font-mono text-[10px]">{record.value}</td>
+                            <td className="px-2 py-1 text-right"><button type="button" onClick={() => copyValue(record.value)} className="text-primary hover:text-primary/80"><Copy size={12} /></button></td>
                           </tr>
                         ))}
                       </tbody>
@@ -485,32 +511,36 @@ export default function CommunicationSetup({ branchId = null }) {
       )}
 
       {activeTab === 'senders' && (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.9fr_1.1fr]">
-          <Card>
-            <form onSubmit={saveIdentity} className="space-y-4">
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1fr_1fr]">
+          <Card className="!p-4 !rounded-xl">
+            <form onSubmit={saveIdentity} className="space-y-3">
               <div>
-                <h3 className="text-lg font-black text-heading">Branch sender identity</h3>
-                <p className="mt-1 text-xs text-body">Sender emails must use a verified domain.</p>
+                <h3 className="text-sm font-bold text-heading">Branch sender identity</h3>
+                <p className="mt-0.5 text-[11px] text-body">Sender emails must use a verified domain.</p>
               </div>
-              {!branchId && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-800">Select a branch from Settings to save sender identities.</div>}
-              <TextInput label="Sender name" value={identityForm.sender_name} onChange={(v) => setIdentityForm({ ...identityForm, sender_name: v })} placeholder="Apex Moving" />
-              <TextInput label="Sender email" value={identityForm.sender_email} onChange={(v) => setIdentityForm({ ...identityForm, sender_email: v })} placeholder="sales@example.com" type="email" />
-              <SelectField label="Reply-to mode" value={identityForm.reply_to_mode} onChange={(v) => setIdentityForm({ ...identityForm, reply_to_mode: v })}>
-                <option value="kargo_inbound">Kargo inbound</option>
-                <option value="external_mailbox">External mailbox</option>
-                <option value="explicit">Explicit reply-to</option>
-                <option value="none">None</option>
-              </SelectField>
-              <TextInput label="Reply-to email" value={identityForm.reply_to_email} onChange={(v) => setIdentityForm({ ...identityForm, reply_to_email: v })} placeholder="replies@example.com" type="email" />
+              {!branchId && <div className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-800">Select a branch from Settings to save sender identities.</div>}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <TextInput label="Sender name" value={identityForm.sender_name} onChange={(v) => setIdentityForm({ ...identityForm, sender_name: v })} placeholder="Apex Moving" />
+                <TextInput label="Sender email" value={identityForm.sender_email} onChange={(v) => setIdentityForm({ ...identityForm, sender_email: v })} placeholder="sales@example.com" type="email" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <SelectField label="Reply-to mode" value={identityForm.reply_to_mode} onChange={(v) => setIdentityForm({ ...identityForm, reply_to_mode: v })}>
+                  <option value="kargo_inbound">Kargo inbound</option>
+                  <option value="external_mailbox">External mailbox</option>
+                  <option value="explicit">Explicit reply-to</option>
+                  <option value="none">None</option>
+                </SelectField>
+                <TextInput label="Reply-to email" value={identityForm.reply_to_email} onChange={(v) => setIdentityForm({ ...identityForm, reply_to_email: v })} placeholder="replies@example.com" type="email" />
+              </div>
               <label className="flex items-center gap-2 text-xs font-bold text-heading">
                 <input type="checkbox" checked={identityForm.is_default_automation_sender} onChange={(e) => setIdentityForm({ ...identityForm, is_default_automation_sender: e.target.checked })} />
                 Default automation sender for this branch
               </label>
-              <ActionButton type="submit" icon={Save} disabled={savingKey === 'identity'}>{identityForm.id ? 'Update Sender' : 'Create Sender'}</ActionButton>
+              <ActionButton type="submit" icon={Save} size="sm" disabled={savingKey === 'identity'}>{identityForm.id ? 'Update Sender' : 'Create Sender'}</ActionButton>
             </form>
           </Card>
-          <Card className="space-y-3">
-            <h3 className="text-lg font-black text-heading">Configured senders</h3>
+          <Card className="!p-4 !rounded-xl space-y-2.5">
+            <h3 className="text-sm font-bold text-heading">Configured senders</h3>
             {branchIdentities.length === 0 ? (
               <EmptyState title="No branch sender configured" message="Create a sender identity after verifying the email domain." />
             ) : branchIdentities.map((identity) => (
@@ -525,13 +555,17 @@ export default function CommunicationSetup({ branchId = null }) {
                   reply_to_email: identity.reply_to_email || '',
                   is_default_automation_sender: identity.is_default_automation_sender !== false,
                 })}
-                className="w-full rounded-xl border border-slate-200 p-4 text-left transition hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-950"
+                className="w-full rounded-lg border border-slate-200 p-2.5 text-left transition hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-950"
               >
-                <p className="text-sm font-black text-heading dark:text-white">{identity.sender_name}</p>
-                <p className="mt-1 text-xs text-body">{identity.sender_email}</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <StatusPill state={identity.state || identity.domain_state} />
-                  {identity.is_default_automation_sender && <StatusPill state="active">Default automation sender</StatusPill>}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-black text-heading dark:text-white">{identity.sender_name}</p>
+                    <p className="text-[11px] text-body">{identity.sender_email}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    <StatusPill state={identity.state || identity.domain_state} />
+                    {identity.is_default_automation_sender && <StatusPill state="active">Default automation sender</StatusPill>}
+                  </div>
                 </div>
               </button>
             ))}
@@ -540,9 +574,9 @@ export default function CommunicationSetup({ branchId = null }) {
       )}
 
       {activeTab === 'numbers' && (
-        <div className="space-y-4">
-          <Card>
-            <form onSubmit={runNumberSearch} className="grid grid-cols-1 gap-3 md:grid-cols-[0.5fr_0.5fr_0.7fr_0.5fr_auto] md:items-end">
+        <div className="space-y-3">
+          <Card className="!p-3.5 !rounded-xl">
+            <form onSubmit={runNumberSearch} className="grid grid-cols-1 gap-2.5 md:grid-cols-[0.5fr_0.5fr_0.7fr_0.5fr_auto] md:items-end">
               <TextInput label="Country" value={numberSearch.country} onChange={(v) => setNumberSearch({ ...numberSearch, country: v.toUpperCase() })} placeholder="US" />
               <TextInput label="Area code" value={numberSearch.area_code} onChange={(v) => setNumberSearch({ ...numberSearch, area_code: v })} placeholder="415" />
               <SelectField label="Number type" value={numberSearch.number_type} onChange={(v) => setNumberSearch({ ...numberSearch, number_type: v })}>
@@ -550,17 +584,17 @@ export default function CommunicationSetup({ branchId = null }) {
                 <option value="toll_free">Toll free</option>
               </SelectField>
               <TextInput label="Limit" value={numberSearch.limit} onChange={(v) => setNumberSearch({ ...numberSearch, limit: Number(v) || 10 })} type="number" />
-              <ActionButton type="submit" icon={Search} disabled={savingKey === 'number-search'}>Search</ActionButton>
+              <ActionButton type="submit" icon={Search} size="sm" disabled={savingKey === 'number-search'}>Search</ActionButton>
             </form>
           </Card>
 
           {availableNumbers.length > 0 && (
-            <Card className="space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h3 className="text-lg font-black text-heading">Available Telnyx numbers</h3>
-                <div className="flex gap-2">
-                  <ActionButton onClick={quoteNumbers} icon={Save} variant="ghost" disabled={savingKey === 'quote'}>Quote Selected</ActionButton>
-                  {quotedOrder?.id && <ActionButton onClick={purchaseQuotedOrder} icon={CheckCircle2} disabled={savingKey === 'purchase'}>Confirm Purchase</ActionButton>}
+            <Card className="!p-3.5 !rounded-xl space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-bold text-heading">Available Telnyx numbers</h3>
+                <div className="flex gap-1.5">
+                  <ActionButton onClick={quoteNumbers} icon={Save} variant="ghost" size="sm" disabled={savingKey === 'quote'}>Quote Selected</ActionButton>
+                  {quotedOrder?.id && <ActionButton onClick={purchaseQuotedOrder} icon={CheckCircle2} size="sm" disabled={savingKey === 'purchase'}>Confirm Purchase</ActionButton>}
                 </div>
               </div>
               <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
@@ -568,7 +602,7 @@ export default function CommunicationSetup({ branchId = null }) {
                   const value = number.phone_number || number.phone_e164 || number.number;
                   const checked = selectedNumbers.includes(value);
                   return (
-                    <label key={value} className={`flex items-center justify-between rounded-xl border p-3 text-sm font-bold ${checked ? 'border-primary bg-primary/5' : 'border-slate-200 dark:border-slate-800'}`}>
+                    <label key={value} className={`flex items-center justify-between rounded-lg border p-2 text-xs font-bold ${checked ? 'border-primary bg-primary/5' : 'border-slate-200 dark:border-slate-800'}`}>
                       <span>{value}</span>
                       <input
                         type="checkbox"
@@ -580,57 +614,59 @@ export default function CommunicationSetup({ branchId = null }) {
                 })}
               </div>
               {quotedOrder && (
-                <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs font-semibold text-heading">
+                <div className="rounded-lg border border-primary/20 bg-primary/5 p-2.5 text-xs font-semibold text-heading">
                   Quote #{quotedOrder.id} ready. Estimated cost: {quotedOrder.estimated_monthly_cost || quotedOrder.total_cost || 'provider quote recorded'}.
                 </div>
               )}
             </Card>
           )}
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-            <Card className="space-y-3">
-              <h3 className="text-lg font-black text-heading">Number inventory</h3>
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.2fr_0.8fr]">
+            <Card className="!p-4 !rounded-xl space-y-2.5">
+              <h3 className="text-sm font-bold text-heading">Number inventory</h3>
               {numbers.length === 0 ? (
                 <EmptyState title="No SMS numbers" message="Search and purchase a Telnyx number to enable SMS." />
               ) : numbers.map((number) => (
-                <div key={number.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+                <div key={number.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 p-2.5 dark:border-slate-800">
                   <div>
-                    <p className="text-sm font-black text-heading dark:text-white">{number.phone_e164}</p>
-                    <div className="mt-2 flex flex-wrap gap-2">
+                    <p className="text-xs font-black text-heading dark:text-white">{number.phone_e164}</p>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
                       <StatusPill state={number.provisioning_state} />
                       <StatusPill state={number.messaging_registration_state} />
                       {number.assignment?.branch_id || number.branch_id ? <StatusPill state="active">Assigned</StatusPill> : <StatusPill state="draft">Unassigned</StatusPill>}
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <ActionButton variant="ghost" icon={Save} onClick={() => setAssignmentForm({ ...assignmentForm, phone_number_id: number.id, branch_id: branchId || number.assignment?.branch_id || '' })}>Assign</ActionButton>
-                    {(number.assignment || number.assignment_id) && <ActionButton variant="ghost" icon={Trash2} onClick={() => withSaving(`unassign-${number.id}`, () => unassignSmsNumber(number.id), 'Number unassigned.')}>Unassign</ActionButton>}
+                  <div className="flex flex-wrap gap-1.5">
+                    <ActionButton variant="ghost" icon={Save} size="sm" onClick={() => setAssignmentForm({ ...assignmentForm, phone_number_id: number.id, branch_id: branchId || number.assignment?.branch_id || '' })}>Assign</ActionButton>
+                    {(number.assignment || number.assignment_id) && <ActionButton variant="ghost" icon={Trash2} size="sm" onClick={() => withSaving(`unassign-${number.id}`, () => unassignSmsNumber(number.id), 'Number unassigned.')}>Unassign</ActionButton>}
                   </div>
                 </div>
               ))}
             </Card>
-            <div className="space-y-4">
-              <Card>
-                <form onSubmit={assignNumber} className="space-y-3">
-                  <h3 className="text-lg font-black text-heading">Assign number</h3>
+            <div className="space-y-3">
+              <Card className="!p-4 !rounded-xl">
+                <form onSubmit={assignNumber} className="space-y-2.5">
+                  <h3 className="text-sm font-bold text-heading">Assign number</h3>
                   <SelectField label="Phone number" value={assignmentForm.phone_number_id} onChange={(v) => setAssignmentForm({ ...assignmentForm, phone_number_id: v })}>
                     <option value="">Select number</option>
                     {numbers.map((number) => <option key={number.id} value={number.id}>{number.phone_e164}</option>)}
                   </SelectField>
-                  <TextInput label="Branch ID" value={assignmentForm.branch_id} onChange={(v) => setAssignmentForm({ ...assignmentForm, branch_id: v })} placeholder={branchId ? String(branchId) : 'Optional'} />
-                  <TextInput label="Employee ID" value={assignmentForm.employee_id} onChange={(v) => setAssignmentForm({ ...assignmentForm, employee_id: v })} placeholder="Optional" />
-                  <ActionButton type="submit" icon={Save} disabled={savingKey === 'assign-number'}>Save Assignment</ActionButton>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <TextInput label="Branch ID" value={assignmentForm.branch_id} onChange={(v) => setAssignmentForm({ ...assignmentForm, branch_id: v })} placeholder={branchId ? String(branchId) : 'Optional'} />
+                    <TextInput label="Employee ID" value={assignmentForm.employee_id} onChange={(v) => setAssignmentForm({ ...assignmentForm, employee_id: v })} placeholder="Optional" />
+                  </div>
+                  <ActionButton type="submit" icon={Save} size="sm" disabled={savingKey === 'assign-number'}>Save Assignment</ActionButton>
                 </form>
               </Card>
-              <Card className="space-y-3">
-                <h3 className="text-lg font-black text-heading">Recent orders</h3>
+              <Card className="!p-4 !rounded-xl space-y-2.5">
+                <h3 className="text-sm font-bold text-heading">Recent orders</h3>
                 {orders.length === 0 ? <EmptyState title="No orders" message="Purchased number orders will appear here." /> : orders.slice(0, 5).map((order) => (
-                  <div key={order.id} className="flex items-center justify-between rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+                  <div key={order.id} className="flex items-center justify-between rounded-lg border border-slate-200 p-2 dark:border-slate-800">
                     <div>
-                      <p className="text-sm font-bold text-heading">Order #{order.id}</p>
+                      <p className="text-xs font-bold text-heading">Order #{order.id}</p>
                       <StatusPill state={order.order_state} />
                     </div>
-                    <ActionButton variant="ghost" icon={RefreshCw} onClick={() => refreshOrder(order.id)}>Refresh</ActionButton>
+                    <ActionButton variant="ghost" icon={RefreshCw} size="sm" onClick={() => refreshOrder(order.id)}>Refresh</ActionButton>
                   </div>
                 ))}
               </Card>
@@ -640,39 +676,39 @@ export default function CommunicationSetup({ branchId = null }) {
       )}
 
       {activeTab === 'mailboxes' && (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.8fr_1.2fr]">
-          <Card>
-            <div className="space-y-4">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[300px_1fr]">
+          <Card className="!p-4 !rounded-xl">
+            <div className="space-y-3">
               <div>
-                <h3 className="text-lg font-black text-heading">Connect mailbox</h3>
-                <p className="mt-1 text-xs text-body">Connect personal or branch mailboxes for replies and inbound sync.</p>
+                <h3 className="text-sm font-bold text-heading">Connect mailbox</h3>
+                <p className="mt-0.5 text-[11px] text-body">Connect personal or branch mailboxes for replies and inbound sync.</p>
               </div>
               <SelectField label="Provider" value={mailboxProvider} onChange={setMailboxProvider}>
                 <option value="google">Google</option>
                 <option value="microsoft">Microsoft</option>
               </SelectField>
               <TextInput label="Login hint" value={mailboxHint} onChange={setMailboxHint} placeholder="person@example.com" type="email" />
-              <ActionButton onClick={startOAuth} icon={Inbox} disabled={savingKey === 'mailbox-oauth'}>Start OAuth</ActionButton>
+              <ActionButton onClick={startOAuth} icon={Inbox} size="sm" disabled={savingKey === 'mailbox-oauth'}>Start OAuth</ActionButton>
             </div>
           </Card>
-          <Card className="space-y-3">
-            <h3 className="text-lg font-black text-heading">Connected mailboxes</h3>
+          <Card className="!p-4 !rounded-xl space-y-2.5">
+            <h3 className="text-sm font-bold text-heading">Connected mailboxes</h3>
             {mailboxes.length === 0 ? (
               <EmptyState title="No mailboxes connected" message="Mailbox connections are optional but useful for inbound replies." />
             ) : mailboxes.map((mailbox) => (
-              <div key={mailbox.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+              <div key={mailbox.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 p-2.5 dark:border-slate-800">
                 <div>
-                  <p className="text-sm font-black text-heading dark:text-white">{mailbox.mailbox_email}</p>
-                  <p className="mt-1 text-xs text-body">{mailbox.display_name || mailbox.provider}</p>
-                  <div className="mt-2 flex flex-wrap gap-2">
+                  <p className="text-xs font-black text-heading dark:text-white">{mailbox.mailbox_email}</p>
+                  <p className="text-[11px] text-body">{mailbox.display_name || mailbox.provider}</p>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
                     <StatusPill state={mailbox.connection_state} />
                     <StatusPill state={mailbox.sync_state} />
                     {mailbox.is_default_sender && <StatusPill state="active">Default sender</StatusPill>}
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <ActionButton variant="ghost" icon={RefreshCw} onClick={() => withSaving(`mailbox-sync-${mailbox.id}`, () => syncCommunicationMailbox(mailbox.id), 'Mailbox sync queued.')}>Sync</ActionButton>
-                  <ActionButton variant="ghost" icon={CheckCircle2} onClick={() => withSaving(`mailbox-default-${mailbox.id}`, () => updateCommunicationMailbox(mailbox.id, { is_default_sender: true }), 'Default mailbox updated.')}>Default</ActionButton>
+                <div className="flex flex-wrap gap-1.5">
+                  <ActionButton variant="ghost" icon={RefreshCw} size="sm" onClick={() => withSaving(`mailbox-sync-${mailbox.id}`, () => syncCommunicationMailbox(mailbox.id), 'Mailbox sync queued.')}>Sync</ActionButton>
+                  <ActionButton variant="ghost" icon={CheckCircle2} size="sm" onClick={() => withSaving(`mailbox-default-${mailbox.id}`, () => updateCommunicationMailbox(mailbox.id, { is_default_sender: true }), 'Default mailbox updated.')}>Default</ActionButton>
                 </div>
               </div>
             ))}

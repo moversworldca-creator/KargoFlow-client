@@ -2,15 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { 
   Building2, Layers, Sliders, Shield, Key, 
-<<<<<<< Updated upstream
-  History, Users, CreditCard, Activity, 
+  History, Users, CreditCard, Activity, Radio,
   LogOut, Sun, Moon, ShieldCheck, ChevronRight, ChevronDown, User, Bell,
   Menu, X, Sparkles, AlertCircle, CheckCircle2, CheckCheck, Trash2
-=======
-  History, Users, CreditCard, Activity, Radio,
-  LogOut, Sun, Moon, ShieldCheck, ChevronRight,
-  Menu, X, Sparkles, AlertCircle
->>>>>>> Stashed changes
 } from 'lucide-react';
 import { usePlatformAuth } from '../auth/PlatformAuthContext';
 import { PLATFORM_ROLES, PLATFORM_PERMISSIONS } from '../rbac/platformRbac';
