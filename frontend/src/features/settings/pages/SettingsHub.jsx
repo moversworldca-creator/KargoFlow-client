@@ -38,18 +38,9 @@ import { SETTINGS_TAB_PERMISSIONS } from "../../../shared/permissions/registry";
 
 import BranchSettings from "../components/BranchSettings";
 import AuditLogs from "../components/AuditLogs";
-import CatalogPackageBuilder from "../components/CatalogPackageBuilder";
 import CommunicationTemplates from "../components/CommunicationTemplates";
 import CommunicationSetup from "../components/CommunicationSetup";
 import CompanySettings from "../components/CompanySettings";
-import CrewDirectory from "../components/CrewDirectory";
-import CustomerPortalSettings from "../components/CustomerPortalSettings";
-import DocumentTemplates from "../components/DocumentTemplates";
-import EstimateCatalogManager from "../components/EstimateCatalogManager";
-import EstimateDiscountPresetSettings from "../components/EstimateDiscountPresetSettings";
-import EstimatePortalTemplates from "../components/EstimatePortalTemplates";
-import IntegrationSettings from "../components/IntegrationSettings";
-import InventoryWorkflowSettings from "../components/InventoryWorkflowSettings";
 import LeadSourceSettings from "../components/LeadSourceSettings";
 import MoverSizeSettings from "../components/MoverSizeSettings";
 import MoverTypeSettings from "../components/MoverTypeSettings";
@@ -60,7 +51,6 @@ import SchedulingSettings from "../components/SchedulingSettings";
 import ServiceTypeSettings from "../components/ServiceTypeSettings";
 import StatusCodeSettings from "../components/StatusCodeSettings";
 import TeamManagement from "../components/TeamManagement";
-import TruckDirectory from "../components/TruckDirectory";
 
 const FALLBACK_BRANCHES = [
   { id: "1", name: "Main HQ", is_main: true },
@@ -116,12 +106,10 @@ const SETTINGS_GROUPS = [
   },
   {
     id: "operations",
-    label: "Operations & Fleet",
+    label: "Operations & Scheduling",
     shortLabel: "Operations",
     icon: Truck,
     tabs: [
-      { id: "trucks", label: "Trucks & Fleet", description: "Vehicles and branch allocation.", icon: Truck, render: (branchId) => <TruckDirectory branchId={branchId} /> },
-      { id: "crew", label: "Crew Directory", description: "Movers, drivers, and field staff.", icon: UserRoundCog, render: (branchId) => <CrewDirectory branchId={branchId} /> },
       { id: "arrival-windows", label: "Arrival Windows", description: "Company dispatch scheduling.", icon: Clock3, render: (branchId) => <SchedulingSettings branchId={branchId} /> },
     ],
   },
@@ -157,52 +145,16 @@ const SETTINGS_GROUPS = [
       { id: "mover-types", label: "Mover Types", description: "Residential and commercial rules.", icon: Truck, render: (branchId) => <MoverTypeSettings branchId={branchId} /> },
       { id: "service-types", label: "Service Types", description: "Moving and packing services.", icon: Boxes, render: (branchId) => <ServiceTypeSettings branchId={branchId} /> },
       { id: "mover-sizes", label: "Mover Sizes", description: "Home volume classifications.", icon: SlidersHorizontal, render: (branchId) => <MoverSizeSettings branchId={branchId} /> },
-      { id: "inventory-rules", label: "Inventory Rules", description: "Room and item calculation rules.", icon: ClipboardList, render: (branchId) => <InventoryWorkflowSettings branchId={branchId} /> },
     ],
   },
   {
-    id: "pricing",
-    label: "Pricing & Catalogs",
-    shortLabel: "Pricing",
-    icon: BadgeDollarSign,
+    id: "communications",
+    label: "Communications",
+    shortLabel: "Comms",
+    icon: MessageSquare,
     tabs: [
-      { id: "catalog-items", label: "Catalog Items", description: "Labor and material pricing.", icon: ClipboardList, render: (branchId) => <EstimateCatalogManager branchId={branchId} /> },
-      { id: "packages", label: "Packages", description: "Bundled estimate packages.", icon: PackageOpen, render: (branchId) => <CatalogPackageBuilder branchId={branchId} /> },
-      { id: "discount-presets", label: "Discount Presets", description: "Percentage and fixed discounts.", icon: BadgeDollarSign, render: (branchId) => <EstimateDiscountPresetSettings branchId={branchId} /> },
-    ],
-  },
-  {
-    id: "portals",
-    label: "Client Portals",
-    shortLabel: "Portals",
-    icon: Globe2,
-    tabs: [
-      { id: "customer-portal", label: "Customer Portal", description: "Inventory portal and client access.", icon: Globe2, render: (branchId) => <CustomerPortalSettings branchId={branchId} view="portal" /> },
-      { id: "estimate-portal", label: "Estimate Portal Layout", description: "Proposal layout and themes.", icon: LayoutTemplate, render: (branchId) => <EstimatePortalTemplates branchId={branchId} /> },
-      { id: "disclaimers", label: "Terms & Disclaimers", description: "Agreement and legal terms.", icon: FileText, render: (branchId) => <CustomerPortalSettings branchId={branchId} view="disclaimers" /> },
-    ],
-  },
-  {
-    id: "templates",
-    label: "Templates & Documents",
-    shortLabel: "Templates",
-    icon: FileText,
-    tabs: [
-      { id: "communications", label: "Email & SMS Comms", description: "Communication templates and merge tags.", icon: Mail, render: (branchId) => <CommunicationTemplates branchId={branchId} /> },
-      { id: "documents", label: "Document Templates (PDF)", description: "Contracts and signature documents.", icon: FileSignature, render: (branchId) => <DocumentTemplates branchId={branchId} /> },
-    ],
-  },
-  {
-    id: "system",
-    label: "System & Integrations",
-    shortLabel: "System",
-    icon: Plug,
-    tabs: [
-      { id: "gateways", label: "Payment Gateways", description: "Stripe and payment providers.", icon: CreditCard, render: (branchId) => <IntegrationSettings branchId={branchId} view="gateways" /> },
-      { id: "delivery", label: "Email Delivery", description: "Email and SMS delivery providers.", icon: Mail, render: (branchId) => <IntegrationSettings branchId={branchId} view="delivery" /> },
-      { id: "communication-setup", label: "Email & SMS Setup", description: "Sending domains, branch senders, Telnyx numbers, and reply mailboxes.", icon: MessageSquare, render: (branchId) => <CommunicationSetup branchId={Number(branchId) || null} /> },
-      { id: "webhooks", label: "API & Webhooks", description: "Connected APIs and outbound events.", icon: Webhook, render: (branchId) => <IntegrationSettings branchId={branchId} view="webhooks" /> },
-      { id: "diagnostics", label: "System Diagnostics", description: "Service status and diagnostics.", icon: Activity, render: (branchId) => <IntegrationSettings branchId={branchId} view="diagnostics" /> },
+      { id: "setup", label: "Email & SMS Setup", description: "Sending domains, branch senders, Telnyx numbers, and reply mailboxes.", icon: MessageSquare, render: (branchId) => <CommunicationSetup branchId={Number(branchId) || null} /> },
+      { id: "templates", label: "Email & SMS Templates", description: "Communication templates and merge tags.", icon: Mail, render: (branchId) => <CommunicationTemplates branchId={branchId} /> },
     ],
   },
 ];
@@ -212,8 +164,6 @@ const LEGACY_ROUTES = {
   branches: ["branches", "directory"],
   branding: ["branches", "branding"],
   scheduling: ["operations", "arrival-windows"],
-  trucks: ["operations", "trucks"],
-  crew: ["operations", "crew"],
   team: ["team", "members"],
   roles: ["team", "roles"],
   audit: ["team", "audit-logs"],
@@ -224,15 +174,8 @@ const LEGACY_ROUTES = {
   "mover-types": ["moves", "mover-types"],
   "service-types": ["moves", "service-types"],
   "mover-sizes": ["moves", "mover-sizes"],
-  inventory: ["moves", "inventory-rules"],
-  "estimate-catalog": ["pricing", "catalog-items"],
-  "catalog-packages": ["pricing", "packages"],
-  "estimate-discount-presets": ["pricing", "discount-presets"],
-  "estimate-portal-templates": ["portals", "estimate-portal"],
-  "customer-portals": ["portals", "customer-portal"],
-  "document-templates": ["templates", "documents"],
-  integrations: ["system", "gateways"],
-  communications: ["system", "communication-setup"],
+  communications: ["communications", "setup"],
+  "communication-templates": ["communications", "templates"],
 };
 
 function fuzzyMatch(query, value) {
@@ -508,9 +451,9 @@ export default function SettingsHub() {
           })}
         </div>
 
-        {/* Main Content Area (Clean viewport, no floating window) */}
-        <main className="min-h-0 flex-1 overflow-auto p-3 sm:p-4">
-          <div className="mx-auto h-full max-w-6xl">{activeTab && activeTab.render(branchId)}</div>
+        {/* Main Content Area (Compact viewport, efficient space usage) */}
+        <main className="min-h-0 flex-1 overflow-auto p-2 sm:p-2.5">
+          <div className="mx-auto h-full max-w-7xl">{activeTab && activeTab.render(branchId)}</div>
         </main>
       </div>
     </div>
