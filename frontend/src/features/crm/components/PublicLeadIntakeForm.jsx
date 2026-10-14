@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { 
   User, 
   MapPin, 
@@ -11,10 +11,9 @@ import {
   Loader2, 
   CheckCircle, 
   FileText,
-  Building,
   Info
 } from 'lucide-react';
-import { createLead, getBranches } from '../../../services/api';
+import api from '../../../services/axios';
 import AddressAutocomplete from '../../../shared/ui/AddressAutocomplete';
 
 const DEFAULT_MOVE_SIZES = [
@@ -29,10 +28,8 @@ const DEFAULT_MOVE_SIZES = [
   'Commercial'
 ];
 
-export default function PublicLeadIntakeForm({ onSubmit, onSuccess }) {
+export default function PublicLeadIntakeForm({ providerKey, onSubmit, onSuccess }) {
   const [step, setStep] = useState(1);
-  const [branches, setBranches] = useState([]);
-  const [loadingBranches, setLoadingBranches] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
@@ -47,7 +44,6 @@ export default function PublicLeadIntakeForm({ onSubmit, onSuccess }) {
     move_date: '',
     move_size: 'Studio',
     move_type: 'local',
-    branch: '',
     notes: '',
     origin_street: '',
     origin_unit_number: '',
@@ -60,25 +56,6 @@ export default function PublicLeadIntakeForm({ onSubmit, onSuccess }) {
     destination_state: '',
     destination_zip: '',
   });
-
-  // Load active branches
-  useEffect(() => {
-    let mounted = true;
-    setLoadingBranches(true);
-    getBranches()
-      .then((res) => {
-        if (!mounted) return;
-        const list = Array.isArray(res) ? res : (Array.isArray(res?.results) ? res.results : []);
-        setBranches(list.filter(b => b.is_active !== false));
-      })
-      .catch((err) => {
-        console.error('Failed to load branches for intake:', err);
-      })
-      .finally(() => {
-        if (mounted) setLoadingBranches(false);
-      });
-    return () => { mounted = false; };
-  }, []);
 
   // Validation helper
   const getStepError = () => {
@@ -96,7 +73,6 @@ export default function PublicLeadIntakeForm({ onSubmit, onSuccess }) {
     }
     if (step === 2) {
       if (!form.move_date) return 'Please select your move date.';
-      if (!form.branch) return 'Please select a branch closest to you.';
     }
     if (step === 3) {
       if (!form.origin_street.trim() || !form.origin_city.trim()) {
@@ -135,17 +111,20 @@ export default function PublicLeadIntakeForm({ onSubmit, onSuccess }) {
     setIsSubmitting(true);
     setError('');
 
+    const { move_size, move_type, service_type, ...details } = form;
     const payload = {
-      ...form,
-      branch: form.branch ? Number(form.branch) : null,
-      status: 'new',
+      ...details,
+      notes: [details.notes, `Move size: ${move_size}`, `Move type: ${move_type.replace('_', ' ')}`]
+        .filter(Boolean).join('\n'),
     };
 
     try {
       if (onSubmit) {
         await onSubmit(payload);
       } else {
-        await createLead(payload);
+        if (!providerKey) throw new Error('This intake form is not configured.');
+        const result = await api.post(`/public/lead-intake/${encodeURIComponent(providerKey)}/`, payload, { skipAuth: true });
+        if (result.processing_status === 'failed') throw new Error(result.error_message || 'Failed to submit quote request.');
       }
       setSuccess(true);
       if (onSuccess) {
@@ -159,7 +138,7 @@ export default function PublicLeadIntakeForm({ onSubmit, onSuccess }) {
         const val = backendErr[firstKey];
         setError(Array.isArray(val) ? val[0] : String(val || 'Failed to submit quote request.'));
       } else {
-        setError('An unexpected error occurred. Please try again.');
+        setError(err.message || 'An unexpected error occurred. Please try again.');
       }
     } finally {
       setIsSubmitting(false);
@@ -187,7 +166,6 @@ export default function PublicLeadIntakeForm({ onSubmit, onSuccess }) {
               move_date: '',
               move_size: 'Studio',
               move_type: 'local',
-              branch: '',
               notes: '',
               origin_street: '',
               origin_unit_number: '',
@@ -380,34 +358,6 @@ export default function PublicLeadIntakeForm({ onSubmit, onSuccess }) {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-[10px] font-bold text-[#64748b] uppercase tracking-widest mb-1.5">Select Nearest Branch</label>
-                {loadingBranches ? (
-                  <div className="flex items-center gap-2 py-3 text-sm text-[#64748b]">
-                    <Loader2 size={16} className="animate-spin" /> Loading branches...
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {branches.map(br => (
-                      <button
-                        key={br.id}
-                        type="button"
-                        onClick={() => setForm({ ...form, branch: String(br.id) })}
-                        className={`p-4 text-left rounded-2xl border-2 transition-all flex flex-col justify-center ${
-                          String(form.branch) === String(br.id)
-                            ? 'bg-blue-50/50 border-[#1f7ae0] ring-1 ring-[#1f7ae0]'
-                            : 'bg-white border-[#eef5fa] hover:border-[#bae0f5]'
-                        }`}
-                      >
-                        <span className="font-bold text-sm text-[#111d23]">{br.name}</span>
-                        {br.city && (
-                          <span className="text-xs text-[#64748b] mt-0.5">{br.city}, {br.state}</span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
             </div>
           )}
 
@@ -581,7 +531,6 @@ export default function PublicLeadIntakeForm({ onSubmit, onSuccess }) {
                   <div className="text-xs text-[#334155]">Date: <strong className="text-[#111d23]">{form.move_date}</strong></div>
                   <div className="text-xs text-[#334155]">Size: <strong className="text-[#111d23]">{form.move_size}</strong></div>
                   <div className="text-xs text-[#334155]">Type: <strong className="text-[#111d23] uppercase">{form.move_type.replace('_', ' ')}</strong></div>
-                  <div className="text-xs text-[#334155]">Branch: <strong className="text-[#111d23]">{branches.find(b => String(b.id) === form.branch)?.name || 'Selected branch'}</strong></div>
                 </div>
               </div>
 

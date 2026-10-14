@@ -1,4 +1,6 @@
 import api from "./axios";
+import { leadApi, leadPayload } from '../features/crm/leads/leadApi';
+import { getPipelineQueue } from '../features/crm/leads/pipelineApi';
 
 const FILE_TARGET_TYPE_MAP = {
   lead: "leads.lead",
@@ -17,91 +19,221 @@ const normalizeFileTargetType = (value) => {
 };
 
 // Auth APIs
-export const login = (credentials) => api.post("/login/", credentials);
-export const switchCompany = (data) => api.post("/switch-company/", data);
-export const refreshToken = (token) => api.post("/token/refresh/", { refresh: token });
-export const me = () => api.get("/users/me/");
-export const updateMe = (data) => api.patch("/users/me/", data);
-export const changePassword = (data) => api.post("/users/change-password/", data);
+export const login = (credentials) => api.post("/auth/login/", { ...credentials, identity_type: 'tenant' }, { skipAuth: true });
+export const me = () => api.get("/tenant/users/me/");
+export const updateMe = (data) => api.patch("/tenant/users/me/", data);
+export const changePassword = (data) => api.post("/auth/password-change/", data);
 
 // User APIs
-export const getUsers = (params) => api.get("/users/", { params });
+export const getUsers = (params) => api.get("/tenant/users/", { params });
 export const getLookupUsers = (params = { limit: 50 }) => api.get("/lookups/users/", { params });
-export const getUser = (id) => api.get(`/users/${id}/`);
-export const createUser = (data) => api.post("/users/", data);
-export const updateUser = (id, data) => api.patch(`/users/${id}/`, data);
-export const deleteUser = (id) => api.delete(`/users/${id}/`);
+export const getUser = (id) => api.get(`/tenant/users/${id}/`);
+export const createUser = (data) => api.post("/tenant/users/", data);
+export const updateUser = (id, data) => api.patch(`/tenant/users/${id}/`, data);
+export const deleteUser = (id) => api.delete(`/tenant/users/${id}/`);
+export const assignUserRole = (data) => api.post("/tenant/users/assign-role/", data);
+export const deactivateUser = (id) => api.post(`/tenant/users/${id}/deactivate/`);
+export const reactivateUser = (id) => api.post(`/tenant/users/${id}/reactivate/`);
+export const getUserBranches = (id) => api.get(`/tenant/users/${id}/branches/`);
+export const removeUserBranch = (userId, branchId) => api.delete(`/tenant/users/${userId}/branches/${branchId}/`);
+
+// Employee APIs
+export const getEmployees = (params) => api.get("/tenant/employees/", { params });
+export const getEmployee = (id) => api.get(`/tenant/employees/${id}/`);
+export const inviteEmployee = (data) => api.post("/tenant/employees/invite/", data);
+export const terminateEmployee = (id, data = {}) => api.post(`/tenant/employees/${id}/terminate/`, data);
+export const rehireEmployee = (id, data = {}) => api.post(`/tenant/employees/${id}/rehire/`, data);
+export const getEmployeeInvitations = () => api.get("/tenant/employees/invitations/");
+export const revokeEmployeeInvitation = (id) => api.delete(`/tenant/employees/invitations/${id}/revoke/`);
 
 // Role APIs
-export const getRoles = (params) => api.get("/roles/", { params });
-export const getRole = (id) => api.get(`/roles/${id}/`);
-export const createRole = (data) => api.post("/roles/", data);
-export const updateRole = (id, data) => api.patch(`/roles/${id}/`, data);
-export const deleteRole = (id) => api.delete(`/roles/${id}/`);
+export const getRoles = (params) => api.get("/tenant/rbac/roles/", { params });
+export const getRole = (id) => api.get(`/tenant/rbac/roles/${id}/`);
+export const createRole = (data) => api.post("/tenant/rbac/roles/", data);
+export const updateRole = async (id, data) => {
+  const { permissions: permKeysOrIds, ...roleData } = data || {};
+  let res = null;
+  if (Object.keys(roleData).length > 0) {
+    res = await api.patch(`/tenant/rbac/roles/${id}/`, roleData);
+  }
+  if (Array.isArray(permKeysOrIds)) {
+    try {
+      const currentRes = await getRolePermissions(id);
+      const currentList = Array.isArray(currentRes) ? currentRes : Array.isArray(currentRes?.results) ? currentRes.results : [];
+      const currentKeys = new Set(currentList.map((p) => p.permission_key || p.codename || p));
+
+      const allPermsRes = await getPermissions();
+      const allPerms = Array.isArray(allPermsRes) ? allPermsRes : Array.isArray(allPermsRes?.results) ? allPermsRes.results : [];
+      const permKeyById = new Map(allPerms.map((p) => [Number(p.id), p.permission_key || p.codename]));
+
+      const targetKeys = new Set(permKeysOrIds.map((item) => (typeof item === 'number' ? (permKeyById.get(item) || String(item)) : String(item))));
+
+      for (const key of targetKeys) {
+        if (!currentKeys.has(key)) {
+          await grantRolePermission(id, { permission_key: key, scope: 'company' }).catch(() => {});
+        }
+      }
+      for (const key of currentKeys) {
+        if (!targetKeys.has(key)) {
+          await revokeRolePermission(id, { permission_key: key, scope: 'company' }).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to sync role permissions:", e);
+    }
+  }
+  return res || api.get(`/tenant/rbac/roles/${id}/`);
+};
+export const deleteRole = (id) => api.delete(`/tenant/rbac/roles/${id}/`);
+export const getRolePermissions = (roleId) => api.get(`/tenant/rbac/roles/${roleId}/permissions/`);
+export const grantRolePermission = (roleId, data) => api.post(`/tenant/rbac/roles/${roleId}/permissions/`, data);
+export const revokeRolePermission = (roleId, data) => api.delete(`/tenant/rbac/roles/${roleId}/permissions/`, { data });
+export const updateRolePermissions = (roleId, permissions) => api.post(`/tenant/rbac/roles/${roleId}/permissions/`, { permissions });
 
 // Permission APIs
-export const getPermissions = () => api.get("/permissions/");
+export const getPermissions = () => api.get("/tenant/rbac/permissions/");
 
 // Core APIs
 export const getAuditLogs = (params = {}) => api.get("/tenant/audit-logs/", { params });
+export const getSecurityAuditLogs = (params = {}) => api.get("/tenant/security-audit-logs/", { params });
+export const getRbacDecisionLogs = (params = {}) => api.get("/tenant/rbac-decision-logs/", { params });
 export const universalSearch = (params) => api.get("/search/", { params });
-export const getBranches = () => api.get("/branches/");
+
+// Branch APIs
+export const getBranches = () => api.get("/tenant/branches/");
 export const getBranchLookups = (params = {limit: 50}) => api.get("/lookups/branches/", { params });
-export const createBranch = (data) => api.post("/branches/", data);
-export const updateBranch = (id, data) => api.patch(`/branches/${id}/`, data);
-export const deleteBranch = (id) => api.delete(`/branches/${id}/`);
-export const getCompany = (id) => api.get(`/companies/${id}/`);
-export const getCompanies = (params) => api.get("/companies/", { params });
-export const createCompany = (data) => api.post("/companies/", data);
-export const onboardCompany = (data) => api.post("/companies/onboard/", data);
-export const getCompanyLookups = (params) => api.get("/lookups/companies/", { params });
-export const updateCompany = (id, data) => api.patch(`/companies/${id}/`, data);
-export const deleteCompany = (id) => api.delete(`/companies/${id}/`);
+export const createBranch = (data) => api.post("/tenant/branches/", data);
+export const updateBranch = (id, data) => api.patch(`/tenant/branches/${id}/`, data);
+export const deleteBranch = (id) => api.delete(`/tenant/branches/${id}/`);
+export const makeMainBranch = (id) => api.post(`/tenant/branches/${id}/make-main/`);
+export const getBranchSettings = (id) => api.get(`/tenant/branch-settings/${id}/`);
+export const updateBranchSettings = (id, data) => api.patch(`/tenant/branch-settings/${id}/`, data);
+export const resetBranchSetting = (id, key) => api.delete(`/tenant/branch-settings/${id}/${key}/`);
+export const getBranchTaxProfiles = (params) => api.get("/tenant/branch-tax-profiles/", { params });
+export const getBranchWeeklyWindows = (params) => api.get("/tenant/branch-weekly-windows/", { params });
+export const saveBranchWeeklyWindows = (data) => api.post("/tenant/branch-weekly-windows/", data);
+export const getBranchBranding = (id) => api.get(`/tenant/branch-branding/${id}/`);
+export const updateBranchBranding = (id, data) => api.patch(`/tenant/branch-branding/${id}/`, data);
+
+// Company APIs
+export const getCompany = (id) => api.get(`/tenant/companies/${id}/`);
+export const getCompanies = (params) => api.get("/tenant/companies/", { params });
+export const createCompany = (data) => api.post("/tenant/onboarding/", data);
+export const onboardCompany = (data) => api.post("/tenant/onboarding/", data);
+export const updateCompany = (id, data) => api.patch(`/tenant/companies/${id}/`, data);
+export const deleteCompany = (id) => api.delete(`/tenant/companies/${id}/`);
+export const getCompanySettings = () => api.get("/tenant/company-settings/");
+export const updateCompanySettings = (id, data) => api.patch(`/tenant/company-settings/${id}/`, data);
+export const getCompanyBranding = () => api.get("/tenant/company-branding/current/");
+export const updateCompanyBranding = (data) => api.patch("/tenant/company-branding/current/", data);
 export const uploadBranchLogo = (id, file) => {
   const formData = new FormData();
   formData.append("logo", file);
-  return api.post(`/branches/${id}/upload-logo/`, formData);
+  return api.patch(`/tenant/branch-branding/${id}/`, formData);
 };
-export const removeBranchLogo = (id) => api.post(`/branches/${id}/remove-logo/`);
+export const removeBranchLogo = (id) => api.patch(`/tenant/branch-branding/${id}/`, { logo_url: null });
 
 // Notifications APIs
-export const getNotifications = (params) => api.get("/notifications/", { params });
-export const getUnreadNotificationsCount = () => api.get("/notifications/unread-count/");
-export const markNotificationRead = (id) => api.post(`/notifications/${id}/mark-read/`);
-export const markNotificationUnread = (id) => api.post(`/notifications/${id}/mark-unread/`);
-export const markAllNotificationsRead = () => api.post("/notifications/mark-all-read/");
+const notificationPayload = (record) => record?.data ?? record;
+export const getNotifications = async (params) => {
+  const records = await api.get("/tenant/notifications/", { params });
+  return records.map(notificationPayload);
+};
+export const getUnreadNotificationsCount = () => api.get("/tenant/notifications/unread-count/");
+export const markNotificationRead = async (id) => notificationPayload(await api.post(`/tenant/notifications/${id}/mark-read/`));
+export const markNotificationUnread = async (id) => notificationPayload(await api.post(`/tenant/notifications/${id}/mark-unread/`));
+export const markAllNotificationsRead = () => api.post("/tenant/notifications/mark-all-read/");
 
 // Lead APIs
-export const getLeads = (params) => api.get("/leads/leads/", { params });
-export const getLead = (id) => api.get(`/leads/leads/${id}/`);
-export const getLeadBySalesNumber = (salesNumber) => api.get(`/leads/leads/by-sales-number/${salesNumber}/`);
-export const createLead = (data) => api.post("/leads/leads/", data);
-export const updateLead = (id, data) => api.patch(`/leads/leads/${id}/`, data);
-export const deleteLead = (id) => api.delete(`/leads/leads/${id}/`);
-export const duplicateLead = (id) => api.post(`/leads/leads/${id}/duplicate/`);
-export const convertLead = (id) => api.post(`/leads/leads/${id}/convert/`);
-export const assignLead = (id, data) => api.post(`/leads/leads/${id}/assign/`, data);
-export const bulkUpdateLeadStatus = (data) => api.post("/leads/leads/bulk-status/", data);
-export const bulkEmailLeads = (data) => api.post("/leads/leads/bulk-email/", data);
-export const bulkSmsLeads = (data) => api.post("/leads/leads/bulk-sms/", data);
-export const markLeadLost = (id, data) => api.post(`/leads/leads/${id}/mark-lost/`, data);
-export const reopenLead = (id, data = {}) => api.post(`/leads/leads/${id}/reopen/`, data);
-export const getReferralSources = () => api.get("/leads/referral-sources/");
-export const getReferralSourceLookups = (params) => api.get("/lookups/lead-sources/", { params });
-export const getLeadStatusCodes = () => api.get("/leads/lead-status-codes/");
-export const getLeadStatusCodeLookups = (params) => api.get("/lookups/lead-statuses/", { params });
-export const createLeadStatusCode = (data) => api.post("/leads/lead-status-codes/", data);
-export const updateLeadStatusCode = (id, data) => api.patch(`/leads/lead-status-codes/${id}/`, data);
-export const deleteLeadStatusCode = (id) => api.delete(`/leads/lead-status-codes/${id}/`);
-export const getInboundLeadConfig = () => api.get("/leads/inbound-config/current/");
-export const rotateInboundLeadSecret = () => api.post("/leads/inbound-config/rotate-secret/");
-export const createReferralSource = (data) => api.post("/leads/referral-sources/", data);
-export const updateReferralSource = (id, data) => api.patch(`/leads/referral-sources/${id}/`, data);
-export const deleteReferralSource = (id) => api.delete(`/leads/referral-sources/${id}/`);
-export const getLeadActivities = (params) => api.get("/leads/lead-activities/", { params });
-export const createLeadActivity = (data) => api.post("/leads/lead-activities/", data);
-export const updateLeadActivity = (id, data) => api.patch(`/leads/lead-activities/${id}/`, data);
-export const deleteLeadActivity = (id) => api.delete(`/leads/lead-activities/${id}/`);
+export const getLeads = (params) => params ? leadApi.list(params) : leadApi.listAll();
+export const getLead = (id) => leadApi.get(id);
+export const getLeadBySalesNumber = async (salesNumber) => {
+  const detail = await api.get(`/tenant/pipeline/${salesNumber}/`);
+  if (detail?.item?.kind !== 'lead') throw new Error(`Sales number ${salesNumber} is not a lead.`);
+  return leadApi.get(detail.item.id);
+};
+export const createLead = (data) => leadApi.create(data);
+export const updateLead = async (id, data = {}) => {
+  const payload = leadPayload(data);
+  const requestedState = data.status === 'contacted' ? 'in_progress' : data.status;
+  let current = null;
+  let action = null;
+  if (requestedState) {
+    current = await leadApi.get(id);
+    if (requestedState !== current.system_state) {
+      action = { in_progress: current.system_state === 'lost' ? 'reopen' : 'start', qualified: 'qualify', archived: 'archive' }[requestedState];
+      if (!action) throw new Error(`Use the lead workflow to change status to ${requestedState}.`);
+    }
+  }
+  let updated = Object.keys(payload).length ? await leadApi.update(id, payload) : current;
+  if (data.custom_status_code !== undefined || data.custom_status_code_id !== undefined) {
+    const statusId = data.custom_status_code_id ?? data.custom_status_code;
+    updated = await leadApi.setCustomStatus(id, statusId === '' ? null : statusId);
+  }
+  if (action) updated = await leadApi.transition(id, action, { reason: data.reason || '' });
+  return updated || leadApi.get(id);
+};
+export const archiveLead = (id, reason = '') => leadApi.transition(id, 'archive', { reason });
+export const deleteLead = (id) => archiveLead(id, 'Archived from CRM hub');
+export const duplicateLead = async (id) => {
+  const source = await leadApi.get(id);
+  return leadApi.create(leadPayload(source, { create: true }));
+};
+export const convertLead = async (id, data = {}) => {
+  const result = await leadApi.convert(id, data);
+  return {
+    ...result,
+    opportunity: result.opportunity_id
+      ? { id: result.opportunity_id, sales_number: result.opportunity_number }
+      : null,
+  };
+};
+export const assignLead = async (id, data) => {
+  if (data?.branch && Number(data.branch) !== Number((await leadApi.get(id)).branch_id)) {
+    await leadApi.update(id, { branch_id: data.branch });
+  }
+  const employeeId = data?.employee_id ?? data?.assigned_employee_id;
+  const userId = data?.user_id ?? data?.assigned_to;
+  return leadApi.assign(id, employeeId ? { employee_id: Number(employeeId) } : userId ? { user_id: Number(userId) } : null);
+};
+export const setLeadCustomStatus = (id, statusCodeId) => leadApi.setCustomStatus(id, statusCodeId);
+export const startLead = (id, reason = '') => leadApi.transition(id, 'start', { reason });
+export const qualifyLead = (id, reason = '') => leadApi.transition(id, 'qualify', { reason });
+export const bulkUpdateLeadStatus = async ({ ids = [], status_code_id }) => Promise.all(ids.map((id) => setLeadCustomStatus(id, status_code_id)));
+export const bulkEmailLeads = () => { throw new Error('Bulk email requires the communications API.'); };
+export const bulkSmsLeads = () => { throw new Error('Bulk SMS requires the communications API.'); };
+export const markLeadLost = (id, data) => leadApi.transition(id, 'lost', data);
+export const reopenLead = (id, data = {}) => leadApi.transition(id, 'reopen', data);
+export const getReferralSources = (params) => api.get("/tenant/referral-sources/", { params });
+export const getReferralSourceLookups = (params) => api.get("/tenant/referral-sources/", { params });
+export const createReferralSource = (data) => api.post("/tenant/referral-sources/", data);
+export const updateReferralSource = (id, data) => api.patch(`/tenant/referral-sources/${id}/`, data);
+export const deleteReferralSource = (id) => api.delete(`/tenant/referral-sources/${id}/`);
+export const getLeadStatusCodes = (params) => api.get("/tenant/lead-statuses/", { params });
+export const getLeadStatusCodeLookups = (params) => api.get("/tenant/lead-statuses/", { params });
+export const createLeadStatusCode = (data) => api.post("/tenant/lead-statuses/", data);
+export const updateLeadStatusCode = (id, data) => api.patch(`/tenant/lead-statuses/${id}/`, data);
+export const deleteLeadStatusCode = (id) => api.delete(`/tenant/lead-statuses/${id}/`);
+export const getInboundLeadConfig = () => api.get("/tenant/lead-settings/");
+export const updateInboundLeadConfig = (data) => api.patch("/tenant/lead-settings/current/", data);
+export const rotateInboundLeadSecret = (providerId = 1) => api.post(`/tenant/lead-providers/${providerId}/rotate-secret/`);
+export const getLeadActivities = ({ lead_id, lead, branch, ...params } = {}) => {
+  const id = lead_id ?? lead;
+  return id ? leadApi.activities(id) : api.get('/tenant/leads/activity-feed/', {
+    params: { ...params, ...(branch ? { branch_id: branch } : {}) },
+  });
+};
+export const createLeadActivity = ({ lead_id, lead, content, ...data }) =>
+  leadApi.createActivity(lead_id ?? lead, { ...data, description: data.description ?? content ?? '' });
+export const updateLeadActivity = (id, data) => {
+  const leadId = data.lead_id ?? data.lead;
+  if (!leadId) throw new Error('A lead ID is required to update an activity.');
+  return leadApi.updateActivity(leadId, id, {
+    subject: data.subject, description: data.description ?? data.content,
+    status: data.status, is_pinned: data.is_pinned,
+  });
+};
+export const deleteLeadActivity = () => { throw new Error('Deleting lead activities is not supported.'); };
 
 
 
@@ -116,7 +248,7 @@ export const updateCustomerContact = (id, data) => api.patch(`/leads/customer-co
 export const deleteCustomerContact = (id) => api.delete(`/leads/customer-contacts/${id}/`);
 
 // ================= SALES APIs =================
-export const getMyLeadsQueue = (params) => api.get("/sales/my-leads-queue/", { params });
+export const getMyLeadsQueue = (params) => getPipelineQueue(params);
 export const getDashboardSummary = (params) => api.get("/sales/dashboard-summary/", { params });
 export const getSalesDashboardSummary = (params) => api.get("/sales/dashboard-summary-lite/", { params });
 export const getOpportunities = (params) => api.get("/sales/opportunities/", { params });
@@ -188,21 +320,21 @@ export const createTask = (data) => api.post("/sales/tasks/", data);
 export const updateTask = (id, data) => api.patch(`/sales/tasks/${id}/`, data);
 export const getCallLogs = (params) => api.get("/sales/call-logs/", { params });
 export const liststatuscode = (params) => api.get("/sales/status-codes/list-status-codes", { params });  
-export const getStatusCodes = (params) => api.get("/sales/status-codes/", { params });
-export const getStatusCodeLookups = (params = {limit: 50}) => api.get("/lookups/statuses/", { params });
+export const getStatusCodes = (params) => api.get("/tenant/opportunity-statuses/", { params });
+export const getStatusCodeLookups = (params = {limit: 50}) => api.get("/tenant/opportunity-statuses/", { params });
 export const getStatusCodeLookupsPage = (search, offset, limit) =>
-  api.get('/lookups/statuses/', {
+  api.get('/tenant/opportunity-statuses/', {
     params: { search, offset, limit },
   });
-export const createStatusCode = (data) => api.post("/sales/status-codes/", data);
-export const updateStatusCode = (id, data) => api.patch(`/sales/status-codes/${id}/`, data);
-export const deleteStatusCode = (id) => api.delete(`/sales/status-codes/${id}/`);
-export const getOpportunityLossReasons = (params) => api.get("/sales/opportunity-loss-reasons/", { params });
-export const getOpportunityLossReasonLookups = (params = { limit: 50 }) => api.get("/lookups/opportunity-loss-reasons/", { params });
-export const createOpportunityLossReason = (data) => api.post("/sales/opportunity-loss-reasons/", data);
-export const updateOpportunityLossReason = (id, data) => api.patch(`/sales/opportunity-loss-reasons/${id}/`, data);
-export const deleteOpportunityLossReason = (id) => api.delete(`/sales/opportunity-loss-reasons/${id}/`);
-export const seedOpportunityLossReasons = (data = {}) => api.post("/sales/opportunity-loss-reasons/seed-defaults/", data);
+export const createStatusCode = (data) => api.post("/tenant/opportunity-statuses/", data);
+export const updateStatusCode = (id, data) => api.patch(`/tenant/opportunity-statuses/${id}/`, data);
+export const deleteStatusCode = (id) => api.delete(`/tenant/opportunity-statuses/${id}/`);
+export const getOpportunityLossReasons = (params) => api.get("/tenant/lost-reasons/", { params });
+export const getOpportunityLossReasonLookups = (params = { limit: 50 }) => api.get("/tenant/lost-reasons/", { params });
+export const createOpportunityLossReason = (data) => api.post("/tenant/lost-reasons/", data);
+export const updateOpportunityLossReason = (id, data) => api.patch(`/tenant/lost-reasons/${id}/`, data);
+export const deleteOpportunityLossReason = (id) => api.delete(`/tenant/lost-reasons/${id}/`);
+export const seedOpportunityLossReasons = (data = {}) => api.post("/tenant/lost-reasons/", data);
 export const bulkSalesAction = (data) => api.post("/sales/bulk-actions/", data);
 export const bulkSalesEmail = (data) => bulkSalesAction({ ...data, action: "email" });
 export const bulkSalesSms = (data) => bulkSalesAction({ ...data, action: "sms" });
@@ -398,6 +530,32 @@ export const createTelnyxSMSConfig = (data) => api.post("/integrations/telnyx-sm
 export const updateTelnyxSMSConfig = (id, data) => api.patch(`/integrations/telnyx-sms-configs/${id}/`, data);
 export const testTelnyxSMS = (id, phone) => api.post(`/integrations/telnyx-sms-configs/${id}/test-send-sms/`, { test_phone_number: phone });
 
+// Tenant Communications onboarding APIs
+export const getCommunicationEmailDomains = () => api.get("/tenant/communications/email-domains/");
+export const createCommunicationEmailDomain = (data) => api.post("/tenant/communications/email-domains/", data);
+export const updateCommunicationEmailDomain = (id, data) => api.patch(`/tenant/communications/email-domains/${id}/`, data);
+export const refreshCommunicationEmailDomain = (id) => api.post(`/tenant/communications/email-domains/${id}/refresh/`);
+export const getBranchCommunicationSettings = (branchId) => api.get(`/tenant/communications/branch-settings/${branchId}/`);
+export const createBranchEmailIdentity = (branchId, data) =>
+  api.post(`/tenant/communications/branch-settings/${branchId}/email-identities/`, data);
+export const updateBranchEmailIdentity = (branchId, identityId, data) =>
+  api.patch(`/tenant/communications/branch-settings/${branchId}/email-identities/${identityId}/`, data);
+export const getCommunicationMailboxes = () => api.get("/tenant/communications/mailboxes/");
+export const startMailboxOAuth = (data) => api.post("/tenant/communications/mailboxes/oauth/start/", data);
+export const syncCommunicationMailbox = (id) => api.post(`/tenant/communications/mailboxes/${id}/sync/`);
+export const updateCommunicationMailbox = (id, data) => api.patch(`/tenant/communications/mailboxes/${id}/`, data);
+export const deleteCommunicationMailbox = (id) => api.delete(`/tenant/communications/mailboxes/${id}/`);
+export const getSmsNumbers = (params) => api.get("/tenant/communications/sms-numbers/", { params });
+export const getSmsNumberOrders = () => api.get("/tenant/communications/sms-numbers/orders/");
+export const searchSmsNumbers = (params) => api.get("/tenant/communications/sms-numbers/search/", { params });
+export const quoteSmsNumberOrder = (data) => api.post("/tenant/communications/sms-numbers/orders/", data);
+export const purchaseSmsNumberOrder = (orderId, data) =>
+  api.post(`/tenant/communications/sms-numbers/orders/${orderId}/purchase/`, data);
+export const refreshSmsNumberOrder = (orderId) => api.get(`/tenant/communications/sms-numbers/orders/${orderId}/`);
+export const assignSmsNumber = (id, data) => api.post(`/tenant/communications/sms-numbers/${id}/assign/`, data);
+export const unassignSmsNumber = (id) => api.post(`/tenant/communications/sms-numbers/${id}/unassign/`);
+export const releaseSmsNumber = (id) => api.post(`/tenant/communications/sms-numbers/${id}/release/`);
+
 export const getPaymentGateways = (params) => api.get("/integrations/payment-gateways/", { params });
 export const createPaymentGateway = (data) => api.post("/integrations/payment-gateways/", data);
 export const updatePaymentGateway = (id, data) => api.patch(`/integrations/payment-gateways/${id}/`, data);
@@ -441,24 +599,24 @@ export const deleteAutomationStep = (id) => api.delete(`/automations/steps/${id}
 export const getAutomationRuns = (params) => api.get("/automations/runs/", { params });
 
 // Mover Type & Size APIs
-export const getServices = (params) => api.get("/lookups/services/", { params });
-export const getServiceTypes = (params) => api.get("/sales/service-types/", { params });
-export const createServiceType = (data) => api.post("/sales/service-types/", data);
-export const updateServiceType = (id, data) => api.patch(`/sales/service-types/${id}/`, data);
-export const deleteServiceType = (id) => api.delete(`/sales/service-types/${id}/`);
+export const getServices = (params) => api.get("/tenant/service-types/", { params });
+export const getServiceTypes = (params) => api.get("/tenant/service-types/", { params });
+export const createServiceType = (data) => api.post("/tenant/service-types/", data);
+export const updateServiceType = (id, data) => api.patch(`/tenant/service-types/${id}/`, data);
+export const deleteServiceType = (id) => api.delete(`/tenant/service-types/${id}/`);
 
-export const getMoverTypes = (params) => api.get("/move-types/", { params });
-export const getMoveTypeLookups = (params) => api.get("/lookups/move-types/", { params });
-export const createMoverType = (data) => api.post("/move-types/", data);
-export const updateMoverType = (id, data) => api.patch(`/move-types/${id}/`, data);
-export const deleteMoverType = (id) => api.delete(`/move-types/${id}/`);
+export const getMoverTypes = (params) => api.get("/tenant/move-types/", { params });
+export const getMoveTypeLookups = (params) => api.get("/tenant/move-types/", { params });
+export const createMoverType = (data) => api.post("/tenant/move-types/", data);
+export const updateMoverType = (id, data) => api.patch(`/tenant/move-types/${id}/`, data);
+export const deleteMoverType = (id) => api.delete(`/tenant/move-types/${id}/`);
 
-export const getMoverSizes = (params) => api.get("/sales/mover-sizes/", { params });
-export const getMoverSizeLookups = (params) => api.get("/lookups/mover-sizes/", { params });
-export const createMoverSize = (data) => api.post("/sales/mover-sizes/", data);
-export const updateMoverSize = (id, data) => api.patch(`/sales/mover-sizes/${id}/`, data);
-export const deleteMoverSize = (id) => api.delete(`/sales/mover-sizes/${id}/`);
-export const seedStatusCodes = (data = {}) => api.post("/sales/status-codes/seed-defaults/", data);
+export const getMoverSizes = (params) => api.get("/tenant/move-sizes/", { params });
+export const getMoverSizeLookups = (params) => api.get("/tenant/move-sizes/", { params });
+export const createMoverSize = (data) => api.post("/tenant/move-sizes/", data);
+export const updateMoverSize = (id, data) => api.patch(`/tenant/move-sizes/${id}/`, data);
+export const deleteMoverSize = (id) => api.delete(`/tenant/move-sizes/${id}/`);
+export const seedStatusCodes = (data = {}) => api.post("/tenant/opportunity-statuses/", data);
 
 // Legacy support for API object
 const API = {
@@ -471,8 +629,6 @@ const API = {
 
   auth: {
     login,
-    switchCompany,
-    refreshToken,
     me,
     getUsers,
     getLookupUsers,
@@ -480,31 +636,56 @@ const API = {
     createUser,
     updateUser,
     deleteUser,
+    assignUserRole,
+    deactivateUser,
+    reactivateUser,
     getRoles,
     getRole,
     createRole,
     getPermissions,
     updateRole,
     deleteRole,
+    updateRolePermissions,
+    getRolePermissions,
+    grantRolePermission,
+    revokeRolePermission,
+    getEmployees,
+    inviteEmployee,
+    terminateEmployee,
+    rehireEmployee,
   },
 
   general: {
     getAuditLogs,
+    getSecurityAuditLogs,
+    getRbacDecisionLogs,
     universalSearch,
     getBranches,
     getBranchLookups,
     createBranch,
     updateBranch,
     deleteBranch,
+    makeMainBranch,
+    getBranchSettings,
+    updateBranchSettings,
+    resetBranchSetting,
+    getBranchTaxProfiles,
+    getBranchWeeklyWindows,
+    saveBranchWeeklyWindows,
+    getBranchBranding,
+    updateBranchBranding,
     uploadBranchLogo,
     removeBranchLogo,
     getCompany,
     getCompanies,
     createCompany,
     onboardCompany,
-    getCompanyLookups,
     updateCompany,
     deleteCompany,
+    getCompanySettings,
+    updateCompanySettings,
+    getCompanyBranding,
+    updateCompanyBranding,
   },
 
   leads: {
@@ -633,7 +814,7 @@ const API = {
   },
   lookups: {
     getBranches: getBranchLookups,
-    getCompanies: getCompanyLookups,
+    getCompanies,
     getUsers: (params) => api.get("/lookups/users/", { params }),
     getStatusCodes: getStatusCodeLookups,
     getOpportunityLossReasons: getOpportunityLossReasonLookups,

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
-import { AlertCircle, Loader2, Plus, Search } from 'lucide-react';
+import { AlertCircle, Edit2, Globe2, Loader2, Plus, Search, Trash2, X } from 'lucide-react';
 import Card from '../../../shared/ui/Card';
 import {
   createReferralSource,
@@ -16,7 +16,6 @@ const emptyReferralForm = {
   description: '',
   is_active: true,
 };
-
 
 const ReferralSourceSettings = () => {
   const [referrals, setReferrals] = useState([]);
@@ -66,7 +65,6 @@ const ReferralSourceSettings = () => {
     }));
     
     setReferrals(reorderedReferrals);
-
     dragItem.current = null;
     dragOverItem.current = null;
     setDragOverIndex(null);
@@ -99,16 +97,21 @@ const ReferralSourceSettings = () => {
     load();
   }, []);
 
-  const openReferralForm = (source = null) => {
-    setEditingReferral(source);
-    setRefForm({
-      name: source?.name || '',
-      utm_source: source?.utm_source || '',
-      utm_medium: source?.utm_medium || '',
-      utm_campaign: source?.utm_campaign || '',
-      description: source?.description || '',
-      is_active: source?.is_active ?? true,
-    });
+  const openReferralForm = (item = null) => {
+    if (item) {
+      setEditingReferral(item);
+      setRefForm({
+        name: item.name || '',
+        utm_source: item.utm_source || '',
+        utm_medium: item.utm_medium || '',
+        utm_campaign: item.utm_campaign || '',
+        description: item.description || '',
+        is_active: item.is_active ?? true,
+      });
+    } else {
+      setEditingReferral(null);
+      setRefForm(emptyReferralForm);
+    }
     setIsModalOpen(true);
   };
 
@@ -117,24 +120,16 @@ const ReferralSourceSettings = () => {
     setIsSaving(true);
     setError('');
     try {
-      const payload = {
-        name: refForm.name.trim(),
-        utm_source: refForm.utm_source.trim(),
-        utm_medium: refForm.utm_medium.trim(),
-        utm_campaign: refForm.utm_campaign.trim(),
-        description: refForm.description.trim(),
-        is_active: !!refForm.is_active,
-      };
       if (editingReferral?.id) {
-        const updated = await updateReferralSource(editingReferral.id, payload);
+        const updated = await updateReferralSource(editingReferral.id, refForm);
         setReferrals((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
       } else {
-        const created = await createReferralSource(payload);
-        setReferrals((prev) => [created, ...prev]);
+        const created = await createReferralSource(refForm);
+        setReferrals((prev) => [...prev, created]);
       }
+      setIsModalOpen(false);
       setEditingReferral(null);
       setRefForm(emptyReferralForm);
-      setIsModalOpen(false);
     } catch (err) {
       console.error('Failed to save referral source:', err);
       setError('Failed to save referral source.');
@@ -169,131 +164,135 @@ const ReferralSourceSettings = () => {
     );
   }, [referrals, search]);
 
-  const activeReferrals = filteredReferrals.filter((item) => item.is_active);
-  const inactiveReferrals = filteredReferrals.filter((item) => !item.is_active);
-
   if (isLoading) {
     return (
-      <div className="flex justify-center p-12">
-        <Loader2 className="animate-spin text-primary" />
+      <div className="flex h-48 items-center justify-center">
+        <Loader2 className="animate-spin text-primary" size={20} />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
-      <Card className="p-6 space-y-4">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h3 className="text-xl font-black text-heading">Referral Sources</h3>
-            <p className="text-sm text-body">Manage referral partners separately from inbound lead intake.</p>
+    <div className="space-y-3 animate-in fade-in duration-300">
+      {/* Compact Toolbar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex items-center gap-2 flex-1 max-w-sm">
+          <div className="flex items-center gap-1.5 border-r border-slate-200 pr-3 dark:border-slate-700">
+            <Globe2 size={14} className="text-primary" />
+            <span className="text-xs font-bold text-heading dark:text-white">Referrals</span>
           </div>
-          <div className="flex items-center gap-3 w-full md:w-auto">
-            <div className="relative w-full md:w-80">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-disabled" size={18} />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search referral sources..."
-                className="w-full rounded-xl border border-subtle bg-card py-2 pl-10 pr-4 text-sm outline-none focus:border-primary"
-              />
-            </div>
-            <button
-              onClick={() => {
-                setEditingReferral(null);
-                setRefForm(emptyReferralForm);
-                setIsModalOpen(true);
-              }}
-              className="inline-flex items-center gap-2 rounded-xl bg-[#fdba74] hover:bg-[#f9a852] px-4 py-2 font-bold text-[#111d23] transition-colors whitespace-nowrap"
-            >
-              <Plus size={16} />
-              Add Source
-            </button>
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={13} />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search sources or UTM tags..."
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 py-1 pl-8 pr-2.5 text-xs font-medium outline-none transition focus:border-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            />
           </div>
         </div>
 
-        {error && (
-          <div className="flex items-center gap-2 rounded-xl border border-[#FDE8E8] bg-[#FDE8E8]/30 px-4 py-3 text-[#791F1F]">
-            <AlertCircle size={18} />
-            <span className="text-sm font-bold">{error}</span>
-          </div>
-        )}
-      </Card>
-      
-      <Card className="p-0 overflow-hidden rounded-[2rem] border border-[#dce8f1] bg-white shadow-sm mt-8">
+        <button
+          onClick={() => openReferralForm(null)}
+          className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-primary/90"
+        >
+          <Plus size={13} /> Add Source
+        </button>
+      </div>
+
+      {error && (
+        <div className="flex items-center gap-2 rounded-lg border border-[#FDE8E8] bg-[#FDE8E8]/30 px-3 py-1.5 text-xs text-[#791F1F]">
+          <AlertCircle size={14} />
+          <span className="font-semibold">{error}</span>
+        </div>
+      )}
+
+      {/* Compact Table */}
+      <Card className="!p-0 !rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-[#f0f5f9] text-[0.6875rem] font-bold uppercase tracking-[0.18em] text-[#60727b]">
-                <th className="px-6 py-4">Name</th>
-                <th className="px-6 py-4">Description</th>
-                <th className="px-6 py-4 text-center">Status</th>
-                <th className="px-6 py-4 text-right">Actions</th>
+              <tr className="border-b border-slate-100 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-body dark:border-slate-800 dark:bg-slate-900">
+                <th className="px-3.5 py-2.5">Source Name</th>
+                <th className="px-3.5 py-2.5">Attribution / UTM</th>
+                <th className="px-3.5 py-2.5">Description</th>
+                <th className="px-3.5 py-2.5 text-center">Status</th>
+                <th className="px-3.5 py-2.5 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody>
-              {filteredReferrals.map((item, index) => (
-                <tr
-                  key={item.id}
-                  draggable={!search}
-                  onDragStart={(e) => handleDragStart(e, index)}
-                  onDragEnter={(e) => handleDragEnter(e, index)}
-                  onDragEnd={handleDragEnd}
-                  onDragOver={(e) => e.preventDefault()}
-                  className={`border-b border-[#dce8f1] last:border-0 transition-colors hover:bg-[#fbfdff] ${!search ? 'cursor-grab active:cursor-grabbing' : ''} ${dragOverIndex === index ? 'bg-[#edf8f4] shadow-inner' : ''}`}
-                >
-                  <td className="px-6 py-5">
-                    <div className="font-bold text-[#111d23]">{item.name}</div>
-                  </td>
-                  <td className="px-6 py-5 text-sm text-[#60727b]">{item.description || '-'}</td>
-                  <td className="px-6 py-5">
-                    <div className="flex justify-center">
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input 
-                          type="checkbox" 
-                          className="sr-only peer" 
-                          checked={item.is_active} 
-                          onChange={async () => {
-                            try {
-                              const updated = await updateReferralSource(item.id, { is_active: !item.is_active });
-                              setReferrals((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
-                            } catch (err) {
-                              console.error('Failed to toggle status:', err);
-                            }
-                          }} 
-                        />
-                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#fdba74]"></div>
-                      </label>
-                    </div>
-                  </td>
-                  <td className="px-6 py-5 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button 
-                        onClick={() => openReferralForm(item)} 
-                        className="p-2 text-[#60727b] hover:text-[#111d23] hover:bg-[#f0f5f9] rounded-lg transition-colors"
-                        title="Edit"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-                      </button>
-                      <button 
-                        onClick={() => {
-                          if (window.confirm('Are you sure you want to delete this referral source?')) {
-                            removeReferral(item.id);
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {filteredReferrals.map((item, index) => {
+                const hasUtm = item.utm_source || item.utm_medium || item.utm_campaign;
+                return (
+                  <tr
+                    key={item.id}
+                    draggable={!search}
+                    onDragStart={(e) => handleDragStart(e, index)}
+                    onDragEnter={(e) => handleDragEnter(e, index)}
+                    onDragEnd={handleDragEnd}
+                    onDragOver={(e) => e.preventDefault()}
+                    className={`transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-800/40 ${!search ? 'cursor-grab active:cursor-grabbing' : ''} ${dragOverIndex === index ? 'bg-primary/5' : ''}`}
+                  >
+                    <td className="px-3.5 py-2">
+                      <div className="font-bold text-xs text-heading dark:text-white">{item.name}</div>
+                    </td>
+                    <td className="px-3.5 py-2 text-xs">
+                      {hasUtm ? (
+                        <div className="flex flex-wrap gap-1">
+                          {item.utm_source && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono text-slate-700 dark:bg-slate-800 dark:text-slate-300">src:{item.utm_source}</span>}
+                          {item.utm_medium && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono text-slate-700 dark:bg-slate-800 dark:text-slate-300">med:{item.utm_medium}</span>}
+                          {item.utm_campaign && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono text-slate-700 dark:bg-slate-800 dark:text-slate-300">cmp:{item.utm_campaign}</span>}
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-body">Organic / Direct</span>
+                      )}
+                    </td>
+                    <td className="px-3.5 py-2 text-xs text-body truncate max-w-xs">{item.description || '-'}</td>
+                    <td className="px-3.5 py-2 text-center">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const updated = await updateReferralSource(item.id, { is_active: !item.is_active });
+                            setReferrals((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+                          } catch (err) {
+                            console.error('Failed to toggle status:', err);
                           }
                         }}
-                        className="p-2 text-[#60727b] hover:text-[#e11d48] hover:bg-[#ffe4e6] rounded-lg transition-colors"
-                        title="Delete"
+                        className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${item.is_active ? 'bg-primary' : 'bg-slate-200 dark:bg-slate-700'}`}
                       >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                        <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${item.is_active ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
                       </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-3.5 py-2 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => openReferralForm(item)}
+                          className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-primary dark:hover:bg-slate-800"
+                          title="Edit"
+                        >
+                          <Edit2 size={13} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (window.confirm('Are you sure you want to delete this referral source?')) {
+                              removeReferral(item.id);
+                            }
+                          }}
+                          className="rounded-lg p-1 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/30"
+                          title="Delete"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
               {filteredReferrals.length === 0 && (
                 <tr>
-                  <td colSpan="4" className="px-6 py-8 text-center text-sm font-bold text-heading">
+                  <td colSpan="5" className="px-3.5 py-6 text-center text-xs text-body">
                     No referral sources found.
                   </td>
                 </tr>
@@ -303,59 +302,93 @@ const ReferralSourceSettings = () => {
         </div>
       </Card>
 
+      {/* Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#111d23]/20 backdrop-blur-sm">
-          <div className="w-full max-w-4xl bg-white rounded-2xl shadow-lg border border-[#dce8f1] p-8 relative">
-            <button
-              onClick={() => {
-                setIsModalOpen(false);
-                setEditingReferral(null);
-                setRefForm(emptyReferralForm);
-              }}
-              className="absolute top-4 right-4 p-2 text-[#60727b] hover:text-[#111d23] hover:bg-[#f0f5f9] rounded-lg transition-colors"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-            </button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 p-5 relative">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <h4 className="text-sm font-bold text-heading dark:text-white">
+                {editingReferral ? 'Edit Referral Source' : 'New Referral Source'}
+              </h4>
+              <button
+                onClick={() => {
+                  setIsModalOpen(false);
+                  setEditingReferral(null);
+                  setRefForm(emptyReferralForm);
+                }}
+                className="rounded-lg p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            </div>
             
-            <form onSubmit={saveReferral} className="grid gap-4 md:grid-cols-2 mt-4 bg-[#f8fafc] p-6 rounded-2xl border border-[#dce8f1]">
-              <input
-                value={refForm.name}
-                onChange={(e) => setRefForm((prev) => ({ ...prev, name: e.target.value }))}
-                placeholder="Source name"
-                className="rounded-xl border border-[#dce8f1] bg-white px-4 py-3 text-sm outline-none focus:border-[#fdba74] transition-colors"
-                required
-              />
-              <input
-                value={refForm.utm_source}
-                onChange={(e) => setRefForm((prev) => ({ ...prev, utm_source: e.target.value }))}
-                placeholder="UTM source"
-                className="rounded-xl border border-[#dce8f1] bg-white px-4 py-3 text-sm outline-none focus:border-[#fdba74] transition-colors"
-              />
-              <input
-                value={refForm.utm_medium}
-                onChange={(e) => setRefForm((prev) => ({ ...prev, utm_medium: e.target.value }))}
-                placeholder="UTM medium"
-                className="rounded-xl border border-[#dce8f1] bg-white px-4 py-3 text-sm outline-none focus:border-[#fdba74] transition-colors"
-              />
-              <input
-                value={refForm.utm_campaign}
-                onChange={(e) => setRefForm((prev) => ({ ...prev, utm_campaign: e.target.value }))}
-                placeholder="UTM campaign"
-                className="rounded-xl border border-[#dce8f1] bg-white px-4 py-3 text-sm outline-none focus:border-[#fdba74] transition-colors"
-              />
-              <textarea
-                value={refForm.description}
-                onChange={(e) => setRefForm((prev) => ({ ...prev, description: e.target.value }))}
-                placeholder="Description"
-                className="min-h-[120px] rounded-xl border border-[#dce8f1] bg-white px-4 py-3 text-sm outline-none focus:border-[#fdba74] transition-colors md:col-span-2 resize-y"
-              />
-              <div className="flex items-center justify-end gap-2 md:col-span-2 pt-2">
+            <form onSubmit={saveReferral} className="space-y-3 pt-3">
+              <label className="block space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-body">Source Name *</span>
+                <input
+                  value={refForm.name}
+                  onChange={(e) => setRefForm((prev) => ({ ...prev, name: e.target.value }))}
+                  placeholder="e.g., Google Ads, Realtor Referral"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium outline-none focus:border-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  required
+                />
+              </label>
+
+              <div className="grid grid-cols-3 gap-2">
+                <label className="block space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-body">UTM Source</span>
+                  <input
+                    value={refForm.utm_source}
+                    onChange={(e) => setRefForm((prev) => ({ ...prev, utm_source: e.target.value }))}
+                    placeholder="google"
+                    className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium outline-none focus:border-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-body">UTM Medium</span>
+                  <input
+                    value={refForm.utm_medium}
+                    onChange={(e) => setRefForm((prev) => ({ ...prev, utm_medium: e.target.value }))}
+                    placeholder="cpc"
+                    className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium outline-none focus:border-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-body">UTM Campaign</span>
+                  <input
+                    value={refForm.utm_campaign}
+                    onChange={(e) => setRefForm((prev) => ({ ...prev, utm_campaign: e.target.value }))}
+                    placeholder="summer2026"
+                    className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium outline-none focus:border-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                </label>
+              </div>
+
+              <label className="block space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-body">Description</span>
+                <textarea
+                  value={refForm.description}
+                  onChange={(e) => setRefForm((prev) => ({ ...prev, description: e.target.value }))}
+                  placeholder="Notes regarding partner commission, agreement, or attribution..."
+                  rows={2}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium outline-none focus:border-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white resize-none"
+                />
+              </label>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="rounded-lg px-3 py-1.5 text-xs font-semibold text-body hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  Cancel
+                </button>
                 <button
                   type="submit"
                   disabled={isSaving}
-                  className="inline-flex items-center gap-2 rounded-xl bg-[#fdba74] px-8 py-2.5 font-bold text-[#111d23] hover:bg-[#f9a852] disabled:opacity-60 transition-colors"
+                  className="rounded-lg bg-primary px-4 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-primary/90 disabled:opacity-60"
                 >
-                  Save
+                  {isSaving ? 'Saving...' : 'Save Source'}
                 </button>
               </div>
             </form>

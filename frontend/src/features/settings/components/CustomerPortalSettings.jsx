@@ -34,7 +34,7 @@ const normalize = (payload) => {
   return [];
 };
 
-const CustomerPortalSettings = () => {
+const CustomerPortalSettings = ({ branchId = null, view = null }) => {
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

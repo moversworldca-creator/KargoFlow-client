@@ -58,18 +58,6 @@ const getUserDisplayName = (user) =>
     (user?.id ? `User #${user.id}` : '')
   ).trim();
 
-const DEFAULT_MOVE_SIZE_OPTIONS = [
-  'Studio',
-  '1 Bedroom Apartment',
-  '2 Bedroom Apartment',
-  '3 Bedroom Apartment',
-  '3 Bedroom House',
-  '4 Bedroom House',
-  '5+ Bedroom House',
-  'Office',
-  'Commercial',
-];
-
 const INITIAL_FORM_STATE = {
   first_name: '',
   last_name: '',
@@ -172,18 +160,7 @@ const NewLeadForm = ({ isOpen, onClose, metadata = {}, onSuccess, canCreateLead 
   const moverSizes = useMemo(() => asList(metadata.moverSizes), [metadata.moverSizes]);
   const referralSources = useMemo(() => asList(metadata.referralSources), [metadata.referralSources]);
 
-  const resolvedMoveSizes = useMemo(
-    () =>
-      moverSizes
-        .filter((size) => size && size.is_active !== false)
-        .map((size) => String(size.name || '').trim())
-        .filter(Boolean),
-    [moverSizes]
-  );
-
-  const moveSizeOptions = resolvedMoveSizes.length ? resolvedMoveSizes : DEFAULT_MOVE_SIZE_OPTIONS;
-  const currentMoveSize = String(form.move_size || '').trim();
-  const hasCustomMoveSize = Boolean(currentMoveSize) && !moveSizeOptions.includes(currentMoveSize);
+  const moveSizeOptions = useMemo(() => moverSizes.filter((size) => size?.id && size.is_active !== false), [moverSizes]);
   const selectedBranchId = form.branch ? String(form.branch) : '';
 
   const assignableUsers = useMemo(() => {
@@ -213,6 +190,7 @@ const NewLeadForm = ({ isOpen, onClose, metadata = {}, onSuccess, canCreateLead 
   }, [assignableUsers, selectedUser]);
 
   const validateForm = () => {
+    if (!form.branch) return 'Select a branch.';
     if (!form.first_name.trim()) return 'First name is required.';
     if (!form.email.trim() && !form.phone.trim()) return 'At least one contact method (Email or Phone) is required.';
 
@@ -248,7 +226,7 @@ const NewLeadForm = ({ isOpen, onClose, metadata = {}, onSuccess, canCreateLead 
         custom_status_code: null,
         service_type: form.service_type ? Number(form.service_type) : null,
         move_date: form.move_date || null,
-        move_size: form.move_size,
+        move_size_id: form.move_size ? Number(form.move_size) : null,
         move_type: form.move_type ? Number(form.move_type) : null,
         branch: form.branch ? Number(form.branch) : null,
         assigned_to: form.assigned_to && (!selectedBranchId || assignableUsers.some((user) => String(user.id) === String(form.assigned_to)))
@@ -485,12 +463,9 @@ const NewLeadForm = ({ isOpen, onClose, metadata = {}, onSuccess, canCreateLead 
                         className="w-full px-3 py-2 rounded-xl border border-ink-200 bg-brand-tint/30 text-sm font-semibold text-ink-800 outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition-all cursor-pointer"
                       >
                         <option value="">Select Size</option>
-                        {hasCustomMoveSize ? (
-                          <option value={currentMoveSize}>{currentMoveSize}</option>
-                        ) : null}
                         {moveSizeOptions.map((size) => (
-                          <option key={size} value={size}>
-                            {size}
+                          <option key={size.id} value={size.id}>
+                            {size.name}
                           </option>
                         ))}
                       </select>
