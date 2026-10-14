@@ -117,7 +117,7 @@ export function usePlatformAuditLogs(params = {}) {
   });
 }
 
-export function useCommunicationOverview() {
+export function useCommunicationOverview(options = {}) {
   return useQuery({
     queryKey: ['platform', 'communication', 'overview'],
     queryFn: async () => {
@@ -125,10 +125,11 @@ export function useCommunicationOverview() {
       return res?.data || {};
     },
     staleTime: DEFAULT_STALE_TIME,
+    enabled: options.enabled !== false,
   });
 }
 
-export function useCommunicationResend() {
+export function useCommunicationResend(options = {}) {
   return useQuery({
     queryKey: ['platform', 'communication', 'resend'],
     queryFn: async () => {
@@ -136,10 +137,11 @@ export function useCommunicationResend() {
       return res?.data || {};
     },
     staleTime: DEFAULT_STALE_TIME,
+    enabled: options.enabled !== false,
   });
 }
 
-export function useCommunicationTelnyx() {
+export function useCommunicationTelnyx(options = {}) {
   return useQuery({
     queryKey: ['platform', 'communication', 'telnyx'],
     queryFn: async () => {
@@ -147,10 +149,11 @@ export function useCommunicationTelnyx() {
       return res?.data || {};
     },
     staleTime: DEFAULT_STALE_TIME,
+    enabled: options.enabled !== false,
   });
 }
 
-export function useCommunicationHealth() {
+export function useCommunicationHealth(options = {}) {
   return useQuery({
     queryKey: ['platform', 'communication', 'health'],
     queryFn: async () => {
@@ -158,17 +161,20 @@ export function useCommunicationHealth() {
       return res?.data || {};
     },
     staleTime: DEFAULT_STALE_TIME,
+    enabled: options.enabled !== false,
   });
 }
 
-export function useCommunicationAuditLogs(params = {}) {
+export function useCommunicationAuditLogs(params = {}, options = {}) {
   return useQuery({
     queryKey: ['platform', 'communication', 'audit', params],
     queryFn: async () => {
       const res = await platformApi.getCommunicationAuditLogs(params);
-      return unpackResults(res);
+      return { results: res?.data?.results || [], count: res?.data?.count || 0 };
     },
     staleTime: 30 * 1000,
+    // The audit trail needs its own permission; do not ask when it is not held.
+    enabled: options.enabled !== false,
   });
 }
 

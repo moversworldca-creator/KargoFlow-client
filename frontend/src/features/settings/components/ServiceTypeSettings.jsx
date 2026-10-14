@@ -181,8 +181,11 @@ const ServiceTypeSettings = ({ branchId }) => {
     setIsSaving(true);
     try {
       const payload = {
-        ...formData,
-        branch: branchId
+        name: formData.name.trim(),
+        description: formData.description?.trim() || '',
+        is_active: formData.is_active !== false,
+        code: formData.name.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_').slice(0, 50),
+        branch_id: branchId ? Number(branchId) : null,
       };
       if (editingType) {
         const updated = await updateServiceType(editingType.id, payload);

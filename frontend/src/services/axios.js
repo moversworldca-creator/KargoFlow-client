@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getTenantToken, expireTenantSession } from './tenantSession';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -43,11 +44,10 @@ axiosInstance.interceptors.request.use(
       if (typeof window !== 'undefined' && window.__activeCompanyId) {
         return String(window.__activeCompanyId);
       }
-      const storedCompanyId = localStorage.getItem('active_company_id');
-      return storedCompanyId ? String(storedCompanyId) : '';
+      return '';
     };
 
-    const token = localStorage.getItem('access_token');
+    const token = config.skipAuth ? null : getTenantToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -57,7 +57,7 @@ axiosInstance.interceptors.request.use(
     } else if (config.headers?.['X-Branch-ID']) {
       delete config.headers['X-Branch-ID'];
     }
-    const companyId = readCompanyId();
+    const companyId = config.skipAuth ? '' : readCompanyId();
     if (companyId) {
       config.headers['X-Company-ID'] = companyId;
     } else if (config.headers?.['X-Company-ID']) {
@@ -76,36 +76,17 @@ axiosInstance.interceptors.request.use(
   }
 );
 
-// Interceptor to handle token refresh on 401 response
+// Backend sessions are opaque and revocable; expiry requires a new login.
 axiosInstance.interceptors.response.use(
   (response) => response.data, // Directly return data
   async (error) => {
     const originalRequest = error.config;
     
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true;
-      const refreshToken = localStorage.getItem('refresh_token');
-      
-      if (refreshToken) {
-        try {
-          // Call refresh token endpoint directly to avoid circular dependency
-          const response = await axios.post(`${API_BASE_URL}/token/refresh/`, { 
-            refresh: refreshToken 
-          });
-          const { access } = response.data;
-          localStorage.setItem('access_token', access);
-          
-          originalRequest.headers.Authorization = `Bearer ${access}`;
-          return axiosInstance(originalRequest);
-        } catch (refreshError) {
-          localStorage.clear();
-          window.location.href = '/login';
-          return Promise.reject(refreshError);
-        }
-      } else {
-        localStorage.clear();
-        window.location.href = '/login';
-      }
+    const accountUnavailable = error.response?.status === 403 &&
+      ['tenant_user_not_found', 'tenant_employee_inactive', 'tenant_blocked'].includes(error.response?.data?.error);
+    if ((error.response?.status === 401 || accountUnavailable) && !originalRequest?.skipAuth &&
+        originalRequest?.headers?.Authorization === `Bearer ${getTenantToken()}`) {
+      expireTenantSession();
     }
     
     if (error.response?.status === 403) {

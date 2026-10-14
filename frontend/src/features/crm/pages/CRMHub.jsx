@@ -32,12 +32,15 @@ import {
   deleteOpportunity,
   getActivities,
   getCustomers,
+  getLead,
   getLeads,
+  getLeadStatusCodes,
   getOpportunities,
   getBranchLookups,
   getLookupUsers,
   getStatusCodes,
   updateLead,
+  setLeadCustomStatus,
   updateOpportunity,
   createSalesActivity,
 } from '../../../services/api';
@@ -664,10 +667,11 @@ const CRMHub = ({ defaultTab }) => {
 
   const fetchStatusConfigs = async (branchId = null) => {
     try {
-      const response = await getStatusCodes();
+      const response = await getLeadStatusCodes();
       const rows = asList(response);
       const mapped = rows
         .map((row) => ({
+          id: row.id,
           code: String(row.code || '').trim(),
           label: String(row.label || '').trim() || getLeadStatusLabel(row.code),
           color_hex: row.color_hex || '',
@@ -827,7 +831,9 @@ const CRMHub = ({ defaultTab }) => {
     if (!canManageHubRecords) return denyHubAction('You do not have permission to change lead status.');
     setIsSaving(true);
     try {
-      await Promise.all(ids.map(id => updateLead(id, { status: bulkStatus })));
+      const statusId = leadStatusCodes.find((item) => item.code === bulkStatus)?.id;
+      if (!statusId) throw new Error('Select a configured lead status.');
+      await Promise.all(ids.map(id => setLeadCustomStatus(id, statusId)));
       setBulkStatusOpen(false);
       await fetchLeads();
     } catch (err) {
@@ -978,20 +984,27 @@ const CRMHub = ({ defaultTab }) => {
     navigate('/leads/new');
   };
 
-  const openLeadEdit = (lead) => {
+  const openLeadEdit = async (lead) => {
     if (!lead) return;
-    setLeadModal({ open: true, mode: 'edit', initial: lead });
+    let fullLead;
+    try {
+      fullLead = await getLead(lead.id);
+    } catch (err) {
+      alert(err?.response?.data?.detail || 'Failed to load lead details.');
+      return;
+    }
+    setLeadModal({ open: true, mode: 'edit', initial: fullLead });
     setLeadForm({
-      first_name: lead.first_name || '',
-      last_name: lead.last_name || '',
-      email: lead.email || '',
-      phone: lead.phone || '',
-      status: lead.status || 'new',
-      move_size: lead.move_size || '',
-      move_date: lead.move_date || '',
-      service_type: lead.service_type || '',
-      lead_cost: lead.lead_cost ?? '',
-      notes: lead.notes || '',
+      first_name: fullLead.first_name || '',
+      last_name: fullLead.last_name || '',
+      email: fullLead.email || '',
+      phone: fullLead.phone || '',
+      status: fullLead.status || 'new',
+      move_size: fullLead.move_size || '',
+      move_date: fullLead.move_date || '',
+      service_type: fullLead.service_type || '',
+      lead_cost: fullLead.lead_cost ?? '',
+      notes: fullLead.notes || '',
     });
   };
 

@@ -1,35 +1,50 @@
 import React, { useState } from 'react';
-import { ShieldAlert, X, Loader2, AlertOctagon } from 'lucide-react';
+import { ShieldAlert, X, Loader2 } from 'lucide-react';
 import { useModal } from '../../hooks/useModal';
 import { useToast } from '../../context/ToastContext';
 import platformApi from '../../api/platformApi';
 import { useInvalidatePlatformQueries } from '../../hooks/usePlatformData';
+import { BTN, BTN_DANGER, INPUT } from './parts';
+import { PROVIDER_LABEL, apiError } from './format';
 
-export default function EmergencySuspensionModal({ isOpen, onClose, provider = 'Resend' }) {
+const PHRASE = 'CONFIRM SUSPENSION';
+
+export default function EmergencySuspensionModal({ isOpen, onClose, provider = 'resend' }) {
   useModal(isOpen, onClose);
   const { showToast } = useToast();
   const { invalidateCommunication } = useInvalidatePlatformQueries();
   const [confirmInput, setConfirmInput] = useState('');
+  const [reason, setReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isOpen) return null;
+  const label = PROVIDER_LABEL[provider] || provider;
+  const channel = provider === 'resend' ? 'Branch email (notifications and automations)' : 'SMS';
+
+  const close = () => {
+    setConfirmInput('');
+    setReason('');
+    onClose();
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (confirmInput.trim() !== 'CONFIRM SUSPENSION') {
-      showToast('Please type "CONFIRM SUSPENSION" exactly to authorize this high-impact action.', 'error');
+    if (confirmInput !== PHRASE) {
+      showToast(`Type "${PHRASE}" exactly to continue.`, 'error');
       return;
     }
-
+    if (!reason.trim()) {
+      showToast('Give a reason: it is recorded in the audit trail.', 'error');
+      return;
+    }
     setIsSubmitting(true);
     try {
-      await platformApi.suspendCommunicationProvider(provider, confirmInput.trim());
-      showToast(`PROVIDER SUSPENDED: ${provider} outbound queue held safely.`, 'error');
+      const res = await platformApi.suspendCommunicationProvider(provider, confirmInput, reason.trim());
+      showToast(res?.data?.message || `${label} is suspended.`, 'success');
       invalidateCommunication();
-      setConfirmInput('');
-      onClose();
+      close();
     } catch (err) {
-      showToast(err?.response?.data?.error || `Failed to suspend ${provider}.`, 'error');
+      showToast(apiError(err, `${label} could not be suspended.`), 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -38,82 +53,41 @@ export default function EmergencySuspensionModal({ isOpen, onClose, provider = '
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
       <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-900/60 shadow-2xl overflow-hidden">
-        {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-rose-100 dark:border-rose-900/40 bg-rose-50/50 dark:bg-rose-950/20">
           <div className="flex items-center gap-3 text-rose-600 dark:text-rose-400">
             <div className="p-2.5 rounded-xl bg-rose-100 dark:bg-rose-900/50 border border-rose-200 dark:border-rose-800/40">
               <ShieldAlert size={24} />
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                Emergency Provider Suspension
-              </h3>
-              <p className="text-xs text-rose-600 dark:text-rose-400 font-semibold">
-                High-Impact Destructive Control
-              </p>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">Suspend {label}</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Affects every tenant &bull; Recorded in the audit trail</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-          >
+          <button onClick={close} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors cursor-pointer">
             <X size={18} />
           </button>
         </div>
 
-        {/* Content */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-            You are about to immediately suspend <strong className="text-rose-600 dark:text-rose-400">all outbound email and SMS activity</strong> across Kargo Flow for <strong className="text-slate-900 dark:text-white">{provider}</strong>.
+            While {label} is suspended, no {channel} leaves the platform for any tenant. Messages already queued are not lost:
+            they stay queued or are retried, and go out after the provider is resumed. Employee mailboxes are not affected.
           </p>
-
-          <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-xs text-rose-800 dark:text-rose-300 flex items-start gap-2.5">
-            <AlertOctagon size={18} className="shrink-0 mt-0.5 text-rose-600 dark:text-rose-400" />
-            <div>
-              <strong>Consequence:</strong> Hundreds of tenant shipments, driver dispatches, and billing notices will be held in platform buffer queues until restored.
-            </div>
+          <div>
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1 block">Reason</label>
+            <input className={INPUT} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} placeholder="What is happening?" autoFocus />
           </div>
-
-          <div className="space-y-1.5">
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Type &ldquo;CONFIRM SUSPENSION&rdquo; to execute:
+          <div>
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1 block">
+              Type <span className="font-mono text-rose-600 dark:text-rose-400">{PHRASE}</span> to authorize
             </label>
-            <input
-              type="text"
-              value={confirmInput}
-              onChange={(e) => setConfirmInput(e.target.value)}
-              placeholder="CONFIRM SUSPENSION"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-rose-300 dark:border-rose-900 bg-rose-50/30 dark:bg-slate-950 font-mono text-xs text-rose-700 dark:text-rose-400 placeholder-rose-300 focus:outline-none focus:ring-2 focus:ring-rose-500"
-              required
-            />
+            <input className={`${INPUT} font-mono`} value={confirmInput} onChange={(e) => setConfirmInput(e.target.value)} autoComplete="off" spellCheck={false} />
           </div>
-
-          {/* Footer Actions */}
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={isSubmitting}
-              className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting || confirmInput.trim() !== 'CONFIRM SUSPENSION'}
-              className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-2 shadow-sm transition-colors cursor-pointer disabled:opacity-50"
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 size={14} className="animate-spin" />
-                  <span>Suspending...</span>
-                </>
-              ) : (
-                <>
-                  <ShieldAlert size={14} />
-                  <span>Suspend Provider Immediately</span>
-                </>
-              )}
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <button type="button" className={BTN} onClick={close} disabled={isSubmitting}>Cancel</button>
+            <button type="submit" className={BTN_DANGER} disabled={isSubmitting || confirmInput !== PHRASE}>
+              {isSubmitting ? <Loader2 size={14} className="animate-spin" /> : <ShieldAlert size={14} />}
+              Suspend {label}
             </button>
           </div>
         </form>

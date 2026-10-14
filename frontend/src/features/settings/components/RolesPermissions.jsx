@@ -48,15 +48,16 @@ const groupPermissionsByModule = (permissions, query) => {
     ? permissions.filter(p =>
         String(p.module || '').toLowerCase().includes(q) ||
         String(p.name || '').toLowerCase().includes(q) ||
-        String(p.codename || '').toLowerCase().includes(q)
+        String(p.codename || p.permission_key || '').toLowerCase().includes(q)
       )
     : permissions;
 
   const modules = new Map();
   for (const perm of filtered) {
-    const canonical = FEATURE_PERMISSION_CATALOG[perm.codename] || {};
+    const key = perm.codename || perm.permission_key || '';
+    const canonical = FEATURE_PERMISSION_CATALOG[key] || {};
     const moduleName = canonical.module || perm.module || 'Other';
-    const label = canonical.label || perm.name || perm.label || perm.codename;
+    const label = canonical.label || perm.name || perm.label || perm.description || key;
     if (!modules.has(moduleName)) {
       modules.set(moduleName, {
         module: moduleName,
@@ -67,12 +68,13 @@ const groupPermissionsByModule = (permissions, query) => {
     const group = modules.get(moduleName);
     const normalizedPerm = {
       ...perm,
+      codename: key,
       module: moduleName,
       name: label,
       label,
     };
     group.all.push(normalizedPerm);
-    group.actions[actionFromCodename(normalizedPerm.codename)].push(normalizedPerm);
+    group.actions[actionFromCodename(key)].push(normalizedPerm);
   }
 
   return Array.from(modules.values())
@@ -339,7 +341,7 @@ const RolesPermissions = ({ branchId }) => {
         if (roleRows.length > 0) {
           const nextRole = roleRows[0];
           setSelectedRole(nextRole.id);
-          setRolePerms(nextRole.permissions_details?.map((p) => p.codename) || []);
+          setRolePerms(nextRole.permissions_details?.map((p) => p.codename || p.permission_key) || []);
         } else {
           setSelectedRole(null);
           setRolePerms([]);
@@ -376,7 +378,7 @@ const RolesPermissions = ({ branchId }) => {
     }
     setIsLoadingSaving(true);
     try {
-      const permIds = permissions.filter(p => rolePerms.includes(p.codename)).map(p => p.id);
+      const permIds = permissions.filter(p => rolePerms.includes(p.codename || p.permission_key)).map(p => p.id || p.permission_key);
       const response = await updateRole(selectedRoleId, { permissions: permIds });
       setRoles((prev) => prev.map(r => r.id === selectedRoleId ? response : r));
       setMessage({ type: 'success', text: 'Changes updated!' });
@@ -581,7 +583,7 @@ const RolesPermissions = ({ branchId }) => {
                 tabIndex={0}
                 onClick={() => { 
                   setSelectedRole(role.id); 
-                  setRolePerms(role.permissions_details?.map(p => p.codename) || []);
+                  setRolePerms(role.permissions_details?.map((p) => p.codename || p.permission_key) || []);
                   setIsRolesOpen(false);
                 }}
                 className={`w-full text-left p-4 rounded-xl transition-all border relative overflow-hidden group cursor-pointer min-h-[88px] ${

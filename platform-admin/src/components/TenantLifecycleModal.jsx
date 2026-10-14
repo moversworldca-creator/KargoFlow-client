@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Building2, Shield, AlertTriangle, CheckCircle2, 
   XCircle, Clock, Archive, RefreshCw, Loader2, 
@@ -7,6 +7,32 @@ import {
 import { useToast } from '../context/ToastContext';
 import { useModal } from '../hooks/useModal';
 import platformApi from '../api/platformApi';
+
+// The transitions the server accepts (it refuses every other one):
+//   Provisioning -> Active | Closed
+//   Active       -> Deactivated | Closed
+//   Deactivated  -> Active | Closed
+// Nothing returns to Provisioning and a Closed tenant stays closed.
+const ALLOWED_TARGETS = {
+  Provisioning: ['Active', 'Closed'],
+  Active: ['Deactivated', 'Closed'],
+  Deactivated: ['Active', 'Closed'],
+  Closed: [],
+};
+
+function currentState(tenant) {
+  if (!tenant) return 'Active';
+  if (tenant.functional_state === 'Suspended') return 'Deactivated';
+  return tenant.functional_state || (tenant.is_active === false ? 'Provisioning' : 'Active');
+}
+
+function errorText(err, fallback) {
+  const data = err?.response?.data;
+  if (!data) return err?.message || fallback;
+  if (typeof data.detail === 'string') return data.detail;
+  const first = Object.values(data).flat().find((item) => typeof item === 'string' && item !== 'domain_error');
+  return first || fallback;
+}
 
 // Section 2.1 Approved Table
 const FUNCTIONAL_STATES = [
@@ -38,7 +64,7 @@ const FUNCTIONAL_STATES = [
     accessLevel: 'Access Blocked',
   },
   {
-    state: 'Closed / Deleted',
+    state: 'Closed',
     isActive: false,
     isDeleted: true,
     badgeColor: 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400 border-rose-200',
@@ -56,17 +82,30 @@ export default function TenantLifecycleModal({
 }) {
   useModal(isOpen, onClose);
   const { showToast } = useToast();
-  if (!isOpen || !tenant) return null;
-
-  const [selectedState, setSelectedState] = useState(tenant.functional_state || 'Active');
+  const fromState = currentState(tenant);
+  const targets = ALLOWED_TARGETS[fromState] || [];
+  const [selectedState, setSelectedState] = useState(null);
   const [reason, setReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const currentStateInfo = FUNCTIONAL_STATES.find((s) => s.state === tenant.functional_state) || FUNCTIONAL_STATES[0];
-  const targetStateInfo = FUNCTIONAL_STATES.find((s) => s.state === selectedState) || FUNCTIONAL_STATES[0];
+  // A fresh dialog per tenant: preselect the usual next step (activate a
+  // provisioning or deactivated tenant; nothing preselected for an active one).
+  useEffect(() => {
+    if (!isOpen) return;
+    setSelectedState(targets.includes('Active') ? 'Active' : null);
+    setReason('');
+  }, [isOpen, tenant?.id, fromState]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!isOpen || !tenant) return null;
+
+  const currentStateInfo = FUNCTIONAL_STATES.find((s) => s.state === fromState) || FUNCTIONAL_STATES[0];
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!selectedState || !targets.includes(selectedState)) {
+      showToast('Choose the state to move this tenant to.', 'warning');
+      return;
+    }
     if (!reason.trim()) {
       showToast('Mandatory audit reason is required for tenant lifecycle changes (Section 2.1).', 'warning');
       return;
@@ -78,11 +117,17 @@ export default function TenantLifecycleModal({
         functional_state: selectedState,
         reason: reason.trim(),
       });
-      showToast(`Tenant "${tenant.name}" state updated to ${selectedState}.`, 'success');
+      const applied = res?.data?.functional_state || selectedState;
+      showToast(
+        applied === 'Active'
+          ? `Tenant "${tenant.name}" is now Active. Its users can sign in.`
+          : `Tenant "${tenant.name}" is now ${applied}. Its users are signed out and cannot sign in.`,
+        'success'
+      );
       onTenantUpdated?.(res.data);
       onClose();
     } catch (err) {
-      showToast(err?.response?.data?.error || err?.message || 'Failed to update tenant lifecycle', 'error');
+      showToast(errorText(err, 'The tenant state could not be changed.'), 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -132,7 +177,7 @@ export default function TenantLifecycleModal({
             <div>
               <span className="text-[10px] uppercase font-bold text-slate-400 block">Current Company State</span>
               <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border mt-0.5 ${currentStateInfo.badgeColor}`}>
-                {tenant.functional_state || 'Active'}
+                {fromState}
               </span>
             </div>
             <div>
@@ -149,14 +194,20 @@ export default function TenantLifecycleModal({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {FUNCTIONAL_STATES.map((stateObj) => {
                 const isSelected = selectedState === stateObj.state;
+                const isCurrent = stateObj.state === fromState;
+                const allowed = targets.includes(stateObj.state);
                 return (
                   <div
                     key={stateObj.state}
-                    onClick={() => setSelectedState(stateObj.state)}
-                    className={`p-3.5 rounded-2xl border cursor-pointer transition-all space-y-1 ${
+                    onClick={() => allowed && setSelectedState(stateObj.state)}
+                    aria-disabled={!allowed}
+                    title={isCurrent ? 'Current state' : allowed ? '' : `A ${fromState} tenant cannot become ${stateObj.state}`}
+                    className={`p-3.5 rounded-2xl border transition-all space-y-1 ${
                       isSelected
-                        ? 'border-blue-600 bg-blue-50/50 dark:bg-blue-950/20 ring-2 ring-blue-600/30'
-                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
+                        ? 'border-blue-600 bg-blue-50/50 dark:bg-blue-950/20 ring-2 ring-blue-600/30 cursor-pointer'
+                        : allowed
+                          ? 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300 cursor-pointer'
+                          : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 opacity-50 cursor-not-allowed'
                     }`}
                   >
                     <div className="flex items-center justify-between">
@@ -164,7 +215,7 @@ export default function TenantLifecycleModal({
                         {stateObj.state}
                       </span>
                       <span className="text-[10px] font-mono text-slate-400">
-                        active: {stateObj.isActive ? 'true' : 'false'}
+                        {isCurrent ? 'current' : allowed ? 'available' : 'not available'}
                       </span>
                     </div>
                     <h4 className="font-bold text-slate-900 dark:text-white pt-1">{stateObj.title}</h4>
@@ -174,6 +225,15 @@ export default function TenantLifecycleModal({
               })}
             </div>
           </div>
+
+          {targets.length === 0 && (
+            <p className="text-[11px] text-slate-500">A closed tenant cannot be reopened.</p>
+          )}
+          {selectedState === 'Closed' && (
+            <p className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 text-[11px] text-rose-800 dark:text-rose-300">
+              Closing is permanent: the tenant cannot be reactivated afterwards. Use Deactivated for a reversible shutdown.
+            </p>
+          )}
 
           {/* Form Audit Reason */}
           <form onSubmit={handleSubmit} id="tenant-lifecycle-form" className="space-y-4">
@@ -205,11 +265,11 @@ export default function TenantLifecycleModal({
           <button
             type="submit"
             form="tenant-lifecycle-form"
-            disabled={isSubmitting || selectedState === tenant.functional_state}
+            disabled={isSubmitting || !selectedState || !targets.includes(selectedState)}
             className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 shadow-sm"
           >
             {isSubmitting ? <Loader2 size={14} className="animate-spin" /> : null}
-            <span>Execute Lifecycle Transition</span>
+            <span>{selectedState ? `Move to ${selectedState}` : 'Choose a state'}</span>
           </button>
         </div>
       </div>

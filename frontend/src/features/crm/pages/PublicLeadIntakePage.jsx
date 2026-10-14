@@ -1,8 +1,11 @@
 import React from 'react';
 import PublicLeadIntakeForm from '../components/PublicLeadIntakeForm';
 import { Truck } from 'lucide-react';
+import { useParams } from 'react-router-dom';
 
 export default function PublicLeadIntakePage() {
+  const { providerKey: routeProviderKey } = useParams();
+  const providerKey = routeProviderKey || import.meta.env.VITE_PUBLIC_LEAD_PROVIDER_KEY;
   return (
     <div className="min-h-screen bg-[#fafafa] text-[#334155] font-sans selection:bg-[#eef5fa] selection:text-[#1f7ae0] flex flex-col justify-between py-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
       
@@ -26,7 +29,9 @@ export default function PublicLeadIntakePage() {
 
       {/* Main Intake Form Container */}
       <div className="relative z-10 w-full mb-12">
-        <PublicLeadIntakeForm />
+        {providerKey ? <PublicLeadIntakeForm providerKey={providerKey} /> : (
+          <p className="text-center text-sm text-red-700" role="alert">This quote form is not configured.</p>
+        )}
       </div>
 
       {/* Footer Info */}
