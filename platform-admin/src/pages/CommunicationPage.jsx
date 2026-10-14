@@ -1,21 +1,17 @@
 import React, { useState } from 'react';
-import { 
-  Radio, Mail, Phone, Activity, Shield, RefreshCw, 
-  Layers, Lock, AlertTriangle, CheckCircle2, ChevronRight,
-  ShieldCheck, Loader2
-} from 'lucide-react';
+import { Radio, Mail, Phone, Activity, Shield, RefreshCw, ShieldCheck, Loader2, AlertTriangle, FlaskConical } from 'lucide-react';
 import { usePlatformAuth } from '../auth/PlatformAuthContext';
 import { PLATFORM_PERMISSIONS } from '../rbac/platformRbac';
 import AccessDenied from '../components/AccessDenied';
 import { useToast } from '../context/ToastContext';
 import platformApi from '../api/platformApi';
-import { 
-  useCommunicationOverview, 
-  useCommunicationResend, 
-  useCommunicationTelnyx, 
-  useCommunicationHealth, 
+import {
+  useCommunicationOverview,
+  useCommunicationResend,
+  useCommunicationTelnyx,
+  useCommunicationHealth,
   useCommunicationAuditLogs,
-  useInvalidatePlatformQueries 
+  useInvalidatePlatformQueries,
 } from '../hooks/usePlatformData';
 
 import CommunicationOverviewTab from '../components/communication/CommunicationOverviewTab';
@@ -25,7 +21,15 @@ import ProviderHealthTab from '../components/communication/ProviderHealthTab';
 import CommunicationAuditTab from '../components/communication/CommunicationAuditTab';
 import RotateApiKeyModal from '../components/communication/RotateApiKeyModal';
 import EmergencySuspensionModal from '../components/communication/EmergencySuspensionModal';
+import ProviderSettingsModal from '../components/communication/ProviderSettingsModal';
 import CommunicationInspectorDrawer from '../components/communication/CommunicationInspectorDrawer';
+import StatusBadge from '../components/communication/StatusBadge';
+import { BTN, BTN_PRIMARY, CARD } from '../components/communication/parts';
+import { PROVIDER_LABEL, apiError, healthBadge } from '../components/communication/format';
+
+const TAB_TITLES = {
+  overview: 'Overview', resend: 'Resend (Email)', telnyx: 'Telnyx (SMS)', health: 'Health', audit: 'Audit trail',
+};
 
 export default function CommunicationPage() {
   const { hasPermission } = usePlatformAuth();
@@ -34,26 +38,20 @@ export default function CommunicationPage() {
 
   const canView = hasPermission(PLATFORM_PERMISSIONS.COMMUNICATION_VIEW);
   const canManage = hasPermission(PLATFORM_PERMISSIONS.COMMUNICATION_MANAGE);
+  const canAudit = hasPermission(PLATFORM_PERMISSIONS.AUDIT_VIEW);
 
   const [activeTab, setActiveTab] = useState('overview');
   const [isRefreshing, setIsRefreshing] = useState(false);
-
-  // Modals state
-  const [rotateModalOpen, setRotateModalOpen] = useState(false);
-  const [rotateProvider, setRotateProvider] = useState('Resend');
-  const [suspendModalOpen, setSuspendModalOpen] = useState(false);
-  const [suspendProvider, setSuspendProvider] = useState('Resend');
-
-  // Inspector Drawer state
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [verifyingDomain, setVerifyingDomain] = useState(null);
+  const [dialog, setDialog] = useState(null); // { kind: 'rotate' | 'suspend' | 'settings', provider }
   const [inspectData, setInspectData] = useState(null);
 
-  // Data Queries
-  const { data: overviewData = {}, isLoading: overviewLoading, refetch: refetchOverview } = useCommunicationOverview();
-  const { data: resendData = {}, refetch: refetchResend } = useCommunicationResend();
-  const { data: telnyxData = {}, refetch: refetchTelnyx } = useCommunicationTelnyx();
-  const { data: healthData = {}, refetch: refetchHealth } = useCommunicationHealth();
-  const { data: auditLogs = [], refetch: refetchAudit } = useCommunicationAuditLogs();
+  const overview = useCommunicationOverview({ enabled: canView });
+  const resend = useCommunicationResend({ enabled: canView });
+  const telnyx = useCommunicationTelnyx({ enabled: canView });
+  const health = useCommunicationHealth({ enabled: canView });
+  const audit = useCommunicationAuditLogs({ limit: 100 }, { enabled: canView && canAudit });
 
   if (!canView) {
     return (
@@ -65,157 +63,145 @@ export default function CommunicationPage() {
     );
   }
 
+  const overviewData = overview.data || {};
+  const configs = { resend: resend.data?.config || overviewData.resend, telnyx: telnyx.data?.config || overviewData.telnyx };
+  const healthRows = Object.fromEntries(((health.data || overviewData).health_matrix || []).map((row) => [row.key, row]));
+
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      await Promise.all([
-        refetchOverview(),
-        refetchResend(),
-        refetchTelnyx(),
-        refetchHealth(),
-        refetchAudit(),
+      const results = await Promise.all([
+        overview.refetch(), resend.refetch(), telnyx.refetch(), health.refetch(), ...(canAudit ? [audit.refetch()] : []),
       ]);
-      showToast('Live telemetry status refreshed across Resend & Telnyx clusters.', 'success');
-    } catch {
-      showToast('Error syncing communication telemetry.', 'error');
+      const failed = results.find((result) => result.isError);
+      if (failed) showToast(apiError(failed.error, 'Some communication data could not be refreshed.'), 'error');
+      else showToast('Communication status refreshed.', 'success');
     } finally {
       setIsRefreshing(false);
     }
   };
 
+  const requireManage = (what) => {
+    if (canManage) return true;
+    showToast(`You do not have permission to ${what}.`, 'error');
+    return false;
+  };
+
   const handleTestPing = async (provider) => {
-    showToast(`Initiating ping probe to ${provider} API edge...`, 'info');
+    if (!requireManage('test provider connections')) return;
+    const label = PROVIDER_LABEL[provider] || provider;
+    setBusy(true);
     try {
-      const res = await platformApi.testCommunicationConnection(provider);
-      showToast(res?.data?.message || `${provider} API handshake success (Roundtrip: 74ms, TLS 1.3 verified).`, 'success');
+      const { data } = await platformApi.testCommunicationConnection(provider);
+      showToast(`${label}: ${data.message}${data.success && !data.simulated ? ` (${data.roundtrip_ms} ms)` : ''}`, data.success ? 'success' : 'error');
       invalidateCommunication();
-    } catch {
-      showToast(`${provider} API handshake success (Roundtrip: 74ms, TLS 1.3 verified).`, 'success');
+    } catch (err) {
+      showToast(apiError(err, `The ${label} connection test could not be run.`), 'error');
+    } finally {
+      setBusy(false);
     }
   };
 
-  const handleOpenRotateKey = (provider) => {
-    if (!canManage) {
-      showToast('You do not have permission to rotate carrier keys.', 'error');
-      return;
-    }
-    setRotateProvider(provider);
-    setRotateModalOpen(true);
-  };
-
-  const handleOpenDisableProvider = (provider) => {
-    if (!canManage) {
-      showToast('You do not have permission to suspend providers.', 'error');
-      return;
-    }
-    setSuspendProvider(provider);
-    setSuspendModalOpen(true);
-  };
-
-  const handleInspect = (data) => {
-    setInspectData(data);
-    setDrawerOpen(true);
-  };
-
-  const getBreadcrumbTitle = () => {
-    switch (activeTab) {
-      case 'overview':
-        return 'Overview';
-      case 'resend':
-        return 'Resend (Email)';
-      case 'telnyx':
-        return 'Telnyx (SMS)';
-      case 'health':
-        return 'Health & Latency';
-      case 'audit':
-        return 'Security Audit';
-      default:
-        return '';
+  const handleResume = async (provider) => {
+    if (!requireManage('resume providers')) return;
+    const label = PROVIDER_LABEL[provider] || provider;
+    setBusy(true);
+    try {
+      const { data } = await platformApi.resumeCommunicationProvider(provider);
+      showToast(data.message || `${label} is active again.`, 'success');
+      invalidateCommunication();
+    } catch (err) {
+      showToast(apiError(err, `${label} could not be resumed.`), 'error');
+    } finally {
+      setBusy(false);
     }
   };
+
+  const handleVerifyDns = async (domain) => {
+    if (!requireManage('re-check domains')) return;
+    setVerifyingDomain(domain);
+    try {
+      const { data } = await platformApi.verifyCommunicationDomainDns(domain);
+      showToast(data.message, data.success ? 'success' : 'info');
+      const refreshed = await resend.refetch();
+      const row = (refreshed.data?.domains || []).find((item) => item.domain === domain);
+      setInspectData((current) => (current?.type === 'domain' && current.identifier === domain && row ? { ...current, details: row } : current));
+      invalidateCommunication();
+    } catch (err) {
+      showToast(apiError(err, `${domain} could not be re-checked.`), 'error');
+    } finally {
+      setVerifyingDomain(null);
+    }
+  };
+
+  const openDialog = (kind, what) => (provider) => {
+    if (requireManage(what)) setDialog({ kind, provider });
+  };
+  const providerHandlers = {
+    canManage, busy, onTestPing: handleTestPing, onResume: handleResume, onInspect: setInspectData,
+    onOpenRotateKey: openDialog('rotate', 'change provider keys'),
+    onOpenSettings: openDialog('settings', 'change provider settings'),
+    onOpenDisableProvider: openDialog('suspend', 'suspend providers'),
+  };
+
+  const tabs = [
+    { id: 'overview', label: 'Overview', icon: Radio },
+    { id: 'resend', label: 'Resend (Email)', icon: Mail, status: healthRows.resend?.status },
+    { id: 'telnyx', label: 'Telnyx (SMS & numbers)', icon: Phone, status: healthRows.telnyx?.status },
+    { id: 'health', label: 'Health', icon: Activity },
+    { id: 'audit', label: 'Audit trail', icon: ShieldCheck },
+  ];
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
-      {/* Top Context & Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between pb-4 gap-4 border-b border-slate-200 dark:border-slate-800">
         <div>
-          {/* Breadcrumbs */}
           <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5 font-mono">
             <span>Platform Admin</span>
             <span>/</span>
             <span className="text-blue-600 dark:text-blue-400 font-bold">Communication Infrastructure</span>
             <span>/</span>
-            <span className="text-slate-700 dark:text-slate-300 font-bold">{getBreadcrumbTitle()}</span>
+            <span className="text-slate-700 dark:text-slate-300 font-bold">{TAB_TITLES[activeTab]}</span>
           </div>
-
-          <div className="flex items-center gap-2.5">
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300">
-              CONTROLLED ACCESS
-            </span>
-            <span className="text-xs text-slate-400">
-              Time-boxed &bull; Audited Operations &bull; Super Admin Scope
-            </span>
-          </div>
-
           <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight mt-1">
             Communication Infrastructure Console
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Monitor the centralized Email (Resend) and SMS (Telnyx) infrastructure serving Kargo Flow multi-tenant operations.
+            The platform-wide Email (Resend) and SMS (Telnyx) accounts that serve every tenant.
           </p>
         </div>
-
-        {/* Global Header Actions */}
         <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
-          <button
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-60"
-          >
+          <button onClick={handleRefresh} disabled={isRefreshing} className={BTN}>
             <RefreshCw size={14} className={isRefreshing ? 'animate-spin text-blue-600' : ''} />
-            <span>Refresh Status</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('health')}
-            className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
-          >
-            <Activity size={14} className="text-blue-600 dark:text-blue-400" />
-            <span>Provider Health &amp; Latency</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('audit')}
-            className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
-          >
-            <ShieldCheck size={14} className="text-purple-600 dark:text-purple-400" />
-            <span>Audit Logs</span>
+            <span>Refresh</span>
           </button>
         </div>
       </div>
 
-      {/* Governance Banner */}
-      <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <Shield size={20} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-          <p className="text-xs text-amber-900 dark:text-amber-300 leading-relaxed">
-            <strong>Controlled Platform Infrastructure Governance (Section 2.4):</strong> Super Admins oversee API connections, global number inventory, and carrier delivery pipelines. Reading individual tenant customer messages or manual customer messaging is strictly prohibited by platform zero-knowledge policy.
+      <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 flex items-start gap-3">
+        <Shield size={20} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+        <p className="text-xs text-amber-900 dark:text-amber-300 leading-relaxed">
+          <strong>Controlled access.</strong> This console shows delivery metadata across tenants: recipients are masked and message
+          content is never available here. Every key change, settings change, suspension, connection test and DNS re-check is written
+          to the platform audit trail{canManage ? '.' : '. Your role can view this console but cannot change anything.'}
+        </p>
+      </div>
+
+      {overviewData.simulated && (
+        <div className="p-4 rounded-2xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/60 flex items-start gap-3">
+          <FlaskConical size={20} className="text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+          <p className="text-xs text-blue-900 dark:text-blue-300 leading-relaxed">
+            <strong>Fake provider mode.</strong> This server does not call Resend or Telnyx: messages are recorded but not delivered,
+            and connection tests and DNS re-checks return simulated answers.
           </p>
         </div>
-        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-900 dark:bg-amber-900/60 dark:text-amber-200 border border-amber-300 dark:border-amber-700/60 whitespace-nowrap self-start sm:self-auto shrink-0">
-          COMPLIANCE LEVEL 4 &bull; ENFORCED
-        </span>
-      </div>
+      )}
 
-      {/* Main Tabs (High Level Cluster) */}
       <div className="border-b border-slate-200 dark:border-slate-800 flex items-center gap-2 sm:gap-6 overflow-x-auto no-scrollbar">
-        {[
-          { id: 'overview', label: 'Central Overview', icon: Radio, badge: null },
-          { id: 'resend', label: 'Resend (Email Core)', icon: Mail, badge: 'OPERATIONAL' },
-          { id: 'telnyx', label: 'Telnyx (SMS & Numbers)', icon: Phone, badge: 'OPERATIONAL' },
-          { id: 'health', label: 'Incidents & Health Matrix', icon: Activity, badge: null },
-          { id: 'audit', label: 'Platform Security Audit', icon: ShieldCheck, badge: null },
-        ].map((tab) => {
+        {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
+          const badge = tab.status ? healthBadge(tab.status) : null;
           return (
             <button
               key={tab.id}
@@ -228,85 +214,60 @@ export default function CommunicationPage() {
             >
               <Icon size={16} />
               <span>{tab.label}</span>
-              {tab.badge && (
-                <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400">
-                  {tab.badge}
-                </span>
-              )}
+              {badge && <StatusBadge label={badge.label} tone={badge.tone} dot={false} className="text-[9px] uppercase tracking-wider" />}
             </button>
           );
         })}
       </div>
 
-      {/* Active Tab View */}
-      {overviewLoading ? (
+      {overview.isLoading ? (
         <div className="py-24 flex flex-col items-center justify-center gap-3 text-slate-400">
           <Loader2 size={24} className="animate-spin text-blue-600" />
-          <span className="text-xs font-semibold">Loading communication telemetry...</span>
+          <span className="text-xs font-semibold">Loading communication status…</span>
+        </div>
+      ) : overview.isError ? (
+        <div className={`${CARD} p-10 text-center`}>
+          <AlertTriangle size={24} className="mx-auto text-rose-500 mb-3" />
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white">The communication console could not be loaded</h3>
+          <p className="text-xs text-slate-400 mt-1">{apiError(overview.error, 'The server did not answer.')}</p>
+          <button className={`${BTN_PRIMARY} mx-auto mt-4`} onClick={handleRefresh}><RefreshCw size={14} /> Try again</button>
         </div>
       ) : (
         <>
           {activeTab === 'overview' && (
             <CommunicationOverviewTab
-              overviewData={overviewData}
-              onNavigateTab={(tab) => setActiveTab(tab)}
-              onTestPing={handleTestPing}
-              onInspect={handleInspect}
+              overviewData={overviewData} canManage={canManage} onNavigateTab={setActiveTab}
+              onTestPing={handleTestPing} onInspect={setInspectData}
             />
           )}
-
           {activeTab === 'resend' && (
             <ResendSubSuiteTab
-              resendData={resendData}
-              onTestPing={handleTestPing}
-              onOpenRotateKey={handleOpenRotateKey}
-              onOpenDisableProvider={handleOpenDisableProvider}
-              onInspect={handleInspect}
+              resendData={resend.data || { config: overviewData.resend }} health={healthRows.resend} {...providerHandlers}
+              verifyingDomain={verifyingDomain} onVerifyDns={handleVerifyDns}
             />
           )}
-
           {activeTab === 'telnyx' && (
-            <TelnyxSubSuiteTab
-              telnyxData={telnyxData}
-              onTestPing={handleTestPing}
-              onOpenRotateKey={handleOpenRotateKey}
-              onInspect={handleInspect}
-            />
+            <TelnyxSubSuiteTab telnyxData={telnyx.data || { config: overviewData.telnyx }} health={healthRows.telnyx} {...providerHandlers} />
           )}
-
-          {activeTab === 'health' && (
-            <ProviderHealthTab
-              healthData={healthData}
-            />
-          )}
-
+          {activeTab === 'health' && <ProviderHealthTab healthData={health.data || overviewData} />}
           {activeTab === 'audit' && (
-            <CommunicationAuditTab
-              auditLogs={auditLogs}
-              onInspect={handleInspect}
-            />
+            <CommunicationAuditTab auditData={audit.data} canAudit={canAudit} isError={audit.isError} onInspect={setInspectData} />
           )}
         </>
       )}
 
-      {/* Modals & Drawer */}
       <RotateApiKeyModal
-        isOpen={rotateModalOpen}
-        onClose={() => setRotateModalOpen(false)}
-        provider={rotateProvider}
+        isOpen={dialog?.kind === 'rotate'} onClose={() => setDialog(null)} provider={dialog?.provider}
+        hasKey={Boolean(configs[dialog?.provider]?.configured)}
       />
-
-      <EmergencySuspensionModal
-        isOpen={suspendModalOpen}
-        onClose={() => setSuspendModalOpen(false)}
-        provider={suspendProvider}
+      <EmergencySuspensionModal isOpen={dialog?.kind === 'suspend'} onClose={() => setDialog(null)} provider={dialog?.provider} />
+      <ProviderSettingsModal
+        isOpen={dialog?.kind === 'settings'} onClose={() => setDialog(null)} provider={dialog?.provider}
+        config={configs[dialog?.provider]}
       />
-
       <CommunicationInspectorDrawer
-        isOpen={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        inspectData={inspectData}
-        onRefreshCarrier={handleRefresh}
+        isOpen={Boolean(inspectData)} onClose={() => setInspectData(null)} inspectData={inspectData}
+        canManage={canManage} verifyingDomain={verifyingDomain} onVerifyDns={handleVerifyDns}
       />
     </div>
   );

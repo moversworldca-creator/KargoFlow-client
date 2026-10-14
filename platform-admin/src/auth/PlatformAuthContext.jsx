@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import platformApi from '../api/platformApi';
 import { hasPlatformPermission } from '../rbac/platformRbac';
@@ -25,8 +25,9 @@ export const PlatformAuthProvider = ({ children }) => {
       return null;
     }
   });
-  const [permissions, setPermissions] = useState([]);
+  const [permissions, setPermissions] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const verificationStarted = useRef(false);
   const navigate = useNavigate();
 
   const logout = useCallback(() => {
@@ -50,17 +51,18 @@ export const PlatformAuthProvider = ({ children }) => {
       const res = await platformApi.getPlatformAuthMe();
       if (res?.data?.user) {
         setPlatformUser(res.data.user);
-        setPermissions(res.data.permissions || []);
+        setPermissions(Array.isArray(res.data.permissions) ? res.data.permissions : null);
         localStorage.setItem('platform_user', JSON.stringify(res.data.user));
       }
     } catch (err) {
       console.warn('Platform authentication verification failed:', err?.response?.data || err?.message);
-      // If unauthorized, clear state
+      // Never keep protected routes mounted when the server cannot verify the cached user.
+      localStorage.removeItem('platform_user');
+      setPlatformUser(null);
+      setPermissions(null);
+
       if (err?.response?.status === 401 || err?.response?.status === 403) {
         localStorage.removeItem('platform_access_token');
-        localStorage.removeItem('platform_user');
-        setPlatformUser(null);
-        setPermissions([]);
       }
     } finally {
       setIsLoading(false);
@@ -68,7 +70,10 @@ export const PlatformAuthProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    verifyAndRefreshUser();
+    if (!verificationStarted.current) {
+      verificationStarted.current = true;
+      verifyAndRefreshUser();
+    }
 
     const handleSessionExpired = (e) => {
       logout();
@@ -98,16 +103,17 @@ export const PlatformAuthProvider = ({ children }) => {
     }
 
     setPlatformUser(user || null);
-    setPermissions(perms || []);
+    setPermissions(Array.isArray(perms) ? perms : null);
     return res.data;
   };
 
   const checkPermission = useCallback(
     (permissionCode) => {
       if (!platformUser) return false;
+      if (permissions !== null) return permissions.includes(permissionCode);
       return hasPlatformPermission(platformUser, permissionCode);
     },
-    [platformUser]
+    [platformUser, permissions]
   );
 
   const switchPersona = async (userId) => {

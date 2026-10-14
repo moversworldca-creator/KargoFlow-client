@@ -38,7 +38,7 @@ export default function TenantDirectoryTab({
     if (statusFilter === 'active') return t.functional_state === 'Active' && t.subscription_status === 'active';
     if (statusFilter === 'trialing') return t.subscription_status === 'trialing';
     if (statusFilter === 'past_due') return t.subscription_status === 'past_due';
-    if (statusFilter === 'suspended') return t.subscription_status === 'suspended' || t.functional_state === 'Suspended';
+    if (statusFilter === 'suspended') return t.subscription_status === 'suspended' || ['Deactivated', 'Suspended', 'Closed'].includes(t.functional_state);
     if (statusFilter === 'provisioning') return t.functional_state === 'Provisioning' || !t.is_active;
     return true;
   });
@@ -67,8 +67,42 @@ export default function TenantDirectoryTab({
     }
   };
 
-  const getAccessBadge = (accessBehavior) => {
-    const access = accessBehavior?.access || 'Full';
+  // What the tenant can actually do. The company's own lifecycle state comes
+  // first: a company that is not Active cannot sign in, whatever its
+  // subscription says. Only then does the subscription decide.
+  const deriveAccess = (tenant) => {
+    const state = tenant.functional_state || (tenant.is_active ? 'Active' : 'Provisioning');
+    if (state !== 'Active' || tenant.is_active === false) return 'Blocked';
+    if (tenant.access_behavior?.access) return tenant.access_behavior.access;
+    if (['active', 'trialing'].includes(tenant.subscription_status)) return 'Full';
+    if (tenant.subscription_status === 'past_due') return 'Grace / operational write';
+    return 'Blocked';
+  };
+
+  const getStateBadge = (tenant) => {
+    const state = tenant.functional_state || (tenant.is_active ? 'Active' : 'Provisioning');
+    const tone = state === 'Active'
+      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400'
+      : state === 'Provisioning'
+        ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
+        : 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400';
+    return (
+      <div>
+        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${tone}`}>{state}</span>
+        {state === 'Provisioning' && (
+          <button
+            onClick={() => setLifecycleModalTenant(tenant)}
+            className="block mt-1 text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+          >
+            Activate…
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  const getAccessBadge = (tenant) => {
+    const access = deriveAccess(tenant);
     if (access === 'Full') {
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/50">
@@ -176,6 +210,7 @@ export default function TenantDirectoryTab({
                 <th className="py-2.5 px-3.5">Organization / Tenant</th>
                 <th className="py-2.5 px-3.5">Company ID</th>
                 <th className="py-2.5 px-3.5">Current Plan</th>
+                <th className="py-2.5 px-3.5">Tenant State</th>
                 <th className="py-2.5 px-3.5">Subscription</th>
                 <th className="py-2.5 px-3.5">Derived Access</th>
                 <th className="py-2.5 px-3.5">Capacity</th>
@@ -185,7 +220,7 @@ export default function TenantDirectoryTab({
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
               {filteredTenants.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-8 text-center text-slate-400">
+                  <td colSpan={8} className="py-8 text-center text-slate-400">
                     No matching tenants found.
                   </td>
                 </tr>
@@ -213,11 +248,15 @@ export default function TenantDirectoryTab({
                       </td>
 
                       <td className="py-3 px-4">
+                        {getStateBadge(tenant)}
+                      </td>
+
+                      <td className="py-3 px-4">
                         {getSubStatusBadge(tenant.subscription_status)}
                       </td>
 
                       <td className="py-3 px-4">
-                        {getAccessBadge(tenant.access_behavior)}
+                        {getAccessBadge(tenant)}
                       </td>
 
                       <td className="py-3 px-4">

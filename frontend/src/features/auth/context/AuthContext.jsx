@@ -117,6 +117,12 @@ export const AuthProvider = ({ children }) => {
       resetTenantCaches();
       return data;
     } catch (backendError) {
+      // The server answered and refused the sign-in (wrong password, company
+      // not active, too many attempts...). That is a real answer: report it.
+      // A demo session here would only hold a token every request rejects.
+      if (backendError?.response) {
+        throw backendError;
+      }
       console.warn("Backend auth unavailable, falling back to offline demo user session:", backendError);
       const demoUser = {
         id: 1,
