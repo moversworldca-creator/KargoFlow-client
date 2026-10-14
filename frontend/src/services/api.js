@@ -1,4 +1,6 @@
 import api from "./axios";
+import { leadApi, leadPayload } from '../features/crm/leads/leadApi';
+import { getPipelineQueue } from '../features/crm/leads/pipelineApi';
 
 const FILE_TARGET_TYPE_MAP = {
   lead: "leads.lead",
@@ -143,20 +145,65 @@ export const markNotificationUnread = async (id) => notificationPayload(await ap
 export const markAllNotificationsRead = () => api.post("/tenant/notifications/mark-all-read/");
 
 // Lead APIs
-export const getLeads = (params) => api.get("/leads/leads/", { params });
-export const getLead = (id) => api.get(`/leads/leads/${id}/`);
-export const getLeadBySalesNumber = (salesNumber) => api.get(`/leads/leads/by-sales-number/${salesNumber}/`);
-export const createLead = (data) => api.post("/leads/leads/", data);
-export const updateLead = (id, data) => api.patch(`/leads/leads/${id}/`, data);
-export const deleteLead = (id) => api.delete(`/leads/leads/${id}/`);
-export const duplicateLead = (id) => api.post(`/leads/leads/${id}/duplicate/`);
-export const convertLead = (id) => api.post(`/leads/leads/${id}/convert/`);
-export const assignLead = (id, data) => api.post(`/leads/leads/${id}/assign/`, data);
-export const bulkUpdateLeadStatus = (data) => api.post("/leads/leads/bulk-status/", data);
-export const bulkEmailLeads = (data) => api.post("/leads/leads/bulk-email/", data);
-export const bulkSmsLeads = (data) => api.post("/leads/leads/bulk-sms/", data);
-export const markLeadLost = (id, data) => api.post(`/leads/leads/${id}/mark-lost/`, data);
-export const reopenLead = (id, data = {}) => api.post(`/leads/leads/${id}/reopen/`, data);
+export const getLeads = (params) => params ? leadApi.list(params) : leadApi.listAll();
+export const getLead = (id) => leadApi.get(id);
+export const getLeadBySalesNumber = async (salesNumber) => {
+  const detail = await api.get(`/tenant/pipeline/${salesNumber}/`);
+  if (detail?.item?.kind !== 'lead') throw new Error(`Sales number ${salesNumber} is not a lead.`);
+  return leadApi.get(detail.item.id);
+};
+export const createLead = (data) => leadApi.create(data);
+export const updateLead = async (id, data = {}) => {
+  const payload = leadPayload(data);
+  const requestedState = data.status === 'contacted' ? 'in_progress' : data.status;
+  let current = null;
+  let action = null;
+  if (requestedState) {
+    current = await leadApi.get(id);
+    if (requestedState !== current.system_state) {
+      action = { in_progress: current.system_state === 'lost' ? 'reopen' : 'start', qualified: 'qualify', archived: 'archive' }[requestedState];
+      if (!action) throw new Error(`Use the lead workflow to change status to ${requestedState}.`);
+    }
+  }
+  let updated = Object.keys(payload).length ? await leadApi.update(id, payload) : current;
+  if (data.custom_status_code !== undefined || data.custom_status_code_id !== undefined) {
+    const statusId = data.custom_status_code_id ?? data.custom_status_code;
+    updated = await leadApi.setCustomStatus(id, statusId === '' ? null : statusId);
+  }
+  if (action) updated = await leadApi.transition(id, action, { reason: data.reason || '' });
+  return updated || leadApi.get(id);
+};
+export const archiveLead = (id, reason = '') => leadApi.transition(id, 'archive', { reason });
+export const deleteLead = (id) => archiveLead(id, 'Archived from CRM hub');
+export const duplicateLead = async (id) => {
+  const source = await leadApi.get(id);
+  return leadApi.create(leadPayload(source, { create: true }));
+};
+export const convertLead = async (id, data = {}) => {
+  const result = await leadApi.convert(id, data);
+  return {
+    ...result,
+    opportunity: result.opportunity_id
+      ? { id: result.opportunity_id, sales_number: result.opportunity_number }
+      : null,
+  };
+};
+export const assignLead = async (id, data) => {
+  if (data?.branch && Number(data.branch) !== Number((await leadApi.get(id)).branch_id)) {
+    await leadApi.update(id, { branch_id: data.branch });
+  }
+  const employeeId = data?.employee_id ?? data?.assigned_employee_id;
+  const userId = data?.user_id ?? data?.assigned_to;
+  return leadApi.assign(id, employeeId ? { employee_id: Number(employeeId) } : userId ? { user_id: Number(userId) } : null);
+};
+export const setLeadCustomStatus = (id, statusCodeId) => leadApi.setCustomStatus(id, statusCodeId);
+export const startLead = (id, reason = '') => leadApi.transition(id, 'start', { reason });
+export const qualifyLead = (id, reason = '') => leadApi.transition(id, 'qualify', { reason });
+export const bulkUpdateLeadStatus = async ({ ids = [], status_code_id }) => Promise.all(ids.map((id) => setLeadCustomStatus(id, status_code_id)));
+export const bulkEmailLeads = () => { throw new Error('Bulk email requires the communications API.'); };
+export const bulkSmsLeads = () => { throw new Error('Bulk SMS requires the communications API.'); };
+export const markLeadLost = (id, data) => leadApi.transition(id, 'lost', data);
+export const reopenLead = (id, data = {}) => leadApi.transition(id, 'reopen', data);
 export const getReferralSources = (params) => api.get("/tenant/referral-sources/", { params });
 export const getReferralSourceLookups = (params) => api.get("/tenant/referral-sources/", { params });
 export const createReferralSource = (data) => api.post("/tenant/referral-sources/", data);
@@ -170,10 +217,23 @@ export const deleteLeadStatusCode = (id) => api.delete(`/tenant/lead-statuses/${
 export const getInboundLeadConfig = () => api.get("/tenant/lead-settings/");
 export const updateInboundLeadConfig = (data) => api.patch("/tenant/lead-settings/current/", data);
 export const rotateInboundLeadSecret = (providerId = 1) => api.post(`/tenant/lead-providers/${providerId}/rotate-secret/`);
-export const getLeadActivities = (params) => api.get("/leads/lead-activities/", { params });
-export const createLeadActivity = (data) => api.post("/leads/lead-activities/", data);
-export const updateLeadActivity = (id, data) => api.patch(`/leads/lead-activities/${id}/`, data);
-export const deleteLeadActivity = (id) => api.delete(`/leads/lead-activities/${id}/`);
+export const getLeadActivities = ({ lead_id, lead, branch, ...params } = {}) => {
+  const id = lead_id ?? lead;
+  return id ? leadApi.activities(id) : api.get('/tenant/leads/activity-feed/', {
+    params: { ...params, ...(branch ? { branch_id: branch } : {}) },
+  });
+};
+export const createLeadActivity = ({ lead_id, lead, content, ...data }) =>
+  leadApi.createActivity(lead_id ?? lead, { ...data, description: data.description ?? content ?? '' });
+export const updateLeadActivity = (id, data) => {
+  const leadId = data.lead_id ?? data.lead;
+  if (!leadId) throw new Error('A lead ID is required to update an activity.');
+  return leadApi.updateActivity(leadId, id, {
+    subject: data.subject, description: data.description ?? data.content,
+    status: data.status, is_pinned: data.is_pinned,
+  });
+};
+export const deleteLeadActivity = () => { throw new Error('Deleting lead activities is not supported.'); };
 
 
 
@@ -188,7 +248,7 @@ export const updateCustomerContact = (id, data) => api.patch(`/leads/customer-co
 export const deleteCustomerContact = (id) => api.delete(`/leads/customer-contacts/${id}/`);
 
 // ================= SALES APIs =================
-export const getMyLeadsQueue = (params) => api.get("/sales/my-leads-queue/", { params });
+export const getMyLeadsQueue = (params) => getPipelineQueue(params);
 export const getDashboardSummary = (params) => api.get("/sales/dashboard-summary/", { params });
 export const getSalesDashboardSummary = (params) => api.get("/sales/dashboard-summary-lite/", { params });
 export const getOpportunities = (params) => api.get("/sales/opportunities/", { params });

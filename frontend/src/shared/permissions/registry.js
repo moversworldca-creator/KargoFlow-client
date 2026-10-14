@@ -333,7 +333,7 @@ const normalizeRequired = (required) => {
 const PERMISSION_ALIASES = {
   'crm.leads.view': ['leads.view'],
   'crm.leads.create': ['leads.create'],
-  'crm.leads.edit': ['leads.edit'],
+  'crm.leads.edit': ['leads.update'],
   'crm.leads.assign': ['leads.assign'],
   'crm.leads.convert': ['leads.convert'],
   'crm.opportunities.view': ['opportunities.view'],

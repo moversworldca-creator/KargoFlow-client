@@ -222,6 +222,7 @@ function App() {
           <Route path="/portal/inventory" element={<CustomerInventoryPortal />} />
           <Route path="/portal/contracts/:token" element={<CustomerContractPortal />} />
           <Route path="/intake" element={<PublicLeadIntakePage />} />
+          <Route path="/intake/:providerKey" element={<PublicLeadIntakePage />} />
           <Route
             path="/__playwright__/estimate-view"
             element={isPlaywrightHarnessEnabled ? <EstimateViewPlaywrightHarness /> : <Navigate to="/" replace />}
