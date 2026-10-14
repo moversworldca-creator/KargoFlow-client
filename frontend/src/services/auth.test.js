@@ -71,4 +71,33 @@ describe('tenant authentication', () => {
     expect(getTenantToken()).toBeNull();
     expect(localStorage.getItem('platform_access_token')).toBe('platform-session');
   });
+
+  it('accepts a server-validated platform support profile', async () => {
+    api.get.mockResolvedValue({
+      user: {
+        id: 7,
+        company_id: 3,
+        identity_type: 'platform_support',
+        is_active: true,
+        access_mode: 'read',
+      },
+      company: { id: 3, name: 'Acme Moves' },
+      permissions: ['crm.dashboard.view'],
+    });
+
+    await expect(authService.me()).resolves.toMatchObject({
+      identity_type: 'platform_support',
+      company: { id: 3 },
+      permissions: ['crm.dashboard.view'],
+    });
+  });
+
+  it('still rejects an unrecognized identity type', async () => {
+    api.get.mockResolvedValue({
+      user: { id: 7, company_id: 3, identity_type: 'platform', is_active: true },
+      company: { id: 3 },
+    });
+
+    await expect(authService.me()).rejects.toThrow('validate the tenant account');
+  });
 });
