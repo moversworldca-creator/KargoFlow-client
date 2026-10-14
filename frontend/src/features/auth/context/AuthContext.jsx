@@ -11,6 +11,24 @@ function clearCaches() {
   window.dispatchEvent(new Event('app:tenant-changed'));
 }
 
+function consumeSupportConsoleHandoff() {
+  if (typeof window === 'undefined' || !window.location.hash) return null;
+
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  const token = params.get('support_token');
+  if (!token) return null;
+
+  const context = {
+    tenantId: params.get('tenant_id') || '',
+    tenantName: params.get('tenant_name') || '',
+    accessMode: params.get('access_mode') || 'read',
+    expiresAt: params.get('expires_at') || '',
+  };
+  sessionStorage.setItem('tenant_access_token', token);
+  window.history.replaceState(null, document.title, `${window.location.pathname}${window.location.search}`);
+  return context;
+}
+
 export const AuthProvider = ({ children }) => {
   const [supportConsoleContext] = useState(() => consumeSupportConsoleHandoff());
   const [user, setUser] = useState(null);
@@ -96,7 +114,7 @@ export const AuthProvider = ({ children }) => {
   }), [permissionSet]);
 
   const value = {
-    user, isAuthenticated: Boolean(user), isLoading, login, logout, switchCompany, setUser,
+    user, isAuthenticated: Boolean(user), isLoading, login, logout, switchCompany, setUser, supportConsoleContext,
     permissionSet, permissionContext,
     hasRole: (names) => Boolean(user?.role_details?.some(role => names.includes(role.name))),
     hasPermission: (permissions) => canAll(permissions, permissionContext),

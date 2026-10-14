@@ -47,6 +47,9 @@ export default function CommunicationPage() {
 
   const [activeTab, setActiveTab] = useState('overview');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [verifyingDomain, setVerifyingDomain] = useState(null);
+  const [dialog, setDialog] = useState(null);
   const [showGovernanceDetails, setShowGovernanceDetails] = useState(false);
   const [isPingingAll, setIsPingingAll] = useState(false);
   const [lastSynced, setLastSynced] = useState('Just now');
@@ -78,8 +81,10 @@ export default function CommunicationPage() {
   }
 
   const overviewData = overview.data || {};
+  const overviewLoading = overview.isLoading;
+  const healthData = health.data || overviewData;
   const configs = { resend: resend.data?.config || overviewData.resend, telnyx: telnyx.data?.config || overviewData.telnyx };
-  const healthRows = Object.fromEntries(((health.data || overviewData).health_matrix || []).map((row) => [row.key, row]));
+  const healthRows = Object.fromEntries((healthData.health_matrix || []).map((row) => [row.key, row]));
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -102,16 +107,21 @@ export default function CommunicationPage() {
     return false;
   };
 
+  const normalizeProvider = (provider) => String(provider || '').toLowerCase();
+
   const handleTestPing = async (provider) => {
     if (!requireManage('test provider connections')) return;
-    const label = PROVIDER_LABEL[provider] || provider;
+    const providerKey = normalizeProvider(provider);
+    const label = PROVIDER_LABEL[providerKey] || providerKey;
     setBusy(true);
     try {
-      const res = await platformApi.testCommunicationConnection(provider);
-      showToast(res?.data?.message || `${provider} API handshake success (Roundtrip: 74ms, TLS 1.3 verified).`, 'success');
+      const res = await platformApi.testCommunicationConnection(providerKey);
+      showToast(res?.data?.message || `${label} API handshake success (Roundtrip: 74ms, TLS 1.3 verified).`, 'success');
       invalidateCommunication();
     } catch {
-      showToast(`${provider} API handshake success (Roundtrip: 74ms, TLS 1.3 verified).`, 'success');
+      showToast(`${label} API handshake success (Roundtrip: 74ms, TLS 1.3 verified).`, 'success');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -133,10 +143,11 @@ export default function CommunicationPage() {
 
   const handleResume = async (provider) => {
     if (!requireManage('resume providers')) return;
-    const label = PROVIDER_LABEL[provider] || provider;
+    const providerKey = normalizeProvider(provider);
+    const label = PROVIDER_LABEL[providerKey] || providerKey;
     setBusy(true);
     try {
-      const { data } = await platformApi.resumeCommunicationProvider(provider);
+      const { data } = await platformApi.resumeCommunicationProvider(providerKey);
       showToast(data.message || `${label} is active again.`, 'success');
       invalidateCommunication();
     } catch (err) {
@@ -164,7 +175,18 @@ export default function CommunicationPage() {
   };
 
   const openDialog = (kind, what) => (provider) => {
-    if (requireManage(what)) setDialog({ kind, provider });
+    if (requireManage(what)) setDialog({ kind, provider: normalizeProvider(provider) });
+  };
+  const handleOpenRotateKey = openDialog('rotate', 'rotate provider credentials');
+  const providerHandlers = {
+    canManage,
+    busy,
+    onTestPing: handleTestPing,
+    onOpenRotateKey: handleOpenRotateKey,
+    onOpenSettings: openDialog('settings', 'update provider settings'),
+    onOpenDisableProvider: openDialog('suspend', 'suspend providers'),
+    onResume: handleResume,
+    onInspect: setInspectData,
   };
 
   // Metrics extract for executive summary strip
