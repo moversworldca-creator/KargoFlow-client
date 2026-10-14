@@ -2,6 +2,7 @@ import React from 'react';
 import { Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { usePlatformAuth } from './auth/PlatformAuthContext';
+import TenantPortal from './tenant/TenantPortal';
 
 import LoginPage from './auth/LoginPage';
 import PlatformShell from './layout/PlatformShell';
@@ -40,6 +41,7 @@ function RequireAuth() {
 export default function App() {
   return (
     <Routes>
+      <Route path="/tenant/*" element={<TenantPortal />} />
       <Route path="/login" element={<LoginPage />} />
 
       {/* Protected Routes */}

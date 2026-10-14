@@ -90,6 +90,8 @@ export function useSupportSessions() {
       return unpackResults(res);
     },
     staleTime: 30 * 1000,
+    refetchInterval: 30 * 1000,
+    refetchIntervalInBackground: false,
   });
 }
 

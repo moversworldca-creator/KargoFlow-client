@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   CreditCard, ArrowRight, Clock, AlertTriangle, 
   CheckCircle2, XCircle, PauseCircle, ShieldAlert, 
@@ -30,6 +30,20 @@ const STATUS_ACCESS_INFO = {
   cancelled: { access: 'Read-only initially', desc: 'Customer data remains visible for export and recovery; long-term retention TBD.' },
   expired: { access: 'Read-only initially', desc: 'Ended/non-renewed contract retains read access initially.' },
   suspended: { access: 'Blocked', desc: 'Administrative/security condition blocks tenant operation completely while retaining data.' },
+};
+
+const formatApiError = (data, fallback) => {
+  if (!data) return fallback;
+  if (typeof data === 'string') return data;
+  if (data.detail || data.error || data.message) {
+    return data.detail || data.error || data.message;
+  }
+  if (typeof data === 'object') {
+    return Object.entries(data)
+      .map(([field, value]) => `${field}: ${Array.isArray(value) ? value.join(', ') : String(value)}`)
+      .join('; ');
+  }
+  return fallback;
 };
 
 export default function SubscriptionLifecycleModal({ 
@@ -70,12 +84,53 @@ export default function SubscriptionLifecycleModal({
   const [cancelReason, setCancelReason] = useState('');
   const [reactivateReason, setReactivateReason] = useState('');
 
+  // History timeline
+  const [historyList, setHistoryList] = useState(subscription?.status_history || []);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Quota check for plan change
   const targetPlan = plans.find((p) => p.id === newPlanId);
   const targetTenant = tenants.find((t) => String(t.id) === String(activeSubscription.tenant_id));
   const isDowngrade = targetPlan && currentPlan && (targetPlan.base_price_cents || 0) < (currentPlan.base_price_cents || 0);
+
+  // Sync state whenever selected subscription changes
+  useEffect(() => {
+    if (subscription) {
+      const allowed = ALLOWED_TRANSITIONS[subscription.status] || [];
+      setTargetStatus(allowed[0] || 'active');
+      setTransitionReason('');
+      setGraceDays(7);
+      setNewPlanId(plans[0]?.id || '');
+      setBillingInterval(subscription.billing_interval || 'month');
+      setEffectiveTiming('immediate');
+      setPlanChangeReason('');
+      setTrialEndsAt(subscription.trial_ends_at ? subscription.trial_ends_at.slice(0, 10) : '');
+      setGraceEndsAt(subscription.grace_period_ends_at ? subscription.grace_period_ends_at.slice(0, 10) : '');
+      setDatesReason('');
+      setCancelReason('');
+      setReactivateReason('');
+      setHistoryList(subscription.status_history || []);
+    }
+  }, [subscription, isOpen]);
+
+  // Fetch history when history tab is selected
+  useEffect(() => {
+    if (activeSubTab === 'history' && subscription?.id) {
+      setHistoryLoading(true);
+      platformApi.getSubscriptionHistory(subscription.id)
+        .then((res) => {
+          setHistoryList(res.data || []);
+        })
+        .catch(() => {
+          setHistoryList(subscription.status_history || []);
+        })
+        .finally(() => {
+          setHistoryLoading(false);
+        });
+    }
+  }, [activeSubTab, subscription?.id]);
 
   if (!isOpen || !subscription) return null;
 
@@ -89,24 +144,22 @@ export default function SubscriptionLifecycleModal({
 
     setIsSubmitting(true);
     try {
-      const fields = {};
-      if (targetStatus === 'past_due' && graceDays) {
-        const d = new Date();
-        d.setDate(d.getDate() + Number(graceDays));
-        fields.grace_period_ends_at = d.toISOString();
-      }
-
-      const res = await platformApi.transitionSubscription(subscription.id, {
+      const payload = {
         new_status: targetStatus,
         next_status: targetStatus,
         reason: transitionReason.trim(),
-        fields: Object.keys(fields).length > 0 ? fields : undefined,
-      });
+      };
+      if (targetStatus === 'past_due' && graceDays) {
+        payload.fields = {
+          grace_period_ends_at: new Date(Date.now() + Number(graceDays) * 86400000).toISOString(),
+        };
+      }
+      const res = await platformApi.transitionSubscription(subscription.id, payload);
       showToast(`Subscription transitioned to "${targetStatus}".`, 'success');
       onSubscriptionUpdated?.(res.data?.subscription || res.data);
       onClose();
     } catch (err) {
-      showToast(err?.response?.data?.error || err?.message || 'Transition failed', 'error');
+      showToast(formatApiError(err?.response?.data, err?.message || 'Transition failed'), 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -126,10 +179,14 @@ export default function SubscriptionLifecycleModal({
       const res = await platformApi.changeSubscriptionPlan(companyId, {
         plan_id: newPlanId,
         new_plan_id: newPlanId,
+        plan_id: newPlanId,
         billing_interval: billingInterval,
         effective: effectiveTiming,
         effective_timing: effectiveTiming,
         reason: planChangeReason.trim(),
+        tenant_id: subscription.tenant_id || subscription.company_id,
+        company_id: subscription.tenant_id || subscription.company_id,
+        current_status: subscription.status,
       });
       showToast(res.data?.message || 'Plan changed successfully.', 'success');
       if (res.data?.downgrade_warning) {
@@ -138,7 +195,7 @@ export default function SubscriptionLifecycleModal({
       onSubscriptionUpdated?.(res.data?.subscription || res.data);
       onClose();
     } catch (err) {
-      showToast(err?.response?.data?.error || err?.message || 'Plan change failed', 'error');
+      showToast(formatApiError(err?.response?.data, err?.message || 'Plan change failed'), 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -156,12 +213,14 @@ export default function SubscriptionLifecycleModal({
           plan_id: subscription.plan_id,
           trial_ends_at: new Date(trialEndsAt).toISOString(),
           reason: datesReason.trim() || 'Admin trial adjustment',
+          current_status: subscription.status,
         });
       }
       if (graceEndsAt) {
         await platformApi.transitionSubscription(subscription.id, {
           new_status: subscription.status || 'past_due',
           reason: datesReason.trim() || 'Admin grace adjustment',
+          current_status: subscription.status,
           fields: {
             grace_period_ends_at: new Date(graceEndsAt).toISOString(),
           },
@@ -171,7 +230,7 @@ export default function SubscriptionLifecycleModal({
       onSubscriptionUpdated?.();
       onClose();
     } catch (err) {
-      showToast(err?.response?.data?.error || err?.message || 'Failed to update dates', 'error');
+      showToast(formatApiError(err?.response?.data, err?.message || 'Failed to update dates'), 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -189,12 +248,15 @@ export default function SubscriptionLifecycleModal({
       const res = await platformApi.cancelSubscription(subscription.id, {
         cancel_mode: cancelMode,
         reason: cancelReason.trim(),
+        tenant_id: subscription.tenant_id || subscription.company_id,
+        company_id: subscription.tenant_id || subscription.company_id,
+        current_status: subscription.status,
       });
       showToast(res.data?.message || 'Cancellation recorded.', 'success');
       onSubscriptionUpdated?.(res.data?.subscription || res.data);
       onClose();
     } catch (err) {
-      showToast(err?.response?.data?.error || err?.message || 'Cancellation failed', 'error');
+      showToast(formatApiError(err?.response?.data, err?.message || 'Cancellation failed'), 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -211,12 +273,13 @@ export default function SubscriptionLifecycleModal({
     try {
       const res = await platformApi.reactivateSubscription(subscription.id, {
         reason: reactivateReason.trim(),
+        new_status: 'active',
       });
       showToast(res.data?.message || 'Subscription reactivated.', 'success');
       onSubscriptionUpdated?.(res.data?.subscription || res.data);
       onClose();
     } catch (err) {
-      showToast(err?.response?.data?.error || err?.message || 'Reactivation failed', 'error');
+      showToast(formatApiError(err?.response?.data, err?.message || 'Reactivation failed'), 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -664,10 +727,14 @@ export default function SubscriptionLifecycleModal({
           {/* TAB 5: Status History Timeline (Section 2.11) */}
           {activeSubTab === 'history' && (
             <div className="space-y-3 animate-in fade-in max-h-80 overflow-y-auto pr-1">
-              {(subscription.status_history || []).length === 0 ? (
+              {historyLoading ? (
+                <div className="py-8 flex justify-center items-center text-slate-400">
+                  <Loader2 size={20} className="animate-spin text-blue-600" />
+                </div>
+              ) : (historyList || []).length === 0 ? (
                 <p className="text-slate-400 py-8 text-center italic">No status changes recorded.</p>
               ) : (
-                subscription.status_history.map((h, i) => (
+                historyList.map((h, i) => (
                   <div key={h.id || i} className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 text-xs space-y-1">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -675,13 +742,13 @@ export default function SubscriptionLifecycleModal({
                         <ArrowRight size={13} className="text-slate-400" />
                         <span className="font-bold text-blue-600 dark:text-blue-400 uppercase">{h.new_status}</span>
                       </div>
-                      <span className="text-[11px] text-slate-400">{new Date(h.timestamp).toLocaleString()}</span>
+                      <span className="text-[11px] text-slate-400">{new Date(h.timestamp || h.created_at).toLocaleString()}</span>
                     </div>
                     <p className="text-slate-700 dark:text-slate-300 font-medium pt-1">
                       {h.reason || 'Reason not recorded'}
                     </p>
                     <p className="text-[10px] text-slate-400">
-                      Actor: {h.actor || 'system'}
+                      Actor: {h.actor || (h.actor_platform_user_id ? `Platform Admin #${h.actor_platform_user_id}` : 'system')}
                     </p>
                   </div>
                 ))

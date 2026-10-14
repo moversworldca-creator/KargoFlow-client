@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Building2, Mail, Phone, Globe, MapPin, Hash, ShieldCheck, Save, Loader2 } from 'lucide-react';
+import { Building2, Loader2 } from 'lucide-react';
 import Card from '../../../shared/ui/Card';
 import { getCompany, updateCompany } from '../../../services/api';
 import { useAuth } from '../../auth/context/AuthContext';
@@ -11,7 +11,6 @@ const InputField = ({ label, icon: Icon, type = "text", value, onChange, placeho
     <div className="relative">
       {Icon && <Icon className="absolute left-3 top-1/2 -translate-y-1/2 text-disabled" size={14} />}
       <input
-        type={type}
         value={value || ''}
         onChange={onChange}
         placeholder={placeholder}
@@ -56,9 +55,8 @@ const CompanySettings = ({ branchId = null, view = null }) => {
   useEffect(() => {
     const fetchCompany = async () => {
       try {
-        if (!companyId) return;
-        const response = await getCompany(companyId);
-        setCompany(response);
+        const response = await getTenantCompany();
+        setCompany(Array.isArray(response) ? response[0] || null : response);
       } catch (err) {
         console.error('Failed to fetch company:', err);
         setMessage({ type: 'error', text: 'Failed to load company profile.' });

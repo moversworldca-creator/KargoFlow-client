@@ -12,6 +12,7 @@ function clearCaches() {
 }
 
 export const AuthProvider = ({ children }) => {
+  const [supportConsoleContext] = useState(() => consumeSupportConsoleHandoff());
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const operation = useRef(0);
