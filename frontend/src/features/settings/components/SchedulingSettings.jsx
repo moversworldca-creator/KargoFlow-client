@@ -271,29 +271,29 @@ const SchedulingSettings = ({ branchId = null }) => {
   }
 
   return (
-    <div className="w-full space-y-6 bg-white">
+    <div className="w-full space-y-3">
       {message.text && (
         <div
-          className={`mb-3 flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm ${
+          className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold ${
             message.type === 'success'
               ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
               : 'border-rose-200 bg-rose-50 text-rose-900'
           }`}
         >
-          {message.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+          {message.type === 'success' ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
           {message.text}
         </div>
       )}
 
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-1 flex-wrap items-center gap-3">
           {!branchId && (
-            <div className="space-y-1.5">
-              <label className="ml-1 text-[0.625rem] font-bold uppercase tracking-widest text-body">Branch</label>
+            <label className="block space-y-1 min-w-[160px]">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-body">Branch</span>
               <select
                 value={internalBranchId}
                 onChange={(event) => setInternalBranchId(event.target.value)}
-                className="w-full rounded-lg border-b-2 border-transparent bg-white px-4 py-3 text-sm font-medium shadow-sm outline-none ring-1 ring-disabled/30 transition-all focus:border-primary focus:ring-0"
+                className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-heading outline-none focus:border-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
               >
                 {branches.map((branch) => (
                   <option key={branch.id} value={branch.id}>
@@ -301,13 +301,13 @@ const SchedulingSettings = ({ branchId = null }) => {
                   </option>
                 ))}
               </select>
-            </div>
+            </label>
           )}
 
-          <div className="space-y-1.5">
-            <label className="ml-1 text-[0.625rem] font-bold uppercase tracking-widest text-body">Scheduling Horizon</label>
+          <label className="block space-y-1 min-w-[180px]">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-body">Scheduling Horizon</span>
             <div className="relative">
-              <Clock className="absolute left-4 top-1/2 -translate-y-1/2 text-disabled" size={18} />
+              <Clock className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
               <input
                 type="number"
                 min="0"
@@ -317,56 +317,56 @@ const SchedulingSettings = ({ branchId = null }) => {
                   setHorizonDays(event.target.value);
                   setIsDirty(true);
                 }}
-                className="w-full rounded-lg border-b-2 border-transparent bg-white py-3 pl-11 pr-4 text-sm font-medium shadow-sm outline-none ring-1 ring-disabled/30 transition-all focus:border-primary focus:ring-0"
+                className="w-full rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-2.5 text-xs font-medium text-heading outline-none focus:border-primary dark:border-slate-700 dark:bg-slate-900 dark:text-white"
               />
             </div>
-          </div>
+          </label>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={loadBranches}
             disabled={isSaving}
-            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-60"
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
           >
-            <RefreshCw size={16} /> Refresh
+            <RefreshCw size={13} /> Refresh
           </button>
           <button
             type="button"
             onClick={handleAddRow}
             disabled={!selectedBranch || isSaving}
-            className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white shadow-md transition-all hover:bg-primary-dark disabled:opacity-60"
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-primary/90 disabled:opacity-60"
           >
-            <Plus size={16} /> Add Row
+            <Plus size={13} /> Add Row
           </button>
           <button
             type="button"
             onClick={handleSave}
             disabled={!selectedBranch || isSaving || !isDirty}
-            className="flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white shadow-md transition-all hover:bg-slate-800 disabled:opacity-60"
+            className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-60 dark:bg-blue-600"
           >
-            {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+            {isSaving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
             {isSaving ? 'Saving...' : 'Save'}
           </button>
         </div>
       </div>
 
       {!selectedBranch ? (
-        <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-10 text-center text-sm font-medium text-slate-500">
+        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs font-medium text-slate-500">
           Add a branch before configuring arrival windows.
         </div>
       ) : (
-        <div className="overflow-x-auto border border-slate-200/80 bg-white shadow-sm">
-          <table className="w-full min-w-[720px] border-collapse text-left">
+        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <table className="w-full min-w-[640px] border-collapse text-left">
             <thead>
-              <tr className="border-b border-slate-200/80 bg-[#f8f9fa]">
-                <th className="w-[20%] px-5 py-4 text-xs font-medium uppercase tracking-wide text-slate-800">Start Hour</th>
-                <th className="w-[20%] px-5 py-4 text-xs font-medium uppercase tracking-wide text-slate-800">End Hour</th>
-                <th className="w-[15%] px-5 py-4 text-xs font-medium uppercase tracking-wide text-slate-800">Capacity</th>
-                <th className="w-[27%] px-5 py-4 text-xs font-medium uppercase tracking-wide text-slate-800">Window</th>
-                <th className="w-[13%] px-5 py-4 text-xs font-medium uppercase tracking-wide text-slate-800">Default</th>
-                <th className="w-[5%] px-5 py-4"></th>
+              <tr className="border-b border-slate-100 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-body dark:border-slate-800 dark:bg-slate-900">
+                <th className="px-3.5 py-2.5">Start Hour</th>
+                <th className="px-3.5 py-2.5">End Hour</th>
+                <th className="px-3.5 py-2.5">Capacity</th>
+                <th className="px-3.5 py-2.5">Window</th>
+                <th className="px-3.5 py-2.5">Default</th>
+                <th className="px-3.5 py-2.5"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200/60">

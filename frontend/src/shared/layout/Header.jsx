@@ -7,7 +7,7 @@ import {
   MessageSquare, AlertCircle, Menu, Phone, Loader2, Clock, Volume2, CreditCard, FileCheck,
   Sun, Moon, Target, Layers, Truck, Zap, Building2, ChevronDown, ChevronRight, ChevronLeft, Check, X
 } from 'lucide-react';
-import { getActivities, getLeadActivities, getTasks, universalSearch, getNotifications, markAllNotificationsRead, markNotificationRead, markNotificationUnread, getCompanies } from '../../services/api';
+import { getTasks, universalSearch, getNotifications, markAllNotificationsRead, markNotificationRead, markNotificationUnread, getCompanies } from '../../services/api';
 import logo from '../../assets/full_logo.png';
 import { getLegacyRecordDetailPath } from '../../features/crm/utils/recordRoutes';
 import { toast } from 'sonner';
@@ -293,8 +293,6 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
       setLoadingCompanies(false);
     }
   }, []);
-  const [commRecords, setCommRecords] = useState([]);
-  const [loadingComm, setLoadingComm] = useState(false);
   const [followUps, setFollowUps] = useState([]);
   const [loadingFollowUps, setLoadingFollowUps] = useState(false);
   const [notifications, setNotifications] = useState([]);
@@ -620,28 +618,6 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
     return AlertCircle;
   };
 
-  const fetchCommRecords = useCallback(async () => {
-    setLoadingComm(true);
-    try {
-      const [salesRes, leadRes] = await Promise.allSettled([
-        getActivities({ ordering: '-created_at', limit: 20 }),
-        getLeadActivities({ ordering: '-created_at', limit: 20 }),
-      ]);
-
-      const sales = salesRes.status === 'fulfilled' ? asList(salesRes.value.data ?? salesRes.value) : [];
-      const leads = leadRes.status === 'fulfilled' ? asList(leadRes.value.data ?? leadRes.value) : [];
-      const filtered = [...sales, ...leads]
-        .filter((a) => a.activity_type === 'email' || a.activity_type === 'sms')
-        .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
-        .slice(0, 20);
-      setCommRecords(filtered);
-    } catch (err) {
-      console.error('Failed to fetch communication records:', err);
-    } finally {
-      setLoadingComm(false);
-    }
-  }, []);
-
   const fetchFollowUps = useCallback(async () => {
     setLoadingFollowUps(true);
     try {
@@ -696,21 +672,17 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
     const now = Date.now();
     if (now - lastHeaderBootstrapAt < 2000) return undefined;
     lastHeaderBootstrapAt = now;
-    fetchCommRecords();
     fetchNotifications({ silent: true });
-  }, [fetchCommRecords, fetchNotifications]);
+  }, [fetchNotifications]);
 
   useEffect(() => {
-    if (openDropdown === 'messages') {
-      fetchCommRecords();
-    }
-    if (openDropdown === 'followups' || openDropdown?.startsWith('notifications')) {
+    if (openDropdown === 'followups') {
       fetchFollowUps();
     }
     if (openDropdown?.startsWith('notifications')) {
       fetchNotifications({ silent: Boolean(notificationsSignatureRef.current) });
     }
-  }, [openDropdown, fetchCommRecords, fetchFollowUps, fetchNotifications]);
+  }, [openDropdown, fetchFollowUps, fetchNotifications]);
 
   const toggleDropdown = (name) => {
     setOpenDropdown(openDropdown === name ? null : name);

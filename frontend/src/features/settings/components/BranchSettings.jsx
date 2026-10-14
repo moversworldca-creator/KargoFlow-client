@@ -1,24 +1,31 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
+  Building2,
   CheckCircle2,
+  CreditCard,
   Edit2,
+  FileText,
+  Globe,
+  Image as ImageIcon,
   Info,
   Loader2,
+  Mail,
   MapPin,
+  Phone,
   Plus,
   Save,
   Trash2,
   Truck,
   XCircle,
 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import Card from '../../../shared/ui/Card';
 import API from '../../../services/api';
 import { useAuth } from '../../auth/context/AuthContext';
-import { useBranchesLookup } from '../../../shared/queries/sharedQueries';
+import { useToast } from '../../../shared/context/ToastContext';
 import { filterAccessibleBranches } from '../../../shared/utils/branchScope';
 
-const TAXABLE_FIELDS = [];
 const isBranchActive = (branch) => branch?.is_active !== false;
 
 const emptyBranchForm = {
@@ -49,79 +56,6 @@ const emptyBranchForm = {
   },
 };
 
-const WEEKDAYS = [
-  { value: 0, label: 'Monday' },
-  { value: 1, label: 'Tuesday' },
-  { value: 2, label: 'Wednesday' },
-  { value: 3, label: 'Thursday' },
-  { value: 4, label: 'Friday' },
-  { value: 5, label: 'Saturday' },
-  { value: 6, label: 'Sunday' },
-];
-
-const InputField = ({
-  label,
-  name,
-  icon: Icon,
-  type = 'text',
-  value,
-  onChange,
-  placeholder,
-  disabled = false,
-  className = '',
-  step,
-  min,
-}) => (
-  <div className="space-y-1.5">
-    <label className="ml-1 text-[0.625rem] font-bold uppercase tracking-widest text-body">{label}</label>
-    <div className="relative">
-      {Icon && <Icon className="absolute left-4 top-1/2 -translate-y-1/2 text-disabled" size={18} />}
-      <input
-        name={name}
-        type={type}
-        value={value ?? ''}
-        onChange={onChange}
-        placeholder={placeholder}
-        disabled={disabled}
-        step={step}
-        min={min}
-        className={`w-full rounded-lg bg-[#ffffff] py-3 text-sm font-medium outline-none ring-1 ring-disabled/30 transition-all shadow-sm focus:border-primary focus:ring-0 disabled:bg-page disabled:text-disabled ${Icon ? 'pl-11' : 'px-4'} pr-4 border-b-2 border-transparent ${className}`}
-      />
-    </div>
-  </div>
-);
-
-const ToggleField = ({ label, description, enabled, onToggle, disabled = false }) => (
-  <div className={`flex items-center justify-between rounded-xl bg-page p-4 transition-colors ${disabled ? 'opacity-60 cursor-not-allowed' : 'hover:bg-subtle'}`}>
-    <div className="space-y-0.5">
-      <p className="text-sm font-bold text-heading">{label}</p>
-      <p className="text-xs text-body">{description}</p>
-    </div>
-    <button
-      type="button"
-      onClick={disabled ? undefined : onToggle}
-      disabled={disabled}
-      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none ${enabled ? 'bg-primary' : 'bg-slate-200'} ${disabled ? 'cursor-not-allowed' : ''}`}
-    >
-      <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-card transition-transform duration-200 ${enabled ? 'translate-x-6' : 'translate-x-1'}`}
-      />
-    </button>
-  </div>
-);
-
-const InheritanceToggle = ({ label, enabled, onChange }) => (
-  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-body select-none">
-    <input
-      type="checkbox"
-      checked={enabled}
-      onChange={onChange}
-      className="h-4 w-4 rounded border-disabled text-primary focus:ring-primary focus:ring-offset-0"
-    />
-    <span>{label}</span>
-  </label>
-);
-
 const toPercent = (value) => {
   if (value === null || value === undefined || value === '') return 0;
   const num = Number(value);
@@ -138,13 +72,70 @@ const toDecimalRate = (value) => {
 
 const formatPercent = (value) => `${toPercent(value).toFixed(2)}%`;
 
-const extractRows = (response) => {
-  if (Array.isArray(response)) return response;
-  if (Array.isArray(response?.results)) return response.results;
-  if (Array.isArray(response?.data)) return response.data;
-  if (Array.isArray(response?.data?.results)) return response.data.results;
-  return [];
-};
+const InputField = ({
+  label,
+  name,
+  icon: Icon,
+  type = 'text',
+  value,
+  onChange,
+  placeholder,
+  disabled = false,
+  className = '',
+  step,
+  min,
+  max,
+}) => (
+  <label className={`block space-y-1 ${className}`}>
+    <span className="ml-0.5 text-[10px] font-bold uppercase tracking-widest text-body">{label}</span>
+    <div className="relative">
+      {Icon && <Icon className="absolute left-3 top-1/2 -translate-y-1/2 text-disabled" size={14} />}
+      <input
+        name={name}
+        type={type}
+        value={value ?? ''}
+        onChange={onChange}
+        placeholder={placeholder}
+        disabled={disabled}
+        step={step}
+        min={min}
+        max={max}
+        className={`w-full rounded-lg border border-slate-200 bg-white ${Icon ? 'pl-9' : 'px-2.5'} pr-2.5 py-1.5 text-xs font-medium text-heading outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:bg-slate-50 disabled:text-disabled dark:border-slate-700 dark:bg-slate-900 dark:text-white`}
+      />
+    </div>
+  </label>
+);
+
+const ToggleField = ({ label, description, enabled, onToggle, disabled = false }) => (
+  <div className={`flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 transition dark:border-slate-800 dark:bg-slate-900/60 ${disabled ? 'opacity-60 cursor-not-allowed' : 'hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
+    <div className="space-y-0.5 pr-3">
+      <p className="text-xs font-bold text-heading dark:text-white">{label}</p>
+      {description && <p className="text-[11px] text-body">{description}</p>}
+    </div>
+    <button
+      type="button"
+      onClick={disabled ? undefined : onToggle}
+      disabled={disabled}
+      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none ${enabled ? 'bg-primary' : 'bg-slate-200 dark:bg-slate-700'} ${disabled ? 'cursor-not-allowed' : ''}`}
+    >
+      <span
+        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${enabled ? 'translate-x-4' : 'translate-x-0.5'}`}
+      />
+    </button>
+  </div>
+);
+
+const InheritanceToggle = ({ label, enabled, onChange }) => (
+  <label className="flex items-center gap-1.5 cursor-pointer text-[11px] font-semibold text-body select-none">
+    <input
+      type="checkbox"
+      checked={enabled}
+      onChange={onChange}
+      className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary focus:ring-offset-0"
+    />
+    <span>{label}</span>
+  </label>
+);
 
 const normalizeBranchPayload = (formData) => {
   const payload = {
@@ -162,8 +153,7 @@ const normalizeBranchPayload = (formData) => {
     restrict_leads_opportunities_to_branch_users: !!formData?.restrict_leads_opportunities_to_branch_users,
     is_main: !!formData?.is_main,
     enable_lead_posting: !!formData?.enable_lead_posting,
-    is_active: !!formData?.is_active,
-    scheduling_config: normalizeSchedulingConfig(formData?.scheduling_config),
+    is_active: formData?.is_active !== false,
   };
 
   if (formData.is_main) {
@@ -183,30 +173,6 @@ const normalizeBranchPayload = (formData) => {
   return payload;
 };
 
-const normalizeSchedulingConfig = (value = {}) => {
-  const config = value && typeof value === 'object' ? value : {};
-  const horizon = Number(config.scheduling_horizon_days);
-  const weeklyWindows = Array.isArray(config.weekly_windows) ? config.weekly_windows : [];
-  const defaultWindow = config.default_arrival_window && typeof config.default_arrival_window === 'object'
-    ? config.default_arrival_window
-    : emptyBranchForm.scheduling_config.default_arrival_window;
-  return {
-    scheduling_horizon_days: Number.isFinite(horizon) ? Math.max(0, Math.round(horizon)) : 90,
-    default_arrival_window: {
-      start: String(defaultWindow.start || '').slice(0, 5),
-      end: String(defaultWindow.end || '').slice(0, 5),
-    },
-    weekly_windows: weeklyWindows
-      .map((window) => ({
-        weekday: Number(window.weekday),
-        start: String(window.start || '').slice(0, 5),
-        end: String(window.end || '').slice(0, 5),
-        capacity: Math.max(1, Math.round(Number(window.capacity) || 1)),
-      }))
-      .filter((window) => Number.isInteger(window.weekday) && window.weekday >= 0 && window.weekday <= 6 && window.start && window.end),
-  };
-};
-
 const normalizeFormState = (initialData = {}) => {
   const is_main = !!initialData?.is_main;
   const inherit_tax_rate = !is_main && (initialData?.sales_tax_rate === null || initialData?.sales_tax_rate === undefined);
@@ -216,7 +182,6 @@ const normalizeFormState = (initialData = {}) => {
   return {
     ...emptyBranchForm,
     ...initialData,
-    scheduling_config: normalizeSchedulingConfig(initialData?.scheduling_config || emptyBranchForm.scheduling_config),
     sales_tax_rate: inherit_tax_rate ? '' : toPercent(initialData?.sales_tax_rate),
     default_deposit_pct: inherit_deposit ? '' : toPercent(initialData?.default_deposit_pct),
     inherit_tax_rate,
@@ -227,8 +192,6 @@ const normalizeFormState = (initialData = {}) => {
 
 const BranchViewModal = ({ branch, onClose }) => {
   if (!branch) return null;
-
-  const enabledTaxRules = TAXABLE_FIELDS.filter(({ key }) => branch[key]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
@@ -250,7 +213,7 @@ const BranchViewModal = ({ branch, onClose }) => {
 
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <div className="space-y-3">
-            <h4 className="text-[0.625rem] font-bold uppercase tracking-widest text-disabled">Location</h4>
+            <h4 className="text-[0.625rem] font-bold uppercase tracking-widest text-disabled">Location & Contact</h4>
             <div className="space-y-2 text-sm text-body">
               <p className="flex items-center gap-2">
                 <MapPin size={14} /> {branch.address_line1 || 'No street address'}
@@ -261,16 +224,6 @@ const BranchViewModal = ({ branch, onClose }) => {
               </p>
               <p className="ml-6">Dispatch: {branch.dispatch_location || 'Not set'}</p>
               <div className="ml-6 space-y-1">
-                <p>Logo URL: {branch.logo_url ? <a className="underline" href={branch.logo_url} target="_blank" rel="noreferrer">{branch.logo_url}</a> : 'Not set'}</p>
-                {branch.logo_url && (
-                  <img
-                    src={branch.logo_url}
-                    alt={`${branch.name} logo`}
-                    className="mt-1 max-h-10 rounded bg-white p-1 ring-1 ring-disabled/30"
-                  />
-                )}
-              </div>
-              <div className="ml-6 space-y-1">
                 <p>Email: {branch.email || 'Not set'}</p>
                 <p>Phone: {branch.phone || 'Not set'}</p>
                 <p>Website: {branch.website ? <a className="underline" href={branch.website} target="_blank" rel="noreferrer">{branch.website}</a> : 'Not set'}</p>
@@ -279,73 +232,53 @@ const BranchViewModal = ({ branch, onClose }) => {
           </div>
 
           <div className="space-y-3">
-            <h4 className="text-[0.625rem] font-bold uppercase tracking-widest text-disabled">Behavior</h4>
+            <h4 className="text-[0.625rem] font-bold uppercase tracking-widest text-disabled">Behavior & Rules</h4>
             <div className="space-y-2 text-sm text-body">
-                <p>
-                  <span className="font-bold text-heading">Status:</span> {isBranchActive(branch) ? 'Active' : 'Inactive'}
-                </p>
+              <p>
+                <span className="font-bold text-heading">Status:</span> {isBranchActive(branch) ? 'Active' : 'Inactive'}
+              </p>
+              <p>
+                <span className="font-bold text-heading">Main Branch:</span> {branch.is_main ? 'Yes' : 'No'}
+              </p>
+              <p>
+                <span className="font-bold text-heading">Prefix:</span> {branch.sales_number_prefix || 'None'}
+              </p>
               <p>
                 <span className="font-bold text-heading">Restricted To Branch Users:</span>{' '}
                 {branch.restrict_leads_opportunities_to_branch_users ? 'Yes' : 'No'}
               </p>
               <p>
-                <span className="font-bold text-heading">Main Branch:</span>{' '}
-                {branch.is_main ? 'Yes' : 'No'}
-              </p>
-              <p>
-                <span className="font-bold text-heading">Enable Lead Posting:</span>{' '}
-                {branch.enable_lead_posting ? 'Yes' : 'No'}
+                <span className="font-bold text-heading">Lead Posting:</span> {branch.enable_lead_posting ? 'Enabled' : 'Disabled'}
               </p>
               <p>
                 <span className="font-bold text-heading">Tax Rate:</span> {formatPercent(branch.sales_tax_rate)}
               </p>
               <p>
-                <span className="font-bold text-heading">Deposits Enabled:</span> {branch.deposit_enabled ? 'Yes' : 'No'}
+                <span className="font-bold text-heading">Deposits:</span> {branch.deposit_enabled ? `${formatPercent(branch.default_deposit_pct)} (Required)` : 'Disabled'}
               </p>
               <p>
-                <span className="font-bold text-heading">Allow Booking Without Deposit:</span>{' '}
-                {branch.allow_booking_without_deposit ? 'Yes' : 'No'}
-              </p>
-              <p>
-                <span className="font-bold text-heading">Default Deposit:</span>{' '}
-                {branch.deposit_enabled ? formatPercent(branch.default_deposit_pct) : 'Disabled'}
+                <span className="font-bold text-heading">Booking Without Deposit:</span> {branch.allow_booking_without_deposit ? 'Allowed' : 'Disallowed'}
               </p>
             </div>
           </div>
         </div>
 
-        <div className="rounded-2xl border border-subtle bg-page p-4">
-          <p className="mb-3 text-[0.625rem] font-bold uppercase tracking-widest text-disabled">Taxable Charge Categories</p>
-          <div className="flex flex-wrap gap-2">
-            {enabledTaxRules.length ? (
-              enabledTaxRules.map(({ key, label }) => (
-                <span key={key} className="rounded-full bg-primary-tint/30 px-3 py-1 text-xs font-bold text-primary">
-                  {label}
-                </span>
-              ))
-            ) : (
-              <p className="text-sm text-body">No taxable charge categories enabled.</p>
-            )}
+        {branch.logo_url && (
+          <div className="rounded-2xl border border-subtle bg-page p-4 space-y-2">
+            <p className="text-[0.625rem] font-bold uppercase tracking-widest text-disabled">Branch Logo</p>
+            <img
+              src={branch.logo_url}
+              alt={`${branch.name} logo`}
+              className="max-h-16 rounded bg-white p-2 ring-1 ring-disabled/30"
+            />
           </div>
-        </div>
-
-        <div className="rounded-2xl border border-subtle bg-card p-4">
-          <p className="mb-3 text-[0.625rem] font-bold uppercase tracking-widest text-disabled">Metadata</p>
-          <div className="space-y-1 text-sm text-body">
-            <p>
-              <span className="font-bold text-heading">Created:</span> {branch.created_at || '-'}
-            </p>
-            <p>
-              <span className="font-bold text-heading">Updated:</span> {branch.updated_at || '-'}
-            </p>
-          </div>
-        </div>
+        )}
       </Card>
     </div>
   );
 };
 
-const BranchForm = ({ initialData = {}, onSave, onCancel, isLoading, mainBranch, companyId }) => {
+const BranchModalForm = ({ initialData = {}, onSave, onCancel, isLoading, mainBranch, companyId }) => {
   const [formData, setFormData] = useState(() => normalizeFormState(initialData));
 
   useEffect(() => {
@@ -394,7 +327,7 @@ const BranchForm = ({ initialData = {}, onSave, onCancel, isLoading, mainBranch,
       <Card className="max-h-[90vh] w-full max-w-3xl space-y-6 overflow-y-auto p-6">
         <div className="flex items-center justify-between gap-4">
           <h3 className="font-heading text-xl font-bold text-heading">
-            {initialData.id ? 'Edit Branch' : 'Add New Branch'}
+            {initialData?.id ? 'Edit Branch' : 'Add New Branch'}
           </h3>
           {formData.is_main && (
             <button
@@ -436,11 +369,11 @@ const BranchForm = ({ initialData = {}, onSave, onCancel, isLoading, mainBranch,
             </div>
           )}
           <InputField
-            label="Branch Logo URL (Email)"
+            label="Branch Logo URL"
             name="logo_url"
             value={formData.inherit_branding ? '' : formData.logo_url}
             onChange={handleChange}
-            placeholder={formData.inherit_branding ? (mainBranch?.effective_logo_url || "Inherited logo URL") : "https://.../logo.png"}
+            placeholder={formData.inherit_branding ? (mainBranch?.logo_url || "Inherited logo URL") : "https://.../logo.png"}
             disabled={formData.inherit_branding}
           />
           <InputField
@@ -450,9 +383,6 @@ const BranchForm = ({ initialData = {}, onSave, onCancel, isLoading, mainBranch,
             onChange={handleChange}
             placeholder="SM"
           />
-          <p className="text-xs text-body">
-            Preview: <span className="font-mono font-semibold text-heading">{(String(formData.sales_number_prefix || '').trim() ? `${String(formData.sales_number_prefix).trim()}-00001` : '00001')}</span>
-          </p>
 
           <InputField
             label="Address Line 1"
@@ -478,13 +408,14 @@ const BranchForm = ({ initialData = {}, onSave, onCancel, isLoading, mainBranch,
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <InputField label="City" name="city" value={formData.city} onChange={handleChange} placeholder="City" />
-            <InputField label="Province/State" name="state" value={formData.state} onChange={handleChange} placeholder="Province" />
-            <InputField label="Postal/Zip Code" name="zip_code" value={formData.zip_code} onChange={handleChange} placeholder="Postal code" />
+            <InputField label="City" name="city" value={formData.city} onChange={handleChange} placeholder="Toronto" />
+            <InputField label="State / Province" name="state" value={formData.state} onChange={handleChange} placeholder="ON" />
+            <InputField label="Zip / Postal Code" name="zip_code" value={formData.zip_code} onChange={handleChange} placeholder="M5V 2T6" />
           </div>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div className="space-y-2">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[0.625rem] font-bold uppercase tracking-widest text-disabled">Tax Settings</p>
               {!formData.is_main && (
                 <InheritanceToggle
                   label="Inherit tax rate from Main Branch"
@@ -492,26 +423,18 @@ const BranchForm = ({ initialData = {}, onSave, onCancel, isLoading, mainBranch,
                   onChange={(e) => setFormData((prev) => ({ ...prev, inherit_tax_rate: e.target.checked }))}
                 />
               )}
-              <InputField
-                label="Sales Tax Rate (%)"
-                name="sales_tax_rate"
-                type="number"
-                value={formData.inherit_tax_rate ? '' : formData.sales_tax_rate}
-                onChange={handleChange}
-                step="0.01"
-                min="0"
-                placeholder={formData.inherit_tax_rate ? `${toPercent(mainBranch?.effective_sales_tax_rate)}` : "0.00"}
-                disabled={formData.inherit_tax_rate}
-              />
             </div>
-            <div className="rounded-xl border border-subtle bg-page p-4 flex items-center">
-              <div>
-                <p className="text-sm font-bold text-heading">Tax rate settings</p>
-                <p className="mt-1 text-xs text-body">
-                  {formData.inherit_tax_rate ? "Inheriting from Main Branch." : "Branch-specific tax rate override."}
-                </p>
-              </div>
-            </div>
+            <InputField
+              label="Sales Tax Rate (%)"
+              name="sales_tax_rate"
+              type="number"
+              value={formData.inherit_tax_rate ? '' : formData.sales_tax_rate}
+              onChange={handleChange}
+              step="0.01"
+              min="0"
+              placeholder={formData.inherit_tax_rate ? `${toPercent(mainBranch?.sales_tax_rate)}` : "0.00"}
+              disabled={formData.inherit_tax_rate}
+            />
           </div>
 
           <div className="space-y-3">
@@ -527,8 +450,8 @@ const BranchForm = ({ initialData = {}, onSave, onCancel, isLoading, mainBranch,
             </div>
             <ToggleField
               label="Enable Deposit Payments"
-              description="When enabled, new estimates will calculate a deposit amount and customers can pay Deposit in the portal."
-              enabled={formData.inherit_deposit ? !!mainBranch?.effective_deposit_enabled : formData.deposit_enabled}
+              description="Calculate deposit and allow payment portal checkout."
+              enabled={formData.inherit_deposit ? !!mainBranch?.deposit_enabled : formData.deposit_enabled}
               onToggle={() => {
                 if (!formData.inherit_deposit) {
                   setFormData((prev) => ({ ...prev, deposit_enabled: !prev.deposit_enabled }));
@@ -538,8 +461,8 @@ const BranchForm = ({ initialData = {}, onSave, onCancel, isLoading, mainBranch,
             />
             <ToggleField
               label="Allow Booking Without Deposit"
-              description="When enabled, users with the right permission can book a job even if no deposit payment is recorded."
-              enabled={formData.inherit_deposit ? !!mainBranch?.effective_allow_booking_without_deposit : formData.allow_booking_without_deposit}
+              description="Users with permission can book jobs even without deposit."
+              enabled={formData.inherit_deposit ? !!mainBranch?.allow_booking_without_deposit : formData.allow_booking_without_deposit}
               onToggle={() => {
                 if (!formData.inherit_deposit) {
                   setFormData((prev) => ({
@@ -558,8 +481,8 @@ const BranchForm = ({ initialData = {}, onSave, onCancel, isLoading, mainBranch,
               onChange={handleChange}
               step="0.01"
               min="0"
-              disabled={formData.inherit_deposit || !(formData.inherit_deposit ? !!mainBranch?.effective_deposit_enabled : formData.deposit_enabled)}
-              placeholder={formData.inherit_deposit ? `${toPercent(mainBranch?.effective_default_deposit_pct)}` : "10"}
+              disabled={formData.inherit_deposit || !(formData.inherit_deposit ? !!mainBranch?.deposit_enabled : formData.deposit_enabled)}
+              placeholder={formData.inherit_deposit ? `${toPercent(mainBranch?.default_deposit_pct)}` : "10"}
             />
           </div>
 
@@ -567,7 +490,7 @@ const BranchForm = ({ initialData = {}, onSave, onCancel, isLoading, mainBranch,
             <p className="text-[0.625rem] font-bold uppercase tracking-widest text-disabled">Branch Rules</p>
             <ToggleField
               label="Restrict Leads And Opportunities To Branch Users"
-              description="Only users assigned to this branch can access its leads and opportunities."
+              description="Only users assigned to this branch can access its records."
               enabled={formData.restrict_leads_opportunities_to_branch_users}
               onToggle={() =>
                 setFormData((prev) => ({
@@ -600,28 +523,13 @@ const BranchForm = ({ initialData = {}, onSave, onCancel, isLoading, mainBranch,
             />
             <ToggleField
               label="Branch Active"
-              description="Inactive branches remain stored but should not be used for active operations."
+              description="Inactive branches remain archived and cannot be used for active jobs."
               enabled={formData.is_active}
               onToggle={() => setFormData((prev) => ({ ...prev, is_active: !prev.is_active }))}
             />
           </div>
 
-          <div className="space-y-3">
-            <p className="text-[0.625rem] font-bold uppercase tracking-widest text-disabled">Taxable Charge Categories</p>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              {TAXABLE_FIELDS.map(({ key, label, description }) => (
-                <ToggleField
-                  key={key}
-                  label={label}
-                  description={description}
-                  enabled={!!formData[key]}
-                  onToggle={() => setFormData((prev) => ({ ...prev, [key]: !prev[key] }))}
-                />
-              ))}
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-3">
+          <div className="flex justify-end gap-3 pt-2">
             <button
               type="button"
               onClick={onCancel}
@@ -650,7 +558,7 @@ const ConfirmDelete = ({ name, onConfirm, onCancel, isLoading }) => (
       <AlertCircle size={48} className="mx-auto text-[#791F1F]" />
       <h3 className="font-heading text-xl font-bold text-heading">Confirm Deletion</h3>
       <p className="text-sm text-body">
-        Are you sure you want to delete the branch: <span className="font-bold">{name}</span>? This action cannot be undone.
+        Are you sure you want to delete branch: <span className="font-bold">{name}</span>? This action cannot be undone.
       </p>
       <div className="mt-6 flex justify-center gap-3">
         <button type="button" onClick={onCancel} className="rounded-lg bg-card px-4 py-2 font-medium text-body transition-colors hover:bg-page">
@@ -670,20 +578,18 @@ const ConfirmDelete = ({ name, onConfirm, onCancel, isLoading }) => (
   </div>
 );
 
-const normalizeBranches = (payload) => {
-  if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload?.results)) return payload.results;
-  if (Array.isArray(payload?.data)) return payload.data;
-  return [];
-};
-
 const BranchSettings = ({ activeBranchId = null, view = null }) => {
   const { user } = useAuth();
-  const { data: branchRows = [], refetch: refetchBranches } = useBranchesLookup();
+  const { showToast } = useToast();
+  const queryClient = useQueryClient();
+
   const [branches, setBranches] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
+
+  // Directory view state
+  const [searchFilter, setSearchFilter] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [branchToEdit, setBranchToEdit] = useState(null);
@@ -692,80 +598,141 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [branchToDelete, setBranchToDelete] = useState(null);
 
-  const visibleBranches = useMemo(() => {
-    const scoped = filterAccessibleBranches(user, normalizeBranches(branchRows));
-    return scoped.length ? scoped : normalizeBranches(branchRows);
-  }, [branchRows, user]);
-  const mainBranch = Array.isArray(branches) ? branches.find((b) => b.is_main) : null;
+  // Active branch inline form state (used for general, booking, taxes, branding views)
+  const [currentBranchForm, setCurrentBranchForm] = useState(null);
 
-  const handleRefreshBranches = async () => {
+  const fetchBranches = async () => {
     setIsLoading(true);
     try {
-      setBranches(visibleBranches);
+      const response = await API.general.getBranches();
+      const list = Array.isArray(response)
+        ? response
+        : Array.isArray(response?.results)
+        ? response.results
+        : Array.isArray(response?.data)
+        ? response.data
+        : [];
+      const accessible = filterAccessibleBranches(user, list);
+      setBranches(accessible.length ? accessible : list);
     } catch (err) {
-      console.error('Failed to fetch branches:', err);
+      console.error('Failed to load branches:', err);
       setMessage({ type: 'error', text: 'Failed to load branches.' });
-      setBranches([]);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    handleRefreshBranches();
-  }, [refetchBranches, visibleBranches]);
+    fetchBranches();
+  }, []);
 
-  const handleAddBranch = async (formData) => {
+  const mainBranch = useMemo(() => {
+    return branches.find((b) => b.is_main) || null;
+  }, [branches]);
+
+  const selectedBranch = useMemo(() => {
+    if (!branches.length) return null;
+    if (activeBranchId) {
+      const found = branches.find((b) => String(b.id) === String(activeBranchId));
+      if (found) return found;
+    }
+    return mainBranch || branches[0];
+  }, [branches, activeBranchId, mainBranch]);
+
+  useEffect(() => {
+    if (selectedBranch) {
+      setCurrentBranchForm(normalizeFormState(selectedBranch));
+    }
+  }, [selectedBranch]);
+
+  const refreshAndInvalidate = async () => {
+    await fetchBranches();
+    queryClient.invalidateQueries({ queryKey: ['branches'] });
+  };
+
+  const handleCreateBranch = async (payload) => {
     setIsSaving(true);
     setMessage({ type: '', text: '' });
     try {
-      await API.general.createBranch(formData);
-      setMessage({ type: 'success', text: 'Branch added successfully!' });
+      await API.general.createBranch(payload);
+      showToast?.('Branch created successfully!', 'success');
+      setMessage({ type: 'success', text: 'Branch created successfully!' });
       setShowAddModal(false);
-      await handleRefreshBranches();
+      await refreshAndInvalidate();
     } catch (err) {
-      console.error('Failed to add branch:', err);
-      setMessage({ type: 'error', text: 'Failed to add branch.' });
+      console.error('Failed to create branch:', err);
+      const errText = err.response?.data?.detail || err.message || 'Failed to create branch.';
+      showToast?.(typeof errText === 'string' ? errText : 'Failed to create branch.', 'error');
+      setMessage({ type: 'error', text: typeof errText === 'string' ? errText : 'Failed to create branch.' });
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleUpdateBranch = async (formData) => {
+  const handleUpdateModalBranch = async (payload) => {
+    if (!branchToEdit?.id) return;
     setIsSaving(true);
     setMessage({ type: '', text: '' });
     try {
-      await API.general.updateBranch(branchToEdit.id, formData);
+      await API.general.updateBranch(branchToEdit.id, payload);
+      showToast?.('Branch updated successfully!', 'success');
       setMessage({ type: 'success', text: 'Branch updated successfully!' });
       setShowEditModal(false);
       setBranchToEdit(null);
-      await handleRefreshBranches();
+      await refreshAndInvalidate();
     } catch (err) {
       console.error('Failed to update branch:', err);
-      setMessage({ type: 'error', text: 'Failed to update branch.' });
+      const errText = err.response?.data?.detail || err.message || 'Failed to update branch.';
+      showToast?.(typeof errText === 'string' ? errText : 'Failed to update branch.', 'error');
+      setMessage({ type: 'error', text: typeof errText === 'string' ? errText : 'Failed to update branch.' });
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleDeleteBranch = async () => {
+    if (!branchToDelete?.id) return;
     setIsSaving(true);
     setMessage({ type: '', text: '' });
     try {
       await API.general.deleteBranch(branchToDelete.id);
+      showToast?.('Branch deleted successfully!', 'success');
       setMessage({ type: 'success', text: 'Branch deleted successfully!' });
       setShowDeleteConfirm(false);
       setBranchToDelete(null);
-      await handleRefreshBranches();
+      await refreshAndInvalidate();
     } catch (err) {
       console.error('Failed to delete branch:', err);
-      setMessage({ type: 'error', text: 'Failed to delete branch.' });
+      const errText = err.response?.data?.detail || err.message || 'Failed to delete branch.';
+      showToast?.(typeof errText === 'string' ? errText : 'Failed to delete branch.', 'error');
+      setMessage({ type: 'error', text: typeof errText === 'string' ? errText : 'Failed to delete branch.' });
     } finally {
       setIsSaving(false);
     }
   };
 
-  if (isLoading) {
+  const handleSaveActiveBranch = async () => {
+    if (!selectedBranch?.id || !currentBranchForm) return;
+    setIsSaving(true);
+    setMessage({ type: '', text: '' });
+    try {
+      const payload = normalizeBranchPayload(currentBranchForm);
+      await API.general.updateBranch(selectedBranch.id, payload);
+      showToast?.(`${selectedBranch.name} settings saved successfully!`, 'success');
+      setMessage({ type: 'success', text: `${selectedBranch.name} settings saved successfully!` });
+      await refreshAndInvalidate();
+      setTimeout(() => setMessage({ type: '', text: '' }), 4000);
+    } catch (err) {
+      console.error('Failed to update active branch settings:', err);
+      const errText = err.response?.data?.detail || err.message || 'Failed to save branch settings.';
+      showToast?.(typeof errText === 'string' ? errText : 'Failed to save branch settings.', 'error');
+      setMessage({ type: 'error', text: typeof errText === 'string' ? errText : 'Failed to save branch settings.' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  if (isLoading && !branches.length) {
     return (
       <div className="flex justify-center p-12">
         <Loader2 className="animate-spin text-primary" />
@@ -773,39 +740,61 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
     );
   }
 
-  return (
-    <div className="animate-in space-y-6 fade-in duration-300">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="font-heading text-lg font-bold text-heading">Branch Locations</h3>
-          <p className="text-sm text-body">Branch tax settings control how estimate tax is calculated.</p>
-        </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 font-bold text-white shadow-md transition-all hover:bg-primary-dark"
-        >
-          <Plus size={18} /> Add Branch
-        </button>
-      </div>
+  const effectiveView = view || 'directory';
 
-      {message.text && (
-        <div
-          className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium ${
-            message.type === 'success' ? 'bg-primary-tint/30 text-primary' : 'bg-[#FDE8E8]/30 text-[#791F1F]'
-          }`}
-        >
-          {message.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
-          {message.text}
-        </div>
-      )}
+  // 1. DIRECTORY VIEW
+  if (effectiveView === 'directory') {
+    const filteredBranches = branches.filter((b) => {
+      if (!searchFilter.trim()) return true;
+      const term = searchFilter.toLowerCase();
+      return (
+        b.name?.toLowerCase().includes(term) ||
+        b.city?.toLowerCase().includes(term) ||
+        b.dispatch_location?.toLowerCase().includes(term) ||
+        b.email?.toLowerCase().includes(term)
+      );
+    });
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        {branches.map((branch) => {
-          const enabledTaxRuleCount = TAXABLE_FIELDS.filter(({ key }) => branch[key]).length;
-          return (
+    return (
+      <div className="animate-in space-y-3 fade-in duration-300">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div>
+            <h3 className="text-xs font-bold text-heading dark:text-white">Branch Directory</h3>
+            <p className="text-[10px] text-slate-400">Manage operating branches, facilities, and regional hubs.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="Search branches..."
+              value={searchFilter}
+              onChange={(e) => setSearchFilter(e.target.value)}
+              className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium outline-none focus:border-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+            />
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-primary/90"
+            >
+              <Plus size={14} /> Add Branch
+            </button>
+          </div>
+        </div>
+
+        {message.text && (
+          <div
+            className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium ${
+              message.type === 'success' ? 'bg-primary-tint/30 text-primary' : 'bg-[#FDE8E8]/30 text-[#791F1F]'
+            }`}
+          >
+            {message.type === 'success' ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+            {message.text}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {filteredBranches.map((branch) => (
             <Card
               key={branch.id}
-              className="group relative cursor-pointer transition-shadow hover:shadow-md"
+              className="!p-3.5 !rounded-xl group relative cursor-pointer transition-shadow hover:shadow-md"
               role="button"
               tabIndex={0}
               onClick={() => {
@@ -820,17 +809,17 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
                 }
               }}
             >
-              <div className="absolute right-4 top-4 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+              <div className="absolute right-3 top-3 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                 <button
                   onClick={(event) => {
                     event.stopPropagation();
                     setBranchToView(branch);
                     setShowViewModal(true);
                   }}
-                  className="rounded-lg p-2 text-body transition-colors hover:bg-subtle hover:text-primary"
+                  className="rounded-lg p-1.5 text-body transition-colors hover:bg-subtle hover:text-primary"
                   title="View"
                 >
-                  <Info size={16} />
+                  <Info size={14} />
                 </button>
                 <button
                   onClick={(event) => {
@@ -838,25 +827,33 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
                     setBranchToEdit(branch);
                     setShowEditModal(true);
                   }}
-                  className="rounded-lg p-2 text-body transition-colors hover:bg-subtle hover:text-primary"
+                  className="rounded-lg p-1.5 text-body transition-colors hover:bg-subtle hover:text-primary"
+                  title="Edit"
                 >
-                  <Edit2 size={16} />
+                  <Edit2 size={14} />
                 </button>
-                <button
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setBranchToDelete(branch);
-                    setShowDeleteConfirm(true);
-                  }}
-                  className="rounded-lg p-2 text-body transition-colors hover:bg-[#FDE8E8]/30 hover:text-[#791F1F]"
-                >
-                  <Trash2 size={16} />
-                </button>
+                {!branch.is_main && (
+                  <button
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setBranchToDelete(branch);
+                      setShowDeleteConfirm(true);
+                    }}
+                    className="rounded-lg p-1.5 text-body transition-colors hover:bg-[#FDE8E8]/30 hover:text-[#791F1F]"
+                    title="Delete"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </div>
 
-              <div className="flex items-start gap-4">
+              <div className="flex items-start gap-3">
                 <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-page text-primary">
-                  <Truck size={24} />
+                  {branch.logo_url ? (
+                    <img src={branch.logo_url} alt="" className="h-8 w-8 rounded object-contain" />
+                  ) : (
+                    <Truck size={24} />
+                  )}
                 </div>
                 <div className="flex-1 space-y-1">
                   <div className="flex items-center gap-2">
@@ -879,56 +876,532 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
                       <MapPin size={14} /> {branch.city || '-'}, {branch.state || '-'} {branch.zip_code || '-'}
                     </p>
                     <p>Dispatch: {branch.dispatch_location || 'Not set'}</p>
-                    <p>Branch restriction: {branch.restrict_leads_opportunities_to_branch_users ? 'On' : 'Off'}</p>
-                    <p>Main Branch: {branch.is_main ? 'Yes' : 'No'}</p>
-                    <p>Lead Posting: {branch.enable_lead_posting ? 'Enabled' : 'Disabled'}</p>
+                    <p>Prefix: <span className="font-mono font-semibold">{branch.sales_number_prefix || 'None'}</span></p>
                   </div>
                 </div>
               </div>
 
-              <div className="mt-6 grid grid-cols-2 gap-4 border-t border-page pt-6">
+              <div className="mt-4 grid grid-cols-2 gap-4 border-t border-page pt-4 text-xs">
                 <div>
                   <p className="text-[0.625rem] font-bold uppercase tracking-widest text-disabled">Tax Rate</p>
-                  <p className="text-sm font-bold text-heading">{formatPercent(branch.sales_tax_rate)}</p>
+                  <p className="font-bold text-heading">{formatPercent(branch.sales_tax_rate)}</p>
                 </div>
                 <div>
-                  <p className="text-[0.625rem] font-bold uppercase tracking-widest text-disabled">Taxable Categories</p>
-                  <p className="text-sm font-bold text-heading">{enabledTaxRuleCount}</p>
+                  <p className="text-[0.625rem] font-bold uppercase tracking-widest text-disabled">Deposit Required</p>
+                  <p className="font-bold text-heading">
+                    {branch.deposit_enabled ? formatPercent(branch.default_deposit_pct) : 'No'}
+                  </p>
                 </div>
               </div>
             </Card>
-          );
-        })}
+          ))}
+        </div>
+
+        {showAddModal && (
+          <BranchModalForm
+            onSave={handleCreateBranch}
+            onCancel={() => setShowAddModal(false)}
+            isLoading={isSaving}
+            mainBranch={mainBranch}
+            companyId={user?.company}
+          />
+        )}
+        {showEditModal && (
+          <BranchModalForm
+            initialData={branchToEdit}
+            onSave={handleUpdateModalBranch}
+            onCancel={() => {
+              setShowEditModal(false);
+              setBranchToEdit(null);
+            }}
+            isLoading={isSaving}
+            mainBranch={mainBranch}
+            companyId={user?.company}
+          />
+        )}
+        {showDeleteConfirm && (
+          <ConfirmDelete
+            name={branchToDelete?.name}
+            onConfirm={handleDeleteBranch}
+            onCancel={() => {
+              setShowDeleteConfirm(false);
+              setBranchToDelete(null);
+            }}
+            isLoading={isSaving}
+          />
+        )}
+        {showViewModal && (
+          <BranchViewModal
+            branch={branchToView}
+            onClose={() => {
+              setShowViewModal(false);
+              setBranchToView(null);
+            }}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // Active branch is required for views: general, booking, taxes, branding
+  if (!selectedBranch || !currentBranchForm) {
+    return (
+      <div className="p-8 text-center text-body">
+        <Building2 size={36} className="mx-auto mb-2 text-disabled" />
+        <p className="font-semibold">No active branch selected.</p>
+        <p className="text-xs text-disabled mt-1">Please select a branch from the header selector.</p>
+      </div>
+    );
+  }
+
+  const handleActiveBranchFieldChange = (event) => {
+    const { name, value, type, checked } = event.target;
+    setCurrentBranchForm((prev) => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value,
+    }));
+  };
+
+  const isMainBranch = !!currentBranchForm.is_main;
+
+  return (
+    <div className="animate-in space-y-3 fade-in duration-300">
+      {/* Subtab Header Banner */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div>
+          <div className="flex items-center gap-2">
+            <h3 className="text-xs font-bold text-heading dark:text-white">
+              {effectiveView === 'general' && 'General & Location Settings'}
+              {effectiveView === 'booking' && 'Booking & Deposit Rules'}
+              {effectiveView === 'taxes' && 'Taxes & Surcharge Configurations'}
+              {effectiveView === 'branding' && 'Branch Branding & Identity'}
+            </h3>
+            {isMainBranch && (
+              <span className="rounded bg-primary-tint/40 px-2 py-0.5 text-[10px] font-bold uppercase text-primary">
+                Main Branch
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] text-body">
+            Configuring branch: <span className="font-bold text-heading dark:text-white">{selectedBranch.name}</span>
+          </p>
+        </div>
+        <button
+          onClick={handleSaveActiveBranch}
+          disabled={isSaving}
+          className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-primary/90 disabled:opacity-70"
+        >
+          {isSaving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+          {isSaving ? 'Saving...' : 'Save Settings'}
+        </button>
       </div>
 
-      {showAddModal && (
-        <BranchForm
-          onSave={handleAddBranch}
-          onCancel={() => setShowAddModal(false)}
-          isLoading={isSaving}
-          mainBranch={mainBranch}
-          companyId={user?.company}
-        />
+      {message.text && (
+        <div
+          className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium ${
+            message.type === 'success' ? 'bg-primary-tint/30 text-primary' : 'bg-[#FDE8E8]/30 text-[#791F1F]'
+          }`}
+        >
+          {message.type === 'success' ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+          {message.text}
+        </div>
       )}
-      {showEditModal && (
-        <BranchForm
-          initialData={branchToEdit}
-          onSave={handleUpdateBranch}
-          onCancel={() => setShowEditModal(false)}
-          isLoading={isSaving}
-          mainBranch={mainBranch}
-          companyId={user?.company}
-        />
+
+      {/* 2. GENERAL & LOCATION VIEW */}
+      {effectiveView === 'general' && (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <Card className="!p-3.5 !rounded-xl space-y-2.5">
+            <h4 className="text-xs font-bold text-heading">Branch Identity</h4>
+            <InputField
+              label="Branch Name"
+              name="name"
+              value={currentBranchForm.name}
+              onChange={handleActiveBranchFieldChange}
+              icon={Truck}
+              placeholder="e.g., Downtown Facility"
+            />
+            <InputField
+              label="Sales Number Prefix"
+              name="sales_number_prefix"
+              value={currentBranchForm.sales_number_prefix}
+              onChange={handleActiveBranchFieldChange}
+              placeholder="e.g., DWT"
+            />
+            <p className="text-[11px] text-body">
+              Opportunity code preview: <span className="font-mono font-bold text-heading">{(String(currentBranchForm.sales_number_prefix || '').trim() ? `${String(currentBranchForm.sales_number_prefix).trim()}-00001` : '00001')}</span>
+            </p>
+            <InputField
+              label="Dispatch Location"
+              name="dispatch_location"
+              value={currentBranchForm.dispatch_location}
+              onChange={handleActiveBranchFieldChange}
+              icon={MapPin}
+              placeholder="e.g., Bay 4 / Yard South"
+            />
+          </Card>
+
+          <Card className="!p-3.5 !rounded-xl space-y-2.5">
+            <h4 className="text-xs font-bold text-heading">Contact Channels</h4>
+            <InputField
+              label="Branch Email"
+              name="email"
+              type="email"
+              value={currentBranchForm.email}
+              onChange={handleActiveBranchFieldChange}
+              icon={Mail}
+              placeholder="branch@company.com"
+            />
+            <InputField
+              label="Branch Phone"
+              name="phone"
+              value={currentBranchForm.phone}
+              onChange={handleActiveBranchFieldChange}
+              icon={Phone}
+              placeholder="+1 555 0192"
+            />
+            <InputField
+              label="Branch Website"
+              name="website"
+              value={currentBranchForm.website}
+              onChange={handleActiveBranchFieldChange}
+              icon={Globe}
+              placeholder="https://company.com/locations/downtown"
+            />
+          </Card>
+
+          <Card className="!p-3.5 !rounded-xl space-y-2.5">
+            <h4 className="text-xs font-bold text-heading">Physical Address</h4>
+            <InputField
+              label="Address Line 1"
+              name="address_line1"
+              value={currentBranchForm.address_line1}
+              onChange={handleActiveBranchFieldChange}
+              icon={MapPin}
+              placeholder="123 Industrial Parkway"
+            />
+            <InputField
+              label="Address Line 2"
+              name="address_line2"
+              value={currentBranchForm.address_line2}
+              onChange={handleActiveBranchFieldChange}
+              placeholder="Building B, Suite 100"
+            />
+            <div className="grid grid-cols-3 gap-2">
+              <InputField
+                label="City"
+                name="city"
+                value={currentBranchForm.city}
+                onChange={handleActiveBranchFieldChange}
+                placeholder="Toronto"
+              />
+              <InputField
+                label="State"
+                name="state"
+                value={currentBranchForm.state}
+                onChange={handleActiveBranchFieldChange}
+                placeholder="ON"
+              />
+              <InputField
+                label="Zip Code"
+                name="zip_code"
+                value={currentBranchForm.zip_code}
+                onChange={handleActiveBranchFieldChange}
+                placeholder="M4B 1B3"
+              />
+            </div>
+          </Card>
+
+          <Card className="!p-3.5 !rounded-xl space-y-2">
+            <h4 className="text-xs font-bold text-heading">Operational Controls</h4>
+            <ToggleField
+              label="Branch Active"
+              description="Allow this branch to be used for active operations."
+              enabled={currentBranchForm.is_active}
+              onToggle={() => setCurrentBranchForm((prev) => ({ ...prev, is_active: !prev.is_active }))}
+            />
+            <ToggleField
+              label="Restrict Leads & Opportunities"
+              description="Only assigned branch staff can access this branch's records."
+              enabled={currentBranchForm.restrict_leads_opportunities_to_branch_users}
+              onToggle={() =>
+                setCurrentBranchForm((prev) => ({
+                  ...prev,
+                  restrict_leads_opportunities_to_branch_users: !prev.restrict_leads_opportunities_to_branch_users,
+                }))
+              }
+            />
+            <ToggleField
+              label="Inbound Lead Posting"
+              description="Permit webhook routing to target this branch."
+              enabled={currentBranchForm.enable_lead_posting}
+              onToggle={() =>
+                setCurrentBranchForm((prev) => ({
+                  ...prev,
+                  enable_lead_posting: !prev.enable_lead_posting,
+                }))
+              }
+            />
+            <ToggleField
+              label="Designate as Main Branch"
+              description="Mark this branch as the primary operating entity."
+              enabled={currentBranchForm.is_main}
+              onToggle={() =>
+                setCurrentBranchForm((prev) => ({
+                  ...prev,
+                  is_main: !prev.is_main,
+                }))
+              }
+            />
+          </Card>
+        </div>
       )}
-      {showDeleteConfirm && (
-        <ConfirmDelete
-          name={branchToDelete?.name}
-          onConfirm={handleDeleteBranch}
-          onCancel={() => setShowDeleteConfirm(false)}
-          isLoading={isSaving}
-        />
+
+      {/* 3. BOOKING & DEPOSITS VIEW */}
+      {effectiveView === 'booking' && (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <Card className="!p-3.5 !rounded-xl space-y-2.5">
+            <h4 className="text-xs font-bold text-heading">Deposit Requirements</h4>
+            {!isMainBranch && (
+              <div className="flex justify-between items-center rounded-lg bg-slate-50 px-3 py-1.5 dark:bg-slate-900/60">
+                <span className="text-[11px] font-bold text-heading dark:text-white">Inheritance</span>
+                <InheritanceToggle
+                  label="Inherit deposit rules from Main Branch"
+                  enabled={currentBranchForm.inherit_deposit}
+                  onChange={(e) =>
+                    setCurrentBranchForm((prev) => ({
+                      ...prev,
+                      inherit_deposit: e.target.checked,
+                    }))
+                  }
+                />
+              </div>
+            )}
+
+            <ToggleField
+              label="Enable Deposit Payments"
+              description="Estimates calculate deposit amount for payment checkout."
+              enabled={
+                currentBranchForm.inherit_deposit
+                  ? !!mainBranch?.deposit_enabled
+                  : currentBranchForm.deposit_enabled
+              }
+              onToggle={() => {
+                if (!currentBranchForm.inherit_deposit) {
+                  setCurrentBranchForm((prev) => ({
+                    ...prev,
+                    deposit_enabled: !prev.deposit_enabled,
+                  }));
+                }
+              }}
+              disabled={currentBranchForm.inherit_deposit}
+            />
+
+            <ToggleField
+              label="Allow Booking Without Deposit"
+              description="Permit authorized staff to confirm jobs without deposit."
+              enabled={
+                currentBranchForm.inherit_deposit
+                  ? !!mainBranch?.allow_booking_without_deposit
+                  : currentBranchForm.allow_booking_without_deposit
+              }
+              onToggle={() => {
+                if (!currentBranchForm.inherit_deposit) {
+                  setCurrentBranchForm((prev) => ({
+                    ...prev,
+                    allow_booking_without_deposit: !prev.allow_booking_without_deposit,
+                  }));
+                }
+              }}
+              disabled={currentBranchForm.inherit_deposit}
+            />
+
+            <InputField
+              label="Default Deposit Percent (%)"
+              name="default_deposit_pct"
+              type="number"
+              step="0.01"
+              min="0"
+              max="100"
+              value={currentBranchForm.inherit_deposit ? '' : currentBranchForm.default_deposit_pct}
+              onChange={handleActiveBranchFieldChange}
+              placeholder={
+                currentBranchForm.inherit_deposit
+                  ? `${toPercent(mainBranch?.default_deposit_pct)}% (Inherited)`
+                  : '10'
+              }
+              disabled={
+                currentBranchForm.inherit_deposit ||
+                !(currentBranchForm.inherit_deposit
+                  ? !!mainBranch?.deposit_enabled
+                  : currentBranchForm.deposit_enabled)
+              }
+            />
+          </Card>
+
+          <Card className="!p-3.5 !rounded-xl space-y-2.5">
+            <h4 className="text-xs font-bold text-heading">Booking Logic & Lead Flow</h4>
+            <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5 text-xs text-body dark:border-slate-800 dark:bg-slate-900/60">
+              <p className="font-bold text-heading dark:text-white">Active Deposit Policy</p>
+              <p className="mt-1 text-[11px]">
+                {currentBranchForm.inherit_deposit ? (
+                  <>
+                    Inheriting rules from <span className="font-bold text-primary">{mainBranch?.name || 'Main Branch'}</span>: Deposit {mainBranch?.deposit_enabled ? `Required (${toPercent(mainBranch?.default_deposit_pct)}%)` : 'Disabled'}.
+                  </>
+                ) : (
+                  <>
+                    Branch-specific override: Deposit {currentBranchForm.deposit_enabled ? `Required (${toPercent(currentBranchForm.default_deposit_pct)}%)` : 'Disabled'}.
+                  </>
+                )}
+              </p>
+            </div>
+
+            <ToggleField
+              label="Inbound Lead Posting"
+              description="Enable lead distribution to assign bookings directly to this branch."
+              enabled={currentBranchForm.enable_lead_posting}
+              onToggle={() =>
+                setCurrentBranchForm((prev) => ({
+                  ...prev,
+                  enable_lead_posting: !prev.enable_lead_posting,
+                }))
+              }
+            />
+          </Card>
+        </div>
       )}
-      {showViewModal && <BranchViewModal branch={branchToView} onClose={() => { setShowViewModal(false); setBranchToView(null); }} />}
+
+      {/* 4. TAXES & SURCHARGES VIEW */}
+      {effectiveView === 'taxes' && (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <Card className="!p-3.5 !rounded-xl space-y-2.5">
+            <h4 className="text-xs font-bold text-heading">Sales Tax Rate</h4>
+            {!isMainBranch && (
+              <div className="flex justify-between items-center rounded-lg bg-slate-50 px-3 py-1.5 dark:bg-slate-900/60">
+                <span className="text-[11px] font-bold text-heading dark:text-white">Tax Inheritance</span>
+                <InheritanceToggle
+                  label="Inherit tax rate from Main Branch"
+                  enabled={currentBranchForm.inherit_tax_rate}
+                  onChange={(e) =>
+                    setCurrentBranchForm((prev) => ({
+                      ...prev,
+                      inherit_tax_rate: e.target.checked,
+                    }))
+                  }
+                />
+              </div>
+            )}
+
+            <InputField
+              label="Branch Sales Tax Rate (%)"
+              name="sales_tax_rate"
+              type="number"
+              step="0.01"
+              min="0"
+              value={currentBranchForm.inherit_tax_rate ? '' : currentBranchForm.sales_tax_rate}
+              onChange={handleActiveBranchFieldChange}
+              placeholder={
+                currentBranchForm.inherit_tax_rate
+                  ? `${toPercent(mainBranch?.sales_tax_rate)}% (Inherited)`
+                  : '0.00'
+              }
+              disabled={currentBranchForm.inherit_tax_rate}
+              icon={CreditCard}
+            />
+
+            <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5 text-xs text-body dark:border-slate-800 dark:bg-slate-900/60">
+              <p className="font-bold text-heading dark:text-white">Effective Tax Calculation</p>
+              <p className="mt-1 text-[11px]">
+                {currentBranchForm.inherit_tax_rate
+                  ? `Currently inheriting ${formatPercent(mainBranch?.sales_tax_rate)} from ${mainBranch?.name || 'Main Branch'}.`
+                  : `Custom branch tax override of ${formatPercent(currentBranchForm.sales_tax_rate)} is active.`}
+              </p>
+            </div>
+          </Card>
+
+          <Card className="!p-3.5 !rounded-xl space-y-2.5">
+            <h4 className="text-xs font-bold text-heading">Regional Tax Guidelines</h4>
+            <p className="text-[11px] text-body leading-relaxed">
+              Sales tax rates configured on this branch are applied automatically to local moving estimates, hourly billing charges, and materials invoices.
+            </p>
+            <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5 text-[11px] space-y-1 dark:border-slate-800 dark:bg-slate-900/60">
+              <p className="font-bold text-heading dark:text-white">Main Branch Standard</p>
+              <p className="text-body">{mainBranch?.name}: <span className="font-bold text-heading dark:text-white">{formatPercent(mainBranch?.sales_tax_rate)}</span></p>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* 5. BRANDING VIEW */}
+      {effectiveView === 'branding' && (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <Card className="!p-3.5 !rounded-xl space-y-2.5">
+            <h4 className="text-xs font-bold text-heading">Branch Logo & Visuals</h4>
+            {!isMainBranch && (
+              <div className="flex justify-between items-center rounded-lg bg-slate-50 px-3 py-1.5 dark:bg-slate-900/60">
+                <span className="text-[11px] font-bold text-heading dark:text-white">Branding Inheritance</span>
+                <InheritanceToggle
+                  label="Inherit branding from Main Branch"
+                  enabled={currentBranchForm.inherit_branding}
+                  onChange={(e) =>
+                    setCurrentBranchForm((prev) => ({
+                      ...prev,
+                      inherit_branding: e.target.checked,
+                    }))
+                  }
+                />
+              </div>
+            )}
+
+            <InputField
+              label="Branch Logo URL"
+              name="logo_url"
+              value={currentBranchForm.inherit_branding ? '' : currentBranchForm.logo_url}
+              onChange={handleActiveBranchFieldChange}
+              placeholder={
+                currentBranchForm.inherit_branding
+                  ? (mainBranch?.logo_url || 'Inheriting company logo')
+                  : 'https://cdn.example.com/branch-logo.png'
+              }
+              disabled={currentBranchForm.inherit_branding}
+              icon={ImageIcon}
+            />
+
+            <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5 dark:border-slate-800 dark:bg-slate-900/60">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-disabled mb-1.5">Logo Preview</p>
+              {(() => {
+                const effectiveLogo = currentBranchForm.inherit_branding
+                  ? mainBranch?.logo_url
+                  : currentBranchForm.logo_url;
+                return effectiveLogo ? (
+                  <img
+                    src={effectiveLogo}
+                    alt={`${selectedBranch.name} logo`}
+                    className="max-h-14 max-w-full rounded bg-white p-1.5 ring-1 ring-slate-200 object-contain dark:bg-slate-800 dark:ring-slate-700"
+                  />
+                ) : (
+                  <div className="flex items-center gap-1.5 text-xs text-body">
+                    <ImageIcon size={16} className="text-disabled" />
+                    <span>No logo specified. Default icon will be used.</span>
+                  </div>
+                );
+              })()}
+            </div>
+          </Card>
+
+          <Card className="!p-3.5 !rounded-xl space-y-2.5">
+            <h4 className="text-xs font-bold text-heading">Communications & Documents</h4>
+            <p className="text-[11px] text-body leading-relaxed">
+              Branch branding elements are used in customer quote previews, digital contract headers, and notification signatures.
+            </p>
+            <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5 text-[11px] space-y-1 dark:border-slate-800 dark:bg-slate-900/60">
+              <p className="font-bold text-heading dark:text-white">Display Summary</p>
+              <p className="text-body">Branch: <span className="font-bold text-heading dark:text-white">{selectedBranch.name}</span></p>
+              <p className="text-body">Location: <span className="font-bold text-heading dark:text-white">{selectedBranch.city || '-'}, {selectedBranch.state || '-'}</span></p>
+              <p className="text-body">Dispatch: <span className="font-bold text-heading dark:text-white">{selectedBranch.dispatch_location || 'Standard Yard'}</span></p>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 };

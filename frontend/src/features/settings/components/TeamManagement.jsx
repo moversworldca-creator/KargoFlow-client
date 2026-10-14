@@ -392,71 +392,68 @@ const TeamManagement = ({ branchId }) => {
   }
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-disabled" size={18} />
+    <div className="space-y-3 animate-in fade-in duration-300">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
           <input 
             type="text"
             placeholder="Search by name or email..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 bg-[#ffffff] ring-1 ring-disabled/30 focus:ring-0 border-b-2 border-transparent focus:border-primary outline-none rounded-t-lg text-sm transition-all shadow-sm"
+            className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 focus:border-primary outline-none rounded-lg text-xs font-medium transition dark:border-slate-700 dark:bg-slate-800 dark:text-white"
           />
         </div>
-        <div className="flex gap-3">
-          <button className="flex items-center gap-2 px-4 py-2.5 bg-card border border-subtle text-body rounded-xl text-sm font-bold hover:bg-page transition-colors">
-            <Filter size={18} /> Filter
-          </button>
+        <div className="flex gap-2">
           {canCreateBranchAware && (
             <button
               onClick={() => { setShowAddModal(true); setMessage({ type: '', text: '' }); }}
-              className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white rounded-xl text-sm font-bold shadow-md hover:bg-primary-dark transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-white rounded-lg text-xs font-bold shadow-sm hover:bg-primary/90 transition"
             >
-              <UserPlus size={18} /> Add Member
+              <UserPlus size={14} /> Add Member
             </button>
           )}
         </div>
       </div>
 
       {message.text && (
-        <div className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium ${
+        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium ${
           message.type === 'success' ? 'bg-primary-tint/30 text-primary' : 'bg-[#FDE8E8]/30 text-[#791F1F]'
         }`}>
-          {message.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+          {message.type === 'success' ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
           {message.text}
         </div>
       )}
 
-      <Card className="overflow-hidden border-0 p-0">
+      <Card className="!p-0 !rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800">
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>
-              <tr className="border-b border-page">
-                <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-body">Member</th>
-                <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-body">Role</th>
-                <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-body">Status</th>
-                <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-body">Type</th>
-                <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-body">Joined</th>
-                <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-body"></th>
+              <tr className="border-b border-slate-100 bg-slate-50 dark:border-slate-800 dark:bg-slate-900">
+                <th className="px-3.5 py-2.5 text-[10px] font-bold uppercase tracking-widest text-body">Member</th>
+                <th className="px-3.5 py-2.5 text-[10px] font-bold uppercase tracking-widest text-body">Role</th>
+                <th className="px-3.5 py-2.5 text-[10px] font-bold uppercase tracking-widest text-body">Status</th>
+                <th className="px-3.5 py-2.5 text-[10px] font-bold uppercase tracking-widest text-body">Type</th>
+                <th className="px-3.5 py-2.5 text-[10px] font-bold uppercase tracking-widest text-body">Joined</th>
+                <th className="px-3.5 py-2.5 text-[10px] font-bold uppercase tracking-widest text-body"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#F2F0EB]">
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {filteredUsers.map((user) => (
-                <tr key={user.id} className="group hover:bg-page/50 transition-colors">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-subtle flex items-center justify-center text-primary font-heading font-bold text-sm">
+                <tr key={user.id} className="group hover:bg-slate-50/70 transition-colors dark:hover:bg-slate-800/40">
+                  <td className="px-3.5 py-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs shrink-0">
                         {(user.first_name?.[0] || user.email[0]).toUpperCase()}
                         {user.last_name?.[0]?.toUpperCase()}
                       </div>
-                      <div>
-                        <p className="text-sm font-bold text-heading">{user.first_name} {user.last_name}</p>
-                        <p className="text-xs text-body">{user.email}</p>
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-heading dark:text-white truncate">{user.first_name} {user.last_name}</p>
+                        <p className="text-[11px] text-body truncate">{user.email}</p>
                       </div>
                     </div>
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="px-3.5 py-2.5">
                     <div className="flex items-start gap-2">
                       <Shield size={14} className="text-primary" />
                       <div className="text-sm text-heading font-medium">

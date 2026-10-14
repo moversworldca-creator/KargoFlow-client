@@ -6416,7 +6416,8 @@ const SalesDetail = () => {
       if (view.isLead && actionKey === 'lost') {
         setLostReasonOverride(workflowReason || 'Marked lost from CRM detail page');
         updated = await markLeadLost(opportunity.id, {
-          reason: workflowReason || 'Marked lost from CRM detail page',
+          lost_reason_id: Number(selectedLostReason),
+          note: String(reasonText || '').trim(),
         });
       } else if (view.isLead && actionKey === 'reopen') {
         setLostReasonOverride('');
@@ -7489,7 +7490,13 @@ const SalesDetail = () => {
 
   const submitWorkflowReason = async () => {
     const trimmedReason = String(reasonText || '').trim();
-    const selectedReasonLabel = String(selectedLostReason || '').trim();
+    if (view.isLead && reasonAction === 'lost' && !selectedLostReason) {
+      setToast({ type: 'error', text: 'Select a lost reason.' });
+      return;
+    }
+    const selectedReasonLabel = view.isLead
+      ? String(lostReasonOptions.find((option) => String(option.id) === String(selectedLostReason))?.name || '').trim()
+      : String(selectedLostReason || '').trim();
     const finalReason = reasonAction === 'cancel'
       ? trimmedReason
       : [selectedReasonLabel, trimmedReason].filter(Boolean).join(': ');
@@ -7917,6 +7924,7 @@ const SalesDetail = () => {
         let updated = null;
         if (source === 'lead') {
           updated = await updateLeadActivity(editingActivity.id, {
+            lead_id: opportunity?.id,
             content: description,
           });
         } else {
@@ -10305,11 +10313,13 @@ const SalesDetail = () => {
                       className={inputCls}
                     >
                       <option value="">Please select one...</option>
-                      {lostReasonOptions.map((option) => (
-                        <option key={String(option?.id || option?.label || '')} value={String(option?.label || '')}>
-                          {String(option?.label || '')}
-                        </option>
-                      ))}
+                      {lostReasonOptions
+                        .filter((option) => !view.isLead || option.applies_to === 'lead' || option.applies_to === 'both')
+                        .map((option) => (
+                          <option key={String(option?.id || option?.label || '')} value={String(view.isLead ? option.id : option.label || option.name || '')}>
+                            {String(option?.label || option?.name || '')}
+                          </option>
+                        ))}
                     </select>
                   </label>
                 )}

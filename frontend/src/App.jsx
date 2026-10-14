@@ -197,9 +197,10 @@ const PageTitleUpdater = () => {
 };
 
 function App() {
-  const { isAuthenticated, login } = useAuth();
+  const { isAuthenticated, isLoading, login, hasPermission } = useAuth();
+  const homePath = ['/dashboard', '/leads', '/sales'].find(path => hasPermission(ROUTE_PERMISSIONS[path])) || '/profile';
   const withPermission = (path, element) => (
-    <PermissionRoute required={ROUTE_PERMISSIONS[path]}>
+    <PermissionRoute required={ROUTE_PERMISSIONS[path]} fallbackPath={homePath}>
       {element}
     </PermissionRoute>
   );
@@ -213,13 +214,15 @@ function App() {
           <Route 
             path="/login" 
             element={
-              isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginPage onLogin={login} />
+              isLoading ? <div role="status">Loading...</div> :
+                isAuthenticated ? <Navigate to={homePath} replace /> : <LoginPage onLogin={login} />
             } 
           />
           <Route path="/portal/estimate" element={<CustomerEstimatePortal />} />
           <Route path="/portal/inventory" element={<CustomerInventoryPortal />} />
           <Route path="/portal/contracts/:token" element={<CustomerContractPortal />} />
           <Route path="/intake" element={<PublicLeadIntakePage />} />
+          <Route path="/intake/:providerKey" element={<PublicLeadIntakePage />} />
           <Route
             path="/__playwright__/estimate-view"
             element={isPlaywrightHarnessEnabled ? <EstimateViewPlaywrightHarness /> : <Navigate to="/" replace />}
@@ -237,7 +240,7 @@ function App() {
               </ProtectedRoute>
               }
             >
-            <Route index element={<Navigate to="/dashboard" replace />} />
+            <Route index element={<Navigate to={homePath} replace />} />
             <Route path="dashboard" element={withPermission('/dashboard', <Dashboard />)} />
             
             <Route path="leads" element={withPermission('/leads', <Sales />)} />
