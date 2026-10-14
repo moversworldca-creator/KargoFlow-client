@@ -167,7 +167,6 @@ export const PLATFORM_ROLES = {
       'platform.plans.view',
       'platform.support_sessions.view',
       'platform.support_sessions.create',
-      'platform.communication.view',
     ],
   },
   saas_admin: {

@@ -197,32 +197,40 @@ export const platformApi = {
   },
 
   // Communication Infrastructure Console (Section 2.4)
+  // Platform routes live under /core/: the API binds the acting platform user
+  // (and therefore permissions and the audit trail) only on that prefix.
   getCommunicationOverview: async () => {
-    return platformAxios.get('/platform/communication/overview/');
+    return platformAxios.get('/core/communication/overview/');
   },
   getCommunicationResend: async () => {
-    return platformAxios.get('/platform/communication/resend/');
+    return platformAxios.get('/core/communication/resend/');
   },
   getCommunicationTelnyx: async () => {
-    return platformAxios.get('/platform/communication/telnyx/');
+    return platformAxios.get('/core/communication/telnyx/');
   },
   getCommunicationHealth: async () => {
-    return platformAxios.get('/platform/communication/health/');
+    return platformAxios.get('/core/communication/health/');
   },
   getCommunicationAuditLogs: async (params = {}) => {
-    return platformAxios.get('/platform/communication/audit/', { params });
+    return platformAxios.get('/core/communication/audit/', { params });
   },
   testCommunicationConnection: async (provider) => {
-    return platformAxios.post('/platform/communication/test-connection/', { provider });
+    return platformAxios.post('/core/communication/test-connection/', { provider });
   },
   rotateCommunicationKey: async (provider, newKey) => {
-    return platformAxios.post('/platform/communication/rotate-key/', { provider, new_key: newKey });
+    return platformAxios.post('/core/communication/rotate-key/', { provider, new_key: newKey });
   },
-  suspendCommunicationProvider: async (provider, confirmation) => {
-    return platformAxios.post('/platform/communication/suspend-provider/', { provider, confirmation });
+  suspendCommunicationProvider: async (provider, confirmation, reason = '') => {
+    return platformAxios.post('/core/communication/suspend-provider/', { provider, confirmation, reason });
+  },
+  resumeCommunicationProvider: async (provider) => {
+    return platformAxios.post('/core/communication/resume-provider/', { provider });
   },
   verifyCommunicationDomainDns: async (domain) => {
-    return platformAxios.post('/platform/communication/verify-dns/', { domain });
+    return platformAxios.post('/core/communication/verify-dns/', { domain });
+  },
+  configureCommunicationProvider: async (data = {}) => {
+    return platformAxios.post('/core/communication/configure/', data);
   },
 };
 

@@ -26,7 +26,15 @@ import ProviderHealthTab from '../components/communication/ProviderHealthTab';
 import CommunicationAuditTab from '../components/communication/CommunicationAuditTab';
 import RotateApiKeyModal from '../components/communication/RotateApiKeyModal';
 import EmergencySuspensionModal from '../components/communication/EmergencySuspensionModal';
+import ProviderSettingsModal from '../components/communication/ProviderSettingsModal';
 import CommunicationInspectorDrawer from '../components/communication/CommunicationInspectorDrawer';
+import StatusBadge from '../components/communication/StatusBadge';
+import { BTN, BTN_PRIMARY, CARD } from '../components/communication/parts';
+import { PROVIDER_LABEL, apiError, healthBadge } from '../components/communication/format';
+
+const TAB_TITLES = {
+  overview: 'Overview', resend: 'Resend (Email)', telnyx: 'Telnyx (SMS)', health: 'Health', audit: 'Audit trail',
+};
 
 export default function CommunicationPage() {
   const { hasPermission } = usePlatformAuth();
@@ -35,6 +43,7 @@ export default function CommunicationPage() {
 
   const canView = hasPermission(PLATFORM_PERMISSIONS.COMMUNICATION_VIEW);
   const canManage = hasPermission(PLATFORM_PERMISSIONS.COMMUNICATION_MANAGE);
+  const canAudit = hasPermission(PLATFORM_PERMISSIONS.AUDIT_VIEW);
 
   const [activeTab, setActiveTab] = useState('overview');
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -52,12 +61,11 @@ export default function CommunicationPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [inspectData, setInspectData] = useState(null);
 
-  // Data Queries
-  const { data: overviewData = {}, isLoading: overviewLoading, refetch: refetchOverview } = useCommunicationOverview();
-  const { data: resendData = {}, refetch: refetchResend } = useCommunicationResend();
-  const { data: telnyxData = {}, refetch: refetchTelnyx } = useCommunicationTelnyx();
-  const { data: healthData = {}, refetch: refetchHealth } = useCommunicationHealth();
-  const { data: auditLogs = [], refetch: refetchAudit } = useCommunicationAuditLogs();
+  const overview = useCommunicationOverview({ enabled: canView });
+  const resend = useCommunicationResend({ enabled: canView });
+  const telnyx = useCommunicationTelnyx({ enabled: canView });
+  const health = useCommunicationHealth({ enabled: canView });
+  const audit = useCommunicationAuditLogs({ limit: 100 }, { enabled: canView && canAudit });
 
   if (!canView) {
     return (
@@ -69,15 +77,15 @@ export default function CommunicationPage() {
     );
   }
 
+  const overviewData = overview.data || {};
+  const configs = { resend: resend.data?.config || overviewData.resend, telnyx: telnyx.data?.config || overviewData.telnyx };
+  const healthRows = Object.fromEntries(((health.data || overviewData).health_matrix || []).map((row) => [row.key, row]));
+
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      await Promise.all([
-        refetchOverview(),
-        refetchResend(),
-        refetchTelnyx(),
-        refetchHealth(),
-        refetchAudit(),
+      const results = await Promise.all([
+        overview.refetch(), resend.refetch(), telnyx.refetch(), health.refetch(), ...(canAudit ? [audit.refetch()] : []),
       ]);
       setLastSynced(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
       showToast('Live telemetry status refreshed across Resend & Telnyx clusters.', 'success');
@@ -88,8 +96,16 @@ export default function CommunicationPage() {
     }
   };
 
+  const requireManage = (what) => {
+    if (canManage) return true;
+    showToast(`You do not have permission to ${what}.`, 'error');
+    return false;
+  };
+
   const handleTestPing = async (provider) => {
-    showToast(`Initiating ping probe to ${provider} API edge...`, 'info');
+    if (!requireManage('test provider connections')) return;
+    const label = PROVIDER_LABEL[provider] || provider;
+    setBusy(true);
     try {
       const res = await platformApi.testCommunicationConnection(provider);
       showToast(res?.data?.message || `${provider} API handshake success (Roundtrip: 74ms, TLS 1.3 verified).`, 'success');
@@ -115,27 +131,40 @@ export default function CommunicationPage() {
     }
   };
 
-  const handleOpenRotateKey = (provider) => {
-    if (!canManage) {
-      showToast('You do not have permission to rotate carrier keys.', 'error');
-      return;
+  const handleResume = async (provider) => {
+    if (!requireManage('resume providers')) return;
+    const label = PROVIDER_LABEL[provider] || provider;
+    setBusy(true);
+    try {
+      const { data } = await platformApi.resumeCommunicationProvider(provider);
+      showToast(data.message || `${label} is active again.`, 'success');
+      invalidateCommunication();
+    } catch (err) {
+      showToast(apiError(err, `${label} could not be resumed.`), 'error');
+    } finally {
+      setBusy(false);
     }
-    setRotateProvider(provider);
-    setRotateModalOpen(true);
   };
 
-  const handleOpenDisableProvider = (provider) => {
-    if (!canManage) {
-      showToast('You do not have permission to suspend providers.', 'error');
-      return;
+  const handleVerifyDns = async (domain) => {
+    if (!requireManage('re-check domains')) return;
+    setVerifyingDomain(domain);
+    try {
+      const { data } = await platformApi.verifyCommunicationDomainDns(domain);
+      showToast(data.message, data.success ? 'success' : 'info');
+      const refreshed = await resend.refetch();
+      const row = (refreshed.data?.domains || []).find((item) => item.domain === domain);
+      setInspectData((current) => (current?.type === 'domain' && current.identifier === domain && row ? { ...current, details: row } : current));
+      invalidateCommunication();
+    } catch (err) {
+      showToast(apiError(err, `${domain} could not be re-checked.`), 'error');
+    } finally {
+      setVerifyingDomain(null);
     }
-    setSuspendProvider(provider);
-    setSuspendModalOpen(true);
   };
 
-  const handleInspect = (data) => {
-    setInspectData(data);
-    setDrawerOpen(true);
+  const openDialog = (kind, what) => (provider) => {
+    if (requireManage(what)) setDialog({ kind, provider });
   };
 
   // Metrics extract for executive summary strip
@@ -435,6 +464,7 @@ export default function CommunicationPage() {
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
+          const badge = tab.status ? healthBadge(tab.status) : null;
           return (
             <button
               key={tab.id}
@@ -469,30 +499,18 @@ export default function CommunicationPage() {
         <>
           {activeTab === 'overview' && (
             <CommunicationOverviewTab
-              overviewData={overviewData}
-              onNavigateTab={(tab) => setActiveTab(tab)}
-              onTestPing={handleTestPing}
-              onInspect={handleInspect}
+              overviewData={overviewData} canManage={canManage} onNavigateTab={setActiveTab}
+              onTestPing={handleTestPing} onInspect={setInspectData}
             />
           )}
-
           {activeTab === 'resend' && (
             <ResendSubSuiteTab
-              resendData={resendData}
-              onTestPing={handleTestPing}
-              onOpenRotateKey={handleOpenRotateKey}
-              onOpenDisableProvider={handleOpenDisableProvider}
-              onInspect={handleInspect}
+              resendData={resend.data || { config: overviewData.resend }} health={healthRows.resend} {...providerHandlers}
+              verifyingDomain={verifyingDomain} onVerifyDns={handleVerifyDns}
             />
           )}
-
           {activeTab === 'telnyx' && (
-            <TelnyxSubSuiteTab
-              telnyxData={telnyxData}
-              onTestPing={handleTestPing}
-              onOpenRotateKey={handleOpenRotateKey}
-              onInspect={handleInspect}
-            />
+            <TelnyxSubSuiteTab telnyxData={telnyx.data || { config: overviewData.telnyx }} health={healthRows.telnyx} {...providerHandlers} />
           )}
 
           {activeTab === 'health' && (
@@ -503,32 +521,23 @@ export default function CommunicationPage() {
           )}
 
           {activeTab === 'audit' && (
-            <CommunicationAuditTab
-              auditLogs={auditLogs}
-              onInspect={handleInspect}
-            />
+            <CommunicationAuditTab auditData={audit.data} canAudit={canAudit} isError={audit.isError} onInspect={setInspectData} />
           )}
         </>
       )}
 
-      {/* Modals & Drawer */}
       <RotateApiKeyModal
-        isOpen={rotateModalOpen}
-        onClose={() => setRotateModalOpen(false)}
-        provider={rotateProvider}
+        isOpen={dialog?.kind === 'rotate'} onClose={() => setDialog(null)} provider={dialog?.provider}
+        hasKey={Boolean(configs[dialog?.provider]?.configured)}
       />
-
-      <EmergencySuspensionModal
-        isOpen={suspendModalOpen}
-        onClose={() => setSuspendModalOpen(false)}
-        provider={suspendProvider}
+      <EmergencySuspensionModal isOpen={dialog?.kind === 'suspend'} onClose={() => setDialog(null)} provider={dialog?.provider} />
+      <ProviderSettingsModal
+        isOpen={dialog?.kind === 'settings'} onClose={() => setDialog(null)} provider={dialog?.provider}
+        config={configs[dialog?.provider]}
       />
-
       <CommunicationInspectorDrawer
-        isOpen={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        inspectData={inspectData}
-        onRefreshCarrier={handleRefresh}
+        isOpen={Boolean(inspectData)} onClose={() => setInspectData(null)} inspectData={inspectData}
+        canManage={canManage} verifyingDomain={verifyingDomain} onVerifyDns={handleVerifyDns}
       />
     </div>
   );

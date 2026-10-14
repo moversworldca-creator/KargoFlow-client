@@ -19,6 +19,8 @@ export default function LoginPage({ onLogin }) {
     try {
       await onLogin(email, password);
     } catch (err) {
+      const status = err?.response?.status;
+      const code = err?.response?.data?.error;
       setError(
         err?.response?.data?.detail || 
         err?.response?.data?.non_field_errors?.[0] || 
