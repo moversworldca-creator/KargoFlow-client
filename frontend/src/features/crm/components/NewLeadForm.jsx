@@ -132,7 +132,7 @@ const NewLeadForm = ({ isOpen, onClose, metadata = {}, onSuccess, canCreateLead 
 
     let cancelled = false;
     const loadTypeLookups = async () => {
-      const params = form.branch ? { branch: form.branch } : {};
+      const params = form.branch ? { applicable_branch_id: form.branch } : {};
       try {
         const [moveTypesResponse, serviceTypesResponse] = await Promise.all([
           getMoveTypeLookups(params),
@@ -165,7 +165,12 @@ const NewLeadForm = ({ isOpen, onClose, metadata = {}, onSuccess, canCreateLead 
 
   const assignableUsers = useMemo(() => {
     if (!selectedBranchId) return users;
-    return users.filter((user) => getUserBranchIds(user).includes(selectedBranchId));
+    return users.filter((user) => {
+      const branchIds = getUserBranchIds(user);
+      // The tenant users endpoint does not expose branch memberships. Keep
+      // those users selectable and let the server resolve their employee.
+      return branchIds.length === 0 || branchIds.includes(selectedBranchId);
+    });
   }, [selectedBranchId, users]);
 
   const selectedUser = useMemo(() => {

@@ -154,40 +154,18 @@ const PermissionPill = ({ label, isGranted, onToggle, disabled }) => (
 );
 
 const RoleFormModal = ({ title, initialData, branches, onSave, onCancel, isSaving }) => {
-  const initialType = initialData?.name === 'Company Owner' && !initialData?.branch ? 'company_owner' : 'branch_role';
   const [formData, setFormData] = useState({
     name: initialData?.name || '',
     description: initialData?.description || '',
-    branch: initialData?.branch || null,
-    roleType: initialType,
   });
 
   const handleChange = (e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
 
-  const handleRoleTypeChange = (value) => {
-    if (value === 'company_owner') {
-      setFormData((prev) => ({
-        ...prev,
-        roleType: value,
-        name: 'Company Owner',
-        description: prev.description || 'Full superuser access for this company.',
-        branch: null,
-      }));
-      return;
-    }
-    setFormData((prev) => ({
-      ...prev,
-      roleType: value,
-      name: prev.name === 'Company Owner' ? '' : prev.name,
-    }));
-  };
-
   const handleSubmit = (e) => {
     e.preventDefault();
     onSave({
-      name: formData.roleType === 'company_owner' ? 'Company Owner' : formData.name,
+      name: formData.name,
       description: formData.description,
-      branch: formData.roleType === 'company_owner' ? null : formData.branch,
     });
   };
 
@@ -202,24 +180,12 @@ const RoleFormModal = ({ title, initialData, branches, onSave, onCancel, isSavin
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-[0.625rem] font-bold uppercase tracking-widest text-muted">Role Type</label>
-            <select
-              value={formData.roleType}
-              onChange={(e) => handleRoleTypeChange(e.target.value)}
-              className="w-full px-4 py-3 bg-subtle border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-            >
-              <option value="branch_role">Branch Role</option>
-              <option value="company_owner">Company Owner</option>
-            </select>
-          </div>
-          <div className="space-y-1.5">
             <label className="text-[0.625rem] font-bold uppercase tracking-widest text-muted">Role Name</label>
             <input 
               name="name"
               value={formData.name}
               onChange={handleChange}
               required
-              disabled={formData.roleType === 'company_owner'}
               className="w-full px-4 py-3 bg-subtle border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" 
             />
           </div>
@@ -233,28 +199,9 @@ const RoleFormModal = ({ title, initialData, branches, onSave, onCancel, isSavin
               
             />
           </div>
-          {formData.roleType === 'company_owner' ? (
-            <div className="rounded-xl border border-border bg-subtle px-4 py-3 text-sm text-body">
-              Company Owner is the superuser role for this company and is not tied to a branch.
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              <label className="text-[0.625rem] font-bold uppercase tracking-widest text-muted">Branch Scope</label>
-              <select
-                name="branch"
-                value={formData.branch ?? ''}
-                onChange={(e) => setFormData((prev) => ({ ...prev, branch: e.target.value ? Number(e.target.value) : null }))}
-                className="w-full px-4 py-3 bg-subtle border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-              >
-                <option value="">Select branch</option>
-                {(branches || []).map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          <div className="rounded-xl border border-border bg-subtle px-4 py-3 text-sm text-body">
+            Roles apply across this tenant. Permission scopes control what the role can access.
+          </div>
           <div className="flex gap-3 pt-4">
             <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl font-bold bg-border text-body hover:bg-border transition-all">
               Cancel
@@ -411,7 +358,7 @@ const RolesPermissions = ({ branchId }) => {
     if (!branchFilter) return roles;
     return roles.filter((role) => {
       const roleBranchId = resolveRoleBranchId(role);
-      return roleBranchId !== null && String(roleBranchId) === String(branchFilter);
+      return roleBranchId === null || String(roleBranchId) === String(branchFilter);
     });
   }, [roles, branchFilter]);
 
