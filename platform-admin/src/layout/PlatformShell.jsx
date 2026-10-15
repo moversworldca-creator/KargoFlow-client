@@ -188,12 +188,6 @@ export default function PlatformShell() {
       permission: PLATFORM_PERMISSIONS.PLANS_VIEW 
     },
     { 
-      to: '/features', 
-      label: 'Features Matrix', 
-      icon: Sliders, 
-      permission: PLATFORM_PERMISSIONS.PLANS_VIEW 
-    },
-    { 
       to: '/entitlements', 
       label: 'Entitlements & Overrides', 
       icon: Shield, 
