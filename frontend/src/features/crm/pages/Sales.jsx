@@ -4843,7 +4843,7 @@ const Sales = () => {
 
   const openBulkEmailModal = useCallback(() => {
     if (!selectedRecordItems.length) return;
-    if (!canAll(['crm.communications.email.send'])) {
+    if (!canAll([PERMISSIONS.COMMUNICATIONS_EMAIL_SEND])) {
       showToast('You do not have permission to send email.', 'warning');
       return;
     }
@@ -4864,7 +4864,7 @@ const Sales = () => {
 
   const openBulkSmsModal = useCallback(() => {
     if (!selectedRecordItems.length) return;
-    if (!canAll(['crm.communications.sms.send'])) {
+    if (!canAll([PERMISSIONS.COMMUNICATIONS_SMS_SEND])) {
       showToast('You do not have permission to send SMS.', 'warning');
       return;
     }
@@ -5053,7 +5053,7 @@ const Sales = () => {
       return { row_type: item.row_type, id: item.id };
     });
     if (!items.length) return;
-    if (!canAll(['crm.communications.email.send'])) {
+    if (!canAll([PERMISSIONS.COMMUNICATIONS_EMAIL_SEND])) {
       showToast('You do not have permission to send email.', 'warning');
       return;
     }
@@ -5108,7 +5108,7 @@ const Sales = () => {
       return { row_type: item.row_type, id: item.id };
     });
     if (!items.length) return;
-    if (!canAll(['crm.communications.sms.send'])) {
+    if (!canAll([PERMISSIONS.COMMUNICATIONS_SMS_SEND])) {
       showToast('You do not have permission to send SMS.', 'warning');
       return;
     }
@@ -5160,24 +5160,23 @@ const Sales = () => {
     ) {
       return;
     }
-    const openInNewTab = (path) => {
-      if (!path || typeof window === 'undefined') return;
-      window.open(path, '_blank', 'noopener,noreferrer');
+    const openRecord = (path) => {
+      if (path) navigate(path);
     };
     if (item.row_type === "task") {
       if (item.related_type === "lead") {
-        openInNewTab(getRecordDetailPath('lead', { sales_number: item.sales_number, id: item.related_id }));
+        openRecord(getRecordDetailPath('lead', { sales_number: item.sales_number, id: item.related_id }));
       } else {
-        openInNewTab(getRecordDetailPath('opportunity', { sales_number: item.sales_number, id: item.related_id }));
+        openRecord(getRecordDetailPath('opportunity', { sales_number: item.sales_number, id: item.related_id }));
       }
     } else {
       if (item.row_type === "lead") {
-        openInNewTab(getRecordDetailPath('lead', item));
+        openRecord(getRecordDetailPath('lead', item));
       } else {
-        openInNewTab(getRecordDetailPath('opportunity', item));
+        openRecord(getRecordDetailPath('opportunity', item));
       }
     }
-  }, [activeTab]);
+  }, [navigate]);
 
   const skeletonColumns = isLeadTab ? 12 : 13;
   const skeletonRows = Array.from({ length: 6 }, (_, index) => index);

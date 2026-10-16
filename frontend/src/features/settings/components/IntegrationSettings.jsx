@@ -245,15 +245,15 @@ const ConfigSection = ({ title, icon, description, children, onSave, onTest, isS
       <div className="flex items-center gap-2 self-end sm:self-auto">
         <button
           onClick={onTest}
-          disabled={isTesting}
+          disabled={isTesting || isSaving}
           className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold text-primary bg-subtle hover:bg-[#d4e9f4] transition-colors disabled:opacity-50"
         >
           {isTesting ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-          {testLabel}
+          {isTesting && testLabel === 'Send Test Email' ? 'Sending…' : testLabel}
         </button>
         <button
           onClick={onSave}
-          disabled={isSaving}
+          disabled={isSaving || isTesting}
           className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-primary hover:bg-primary-dark transition-colors disabled:opacity-50"
         >
           {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
@@ -267,7 +267,7 @@ const ConfigSection = ({ title, icon, description, children, onSave, onTest, isS
     </div>
 
     {testResult && (
-      <div className={`mt-4 p-3 rounded-lg flex items-center gap-2 text-xs font-medium animate-in fade-in slide-in-from-top-2 ${
+      <div role="status" aria-live="polite" className={`mt-4 p-3 rounded-lg flex items-center gap-2 text-xs font-medium animate-in fade-in slide-in-from-top-2 ${
         testResult.type === 'success' ? 'bg-primary-tint/30 text-primary' : 'bg-[#FDE8E8]/30 text-[#791F1F]'
       }`}>
         {testResult.type === 'success' ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
@@ -286,6 +286,7 @@ const InputField = ({ label, value, onChange, placeholder, type = 'text', secret
       value={value || ''}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
+      aria-label={label}
       className="w-full bg-card ring-1 ring-disabled/30 focus:ring-0 border-b-2 border-transparent focus:border-primary px-3 sm:px-4 py-2.5 rounded-lg outline-none text-sm font-medium transition-all shadow-sm"
     />
     {helperText ? (
@@ -472,13 +473,18 @@ const IntegrationSettings = ({ branchId = null, view = null }) => {
     };
 
     try {
-      const [sg, rs, smtp, tw, paymentGatewayRows] = await Promise.all([
+      const configResults = await Promise.allSettled([
         safeFetch(() => getSendGridConfig(branchFilter ? { branch: branchFilter } : undefined), []),
         safeFetch(() => getResendConfig(branchFilter ? { branch: branchFilter } : undefined), []),
         safeFetch(() => getSMTPConfig(branchFilter ? { branch: branchFilter } : undefined), []),
         safeFetch(() => getTelnyxSMSConfig(branchFilter ? { branch: branchFilter } : undefined), []),
         safeFetch(() => getPaymentGateways(branchFilter ? { branch: branchFilter } : undefined), []),
       ]);
+
+      const [sg, rs, smtp, tw, paymentGatewayRows] = configResults.map((result) => result.status === 'fulfilled' ? result.value : []);
+      if (configResults.slice(0, 3).some((result) => result.status === 'rejected')) {
+        showToast('Some email integrations could not be loaded. Refresh to try again.', 'error');
+      }
 
       const sgRow = pickPreferredConfig(normalizeListResponse(getResponseData(sg)));
       const rsRow = pickPreferredConfig(normalizeListResponse(getResponseData(rs)));
@@ -565,9 +571,9 @@ const IntegrationSettings = ({ branchId = null, view = null }) => {
 
   const handleSave = async (type, config, createFn, updateFn, successMessage = 'Configuration saved successfully.') => {
     const writePermsByType = {
-      sg: [PERMISSIONS.INTEGRATIONS_CHANGE_SENDGRID, PERMISSIONS.INTEGRATIONS_ADD_SENDGRID],
-      rs: [PERMISSIONS.INTEGRATIONS_CHANGE_RESEND, PERMISSIONS.INTEGRATIONS_ADD_RESEND],
-      smtp: [PERMISSIONS.INTEGRATIONS_CHANGE_SMTP, PERMISSIONS.INTEGRATIONS_ADD_SMTP],
+      sg: ['settings.manage'],
+      rs: ['settings.manage'],
+      smtp: ['settings.manage'],
       tw: [PERMISSIONS.INTEGRATIONS_CHANGE_TELNYX, PERMISSIONS.INTEGRATIONS_ADD_TELNYX],
     };
     if (!canAll(writePermsByType[type] || [PERMISSIONS.INTEGRATIONS_VIEW_PAYMENT_GATEWAY])) {
@@ -607,9 +613,9 @@ const IntegrationSettings = ({ branchId = null, view = null }) => {
 
   const handleTest = async (type, config, testFn, extraParam = null) => {
     const viewPermsByType = {
-      sg: [PERMISSIONS.INTEGRATIONS_VIEW_SENDGRID],
-      rs: [PERMISSIONS.INTEGRATIONS_VIEW_RESEND],
-      smtp: [PERMISSIONS.INTEGRATIONS_VIEW_SMTP],
+      sg: ['settings.manage'],
+      rs: ['settings.manage'],
+      smtp: ['settings.manage'],
       tw: [PERMISSIONS.INTEGRATIONS_VIEW_TELNYX],
     };
     if (!canAll(viewPermsByType[type] || [PERMISSIONS.INTEGRATIONS_VIEW_PAYMENT_GATEWAY])) {
@@ -621,13 +627,19 @@ const IntegrationSettings = ({ branchId = null, view = null }) => {
       return;
     }
 
+    const isEmailTest = ['sg', 'rs', 'smtp'].includes(type);
+    const recipient = isEmailTest ? String(extraParam || '').trim() : extraParam;
+    if (isEmailTest && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+      setResult(type, { type: 'error', message: 'Enter a valid test recipient email address.' }, 6000);
+      return;
+    }
     setStates((prev) => ({ ...prev, [type]: { ...prev[type], isTesting: true, result: null } }));
 
     try {
-      const res = extraParam ? await testFn(config.id, extraParam) : await testFn(config.id);
-      setResult(type, { type: 'success', message: res?.message || 'Connection successful.' });
+      const res = getResponseData(recipient ? await testFn(config.id, recipient) : await testFn(config.id));
+      setResult(type, { type: 'success', message: res?.message || (isEmailTest ? 'Test email accepted for sending. Check the inbox and spam folder.' : 'Connection successful.') });
     } catch (err) {
-      setResult(type, { type: 'error', message: getErrorMessage(err, 'Connection test failed.') }, 6000);
+      setResult(type, { type: 'error', message: getErrorMessage(err, isEmailTest ? 'Test email could not be sent. Check the saved email settings and try again.' : 'Connection test failed.') }, 6000);
     } finally {
       setStates((prev) => ({ ...prev, [type]: { ...prev[type], isTesting: false } }));
     }
@@ -904,12 +916,12 @@ const IntegrationSettings = ({ branchId = null, view = null }) => {
                 isSaving={states.sg.isSaving}
                 isTesting={states.sg.isTesting}
                 testResult={states.sg.result}
-                testLabel="Send Test"
+                testLabel="Send Test Email"
               >
                 <InputField label="API Key" value={sgConfig.api_key} onChange={(v) => setSgConfig({ ...sgConfig, api_key: v })} secret />
                 <InputField label="Sender Email" value={sgConfig.sender_email} onChange={(v) => setSgConfig({ ...sgConfig, sender_email: v })} placeholder="noreply@yourdomain.com" type="email" />
                 <ToggleField label="Integration Active" checked={sgConfig.is_active} onChange={(value) => setSgConfig({ ...sgConfig, is_active: value })} />
-	                <InputField label="Test Recipient" value={sgTestEmail} onChange={setSgTestEmail} placeholder="recipient@example.com" type="email" />
+	                <InputField label="Test Recipient" value={sgTestEmail} onChange={setSgTestEmail} placeholder="recipient@example.com" type="email" helperText="Uses saved settings. Save any changes before sending a test email." />
 	              </ConfigSection>
 
 	              <ConfigSection
@@ -921,12 +933,12 @@ const IntegrationSettings = ({ branchId = null, view = null }) => {
 	                isSaving={states.rs.isSaving}
 	                isTesting={states.rs.isTesting}
 	                testResult={states.rs.result}
-	                testLabel="Send Test"
+	                testLabel="Send Test Email"
 	              >
 	                <InputField label="API Key" value={rsConfig.api_key} onChange={(v) => setRsConfig({ ...rsConfig, api_key: v })} secret />
 	                <InputField label="Sender Email" value={rsConfig.sender_email} onChange={(v) => setRsConfig({ ...rsConfig, sender_email: v })} placeholder="noreply@yourdomain.com" type="email" />
 	                <ToggleField label="Integration Active" checked={rsConfig.is_active} onChange={(value) => setRsConfig({ ...rsConfig, is_active: value })} />
-	                <InputField label="Test Recipient" value={rsTestEmail} onChange={setRsTestEmail} placeholder="recipient@example.com" type="email" />
+	                <InputField label="Test Recipient" value={rsTestEmail} onChange={setRsTestEmail} placeholder="recipient@example.com" type="email" helperText="Uses saved settings. Save any changes before sending a test email." />
 	              </ConfigSection>
 
 	              <ConfigSection
@@ -938,7 +950,7 @@ const IntegrationSettings = ({ branchId = null, view = null }) => {
                 isSaving={states.smtp.isSaving}
                 isTesting={states.smtp.isTesting}
                 testResult={states.smtp.result}
-                testLabel="Send Test"
+                testLabel="Send Test Email"
               >
                 <InputField label="SMTP Host" value={smtpConfig.host} onChange={(v) => setSmtpConfig({ ...smtpConfig, host: v })} placeholder="smtp.yourdomain.com" />
                 <InputField label="SMTP Port" value={smtpConfig.port} onChange={(v) => setSmtpConfig({ ...smtpConfig, port: v })} placeholder="587" />
@@ -948,7 +960,7 @@ const IntegrationSettings = ({ branchId = null, view = null }) => {
                 <ToggleField label="Use TLS" checked={smtpConfig.use_tls} onChange={(value) => setSmtpConfig({ ...smtpConfig, use_tls: value })} />
                 <ToggleField label="Use SSL" checked={smtpConfig.use_ssl} onChange={(value) => setSmtpConfig({ ...smtpConfig, use_ssl: value })} />
                 <ToggleField label="Integration Active" checked={smtpConfig.is_active} onChange={(value) => setSmtpConfig({ ...smtpConfig, is_active: value })} />
-                <InputField label="Test Recipient" value={smtpTestEmail} onChange={setSmtpTestEmail} placeholder="recipient@example.com" type="email" />
+                <InputField label="Test Recipient" value={smtpTestEmail} onChange={setSmtpTestEmail} placeholder="recipient@example.com" type="email" helperText="Uses saved settings. Save any changes before sending a test email." />
               </ConfigSection>
             </div>
           )}

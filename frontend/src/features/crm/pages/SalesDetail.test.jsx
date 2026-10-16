@@ -255,6 +255,7 @@ vi.mock('../../../services/api', () => {
     updateOpportunity: vi.fn().mockResolvedValue({}),
     createOpportunity: vi.fn().mockResolvedValue({}),
     getTimelineEvents: vi.fn().mockResolvedValue([]),
+    sendRecordEmail: vi.fn().mockResolvedValue({ id: 901, status: 'queued' }),
     markOpportunityEstimateCreated: vi.fn().mockResolvedValue({}),
     bookOpportunityJob: vi.fn().mockResolvedValue({}),
     unbookOpportunityJob: vi.fn().mockResolvedValue({
@@ -458,8 +459,8 @@ describe('SalesDetail Component Tests', () => {
     });
 
     renderComponent({
-      initialEntry: '/sales/123',
-      routePath: '/sales/:id',
+      initialEntry: '/leads/123',
+      routePath: '/leads/:id',
       params: { id: '123' },
     });
 

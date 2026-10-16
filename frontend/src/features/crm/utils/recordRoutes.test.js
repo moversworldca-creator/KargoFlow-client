@@ -12,7 +12,8 @@ import {
 
 describe('recordRoutes', () => {
   it('builds canonical record detail and workspace tab routes', () => {
-    expect(getRecordDetailPath('lead', { sales_number: '00030', id: 30 })).toBe('/crm/lead/30');
+    expect(getRecordDetailPath('lead', { sales_number: '00030', id: 30 })).toBe('/leads/30');
+    expect(getRecordDetailPath('lead', '00030')).toBe('/crm/lead/30');
     expect(getRecordDetailPath('opportunity', { sales_number: '00017', id: 17 })).toBe('/crm/opportunity/17');
     expect(getRecordDetailTabPath('opportunity', { id: 17 }, 'Sales')).toBe('/crm/opportunity/17/sales');
     expect(getRecordDetailTabPath('opportunity', { id: 17 }, 'Estimate')).toBe('/crm/opportunity/17/estimate');

@@ -110,6 +110,11 @@ const resolveRecordIdentifier = (entityType, value) => {
 
 export const getRecordDetailPath = (entityType, id) => {
   const normalizedType = normalizeRecordEntityType(entityType);
+  // Lead rows already carry the tenant lead primary key. Use the direct route
+  // so opening a row does not require a second pipeline lookup by sales number.
+  if (normalizedType === 'lead' && id && typeof id === 'object' && id.id != null) {
+    return `/leads/${id.id}`;
+  }
   const identifier = resolveRecordIdentifier(normalizedType, id);
   return `/crm/${normalizedType}/${identifier}`;
 };

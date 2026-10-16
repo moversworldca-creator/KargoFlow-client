@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -19,6 +19,7 @@ import {
 import Card from '../../../shared/ui/Card';
 import {
   assignSmsNumber,
+  testBranchEmailIdentity,
   createBranchEmailIdentity,
   createCommunicationEmailDomain,
   getBranchCommunicationSettings,
@@ -133,6 +134,13 @@ const EmptyState = ({ title, message }) => (
   </div>
 );
 
+const pickBranchSender = (identities, selectedId, defaultId) =>
+  identities.find((identity) => String(identity.id) === String(selectedId))
+  || identities.find((identity) => defaultId != null && String(identity.id) === String(defaultId))
+  || identities.find((identity) => identity.is_default_automation_sender && identity.state === 'active')
+  || identities.find((identity) => identity.state === 'active')
+  || identities[0];
+
 const checklistItem = (label, ready, detail) => ({ label, ready, detail });
 
 export default function CommunicationSetup({ branchId = null }) {
@@ -145,6 +153,16 @@ export default function CommunicationSetup({ branchId = null }) {
   const [orders, setOrders] = useState([]);
   const [mailboxes, setMailboxes] = useState([]);
   const [branchSettings, setBranchSettings] = useState(null);
+  const refreshSequence = useRef(0);
+
+  const [testRecipient, setTestRecipient] = useState('');
+  const [testSenderId, setTestSenderId] = useState('');
+  const [isSendingTest, setIsSendingTest] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+  useEffect(() => {
+    setTestSenderId('');
+    setTestResult(null);
+  }, [branchId]);
 
   const [domainName, setDomainName] = useState('');
   const [identityForm, setIdentityForm] = useState({
@@ -155,7 +173,7 @@ export default function CommunicationSetup({ branchId = null }) {
     reply_to_email: '',
     is_default_automation_sender: true,
   });
-  const [numberSearch, setNumberSearch] = useState({ country: 'US', area_code: '', number_type: 'local', limit: 10 });
+  const [numberSearch, setNumberSearch] = useState({ country_code: 'US', area_code: '', number_type: 'local', limit: 10 });
   const [availableNumbers, setAvailableNumbers] = useState([]);
   const [selectedNumbers, setSelectedNumbers] = useState([]);
   const [quotedOrder, setQuotedOrder] = useState(null);
@@ -164,7 +182,9 @@ export default function CommunicationSetup({ branchId = null }) {
   const [mailboxHint, setMailboxHint] = useState('');
 
   const refreshAll = async () => {
+    const requestId = ++refreshSequence.current;
     setLoading(true);
+    setBranchSettings(null);
     try {
       const [domainRes, numberRes, orderRes, mailboxRes, branchRes] = await Promise.all([
         getCommunicationEmailDomains().catch(() => []),
@@ -173,15 +193,16 @@ export default function CommunicationSetup({ branchId = null }) {
         getCommunicationMailboxes().catch(() => []),
         branchId ? getBranchCommunicationSettings(branchId).catch(() => null) : Promise.resolve(null),
       ]);
+      if (requestId !== refreshSequence.current) return;
       setDomains(asList(domainRes));
       setNumbers(asList(numberRes));
       setOrders(asList(orderRes));
       setMailboxes(asList(mailboxRes));
       setBranchSettings(getData(branchRes));
     } catch (err) {
-      showToast(errorMessage(err, 'Failed to load communication setup.'), 'error');
+      if (requestId === refreshSequence.current) showToast(errorMessage(err, 'Failed to load communication setup.'), 'error');
     } finally {
-      setLoading(false);
+      if (requestId === refreshSequence.current) setLoading(false);
     }
   };
 
@@ -190,8 +211,9 @@ export default function CommunicationSetup({ branchId = null }) {
   }, [branchId]);
 
   useEffect(() => {
-    const identity = branchSettings?.email_identities?.[0] || branchSettings?.default_email_identity || null;
-    if (!identity) return;
+    const identity = pickBranchSender(branchSettings?.email_identities || [], testSenderId, branchSettings?.default_email_identity_id)
+      || branchSettings?.default_email_identity || {};
+
     setIdentityForm({
       id: identity.id || null,
       sender_name: identity.sender_name || '',
@@ -200,10 +222,35 @@ export default function CommunicationSetup({ branchId = null }) {
       reply_to_email: identity.reply_to_email || '',
       is_default_automation_sender: identity.is_default_automation_sender !== false,
     });
-  }, [branchSettings]);
+  }, [branchSettings, testSenderId]);
 
   const defaultDomain = useMemo(() => domains.find((domain) => domain.is_default) || domains.find(isVerified) || domains[0], [domains]);
   const branchIdentities = branchSettings?.email_identities || [];
+  const selectedTestSender = pickBranchSender(branchIdentities, testSenderId, branchSettings?.default_email_identity_id);
+
+  const sendTestEmail = async (event) => {
+    event.preventDefault();
+    const recipient = testRecipient.trim();
+    if (!branchId || !selectedTestSender) {
+      setTestResult({ error: true, message: 'Select a branch and save a sender before sending a test email.' });
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+      setTestResult({ error: true, message: 'Enter a valid test recipient email address.' });
+      return;
+    }
+    setIsSendingTest(true);
+    setTestResult(null);
+    try {
+      const result = getData(await testBranchEmailIdentity(branchId, selectedTestSender.id, recipient));
+      setTestResult({ error: false, message: result?.message || 'Test email accepted for sending. Check the inbox and spam folder.' });
+    } catch (err) {
+      setTestResult({ error: true, message: errorMessage(err, 'Test email could not be sent. Check the sender and domain settings.') });
+    } finally {
+      setIsSendingTest(false);
+    }
+  };
+
   const assignedNumbers = useMemo(() => numbers.filter((number) => number.assignment || number.assignment_id || number.branch_id), [numbers]);
   const readyNumbers = useMemo(() => numbers.filter(isReadyNumber), [numbers]);
 
@@ -266,18 +313,23 @@ export default function CommunicationSetup({ branchId = null }) {
     };
     return withSaving('identity', async () => {
       if (identityForm.id) {
-        await updateBranchEmailIdentity(branchId, identityForm.id, payload);
+        const saved = getData(await updateBranchEmailIdentity(branchId, identityForm.id, payload));
+        setTestSenderId(String(saved?.id || identityForm.id));
       } else {
-        await createBranchEmailIdentity(branchId, payload);
+        const saved = getData(await createBranchEmailIdentity(branchId, payload));
+        if (saved?.id) setTestSenderId(String(saved.id));
       }
     }, 'Branch sender saved.');
   };
 
   const runNumberSearch = (e) => {
     e.preventDefault();
+    if (!/^[A-Z]{2}$/.test(numberSearch.country_code.trim().toUpperCase())) {
+      return showToast('Enter a two-letter country code, such as CA for Canada or US for United States. +1 is a calling code.', 'warning');
+    }
     return withSaving('number-search', async () => {
       const res = await searchSmsNumbers({
-        country: numberSearch.country,
+        country_code: numberSearch.country_code.trim().toUpperCase(),
         area_code: numberSearch.area_code || undefined,
         number_type: numberSearch.number_type,
         limit: numberSearch.limit,
@@ -292,7 +344,7 @@ export default function CommunicationSetup({ branchId = null }) {
     if (!selectedNumbers.length) return showToast('Select at least one number to quote.', 'warning');
     return withSaving('quote', async () => {
       const res = await quoteSmsNumberOrder({
-        country_code: numberSearch.country,
+        country_code: numberSearch.country_code.trim().toUpperCase(),
         area_code: numberSearch.area_code || '',
         number_type: numberSearch.number_type,
         requested_quantity: selectedNumbers.length,
@@ -372,6 +424,27 @@ export default function CommunicationSetup({ branchId = null }) {
         </div>
         <ActionButton onClick={refreshAll} icon={RefreshCw} variant="ghost" size="sm">Refresh</ActionButton>
       </div>
+
+      {activeTab === 'senders' && (
+        <Card className="!p-4 !rounded-xl space-y-3">
+          <div>
+            <h3 className="text-sm font-bold text-heading">Send a test email</h3>
+            <p className="mt-0.5 text-[11px] text-body">Test Resend delivery using a saved branch sender and verified domain. Save any sender changes first.</p>
+          </div>
+          <form onSubmit={sendTestEmail} noValidate className="grid grid-cols-1 gap-2.5 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+            <SelectField label="Test sender" value={selectedTestSender?.id || ''} onChange={(value) => { setTestSenderId(value); setTestResult(null); }}>
+              {!selectedTestSender && <option value="">Select a branch and configure a sender</option>}
+              {branchIdentities.map((identity) => <option key={identity.id} value={identity.id}>{identity.sender_name} — {identity.sender_email}</option>)}
+            </SelectField>
+            <TextInput label="Test recipient" type="email" value={testRecipient} onChange={(value) => { setTestRecipient(value); setTestResult(null); }} placeholder="recipient@example.com" />
+            <ActionButton type="submit" icon={isSendingTest ? Loader2 : Send} disabled={isSendingTest || !branchId || !selectedTestSender}>
+              {isSendingTest ? 'Sending…' : 'Send Test Email'}
+            </ActionButton>
+          </form>
+          {!branchId && <p className="text-xs text-body">Select a branch from Settings to test email delivery.</p>}
+          {testResult && <p role="status" aria-live="polite" className={`text-xs ${testResult.error ? 'text-rose-700' : 'text-emerald-700'}`}>{testResult.message}</p>}
+        </Card>
+      )}
 
       {activeTab === 'overview' && (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1.1fr_1.2fr]">
@@ -547,14 +620,8 @@ export default function CommunicationSetup({ branchId = null }) {
               <button
                 type="button"
                 key={identity.id}
-                onClick={() => setIdentityForm({
-                  id: identity.id,
-                  sender_name: identity.sender_name || '',
-                  sender_email: identity.sender_email || '',
-                  reply_to_mode: identity.reply_to_mode || 'kargo_inbound',
-                  reply_to_email: identity.reply_to_email || '',
-                  is_default_automation_sender: identity.is_default_automation_sender !== false,
-                })}
+                onClick={() => { setTestSenderId(String(identity.id)); setTestResult(null); }}
+                aria-pressed={String(selectedTestSender?.id) === String(identity.id)}
                 className="w-full rounded-lg border border-slate-200 p-2.5 text-left transition hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-950"
               >
                 <div className="flex items-center justify-between">
@@ -577,7 +644,7 @@ export default function CommunicationSetup({ branchId = null }) {
         <div className="space-y-3">
           <Card className="!p-3.5 !rounded-xl">
             <form onSubmit={runNumberSearch} className="grid grid-cols-1 gap-2.5 md:grid-cols-[0.5fr_0.5fr_0.7fr_0.5fr_auto] md:items-end">
-              <TextInput label="Country" value={numberSearch.country} onChange={(v) => setNumberSearch({ ...numberSearch, country: v.toUpperCase() })} placeholder="US" />
+              <TextInput label="Country code (CA / US)" value={numberSearch.country_code} onChange={(v) => setNumberSearch({ ...numberSearch, country_code: v.toUpperCase() })} placeholder="CA or US, not +1" />
               <TextInput label="Area code" value={numberSearch.area_code} onChange={(v) => setNumberSearch({ ...numberSearch, area_code: v })} placeholder="415" />
               <SelectField label="Number type" value={numberSearch.number_type} onChange={(v) => setNumberSearch({ ...numberSearch, number_type: v })}>
                 <option value="local">Local</option>

@@ -26,7 +26,7 @@ export const changePassword = (data) => api.post("/auth/password-change/", data)
 
 // User APIs
 export const getUsers = (params) => api.get("/tenant/users/", { params });
-export const getLookupUsers = (params = { limit: 50 }) => api.get("/lookups/users/", { params });
+export const getLookupUsers = (params = { limit: 50 }) => api.get("/tenant/users/", { params });
 export const getUser = (id) => api.get(`/tenant/users/${id}/`);
 export const createUser = (data) => api.post("/tenant/users/", data);
 export const updateUser = (id, data) => api.patch(`/tenant/users/${id}/`, data);
@@ -82,9 +82,11 @@ export const updateRole = async (id, data) => {
       console.warn("Failed to sync role permissions:", e);
     }
   }
-  return res || api.get(`/tenant/rbac/roles/${id}/`);
+  if (res) return res;
+  const roles = await getRoles();
+  return (Array.isArray(roles) ? roles : roles?.results || []).find((role) => Number(role.id) === Number(id));
 };
-export const deleteRole = (id) => api.delete(`/tenant/rbac/roles/${id}/`);
+export const deleteRole = (id) => api.patch(`/tenant/rbac/roles/${id}/`, { is_active: false });
 export const getRolePermissions = (roleId) => api.get(`/tenant/rbac/roles/${roleId}/permissions/`);
 export const grantRolePermission = (roleId, data) => api.post(`/tenant/rbac/roles/${roleId}/permissions/`, data);
 export const revokeRolePermission = (roleId, data) => api.delete(`/tenant/rbac/roles/${roleId}/permissions/`, { data });
@@ -101,7 +103,7 @@ export const universalSearch = (params) => api.get("/search/", { params });
 
 // Branch APIs
 export const getBranches = () => api.get("/tenant/branches/");
-export const getBranchLookups = (params = {limit: 50}) => api.get("/lookups/branches/", { params });
+export const getBranchLookups = (params = {limit: 50}) => api.get("/tenant/branches/", { params });
 export const createBranch = (data) => api.post("/tenant/branches/", data);
 export const updateBranch = (id, data) => api.patch(`/tenant/branches/${id}/`, data);
 export const deleteBranch = (id) => api.delete(`/tenant/branches/${id}/`);
@@ -252,7 +254,16 @@ export const getMyLeadsQueue = (params) => getPipelineQueue(params);
 export const getDashboardSummary = (params) => api.get("/sales/dashboard-summary/", { params });
 export const getSalesDashboardSummary = (params) => api.get("/sales/dashboard-summary-lite/", { params });
 export const getOpportunities = (params) => api.get("/sales/opportunities/", { params });
-export const getTimelineEvents = (params) => api.get("/sales/timeline-events/", { params });
+export const getTimelineEvents = ({ entity_type, entity_id, limit = 20, before_id } = {}) => {
+  const kind = entity_type === 'opportunity' ? 'opportunities' : 'leads';
+  return api.get(`/tenant/${kind}/${entity_id}/communications/`, {
+    params: { limit, ...(before_id ? { before_id } : {}) },
+  });
+};
+export const sendRecordEmail = (entityType, entityId, data) => {
+  const kind = entityType === 'opportunity' ? 'opportunities' : 'leads';
+  return api.post(`/tenant/${kind}/${entityId}/communications/email/`, data);
+};
 export const getOpportunity = (id) => api.get(`/sales/opportunities/${id}/`);
 export const getOpportunityBySalesNumber = (salesNumber) => api.get(`/sales/opportunities/by-sales-number/${salesNumber}/`);
 export const duplicateOpportunity = (id) => api.post(`/sales/opportunities/${id}/duplicate/`);
@@ -510,20 +521,20 @@ export const sendContractForSignature = (id, data = {}) =>
 
 // Legacy pricing-source APIs removed.
 // Integration APIs
-export const getSendGridConfig = (params) => api.get("/integrations/sendgrid-configs/", { params });
-export const createSendGridConfig = (data) => api.post("/integrations/sendgrid-configs/", data);
-export const updateSendGridConfig = (id, data) => api.patch(`/integrations/sendgrid-configs/${id}/`, data);
-export const testSendGridEmail = (id, email) => api.post(`/integrations/sendgrid-configs/${id}/test-send-email/`, { test_email: email });
+export const getSendGridConfig = (params) => api.get("/tenant/integrations/sendgrid-configs/", { params });
+export const createSendGridConfig = (data) => api.post("/tenant/integrations/sendgrid-configs/", data);
+export const updateSendGridConfig = (id, data) => api.patch(`/tenant/integrations/sendgrid-configs/${id}/`, data);
+export const testSendGridEmail = (id, email) => api.post(`/tenant/integrations/sendgrid-configs/${id}/test-send-email/`, { test_email: email });
 
-export const getResendConfig = (params) => api.get("/integrations/resend-configs/", { params });
-export const createResendConfig = (data) => api.post("/integrations/resend-configs/", data);
-export const updateResendConfig = (id, data) => api.patch(`/integrations/resend-configs/${id}/`, data);
-export const testResendEmail = (id, email) => api.post(`/integrations/resend-configs/${id}/test-send-email/`, { test_email: email });
+export const getResendConfig = (params) => api.get("/tenant/integrations/resend-configs/", { params });
+export const createResendConfig = (data) => api.post("/tenant/integrations/resend-configs/", data);
+export const updateResendConfig = (id, data) => api.patch(`/tenant/integrations/resend-configs/${id}/`, data);
+export const testResendEmail = (id, email) => api.post(`/tenant/integrations/resend-configs/${id}/test-send-email/`, { test_email: email });
 
-export const getSMTPConfig = (params) => api.get("/integrations/smtp-configs/", { params });
-export const createSMTPConfig = (data) => api.post("/integrations/smtp-configs/", data);
-export const updateSMTPConfig = (id, data) => api.patch(`/integrations/smtp-configs/${id}/`, data);
-export const testSMTPEmail = (id, email) => api.post(`/integrations/smtp-configs/${id}/test-send-email/`, { test_email: email });
+export const getSMTPConfig = (params) => api.get("/tenant/integrations/smtp-configs/", { params });
+export const createSMTPConfig = (data) => api.post("/tenant/integrations/smtp-configs/", data);
+export const updateSMTPConfig = (id, data) => api.patch(`/tenant/integrations/smtp-configs/${id}/`, data);
+export const testSMTPEmail = (id, email) => api.post(`/tenant/integrations/smtp-configs/${id}/test-send-email/`, { test_email: email });
 
 export const getTelnyxSMSConfig = (params) => api.get("/integrations/telnyx-sms-configs/", { params });
 export const createTelnyxSMSConfig = (data) => api.post("/integrations/telnyx-sms-configs/", data);
@@ -536,6 +547,8 @@ export const createCommunicationEmailDomain = (data) => api.post("/tenant/commun
 export const updateCommunicationEmailDomain = (id, data) => api.patch(`/tenant/communications/email-domains/${id}/`, data);
 export const refreshCommunicationEmailDomain = (id) => api.post(`/tenant/communications/email-domains/${id}/refresh/`);
 export const getBranchCommunicationSettings = (branchId) => api.get(`/tenant/communications/branch-settings/${branchId}/`);
+export const testBranchEmailIdentity = (branchId, identityId, email) =>
+  api.post(`/tenant/communications/branch-settings/${branchId}/email-identities/${identityId}/test-send-email/`, { test_email: email });
 export const createBranchEmailIdentity = (branchId, data) =>
   api.post(`/tenant/communications/branch-settings/${branchId}/email-identities/`, data);
 export const updateBranchEmailIdentity = (branchId, identityId, data) =>
@@ -853,7 +866,7 @@ export const getLookupUsersPage = (search, offset, limit, branch = null) =>
   api.get('/lookups/users/', { params: { search, offset, limit, ...(branch ? { branch } : {}) } });
 
 export const getBranchLookupsPage = (search, offset, limit) =>
-  api.get('/lookups/branches/', { params: { search, offset, limit } });
+  api.get('/tenant/branches/', { params: { search, offset, limit } });
 
 export const getOpportunityLossReasonLookupsPage = (search, offset, limit) =>
   api.get('/lookups/opportunity-loss-reasons/', { params: { search, offset, limit } });
