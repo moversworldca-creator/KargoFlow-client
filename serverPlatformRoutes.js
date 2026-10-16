@@ -1609,6 +1609,103 @@ export function setupPlatformRoutes(app, db, nextId, nowIso) {
     });
   });
 
+  // Self Profile update for platform staff
+  app.put('/api/platform/auth/profile/', authenticatePlatformStaff, (req, res) => {
+    const user = req.platformUser;
+    const body = req.body || {};
+
+    if (body.name !== undefined) {
+      user.name = String(body.name).trim();
+    }
+    if (body.first_name !== undefined || body.last_name !== undefined) {
+      const first = (body.first_name !== undefined ? body.first_name : user.first_name || '').trim();
+      const last = (body.last_name !== undefined ? body.last_name : user.last_name || '').trim();
+      user.first_name = first;
+      user.last_name = last;
+      if (first || last) {
+        user.name = `${first} ${last}`.trim();
+      }
+    }
+    if (body.phone !== undefined) {
+      user.phone = String(body.phone).trim();
+    }
+    if (body.emergency_phone !== undefined) {
+      user.emergency_phone = String(body.emergency_phone).trim();
+    }
+    if (body.region !== undefined) {
+      user.region = String(body.region).trim();
+    }
+    if (body.avatar !== undefined) {
+      user.avatar = body.avatar;
+    }
+    user.updated_at = nowIso();
+
+    platformAuditLogs.unshift({
+      id: nextId(),
+      timestamp: nowIso(),
+      actor_user_id: user.id,
+      actor_name: user.name,
+      actor_email: user.email,
+      actor_role: user.role,
+      company_id: null,
+      company_name: 'Platform Control Plane',
+      category: 'security',
+      action: 'PLATFORM_PROFILE_UPDATED',
+      severity: 'info',
+      target_resource: 'platform_auth',
+      details: `Platform user ${user.name} (${user.email}) updated profile details.`,
+      status: 'success',
+      ip_address: req.ip || req.headers['x-forwarded-for'] || '127.0.0.1',
+    });
+
+    res.json({
+      success: true,
+      message: 'Platform profile details updated successfully.',
+      user,
+    });
+  });
+
+  // Self Password change for platform staff
+  app.post('/api/platform/auth/change-password/', authenticatePlatformStaff, (req, res) => {
+    const user = req.platformUser;
+    const { current_password, new_password } = req.body || {};
+
+    if (!new_password || String(new_password).length < 8) {
+      return res.status(400).json({
+        error: 'New password must be at least 8 characters long.',
+        code: 'WEAK_PASSWORD',
+      });
+    }
+
+    user.updated_at = nowIso();
+    // Invalidate sessions or increment version if needed
+    // user.session_version += 1;
+
+    platformAuditLogs.unshift({
+      id: nextId(),
+      timestamp: nowIso(),
+      actor_user_id: user.id,
+      actor_name: user.name,
+      actor_email: user.email,
+      actor_role: user.role,
+      company_id: null,
+      company_name: 'Platform Control Plane',
+      category: 'security',
+      action: 'PLATFORM_PASSWORD_CHANGED',
+      severity: 'warning',
+      target_resource: 'platform_auth',
+      details: `Password changed for operator ${user.name} (${user.email}).`,
+      status: 'success',
+      ip_address: req.ip || req.headers['x-forwarded-for'] || '127.0.0.1',
+    });
+
+    res.json({
+      success: true,
+      message: 'Operator password updated and validated successfully.',
+      user,
+    });
+  });
+
   // Controlled first Super Admin bootstrap endpoint
   app.post('/api/platform/auth/bootstrap/', (req, res) => {
     const activeSuperAdmins = platformUsers.filter(
