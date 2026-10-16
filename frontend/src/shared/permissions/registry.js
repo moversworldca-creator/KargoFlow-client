@@ -109,6 +109,18 @@ export const FEATURE_PERMISSION_CATALOG = {
     allowedScopes: ['own', 'branch', 'company'],
     legacyAliases: [],
   },
+  'communications.conversations.view': {
+    label: 'View Communication History',
+    module: 'Communications',
+    allowedScopes: ['own', 'branch', 'company'],
+    legacyAliases: ['crm.communications.history.view'],
+  },
+  'communications.conversations.send': {
+    label: 'Send Email and SMS',
+    module: 'Communications',
+    allowedScopes: ['own', 'branch', 'company'],
+    legacyAliases: ['crm.communications.email.send', 'crm.communications.sms.send'],
+  },
 };
 
 export const FEATURE_PERMISSIONS = {
@@ -220,10 +232,10 @@ export const PERMISSIONS = {
 
   AUTOMATIONS_VIEW: 'crm.settings.automations.view',
   AUTOMATIONS_MANAGE: 'crm.settings.automations.manage',
-  COMMUNICATIONS_EMAIL_SEND: 'crm.communications.email.send',
-  COMMUNICATIONS_SMS_SEND: 'crm.communications.sms.send',
-  COMMUNICATIONS_CALL_LOG: 'crm.communications.call.log',
-  COMMUNICATIONS_HISTORY_VIEW: 'crm.communications.history.view',
+  COMMUNICATIONS_EMAIL_SEND: 'communications.conversations.send',
+  COMMUNICATIONS_SMS_SEND: 'communications.conversations.send',
+  COMMUNICATIONS_CALL_LOG: 'communications.conversations.send',
+  COMMUNICATIONS_HISTORY_VIEW: 'communications.conversations.view',
   REPORTS_VIEW: 'crm.reports.view',
 
   SALES_VIEW_STATUS_CODE: FEATURE_PERMISSIONS.CRM.STATUS_VIEW,

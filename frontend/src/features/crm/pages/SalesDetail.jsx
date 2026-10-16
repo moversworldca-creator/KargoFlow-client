@@ -108,6 +108,7 @@ import api, {
   updateOpportunity, 
   createOpportunity,
   getTimelineEvents,
+  sendRecordEmail,
   markOpportunityEstimateCreated,
   bookOpportunityJob,
   unbookOpportunityJob,
@@ -4469,9 +4470,13 @@ const SalesDetail = () => {
           : Number(opportunity?.id || 0) || null;
 
         const nextOffset = timelineOffset + TIMELINE_FETCH_LIMIT;
+        const beforeId = (timelineEvents || []).reduce((oldest, row) => {
+          const value = Number(row?.id || 0);
+          return value > 0 && (!oldest || value < oldest) ? value : oldest;
+        }, 0);
         const requests = [];
-        if (leadId) requests.push(getTimelineEvents({ entity_type: 'lead', entity_id: leadId, limit: TIMELINE_FETCH_LIMIT, offset: nextOffset }));
-        if (opportunityId) requests.push(getTimelineEvents({ entity_type: 'opportunity', entity_id: opportunityId, limit: TIMELINE_FETCH_LIMIT, offset: nextOffset }));
+        if (leadId) requests.push(getTimelineEvents({ entity_type: 'lead', entity_id: leadId, limit: TIMELINE_FETCH_LIMIT, before_id: beforeId || undefined }));
+        if (opportunityId) requests.push(getTimelineEvents({ entity_type: 'opportunity', entity_id: opportunityId, limit: TIMELINE_FETCH_LIMIT, before_id: beforeId || undefined }));
 
         if (requests.length) {
           const results = await Promise.allSettled(requests);
@@ -7956,39 +7961,31 @@ const SalesDetail = () => {
 
       if (isLeadPath) {
         if (commTab === 'email') {
-          if (!canManageActivityHistory() || !canSendEmail()) {
+          if (!canSendEmail()) {
             return denyAction('You do not have permission to send emails.');
           }
           const emailsTo = activityEmailToText.split(',').map(e => e.trim()).filter(Boolean);
           const emailsCc = activityEmailCcText.split(',').map(e => e.trim()).filter(Boolean);
           const emailsBcc = activityEmailBccText.split(',').map(e => e.trim()).filter(Boolean);
-          const providerPayload = JSON.stringify({
-            cc_email: emailsCc.join(', '),
-            bcc_email: emailsBcc.join(', '),
-            plain_reply: emailComposeMode === 'inbound_reply',
+          if (emailAttachments.length) {
+            return denyAction('Email attachments are not supported by the tenant communications API yet.');
+          }
+          await sendRecordEmail('lead', opportunity.id, {
+            to: emailsTo,
+            cc: emailsCc,
+            bcc: emailsBcc,
+            subject: activitySubject.trim(),
+            body_text: description,
+            body_html: emailComposeMode === 'inbound_reply'
+              ? activeBody.trim()
+              : replaceBranchPlaceholders(activeBody.trim(), {
+                  branchLogoUrl: selectedBranchLogoUrl,
+                  branchName: selectedBranchName,
+                }),
+            include_signature: true,
           });
-
-          await Promise.all(emailsTo.map(async (targetEmail) => {
-            const formData = new FormData();
-            formData.append('lead', opportunity.id);
-            formData.append('to_email', targetEmail);
-            formData.append('subject', activitySubject.trim());
-            formData.append('description', description);
-            formData.append(
-              'body_html',
-              emailComposeMode === 'inbound_reply'
-                ? activeBody.trim()
-                : replaceBranchPlaceholders(activeBody.trim(), {
-                    branchLogoUrl: selectedBranchLogoUrl,
-                    branchName: selectedBranchName,
-                  })
-            );
-            formData.append('provider_payload', providerPayload);
-            emailAttachments.forEach((file) => formData.append('attachments', file));
-            await api.post('/sales/sales-activities/send-email/', formData);
-          }));
         } else if (commTab === 'text') {
-          if (!canManageActivityHistory() || !canSendSms()) {
+          if (!canSendSms()) {
             return denyAction('You do not have permission to send SMS messages.');
           }
           await Promise.all(activitySmsRecipients.map(async (targetPhone) => {
@@ -8076,7 +8073,7 @@ const SalesDetail = () => {
       } else {
         let channelWarning = '';
         if (commTab === 'email') {
-          if (!canManageActivityHistory() || !canSendEmail()) {
+          if (!canSendEmail()) {
             return denyAction('You do not have permission to send emails.');
           }
           const emailsTo = activityEmailToText.split(',').map(e => e.trim()).filter(Boolean);
@@ -8129,7 +8126,7 @@ const SalesDetail = () => {
             }
           }));
         } else if (commTab === 'text') {
-          if (!canManageActivityHistory() || !canSendSms()) {
+          if (!canSendSms()) {
             return denyAction('You do not have permission to send SMS messages.');
           }
           await Promise.all(activitySmsRecipients.map(async (targetPhone) => {

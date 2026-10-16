@@ -253,7 +253,7 @@ export default function CommunicationPage() {
       {/* =========================================================================
           TOP COMMAND CENTER HERO BAR
       ========================================================================= */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 text-white p-5 sm:p-6 shadow-xl border border-slate-800">
+<div className="relative overflow-hidden rounded-2xl bg-white text-slate-900 p-4 sm:p-5 shadow-xl border border-slate-200">
         {/* Subtle Ambient Tech Glows */}
         <div className="absolute top-0 right-1/4 w-96 h-36 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute bottom-0 right-0 w-80 h-36 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -262,30 +262,27 @@ export default function CommunicationPage() {
           {/* Title & Metadata */}
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-500/20 text-blue-300 border border-blue-400/30">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 text-blue-800 border border-blue-300">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
                 Controlled Platform Scope
               </span>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                 Carrier Routing Engine Active
               </span>
-              <span className="text-[11px] text-slate-400 font-mono hidden sm:inline">
-                Synced: <strong className="text-slate-300 font-bold">{lastSynced}</strong>
+              <span className="text-[11px] text-black-900 font-mono hidden sm:inline">
+                Synced: <strong className="text-black font-bold">{lastSynced}</strong>
               </span>
             </div>
-
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-blue-600/20 border border-blue-400/30 flex items-center justify-center text-blue-400 shadow-inner">
                 <Radio size={22} className="animate-pulse" />
               </div>
               <div>
-                <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white flex items-center gap-2">
-                  Communication Infrastructure Console
-                </h1>
-                <p className="text-xs text-slate-400 mt-0.5 max-w-2xl">
-                  Centralized Multi-Tenant Delivery Engine powering transactional Email (Resend) and SMS / A2P 10DLC Messaging (Telnyx).
-                </p>
+  
+<h1 className="text-xl sm:text-2xl font-black tracking-tight text-blue-700 flex items-center gap-2">
+  Communication Infrastructure Console
+</h1>
               </div>
             </div>
           </div>
@@ -324,33 +321,41 @@ export default function CommunicationPage() {
             )}
           </div>
         </div>
+       
+{/* Global Live Carrier Heartbeat Bar */}
+<div className="mt-5 pt-4 border-t border-slate-200 flex items-center justify-between gap-4">
 
-        {/* Global Live Carrier Heartbeat Bar */}
-        <div className="mt-5 pt-4 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-slate-300 font-mono text-[11px]">
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              Resend Edge: <strong className="text-white">US-East-1 (62ms)</strong>
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              Telnyx Tier 1: <strong className="text-white">Chicago Hub (74ms)</strong>
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-blue-400" />
-              TCR 10DLC: <strong className="text-white">Strict Enforced</strong>
-            </span>
-          </div>
+  {/* Left side: Compact status information */}
+  <div className="flex items-center gap-5 text-slate-700 font-mono text-[12px] tracking-normal">
 
-          <button
-            onClick={() => setShowGovernanceDetails(!showGovernanceDetails)}
-            className="text-[11px] font-semibold text-slate-400 hover:text-blue-300 flex items-center gap-1 transition-colors cursor-pointer"
-          >
-            <Shield size={12} className="text-amber-400" />
-            <span>Zero-Knowledge Policy (Sec 2.4)</span>
-            {showGovernanceDetails ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-          </button>
-        </div>
+    <span className="flex items-center gap-2 whitespace-nowrap">
+      <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+      Resend Edge: <strong className="text-slate-900 font-bold">US-East-1 (62ms)</strong>
+    </span>
+
+    <span className="flex items-center gap-2 whitespace-nowrap">
+      <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+      Telnyx Tier 1: <strong className="text-slate-900 font-bold">Chicago Hub (74ms)</strong>
+    </span>
+
+    <span className="flex items-center gap-2 whitespace-nowrap">
+      <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+      TCR 10DLC: <strong className="text-slate-900 font-bold">Strict Enforced</strong>
+    </span>
+
+  </div>
+
+  {/* Right side: Zero-Knowledge Policy */}
+  <button
+    onClick={() => setShowGovernanceDetails(!showGovernanceDetails)}
+    className="flex items-center gap-1 text-[11px] font-semibold text-slate-600 hover:text-blue-700 whitespace-nowrap shrink-0"
+  >
+    <Shield size={12} className="text-amber-500" />
+    <span>Zero-Knowledge Policy (Sec 2.4)</span>
+    {showGovernanceDetails ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+  </button>
+
+</div>
 
         {/* Expandable Governance Details Banner */}
         {showGovernanceDetails && (

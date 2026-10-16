@@ -665,7 +665,6 @@ describe('Sales DashboardPane', () => {
   });
 
   it('opens a lead from the new leads tab when the row is clicked', async () => {
-    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
     vi.mocked(getMyLeadsQueue).mockResolvedValue(
       makeSalesQueueResponse([
         makeSalesQueueRow({ id: 777, name: 'Openable New Lead', assigned_user_id: null, assigned_user_name: '' }),
@@ -676,6 +675,7 @@ describe('Sales DashboardPane', () => {
       <MemoryRouter initialEntries={[{ pathname: '/sales', state: { activeTab: 'new-leads' } }]}>
         <Routes>
           <Route path="/sales" element={<Sales />} />
+          <Route path="/leads/:id" element={<div>Lead detail opened</div>} />
         </Routes>
       </MemoryRouter>
     );
@@ -684,12 +684,7 @@ describe('Sales DashboardPane', () => {
     expect(leadElements.length).toBeGreaterThan(0);
     fireEvent.click(leadElements[0]);
 
-    await waitFor(() => {
-      expect(openSpy).toHaveBeenCalled();
-      expect(String(openSpy.mock.calls[0][0] || '')).toMatch(/\/(leads|crm\/lead)\/.*777/);
-    });
-
-    openSpy.mockRestore();
+    expect(await screen.findByText('Lead detail opened')).toBeInTheDocument();
   });
 
   it('loads the merged calls modal within the current day range', async () => {

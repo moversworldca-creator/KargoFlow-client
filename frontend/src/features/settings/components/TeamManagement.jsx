@@ -9,7 +9,7 @@ import {
   UserPlus, Search, Filter, CheckCircle2,
   XCircle, Edit2, Smartphone, Loader2, Info, AlertCircle, Save
 } from 'lucide-react';
-import { getUsers, createUser, updateUser, getRoles, getBranches } from '../../../services/api';
+import { getUsers, createUser, updateUser, assignUserRole, getRoles, getBranches } from '../../../services/api';
 import { PERMISSIONS } from '../../../shared/permissions/registry';
 
 const InputField = ({ label, name, icon: Icon, type = "text", value, onChange, placeholder, disabled = false, required = false }) => (
@@ -165,7 +165,7 @@ const UserFormModal = ({ title, initialData, roles, branches, onSave, onCancel, 
   const branchNameById = new Map(visibleBranches.map((b) => [String(b.id), b.name]));
   const visibleRoles = (roles || []).filter((role) => {
     const roleBranchId = resolveRoleBranchId(role);
-    if (roleBranchId === null) return resolveRoleName(role) === 'Company Owner';
+    if (roleBranchId === null) return true;
     return branchIdSet.has(String(roleBranchId));
   });
   const visibleRoleIdSet = useMemo(() => new Set(visibleRoles.map((role) => role.id)), [visibleRoles]);
@@ -323,6 +323,7 @@ const TeamManagement = ({ branchId }) => {
   const [userToEdit, setUserToEdit] = useState(null);
   const [showStatusConfirm, setShowStatusConfirm] = useState(false);
   const [userToToggleStatus, setUserToToggleStatus] = useState(null);
+  const [assigningRoleUserId, setAssigningRoleUserId] = useState(null);
 
   useEffect(() => {
     const fetchBootstrap = async () => {
@@ -382,6 +383,7 @@ const TeamManagement = ({ branchId }) => {
     () => new Map((roles || []).map((role) => [Number(role.id), role])),
     [roles]
   );
+  const currentUserId = Number(user?.id || 0);
 
   if (isLoading) {
     return (
@@ -478,6 +480,34 @@ const TeamManagement = ({ branchId }) => {
                         })()}
                       </div>
                     </div>
+                    {canEditBranchAware && Number(user.id) !== currentUserId && (
+                      <select
+                        aria-label={`Attach role to ${user.first_name || user.email}`}
+                        value=""
+                        disabled={assigningRoleUserId === user.id}
+                        onChange={async (event) => {
+                          const roleId = Number(event.target.value);
+                          if (!roleId) return;
+                          setAssigningRoleUserId(user.id);
+                          setMessage({ type: '', text: '' });
+                          try {
+                            await assignUserRole({ user_id: user.id, role_id: roleId });
+                            await refreshUsers();
+                            setMessage({ type: 'success', text: 'Role attached successfully!' });
+                          } catch (err) {
+                            setMessage({ type: 'error', text: getErrorMessage(err, 'Failed to attach role.') });
+                          } finally {
+                            setAssigningRoleUserId(null);
+                          }
+                        }}
+                        className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-body disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900"
+                      >
+                        <option value="">{assigningRoleUserId === user.id ? 'Attaching…' : 'Attach role…'}</option>
+                        {(roles || [])
+                          .filter((role) => !(user.roles || []).map(Number).includes(Number(role.id)))
+                          .map((role) => <option key={role.id} value={role.id}>{resolveRoleName(role)}</option>)}
+                      </select>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.625rem] font-bold uppercase tracking-wider ${

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Building2, Loader2 } from 'lucide-react';
+import { Building2, Globe, Hash, Loader2, Mail, MapPin, Phone, Save, ShieldCheck } from 'lucide-react';
 import Card from '../../../shared/ui/Card';
-import { getCompany, updateCompany } from '../../../services/api';
+import { getCompanies, updateCompany } from '../../../services/api';
 import { useAuth } from '../../auth/context/AuthContext';
 import { useToast } from '../../../shared/context/ToastContext';
 
@@ -55,7 +55,7 @@ const CompanySettings = ({ branchId = null, view = null }) => {
   useEffect(() => {
     const fetchCompany = async () => {
       try {
-        const response = await getTenantCompany();
+        const response = await getCompanies();
         setCompany(Array.isArray(response) ? response[0] || null : response);
       } catch (err) {
         console.error('Failed to fetch company:', err);

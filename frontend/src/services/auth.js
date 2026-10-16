@@ -26,7 +26,7 @@ export const authService = {
 
   me: async (signal) => {
     const data = await api.get('/tenant/users/me/', { signal });
-    if (!data?.user?.id || data.user.identity_type !== 'tenant' ||
+    if (!data?.user?.id || !['tenant', 'platform_support'].includes(data.user.identity_type) ||
         data.user.is_active !== true || !data?.company?.id ||
         String(data.user.company_id) !== String(data.company.id)) {
       throw new Error('Unable to validate the tenant account.');
