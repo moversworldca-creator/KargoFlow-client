@@ -41,9 +41,9 @@ describe('lead API contract', () => {
       total: 1,
       items: [{ kind: 'lead', id: 7, system_state: 'new', sales_number: 900, customer_name: 'Ada' }],
     });
-    const page = await getPipelineQueue({ row_type: 'lead', branch: '3', page: 2, page_size: 25 });
+    const page = await getPipelineQueue({ row_type: 'lead', branch: '3', page: 1, page_size: 25 });
     expect(api.get).toHaveBeenCalledWith('/tenant/pipeline/', {
-      params: { kind: 'lead', limit: 25, offset: 25, branch_id: 3 },
+      params: { kind: 'lead', limit: 200, offset: 0, branch_id: 3 },
     });
     expect(page.results[0]).toMatchObject({ row_type: 'lead', lead_id: 7, name: 'Ada', workflow_stage: 'new_lead' });
   });

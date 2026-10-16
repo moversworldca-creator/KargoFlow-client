@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeUserPayload } from './TeamManagement';
+import { employeeUpdatePayload, mergeUsersWithEmployees, normalizeUserPayload } from './TeamManagement';
 
 describe('normalizeUserPayload', () => {
   it('removes roles that are not allowed for the selected branch set', () => {
@@ -43,5 +43,26 @@ describe('normalizeUserPayload', () => {
     expect(payload.roles).toEqual([11, 22]);
     expect(payload.company).toBe(9);
     expect(payload.password).toBeUndefined();
+  });
+});
+
+describe('employee-backed team editing', () => {
+  it('resolves the employee id linked to a login', () => {
+    expect(mergeUsersWithEmployees(
+      [{ id: 4, email: 'user@example.com' }],
+      [{ id: 91, user_id: 4, phone: '555', worker_type: 'office', primary_branch_id: 7 }],
+    )).toEqual([expect.objectContaining({
+      id: 4, employee_id: 91, phone: '555', employee_type: 'office', branches: [7],
+    })]);
+  });
+
+  it('maps the edit form to employee API fields', () => {
+    expect(employeeUpdatePayload({
+      first_name: ' Test ', last_name: ' User ', email: ' user@example.com ', phone: ' 555 ',
+      employee_type: 'office', branches: [7],
+    })).toEqual({
+      first_name: 'Test', last_name: 'User', email: 'user@example.com', phone: '555',
+      worker_type: 'office', primary_branch_id: 7,
+    });
   });
 });

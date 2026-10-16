@@ -215,7 +215,7 @@ export function Pill({ children, tone = "slate", className = "", color }) {
   );
 }
 
-export function IconButton({ name, label, tone = "ghost", onClick, className = "", type = "button" }) {
+export function IconButton({ name, label, tone = "ghost", onClick, className = "", type = "button", disabled = false }) {
   const tones = {
     ghost: "bg-white hover:bg-ink-50 text-black ring-1 ring-ink-100",
     tint:  "bg-brand-tint hover:bg-blue-100 text-brand-dark ring-1 ring-blue-100",
@@ -226,6 +226,8 @@ export function IconButton({ name, label, tone = "ghost", onClick, className = "
     <button
       type={type}
       aria-label={label}
+      disabled={disabled}
+      title={label}
       onClick={onClick}
       className={`inline-flex h-9 w-9 items-center justify-center rounded-xl transition ${tones[tone] || tones.ghost} ${className}`}
     >

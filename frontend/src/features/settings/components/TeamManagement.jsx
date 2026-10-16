@@ -9,7 +9,10 @@ import {
   UserPlus, Search, Filter, CheckCircle2,
   XCircle, Edit2, Smartphone, Loader2, Info, AlertCircle, Save
 } from 'lucide-react';
-import { getUsers, createUser, updateUser, assignUserRole, getRoles, getBranches } from '../../../services/api';
+import {
+  getUsers, getEmployees, createEmployee, updateEmployee, inviteEmployee, assignUserRole, getRoles, getBranches,
+  deactivateUser, reactivateUser,
+} from '../../../services/api';
 import { PERMISSIONS } from '../../../shared/permissions/registry';
 
 const InputField = ({ label, name, icon: Icon, type = "text", value, onChange, placeholder, disabled = false, required = false }) => (
@@ -82,9 +85,44 @@ export const normalizeUserPayload = (formData, { includePassword, companyId, all
   return payload;
 };
 
+export const mergeUsersWithEmployees = (users, employees) => {
+  const employeeByUserId = new Map(
+    (Array.isArray(employees) ? employees : [])
+      .filter((employee) => employee?.user_id != null)
+      .map((employee) => [String(employee.user_id), employee])
+  );
+  return (Array.isArray(users) ? users : []).map((login) => {
+    const employee = employeeByUserId.get(String(login.id));
+    if (!employee) return login;
+    return {
+      ...login,
+      employee_id: employee.id,
+      phone: employee.phone || '',
+      employee_type: employee.worker_type || '',
+      primary_branch_id: employee.primary_branch_id ?? null,
+      branches: login.branches || (employee.primary_branch_id ? [employee.primary_branch_id] : []),
+    };
+  });
+};
+
+export const employeeUpdatePayload = (form) => {
+  const payload = {
+    first_name: String(form?.first_name || '').trim(),
+    last_name: String(form?.last_name || '').trim(),
+    email: String(form?.email || '').trim(),
+    phone: String(form?.phone || '').trim(),
+    primary_branch_id: Array.isArray(form?.branches) && form.branches.length
+      ? Number(form.branches[0])
+      : (form?.primary_branch_id ? Number(form.primary_branch_id) : null),
+  };
+  const workerType = String(form?.employee_type || '').trim();
+  if (workerType) payload.worker_type = workerType;
+  return payload;
+};
+
 const getErrorMessage = (err, fallback) => {
   const data = err?.response?.data;
-  if (!data) return fallback;
+  if (!data) return err?.message || fallback;
   if (typeof data.detail === 'string') return data.detail;
   const firstKey = Object.keys(data)[0];
   if (!firstKey) return fallback;
@@ -101,7 +139,7 @@ const formatJoinedDate = (value) => {
   return date.toLocaleDateString();
 };
 
-const UserFormModal = ({ title, initialData, roles, branches, onSave, onCancel, isSaving, includePassword, companyId }) => {
+const UserFormModal = ({ title, initialData, roles, branches, onSave, onCancel, isSaving, includePassword, requireEmail = false, companyId }) => {
   const { user } = useAuth();
   const [formData, setFormData] = useState(() => ({
     email: '',
@@ -195,7 +233,7 @@ const UserFormModal = ({ title, initialData, roles, branches, onSave, onCancel, 
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className={`grid grid-cols-1 ${includePassword ? 'md:grid-cols-2' : ''} gap-4`}>
-            <InputField label="Email" name="email" type="email" value={formData.email} onChange={handleChange} icon={Mail} placeholder="user@company.com" />
+            <InputField label="Email" name="email" type="email" value={formData.email} onChange={handleChange} icon={Mail} placeholder="user@company.com" required={requireEmail} />
             {includePassword ? (
               <InputField label="Password" name="password" type="password" value={formData.password} onChange={handleChange} icon={Shield} placeholder="Temporary password" required />
             ) : null}
@@ -333,12 +371,16 @@ const TeamManagement = ({ branchId }) => {
         if (branchId) {
           params.branch = branchId;
         }
-        const [usersRes, rolesRes, branchesRes] = await Promise.all([
+        const [usersRes, employeesRes, rolesRes, branchesRes] = await Promise.all([
           getUsers(params),
+          getEmployees({ ...(branchId ? { branch_id: branchId } : {}), limit: 200 }),
           getRoles(params),
           getBranches(),
         ]);
-        setUsers(usersRes?.results || usersRes || []);
+        setUsers(mergeUsersWithEmployees(
+          usersRes?.results || usersRes || [],
+          employeesRes?.results || employeesRes || [],
+        ));
         setRoles(rolesRes?.results || rolesRes || []);
         setBranches(branchesRes?.results || branchesRes || []);
       } catch (err) {
@@ -355,8 +397,14 @@ const TeamManagement = ({ branchId }) => {
     if (branchId) {
       params.branch = branchId;
     }
-    const usersRes = await getUsers(params);
-    setUsers(usersRes?.results || usersRes || []);
+    const [usersRes, employeesRes] = await Promise.all([
+      getUsers(params),
+      getEmployees({ ...(branchId ? { branch_id: branchId } : {}), limit: 200 }),
+    ]);
+    setUsers(mergeUsersWithEmployees(
+      usersRes?.results || usersRes || [],
+      employeesRes?.results || employeesRes || [],
+    ));
   };
 
   const safeUsers = Array.isArray(users) ? users : [];
@@ -562,7 +610,7 @@ const TeamManagement = ({ branchId }) => {
           initialData={branchId ? { branches: [Number(branchId)] } : {}}
           roles={roles}
           branches={branches}
-          includePassword
+          requireEmail
           companyId={user?.company || ''}
           isSaving={isSaving}
           onCancel={() => setShowAddModal(false)}
@@ -574,13 +622,14 @@ const TeamManagement = ({ branchId }) => {
             setIsSaving(true);
             setMessage({ type: '', text: '' });
             try {
-              await createUser(payload);
-              setMessage({ type: 'success', text: 'User created successfully!' });
+              const employee = await createEmployee(employeeUpdatePayload(payload));
+              await inviteEmployee(employee.id, { email: payload.email });
+              setMessage({ type: 'success', text: 'Employee created and invitation sent successfully!' });
               setShowAddModal(false);
               await refreshUsers();
             } catch (err) {
-              console.error('Failed to create user:', err);
-              setMessage({ type: 'error', text: getErrorMessage(err, 'Failed to create user.') });
+              console.error('Failed to add team member:', err);
+              setMessage({ type: 'error', text: getErrorMessage(err, 'Failed to add team member.') });
             } finally {
               setIsSaving(false);
             }
@@ -605,7 +654,14 @@ const TeamManagement = ({ branchId }) => {
             setIsSaving(true);
             setMessage({ type: '', text: '' });
             try {
-              await updateUser(userToEdit.id, payload);
+              if (!userToEdit.employee_id) {
+                throw new Error('This login is not linked to an employee profile and cannot be edited here.');
+              }
+              await updateEmployee(userToEdit.employee_id, employeeUpdatePayload(payload));
+              if (payload.is_active !== userToEdit.is_active) {
+                if (payload.is_active) await reactivateUser(userToEdit.id);
+                else await deactivateUser(userToEdit.id);
+              }
               setMessage({ type: 'success', text: 'User updated successfully!' });
               setShowEditModal(false);
               setUserToEdit(null);
@@ -646,7 +702,9 @@ const TeamManagement = ({ branchId }) => {
             setMessage({ type: '', text: '' });
             try {
               const nextActive = !userToToggleStatus.is_active;
-              const updated = await updateUser(userToToggleStatus.id, { is_active: nextActive });
+              const updated = nextActive
+                ? await reactivateUser(userToToggleStatus.id)
+                : await deactivateUser(userToToggleStatus.id);
               setUsers((prev) => prev.map((row) => (
                 row.id === userToToggleStatus.id ? { ...row, ...updated } : row
               )));

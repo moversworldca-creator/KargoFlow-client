@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import api from './axios';
-import { assignUserRole, deleteRole, getBranches, getBranchLookups, getBranchLookupsPage, getCompany, getLookupUsers, getNotifications, getTimelineEvents, sendRecordEmail, getUnreadNotificationsCount,
+import { assignUserRole, createEmployee, inviteEmployee, deactivateUser, reactivateUser, updateEmployee, deleteRole, getBranches, getBranchLookups, getBranchLookupsPage, getCompany, getLookupUsers, getNotifications, getTimelineEvents, sendRecordEmail, getUnreadNotificationsCount,
   markNotificationRead, markNotificationUnread, markAllNotificationsRead } from './api';
 
 vi.mock('./axios', () => ({ default: { get: vi.fn(), post: vi.fn(), patch: vi.fn() } }));
@@ -30,6 +30,27 @@ it('loads branch dropdown options through the tenant branch route', async () => 
 it('attaches tenant roles without trusting a client supplied company id', async () => {
   await assignUserRole({ user_id: 12, role_id: 4 });
   expect(api.post).toHaveBeenCalledWith('/tenant/users/assign-role/', { user_id: 12, role_id: 4 });
+});
+
+it('changes login status through the supported command endpoints', async () => {
+  await deactivateUser(7);
+  await reactivateUser(7);
+  expect(api.post).toHaveBeenNthCalledWith(1, '/tenant/users/7/deactivate/');
+  expect(api.post).toHaveBeenNthCalledWith(2, '/tenant/users/7/reactivate/');
+  expect(api.patch).not.toHaveBeenCalled();
+});
+
+it('updates team member profiles through the employee endpoint', async () => {
+  await updateEmployee(91, { first_name: 'Test' });
+  expect(api.patch).toHaveBeenCalledWith('/tenant/employees/91/', { first_name: 'Test' });
+});
+
+it('creates an employee and sends an invitation through supported endpoints', async () => {
+  api.post.mockResolvedValueOnce({ id: 91 });
+  const employee = await createEmployee({ first_name: 'Test', email: 'test@example.com' });
+  await inviteEmployee(employee.id, { email: 'test@example.com' });
+  expect(api.post).toHaveBeenNthCalledWith(1, '/tenant/employees/', { first_name: 'Test', email: 'test@example.com' });
+  expect(api.post).toHaveBeenNthCalledWith(2, '/tenant/employees/91/invite/', { email: 'test@example.com' });
 });
 
 it('deactivates custom roles through the supported role update action', async () => {

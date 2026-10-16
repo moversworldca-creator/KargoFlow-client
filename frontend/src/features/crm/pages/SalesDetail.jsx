@@ -27,8 +27,9 @@ import RichTextEditor from '../../../shared/ui/RichTextEditor';
 import AddressAutocomplete from '../../../shared/ui/AddressAutocomplete';
 import AsyncSelect from '../../../shared/ui/AsyncSelect';
 import useCan from '../../../shared/auth/useCan';
+import { useAuth } from '../../auth/context/AuthContext';
 import { PERMISSIONS } from '../../../shared/permissions/registry';
-import { getLookupUsersPage, getBranchLookupsPage, getStatusCodeLookupsPage, getOpportunityLossReasonLookupsPage, getMoveTypeLookups, getServices } from '../../../services/api';
+import { getLookupEmployeesPage, getLeadStatusCodeLookups, getLookupUsersPage, getBranchLookupsPage, getStatusCodeLookupsPage, getOpportunityLossReasonLookupsPage, getMoveTypeLookups, getServices } from '../../../services/api';
 import { useMoverSizesLookup } from '../../../shared/queries/sharedQueries';
 
 import EstimateView from '../components/EstimateView';
@@ -109,6 +110,7 @@ import api, {
   createOpportunity,
   getTimelineEvents,
   sendRecordEmail,
+  sendRecordSms,
   markOpportunityEstimateCreated,
   bookOpportunityJob,
   unbookOpportunityJob,
@@ -121,13 +123,12 @@ import api, {
   updateOpportunityStop,
   deleteOpportunityStop,
   createSalesActivity,
-  updateSalesActivity,
-  deleteSalesActivity,
+  updateSalesActivity as updateActivityRequest,
   getCallLogs,
   getActivities as getSalesActivities,
   getTasks,
   createTask,
-  updateTask,
+  updateTask as updateTaskRequest,
   getCommunicationTemplate,
   getStatusCodeLookups,
   getOpportunityLossReasonLookups,
@@ -149,6 +150,8 @@ import api, {
 	  updateLead,
 	  createLead,
   convertLead,
+  startLead,
+  qualifyLead,
   markLeadLost,
   reopenLead,
   getCommunicationTemplates,
@@ -196,6 +199,8 @@ const CANADIAN_PROVINCES = [
 const asList = (res) => {
   if (Array.isArray(res)) return res;
   if (Array.isArray(res?.results)) return res.results;
+  if (Array.isArray(res?.data)) return res.data;
+  if (Array.isArray(res?.data?.results)) return res.data.results;
   return [];
 };
 
@@ -2099,8 +2104,7 @@ const INITIAL_FORM_STATE = {
     destination_has_elevator: false,
     destination_walk_distance_ft: 50,
 };
-const DETAIL_BOOTSTRAP_TTL_MS = 2500;
-const detailBootstrapCache = new Map();
+
 const ACTIVITY_PAGE_SIZE = 20;
 const ACTIVITY_FETCH_LIMIT = 20;
 const TIMELINE_FETCH_LIMIT = 20;
@@ -2135,6 +2139,7 @@ const SalesDetail = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { canAll, canAny } = useCan();
+  const { user } = useAuth();
   const isCanonicalRecordRoute = Boolean(entityType);
   const isLeadPath = entityType
     ? isLeadRecordType(entityType)
@@ -2143,6 +2148,15 @@ const SalesDetail = () => {
   
   const textareaRef = useRef(null);
   const [opportunity, setOpportunity] = useState(null);
+  const recordRequestRef = useRef(0);
+  const timelineRequestRef = useRef(0);
+  const followUpRequestRef = useRef(0);
+  const [recordError, setRecordError] = useState(null);
+  const [workError, setWorkError] = useState(null);
+  const [conversionReview, setConversionReview] = useState(null);
+  const recordTarget = () => isLeadPath ? { lead: opportunity?.id } : { opportunity: opportunity?.id };
+  const updateSalesActivity = (activityId, data) => updateActivityRequest(activityId, data, recordTarget());
+  const updateTask = (taskId, data) => updateTaskRequest(taskId, data, recordTarget());
   const [estimateOpportunity, setEstimateOpportunity] = useState(null);
   const [estimateSummary, setEstimateSummary] = useState(null);
   const [estimatePortalInventory, setEstimatePortalInventory] = useState([]);
@@ -2874,13 +2888,18 @@ const SalesDetail = () => {
   }, [toast?.text]);
 
   const fetchTimeline = async (entityType, entityId) => {
+    const recordRequestId = recordRequestRef.current;
+    const requestId = ++timelineRequestRef.current;
     try {
       const res = await getTimelineEvents({ entity_type: entityType, entity_id: entityId, limit: TIMELINE_FETCH_LIMIT });
+      if (recordRequestId !== recordRequestRef.current || requestId !== timelineRequestRef.current) return;
       const rows = asList(res?.data || res);
       setTimelineEvents(rows);
       setTimelineOffset(0);
       setHasMoreTimeline(rows.length >= TIMELINE_FETCH_LIMIT);
     } catch (err) {
+      if (recordRequestId !== recordRequestRef.current || requestId !== timelineRequestRef.current) return;
+      setWorkError('Could not load communication history. Please retry.');
       console.warn('Failed to load timeline events:', err);
       setTimelineEvents([]);
       setHasMoreTimeline(false);
@@ -2888,6 +2907,8 @@ const SalesDetail = () => {
   };
 
   const fetchUnifiedTimeline = async ({ leadId, opportunityId }) => {
+    const recordRequestId = recordRequestRef.current;
+    const requestId = ++timelineRequestRef.current;
     const requests = [];
     if (leadId) requests.push(getTimelineEvents({ entity_type: 'lead', entity_id: leadId, limit: TIMELINE_FETCH_LIMIT }));
     if (opportunityId) requests.push(getTimelineEvents({ entity_type: 'opportunity', entity_id: opportunityId, limit: TIMELINE_FETCH_LIMIT }));
@@ -2897,6 +2918,8 @@ const SalesDetail = () => {
     }
     try {
       const results = await Promise.allSettled(requests);
+      if (recordRequestId !== recordRequestRef.current || requestId !== timelineRequestRef.current) return;
+      if (results.some((result) => result.status === 'rejected')) setWorkError('Some communication history could not be loaded. Please retry.');
       const all = results.flatMap((r) => {
         if (r.status !== 'fulfilled') return [];
         return asList(r.value?.data || r.value);
@@ -2907,6 +2930,8 @@ const SalesDetail = () => {
       setTimelineOffset(0);
       setHasMoreTimeline(all.length > 0);
     } catch (err) {
+      if (recordRequestId !== recordRequestRef.current || requestId !== timelineRequestRef.current) return;
+      setWorkError('Could not load communication history. Please retry.');
       console.warn('Failed to load unified timeline:', err);
       setTimelineEvents([]);
       setHasMoreTimeline(false);
@@ -2969,6 +2994,10 @@ const SalesDetail = () => {
   }, [activeTab, isLeadPath, opportunity?.id, opportunity?.lead, opportunity?.opportunity_id, opportunity?.opportunity]);
 
   const fetchOpportunity = async () => {
+    const requestId = ++recordRequestRef.current;
+    setRecordError(null);
+    setWorkError(null);
+    setConversionReview(null);
     setEstimateOpportunity(null);
     setEstimateSummary(null);
     setIsLoadingEstimateOpportunity(false);
@@ -2981,9 +3010,11 @@ const SalesDetail = () => {
 
     try {
       if (isLeadPath) {
-        const leadData = isCanonicalRecordRoute
+        const leadResponse = isCanonicalRecordRoute
           ? await getLeadBySalesNumber(id)
           : await getLead(id);
+        const leadData = leadResponse?.data || leadResponse;
+        if (requestId !== recordRequestRef.current) return;
         if (leadData?.opportunity_id) {
           navigate(`/crm/opportunity/${leadData.sales_number || leadData.opportunity_id}`, { replace: true });
           return;
@@ -2993,12 +3024,17 @@ const SalesDetail = () => {
         return;
       }
 
-      const oppData = isCanonicalRecordRoute
+      const oppResponse = isCanonicalRecordRoute
         ? await getOpportunityBySalesNumber(id)
         : await getOpportunity(id);
+      const oppData = oppResponse?.data || oppResponse;
+      if (requestId !== recordRequestRef.current) return;
       setOpportunity(oppData);
       setEstimateOpportunity(oppData);
     } catch (err) {
+      if (requestId !== recordRequestRef.current) return;
+      const status = err.response?.status;
+      setRecordError(status === 404 ? 'This record could not be found.' : status === 403 ? 'You do not have permission to open this record.' : 'Could not load this record. Please try again.');
       console.error('Failed to fetch data:', err);
     }
   };
@@ -3763,19 +3799,22 @@ const SalesDetail = () => {
     }
   };
 
-  const loadDependencies = async () => {
+  const loadDependencies = async (requestId = recordRequestRef.current) => {
     const fetchSafe = async (fn, setter, label) => {
       try {
         const res = await fn();
+        if (requestId !== recordRequestRef.current) return;
         setter(asList(res));
       } catch (err) {
         console.warn(`Failed to load ${label}:`, err);
+        if (requestId !== recordRequestRef.current) return;
         setter([]);
       }
     };
 
     await Promise.allSettled([
-      // Branches and users are now fetched on demand via AsyncSelect pagination
+      fetchSafe(() => isLeadPath ? getLookupEmployeesPage('', 0, 200) : getLookupUsersPage('', 0, 200), setUsers, 'staff'),
+      // Further options are fetched on demand via AsyncSelect pagination
       fetchSafe(getReferralSourceLookups, setReferralSources, 'referral sources'),
     ]);
   };
@@ -3878,43 +3917,35 @@ const SalesDetail = () => {
 
   useEffect(() => {
     let cancelled = false;
+    const recordId = recordRequestRef.current;
     const loadBranchStatuses = async () => {
-      const cacheKey = `status:${String(statusBranchId || 'global')}`;
-      const now = Date.now();
-      const lastRun = detailBootstrapCache.get(cacheKey) || 0;
-      if (now - lastRun < DETAIL_BOOTSTRAP_TTL_MS) return;
-      detailBootstrapCache.set(cacheKey, now);
       try {
-        const res = await getStatusCodeLookupsPage('', 0, 100);
-        if (cancelled) return;
+        const res = await (isLeadPath ? getLeadStatusCodeLookups({ limit: 100 }) : getStatusCodeLookupsPage('', 0, 100));
+        if (cancelled || recordId !== recordRequestRef.current) return;
         const rows = asList(res);
         setCustomStatusCodes(rows);
       } catch (err) {
         console.warn('Failed to load branch status codes:', err);
-        if (!cancelled) setCustomStatusCodes([]);
+        if (!cancelled && recordId === recordRequestRef.current) setCustomStatusCodes([]);
       }
     };
     loadBranchStatuses();
     return () => {
       cancelled = true;
     };
-  }, [statusBranchId]);
+  }, [statusBranchId, isLeadPath]);
 
   useEffect(() => {
     let cancelled = false;
+    const recordId = recordRequestRef.current;
     const loadBranchTypes = async () => {
-      const cacheKey = `types:${String(statusBranchId || 'global')}`;
-      const now = Date.now();
-      const lastRun = detailBootstrapCache.get(cacheKey) || 0;
-      if (now - lastRun < DETAIL_BOOTSTRAP_TTL_MS) return;
-      detailBootstrapCache.set(cacheKey, now);
       try {
         const params = statusBranchId ? { branch: statusBranchId } : {};
         const [moverTypesRes, servicesRes] = await Promise.allSettled([
           getMoveTypeLookups(params),
           getServices(params)
         ]);
-        if (cancelled) return;
+        if (cancelled || recordId !== recordRequestRef.current) return;
         
         if (moverTypesRes.status === 'fulfilled') {
           setMoverTypes(asList(moverTypesRes.value));
@@ -3935,30 +3966,26 @@ const SalesDetail = () => {
     return () => {
       cancelled = true;
     };
-  }, [statusBranchId]);
+  }, [statusBranchId, isLeadPath]);
 
   useEffect(() => {
     let cancelled = false;
+    const recordId = recordRequestRef.current;
     const loadOpportunityLossReasons = async () => {
-      const cacheKey = 'loss-reasons';
-      const now = Date.now();
-      const lastRun = detailBootstrapCache.get(cacheKey) || 0;
-      if (now - lastRun < DETAIL_BOOTSTRAP_TTL_MS) return;
-      detailBootstrapCache.set(cacheKey, now);
       try {
         const response = await getOpportunityLossReasonLookups({ limit: 100 });
-        if (cancelled) return;
+        if (cancelled || recordId !== recordRequestRef.current) return;
         const rows = asList(response);
         setLostReasonOptions(rows);
       } catch (err) {
         console.warn('Failed to load opportunity loss reasons:', err);
         try {
           const fallback = await getOpportunityLossReasonLookupsPage('', 0, 100);
-          if (cancelled) return;
+          if (cancelled || recordId !== recordRequestRef.current) return;
           setLostReasonOptions(asList(fallback));
         } catch (fallbackErr) {
           console.warn('Fallback opportunity loss reason lookup failed:', fallbackErr);
-          if (!cancelled) setLostReasonOptions([]);
+          if (!cancelled && recordId === recordRequestRef.current) setLostReasonOptions([]);
         }
       }
     };
@@ -3987,6 +4014,8 @@ const SalesDetail = () => {
   };
 
   const loadFollowUps = async (targetEntity) => {
+    const requestId = recordRequestRef.current;
+    const followUpId = ++followUpRequestRef.current;
 	    if (!targetEntity || targetEntity?.id === 'new') {
 	      setFollowUps([]);
 	      return;
@@ -4001,16 +4030,23 @@ const SalesDetail = () => {
 	        params.opportunity = targetEntity.id;
 	      }
 	      const rows = asList(await getTasks(params));
+          if (requestId !== recordRequestRef.current || followUpId !== followUpRequestRef.current) return;
 	      setFollowUps(rows);
 	    } catch {
+          if (requestId !== recordRequestRef.current || followUpId !== followUpRequestRef.current) return;
+          setWorkError('Could not load follow-ups. Please retry.');
 	      setFollowUps([]);
 	    } finally {
-	      setIsLoadingFollowUps(false);
+	      if (requestId === recordRequestRef.current && followUpId === followUpRequestRef.current) setIsLoadingFollowUps(false);
 	    }
 	  };
 
   const loadActivitiesPage = useCallback(async ({ leadId = null, opportunityId = null, offset = 0, replace = false }) => {
-    const rows = await getSalesActivities({ ...(leadId ? { lead: leadId } : { opportunity: opportunityId }), ordering: '-created_at', limit: ACTIVITY_FETCH_LIMIT, offset }).catch(() => []);
+    const requestId = recordRequestRef.current;
+    let rows;
+    try { rows = await getSalesActivities({ ...(leadId ? { lead: leadId } : { opportunity: opportunityId }), ordering: '-created_at', limit: ACTIVITY_FETCH_LIMIT, offset }); }
+    catch { if (requestId === recordRequestRef.current) setWorkError('Could not load activity history. Please retry.'); return; }
+    if (requestId !== recordRequestRef.current) return;
     const activityRows = dedupeActivityRows(asList(rows).map((row) => ({ ...row, timeline_source: leadId ? 'lead' : 'opportunity' })));
 
     if (replace) {
@@ -4050,31 +4086,28 @@ const SalesDetail = () => {
   }, [isEstimateMenuOpen]);
 
   useEffect(() => {
+    let cancelled = false;
     const run = async () => {
-      const cacheKey = [
-        id,
-        isCanonicalRecordRoute ? 'canonical' : 'direct',
-        isLeadPath ? 'lead' : 'opportunity',
-      ].join(':');
-      const now = Date.now();
-      const lastRun = detailBootstrapCache.get(cacheKey) || 0;
-      if (now - lastRun < DETAIL_BOOTSTRAP_TTL_MS) return;
-      detailBootstrapCache.set(cacheKey, now);
       setIsLoading(true);
+      setTimelineEvents([]);
+      setActivities([]);
+      setFollowUps([]);
+      setIsLoadingMoreActivities(false);
+      setIsLoadingMoreTimeline(false);
       try {
-        setTimeout(() => {
-          void loadDependencies();
-        }, 0);
-        await fetchOpportunity();
+        const fetchPromise = fetchOpportunity();
+        void loadDependencies(recordRequestRef.current);
+        await fetchPromise;
       } catch (err) {
         console.error('Failed to load sales detail page:', err);
         setOpportunity(null);
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
     run();
-  }, [id, isCanonicalRecordRoute, isLeadPath]);
+    return () => { cancelled = true; recordRequestRef.current += 1; };
+  }, [id, isCanonicalRecordRoute, isLeadPath, user?.id, user?.company_id]);
 
   useEffect(() => {
     if (activeTab !== "Sales") return;
@@ -4338,7 +4371,7 @@ const SalesDetail = () => {
           source === 'telnyx_inbound_sms' ||
           source.startsWith('inbound_sms') ||
           Boolean(payload?.inbound_sms_id) ||
-          Boolean(payload?.inbound_message_id)
+          (Boolean(payload?.inbound_message_id) && !source.includes('email') && !payload.from_email)
         );
       })
       .map((evt) => ({
@@ -4365,7 +4398,18 @@ const SalesDetail = () => {
         pinned_at: evt.pinned_at,
       }));
 
-    const emailActivities = [...(activities || [])]
+    const inboundEmailActivities = (timelineEvents || []).filter((event) => {
+      const source = String(event.source || '').toLowerCase();
+      return source.includes('inbound_email') || Boolean(event.payload?.from_email && event.payload?.inbound_message_id);
+    }).map((event) => ({
+      id: `inbound-email-${event.id}`, activity_type: 'email', direction: 'inbound',
+      timeline_source: 'inbound_email', inbound_message_id: event.payload?.inbound_message_id || event.id,
+      subject: event.payload?.subject || event.title || 'Inbound email',
+      description: event.payload?.body_text || event.summary || '', content: event.payload?.body_text || event.summary || '',
+      payload: event.payload || {}, created_at: event.created_at,
+      user_details: { email: event.payload?.from_email || 'Inbound' },
+    }));
+    const emailActivities = [...(activities || []), ...inboundEmailActivities]
       .filter((item) => String(item?.activity_type || '').toLowerCase() === 'email')
       .map((item) => ({ ...item, email_thread_key: buildEmailThreadKey(item) }));
     const nonEmailActivities = [...(activities || []), ...warningActivities, ...inboundSmsActivities]
@@ -4436,6 +4480,7 @@ const SalesDetail = () => {
     if (!hasMoreActivities && !hasMoreTimeline) return;
     if (isLoadingMoreActivities || isLoadingMoreTimeline) return;
     if (!opportunity) return;
+    const requestId = recordRequestRef.current;
 
     if (hasMoreActivities) {
       setIsLoadingMoreActivities(true);
@@ -4443,7 +4488,8 @@ const SalesDetail = () => {
         const nextOffset = activityOffset + ACTIVITY_FETCH_LIMIT;
         let fetchedAny = false;
         const params = isLeadPath ? { lead: opportunity?.id } : { opportunity: opportunity?.id };
-        const rows = dedupeActivityRows(asList(await getSalesActivities({ ...params, ordering: '-created_at', limit: ACTIVITY_FETCH_LIMIT, offset: nextOffset }).catch(() => [])));
+        const rows = dedupeActivityRows(asList(await getSalesActivities({ ...params, ordering: '-created_at', limit: ACTIVITY_FETCH_LIMIT, offset: nextOffset })));
+        if (requestId !== recordRequestRef.current) return;
         if (rows.length) {
           fetchedAny = true;
           setActivities(prev => mergeTimelineActivities({
@@ -4454,9 +4500,10 @@ const SalesDetail = () => {
         if (!fetchedAny) setHasMoreActivities(false);
         else setActivityOffset(nextOffset);
       } catch(err) {
+        if (requestId === recordRequestRef.current) setWorkError('Could not load more activity history. Please retry.');
         console.warn(err);
       } finally {
-        setIsLoadingMoreActivities(false);
+        if (requestId === recordRequestRef.current) setIsLoadingMoreActivities(false);
       }
       return;
     }
@@ -4480,7 +4527,9 @@ const SalesDetail = () => {
 
         if (requests.length) {
           const results = await Promise.allSettled(requests);
-          const all = results.flatMap((r) => {
+          if (requestId !== recordRequestRef.current) return;
+          if (results.some((result) => result.status === 'rejected')) { setWorkError('Could not load more communication history. Please retry.'); return; }
+      const all = results.flatMap((r) => {
             if (r.status !== 'fulfilled') return [];
             return asList(r.value?.data || r.value);
           });
@@ -4494,9 +4543,10 @@ const SalesDetail = () => {
           setHasMoreTimeline(false);
         }
       } catch (err) {
+        if (requestId === recordRequestRef.current) setWorkError('Could not load more communication history. Please retry.');
         console.warn(err);
       } finally {
-        setIsLoadingMoreTimeline(false);
+        if (requestId === recordRequestRef.current) setIsLoadingMoreTimeline(false);
       }
     }
   }, [
@@ -4634,7 +4684,7 @@ const SalesDetail = () => {
       : structuredSummary;
     setIsPosting(true);
     try {
-      await api.patch(`/sales/call-logs/${callLogId}/`, {
+      if (!isLeadPath) await api.patch(`/sales/call-logs/${callLogId}/`, {
         duration_seconds: durationSeconds,
         disposition: callLogDraft.disposition,
       });
@@ -4653,6 +4703,7 @@ const SalesDetail = () => {
   }, [callLogDraft.disposition, callLogDraft.duration_minutes, callLogDraft.direction, callLogDraft.notes, closeCallLogModal, editingCallLog, fetchOpportunity, setToast]);
 
   const deleteCallLog = useCallback(async (activity) => {
+    if (isLeadPath) return denyAction('Call deletion is not available. You can edit its notes instead.');
     if (!canManageActivityHistory()) {
       return denyAction('You do not have permission to delete call logs.');
     }
@@ -6018,7 +6069,7 @@ const SalesDetail = () => {
 
     setSpecsDraft(updatedDraft);
     setSpecsDraftLabels(updatedLabels);
-    await saveSpecsSection(updatedDraft);
+    return saveSpecsSection(updatedDraft);
   };
 
   const saveSpecsSection = async (inlinePayload = null) => {
@@ -6032,7 +6083,7 @@ const SalesDetail = () => {
     const validationError = validateSpecsSection(draftToSave);
     if (validationError) {
       setToast({ type: 'error', text: validationError });
-      return;
+      return false;
     }
 
     const changed = (key) => String(draftToSave?.[key] ?? '') !== String(form?.[key] ?? '');
@@ -6051,13 +6102,13 @@ const SalesDetail = () => {
       payload.move_type = resolvedMoveTypeId || null;
     }
     if (changed('move_size')) {
-      if (isLeadPath) payload.move_size = resolveMoveSizeName(draftToSave?.move_size, moverSizes);
+      if (isLeadPath) payload.move_size_id = draftToSave?.move_size ? Number(draftToSave.move_size) : null;
       else payload.mover_size = draftToSave?.move_size ? Number(draftToSave.move_size) : null;
     }
     if (changed('branch')) payload.branch = branchId ? Number(branchId) : null;
     if (changed('assigned_to')) {
       const assignedUserId = selectedAssignedUserId ? Number(selectedAssignedUserId) : null;
-      if (isLeadPath) payload.assigned_to = assignedUserId;
+      if (isLeadPath) payload.assigned_employee_id = assignedUserId;
       else payload.assigned_user = assignedUserId;
     }
     if (changed('referral_source')) payload.referral_source = draftToSave?.referral_source ? Number(draftToSave.referral_source) : null;
@@ -6082,8 +6133,10 @@ const SalesDetail = () => {
       setSpecsDraft(null);
       setToast({ type: 'success', text: 'Details saved successfully.' });
       setTimeout(() => setToast({ type: '', text: '' }), 2500);
+      return true;
     } catch (err) {
       setToast({ type: 'error', text: getErrorMessage(err, 'Failed to save lead/opportunity details.') });
+      return false;
     } finally {
       setIsSpecsSaving(false);
     }
@@ -6345,7 +6398,7 @@ const SalesDetail = () => {
     isLeadPath,
     draftArrivalWindowStart: moveDateDraft?.arrival_window_start || opportunity?.arrival_window_start || '',
     draftArrivalWindowEnd: moveDateDraft?.arrival_window_end || opportunity?.arrival_window_end || '',
-    onArrivalWindowChange: (start, end) => setMoveDateDraft((p) => ({ ...(p || {}), arrival_window_start: start, arrival_window_end: end })),
+    onArrivalWindowChange: isLeadPath ? undefined : (start, end) => setMoveDateDraft((p) => ({ ...(p || {}), arrival_window_start: start, arrival_window_end: end })),
     availabilityData,
     isAvailabilityLoading,
     branchName: opportunity?.branch_details?.name,
@@ -6488,23 +6541,42 @@ const SalesDetail = () => {
     }
   };
 
-  const handleCreateEstimate = useCallback(async () => {
+  const handleAdvanceLead = useCallback(async () => {
+    setIsSaving(true);
+    try {
+      const state = opportunity?.system_state || opportunity?.status;
+      const updated = await (state === 'new' ? startLead(opportunity.id) : qualifyLead(opportunity.id));
+      setOpportunity(updated);
+      setToast({ type: 'success', text: state === 'new' ? 'Lead started.' : 'Lead qualified. You can now create an estimate.' });
+    } catch (error) { setToast({ type: 'error', text: getErrorMessage(error, 'Could not update the lead workflow.') }); }
+    finally { setIsSaving(false); }
+  }, [opportunity?.id, opportunity?.status, opportunity?.system_state]);
+
+  const handleCreateEstimate = useCallback(async (options = {}) => {
     if (!opportunity?.id || opportunity.id === 'new') return;
+    if ((opportunity.system_state || opportunity.status) !== 'qualified') { setToast({ type: 'error', text: 'Qualify this lead before creating an estimate.' }); return; }
     setIsSaving(true);
     setToast({ type: '', text: '' });
     try {
-      const res = await convertLead(opportunity.id);
+      const reviewOptions = options.customer_id ? { customer_id: options.customer_id } : options.create_new_customer ? { create_new_customer: true } : {};
+      const res = await convertLead(opportunity.id, reviewOptions);
+      setConversionReview(null);
       const convertedOpportunity = res?.opportunity || res?.data?.opportunity || null;
       const oppId = convertedOpportunity?.id;
       setToast({ type: 'success', text: 'Lead converted! Opening estimate...' });
       if (convertedOpportunity) {
-        navigate(getRecordEstimateTabPath('opportunity', convertedOpportunity, 'charges'));
+        navigate(getLegacyRecordEstimateTabPath('opportunity', convertedOpportunity.id, 'charges'));
       } else if (oppId) {
         navigate(getLegacyRecordEstimateTabPath('opportunity', oppId, 'charges'));
       } else {
         navigate(getRecordListPath('opportunity'));
       }
     } catch (err) {
+      if (err.response?.data?.error === 'customer_review_required') {
+        setConversionReview(err.response.data.candidates || []);
+        setIsSaving(false);
+        return;
+      }
       console.error('Lead conversion failed:', {
         leadId: opportunity?.id,
         responseStatus: err?.response?.status,
@@ -6513,7 +6585,7 @@ const SalesDetail = () => {
       setToast({ type: 'error', text: getErrorMessage(err, 'Failed to convert lead.') });
       setIsSaving(false);
     }
-  }, [navigate, opportunity?.id]);
+  }, [navigate, opportunity?.id, opportunity?.system_state, opportunity?.status]);
 
   const saveEstimateRequirementsToOpportunity = useCallback(async (target) => {
     if (isLeadPath || !opportunity?.id || opportunity.id === 'new') {
@@ -6834,7 +6906,7 @@ const SalesDetail = () => {
         resolveUserLabel(opportunity?.assigned_user) ||
         resolveUserLabel(opportunity?.assigned_to) ||
         specsDraftLabels.assigned_to ||
-        'Unassigned',
+        (activeSpecs.assigned_to ? `Employee #${activeSpecs.assigned_to}` : 'Unassigned'),
       displayValue:
         resolveUserLabel(selectedAssignedUser) ||
         resolveUserLabel(opportunity?.assigned_user_details) ||
@@ -6842,9 +6914,9 @@ const SalesDetail = () => {
         resolveUserLabel(opportunity?.assigned_user) ||
         resolveUserLabel(opportunity?.assigned_to) ||
         committedSpecsLabels.assigned_to ||
-        'Unassigned',
+        (activeSpecs.assigned_to ? `Employee #${activeSpecs.assigned_to}` : 'Unassigned'),
       icon: "user",
-      fetchOptions: (search, offset, limit) => getLookupUsersPage(search, offset, limit, activeSpecs.branch || selectedBranch?.id || null),
+      fetchOptions: (search, offset, limit) => (isLeadPath ? getLookupEmployeesPage : getLookupUsersPage)(search, offset, limit, activeSpecs.branch || selectedBranch?.id || null),
       cacheKey: activeSpecs.branch || selectedBranch?.id || 'no-branch',
       labelField: "label",
       options: assignedUserOptions,
@@ -6857,9 +6929,9 @@ const SalesDetail = () => {
       initialLabel: selectedCustomStatusCode?.label || opportunity?.custom_status_code_details?.label || '',
       displayValue: selectedCustomStatusCode?.label || opportunity?.custom_status_code_details?.label || '',
       icon: "activity",
-      fetchOptions: (search, offset, limit) => getStatusCodeLookupsPage(search, offset, limit),
+      fetchOptions: (search, offset, limit) => isLeadPath ? getLeadStatusCodeLookups({ search, offset, limit }) : getStatusCodeLookupsPage(search, offset, limit),
       // cacheKey keeps AsyncSelect stable on the company-wide list
-      cacheKey: 'company-wide-status-codes',
+      cacheKey: isLeadPath ? 'lead-status-codes' : 'opportunity-status-codes',
       labelField: "label",
       options: customStatusCodes,
     },
@@ -6874,6 +6946,10 @@ const SalesDetail = () => {
 	        return [];
 	      } else {
 	        if (!canCreateOpportunity()) return [];
+          const leadState = opportunity.system_state || opportunity.status;
+          if (['new', 'in_progress'].includes(leadState)) return [{ type: 'primary', label: leadState === 'new' ? 'Start lead' : 'Qualify lead', icon: 'check', onClick: handleAdvanceLead }];
+          if (leadState !== 'qualified') return [];
+
 	        return [
 	          {
 	            type: 'primary',
@@ -6898,6 +6974,7 @@ const SalesDetail = () => {
 	    return [];
 	  }, [
 	    handleCreateEstimate,
+    handleAdvanceLead,
 	    handleCreateOpportunityEstimate,
 	    opportunity?.id,
 	    opportunity?.workflow_stage,
@@ -7126,12 +7203,7 @@ const SalesDetail = () => {
       totalQty += safeQty;
       totalVol += safeQty * Number(item?.volume_cuft_each || 0);
     });
-    console.log('inventorySnapshotData', {
-      sourceItems,
-      grouped,
-      totalQty,
-      totalVol,
-    });
+
     return {
       roomCount: grouped.size,
       totalQty,
@@ -7149,10 +7221,11 @@ const SalesDetail = () => {
   ]);
 
   if (isLoading) return <div className="flex items-center justify-center h-[80vh]"><Loader2 className="w-12 h-12 text-primary animate-spin" /></div>;
-  if (!opportunity) return (
+  if (!opportunity || recordError) return (
     <div className="max-w-[1400px] mx-auto">
       <Card className="p-6 rounded-2xl border border-subtle">
-        <p className="text-sm font-bold text-[#791F1F]">{isLeadPath ? 'Lead' : 'Opportunity'} not found.</p>
+        <p className="text-sm font-bold text-[#791F1F]">{recordError || `${isLeadPath ? 'Lead' : 'Opportunity'} not found.`}</p>
+        <button type="button" className="mt-3 text-sm underline" onClick={async () => { setIsLoading(true); try { await fetchOpportunity(); } finally { setIsLoading(false); } }}>Retry</button>
       </Card>
     </div>
   );
@@ -7575,12 +7648,9 @@ const SalesDetail = () => {
         const activityId = getFollowUpActivityId(taskRecord);
         if (!activityId) throw new Error('Missing activity for follow-up.');
 
-        await updateSalesActivity(activityId, {
-          subject: followUpSubject.trim(),
-          description,
-          status: taskRecord?.activity_details?.status || taskRecord?.activity?.status || 'pending',
-        });
         await updateTask(editingFollowUpId, {
+          title: followUpSubject.trim(),
+          status: taskRecord?.activity_details?.status || 'pending',
           ...targetPayload,
           task_type: followUpType,
           assigned_to: Number(followUpAssignedTo),
@@ -7589,15 +7659,9 @@ const SalesDetail = () => {
         });
         setToast({ type: 'success', text: 'Follow-up updated.' });
       } else {
-        const createdActivity = await createSalesActivity({
-          ...targetPayload,
-          activity_type: 'task',
-          subject: followUpSubject.trim(),
-          description,
-          status: 'pending',
-        });
         await createTask({
-          activity: createdActivity.id,
+          title: followUpSubject.trim(),
+          status: 'pending',
           ...targetPayload,
           task_type: followUpType,
           assigned_to: Number(followUpAssignedTo),
@@ -7608,6 +7672,8 @@ const SalesDetail = () => {
       }
 
       closeFollowUpModal();
+      await loadFollowUps(opportunity);
+      await refreshActivityTimeline();
     } catch (err) {
       setToast({ type: 'error', text: getErrorMessage(err, 'Failed to save follow-up.') });
     } finally {
@@ -7628,7 +7694,7 @@ const SalesDetail = () => {
     try {
       const currentStatus = String(task?.activity_details?.status || task?.activity?.status || 'pending').toLowerCase();
       const nextStatus = currentStatus === 'completed' ? 'pending' : 'completed';
-      await updateSalesActivity(activityId, {
+      await updateTask(task.id, {
         status: nextStatus,
         completed_at: nextStatus === 'completed' ? new Date().toISOString() : null,
       });
@@ -7660,31 +7726,6 @@ const SalesDetail = () => {
     }
   };
 
-  const handleDeleteFollowUp = async (task) => {
-    const activityId = getFollowUpActivityId(task);
-    if (!activityId) return;
-    if (!requiresAnyPermission([PERMISSIONS.SALES_CHANGE_TASK, PERMISSIONS.SALES_CHANGE_OPPORTUNITY])) {
-      return denyAction('You do not have permission to delete follow-ups.');
-    }
-    if (!requiresAnyPermission([PERMISSIONS.SALES_CHANGE_TASK, PERMISSIONS.SALES_CHANGE_OPPORTUNITY])) {
-      return denyAction('You do not have permission to delete follow-ups.');
-    }
-    const subject = String(task?.activity_details?.subject || task?.activity?.subject || 'this follow-up').trim();
-    if (!window.confirm(`Delete "${subject}"? This will remove the follow-up.`)) return;
-    setIsSavingFollowUp(true);
-    try {
-      await deleteSalesActivity(activityId);
-      if (editingFollowUpId && String(editingFollowUpId) === String(task.id)) {
-        closeFollowUpModal();
-      }
-      setFollowUps((prev) => prev.filter((row) => String(row.id) !== String(task.id)));
-      setToast({ type: 'success', text: 'Follow-up deleted.' });
-    } catch (err) {
-      setToast({ type: 'error', text: getErrorMessage(err, 'Failed to delete follow-up.') });
-    } finally {
-      setIsSavingFollowUp(false);
-    }
-  };
 
   const renderFollowUpItem = (task) => {
     const activity = task?.activity_details || task?.activity || {};
@@ -7726,8 +7767,9 @@ const SalesDetail = () => {
           />
           <IconButton
             name="trash-2"
-            label="Delete follow-up"
-            onClick={() => handleDeleteFollowUp(task)}
+            label="Task deletion unavailable; mark complete instead"
+            disabled
+            onClick={() => {}}
             className="text-rose-500"
           />
         </div>
@@ -7988,36 +8030,7 @@ const SalesDetail = () => {
           if (!canSendSms()) {
             return denyAction('You do not have permission to send SMS messages.');
           }
-          await Promise.all(activitySmsRecipients.map(async (targetPhone) => {
-            if (!targetPhone) return;
-            const created = await createSalesActivity({
-              lead: opportunity.id,
-              opportunity: null,
-              activity_type: 'sms',
-              subject: '',
-              description,
-              direction: 'outbound',
-              status: 'completed',
-            });
-
-            if (created?.id) {
-              try {
-                await api.post('/sales/sms-logs/', {
-                  activity: created.id,
-                  to_phone: targetPhone,
-                  message: activeBody.trim(),
-                  status: 'sent',
-                });
-              } catch (err) {
-                try {
-                  await api.delete(`/sales/sales-activities/${created.id}/`);
-                } catch {
-                  // Preserve the SMS dispatch error as the primary failure.
-                }
-                throw err;
-              }
-            }
-          }));
+          await Promise.all(activitySmsRecipients.filter(Boolean).map((to) => sendRecordSms('lead', opportunity.id, { to, body: activeBody.trim() })));
         } else {
           if (commTab === 'call' && (!canManageActivityHistory() || !canLogCall())) {
             return denyAction('You do not have permission to log calls.');
@@ -8026,41 +8039,7 @@ const SalesDetail = () => {
             return denyAction('You do not have permission to post activities.');
           }
           if (commTab === 'call') {
-            const created = await createSalesActivity({
-              lead: opportunity.id,
-              opportunity: null,
-              activity_type: 'call',
-              subject: activitySubject || '',
-              description,
-              direction: 'outbound',
-              status: 'completed',
-            });
-
-            if (created?.id) {
-              const parsedMinutes = callDuration ? Number(callDuration) : 0;
-              try {
-                const callLogResponse = await api.post('/sales/call-logs/', {
-                  activity: created.id,
-                  duration_seconds: Math.max(0, Math.round(parsedMinutes * 60)),
-                  disposition: callDisposition,
-                });
-                const callLogId = Number(callLogResponse?.data?.id || callLogResponse?.id || 0);
-                if (!callLogId) {
-                  throw new Error('Call log was not created.');
-                }
-                await updateSalesActivity(created.id, {
-                  status: 'completed',
-                  completed_at: new Date().toISOString(),
-                });
-              } catch (err) {
-                try {
-                  await api.delete(`/sales/sales-activities/${created.id}/`);
-                } catch {
-                  // Keep the call-log error as the primary failure.
-                }
-                throw err;
-              }
-            }
+            await createSalesActivity({ lead: opportunity.id, activity_type: 'call', subject: activitySubject || '', description, direction: callDirection || 'outbound', status: 'completed' });
           } else {
             await createSalesActivity({
               lead: opportunity.id,
@@ -8231,6 +8210,15 @@ const SalesDetail = () => {
 
   return (
     <div className="min-h-screen bg-slate-50/50">
+      {workError && <div role="alert" className="m-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{workError} <button type="button" className="underline" onClick={() => { setWorkError(null); void loadFollowUps(opportunity); void refreshActivityTimeline(); }}>Retry</button></div>}
+      {conversionReview && <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-labelledby="customer-review-title">
+        <div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl">
+          <h2 id="customer-review-title" className="text-lg font-bold">Review matching customers</h2>
+          <p className="mt-2 text-sm text-slate-600">Choose an existing customer or confirm that this lead needs a new customer profile.</p>
+          <div className="my-4 space-y-2">{conversionReview.map((candidate) => <button type="button" key={candidate.id} disabled={isSaving || candidate.service_blocked} className="block w-full rounded-lg border p-3 text-left disabled:opacity-50" onClick={() => handleCreateEstimate({ customer_id: candidate.id })}>{candidate.profile_name || `Customer #${candidate.id}`}{candidate.service_blocked ? ' — service blocked' : ''}</button>)}</div>
+          <div className="flex gap-3"><button type="button" disabled={isSaving} className="rounded-lg border p-2" onClick={() => handleCreateEstimate({ create_new_customer: true })}>Create a new customer</button><button type="button" disabled={isSaving} className="p-2" onClick={() => setConversionReview(null)}>Cancel</button></div>
+        </div>
+      </div>}
       {toast.text ? (
         <div className="pointer-events-none fixed bottom-5 right-5 z-[200] max-w-[92vw] sm:max-w-md">
           <div
@@ -8491,7 +8479,7 @@ const SalesDetail = () => {
                     },
                 onEditNote: startEditingNoteActivity,
                 onEditCall: openEditCallLog,
-                onDeleteCall: deleteCallLog,
+                onDeleteCall: isLeadPath ? undefined : deleteCallLog,
                 canManageActivityHistory: canManageActivityHistory(),
                     onPreview: (act) => setSelectedActivityForPreview(act),
                     onLoadMore: handleLoadMore,
@@ -8583,10 +8571,10 @@ const SalesDetail = () => {
                       <span className="label-eyebrow text-ink-400">Files & Photos</span>
                       <h3 className="text-lg font-extrabold text-ink-900 mt-0.5">Project Documents</h3>
                     </div>
-                    {canEditOpportunity() ? <PrimaryBtn icon="upload">Upload File</PrimaryBtn> : null}
+                    {!isLeadPath && canEditOpportunity() ? <PrimaryBtn icon="upload">Upload File</PrimaryBtn> : null}
                  </div>
                  <div className="p-3">
-                    <CategorizedFilesPanel
+                    {isLeadPath ? <p role="status" className="text-sm text-slate-600">Files and photos are not available for leads yet.</p> : <CategorizedFilesPanel
                       targetType={filesTargetSpec.targetType}
                       targetId={filesTargetSpec.targetId}
                       extraTargets={[
@@ -8603,7 +8591,7 @@ const SalesDetail = () => {
                           ? [{ targetType: 'estimates.estimate', targetId: String(estimateSummary.id) }]
                           : []),
                       ]}
-                    />
+                    />}
                   </div>
               </div>
             )}
@@ -10235,6 +10223,8 @@ const SalesDetail = () => {
                 <label className="space-y-1">
                   <span className="label-eyebrow text-ink-400">Direction</span>
                   <select
+                    disabled={isLeadPath}
+                    title={isLeadPath ? "Call direction cannot be changed after logging" : undefined}
                     value={callLogDraft.direction}
                     onChange={(e) => setCallLogDraft((prev) => ({ ...prev, direction: e.target.value }))}
                     className={inputCls}

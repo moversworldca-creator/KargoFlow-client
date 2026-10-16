@@ -2058,6 +2058,20 @@ export function SidebarSpecs({
   onInlineSave,
 }) {
   const [editingId, setEditingId] = React.useState(null);
+  const [saving, setSaving] = React.useState(false);
+  const [saveError, setSaveError] = React.useState('');
+  const commit = async (spec, value, option) => {
+    if (saving || typeof onInlineSave !== 'function' || spec.disabled) return;
+    setSaving(true);
+    setSaveError('');
+    try {
+      const result = await onInlineSave(spec.id, value, option);
+      if (result === false) setSaveError('Change could not be saved. Try again.');
+      else setEditingId(null);
+    } catch {
+      setSaveError('Change could not be saved. Try again.');
+    } finally { setSaving(false); }
+  };
 
   const getOptionLabel = (option) => {
     if (option == null) return '';
@@ -2082,6 +2096,7 @@ export function SidebarSpecs({
         <span className="label-eyebrow text-[#133559]">Lead specifications</span>
       </header>
 
+      {saveError && <p role="alert" className="px-3 pt-2 text-sm text-red-700">{saveError}</p>}
       <dl className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3 overflow-visible">
         {specs.map((s) => (
           <div key={s.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-50 ring-1 ring-slate-100 overflow-visible">
@@ -2090,32 +2105,27 @@ export function SidebarSpecs({
             </span>
             <div className="min-w-0 flex-1">
               <dt className="label-eyebrow text-black">{s.label}</dt>
-              {editingId === s.id ? (
+              {editingId === s.id && typeof onInlineSave === 'function' && !s.disabled ? (
                 s.fetchOptions ? (
                   <AsyncSelect
                     key={`${s.id}-${s.cacheKey ?? ''}`}
                     value={s.value}
-                    onChange={(val, opt) => {
-                      onInlineSave(s.id, val, opt);
-                      setEditingId(null);
-                    }}
+                    disabled={saving}
+                    aria-label={s.label}
+                    onChange={(val, opt) => commit(s, val, opt)}
                     fetchOptions={s.fetchOptions}
                     labelField={s.labelField || "label"}
                     valueField={s.valueField || "id"}
                     initialLabel={s.initialLabel || s.displayValue || ''}
                     placeholder="Select..."
                     className="mt-1 w-full"
-                    autoFocus
-                    onBlur={() => setEditingId(null)}
                   />
                 ) : s.options ? (
                   <select
                     value={s.value}
-                    onChange={(e) => {
-                      onInlineSave(s.id, e.target.value);
-                      setEditingId(null);
-                    }}
-                    onBlur={() => setEditingId(null)}
+                    disabled={saving}
+                    aria-label={s.label}
+                    onChange={(e) => commit(s, e.target.value)}
                     autoFocus
                     className="mt-1 w-full rounded-lg border-2 border-brand/20 bg-brand-tint px-2 py-1.5 text-sm font-semibold text-ink-800 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/10"
                   >
@@ -2128,12 +2138,12 @@ export function SidebarSpecs({
                   <input
                     type={s.type || "text"}
                     defaultValue={s.value}
+                    disabled={saving}
+                    aria-label={s.label}
                     autoFocus
                     onBlur={(e) => {
-                      if (e.target.value !== s.value) {
-                        onInlineSave(s.id, e.target.value);
-                      }
-                      setEditingId(null);
+                      if (e.target.value !== String(s.value ?? '')) void commit(s, e.target.value);
+                      else setEditingId(null);
                     }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
@@ -2147,12 +2157,13 @@ export function SidebarSpecs({
                   />
                 )
               ) : (
-                <dd
-                  className="mt-0.5 text-sm font-semibold !text-brand truncate cursor-pointer hover:bg-blue-50 rounded px-1 -mx-1 border-b border-dashed border-brand/30 hover:border-brand transition-colors"
-                  onClick={() => setEditingId(s.id)}
-                  title="Click to edit"
-                >
-                  {s.displayValue || (s.fetchOptions ? '—' : (s.value || '—'))}
+                <dd className="mt-0.5 text-sm font-semibold truncate">
+                  {typeof onInlineSave === 'function' && !s.disabled ? <button
+                    type="button" disabled={saving} aria-label={`Edit ${s.label}`}
+                    className="max-w-full truncate rounded border-b border-dashed border-brand/30 text-brand hover:bg-blue-50 disabled:opacity-50"
+                    onClick={() => { setSaveError(''); setEditingId(s.id); }}
+                  >{s.displayValue || (s.fetchOptions ? '—' : (s.value || '—'))}</button>
+                    : <span>{s.displayValue || (s.fetchOptions ? '—' : (s.value || '—'))}</span>}
                 </dd>
               )}
             </div>

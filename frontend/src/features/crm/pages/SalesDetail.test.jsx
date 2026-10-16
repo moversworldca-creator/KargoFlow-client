@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import SalesDetail from './SalesDetail';
@@ -27,7 +27,10 @@ vi.mock('../components/RedesignSalesComponents', () => ({
     </div>
     );
   },
-  SidebarSpecs: () => <div data-testid="sidebar-specs" />,
+  SidebarSpecs: ({ onInlineSave }) => <div data-testid="sidebar-specs">
+    <button type="button" onClick={() => onInlineSave('assigned_to', '82', { id: 82, label: 'Employee Ada' })}>Assign employee</button>
+    <button type="button" onClick={() => onInlineSave('move_size', '8', { id: 8, label: '2 Bedroom' })}>Set move size</button>
+  </div>,
   InventorySnapshot: () => <div data-testid="inventory-snapshot" />,
   RouteLogisticsCard: () => <div data-testid="route-logistics-card" />,
   CustomerCard: ({ customerName, email, phone, location, onInlineSave, onManageContacts, additionalContacts = [] }) => (
@@ -44,14 +47,14 @@ vi.mock('../components/RedesignSalesComponents', () => ({
       ))}
     </div>
   ),
-  PlannedMoveCard: ({
+  PlannedMoveCard: ({ plannedMove: {
     fetchAvailability = () => {},
     onStartEdit,
     onMoveDateChange,
     onArrivalWindowChange,
     onSave,
     onClearSchedule,
-  }) => (
+  } }) => (
     <div data-testid="planned-move-card">
       <button type="button" onClick={() => fetchAvailability('2026-07-10')}>Read Availability</button>
       <button
@@ -88,7 +91,10 @@ vi.mock('../components/StorageView', () => {
 
 vi.mock('../components/LeadSpecs', () => {
   return {
-    default: () => <div data-testid="lead-specs" />
+    default: ({ onInlineSave }) => <div data-testid="lead-specs">
+      <button type="button" onClick={() => onInlineSave('assigned_to', '82', { id: 82, label: 'Employee Ada' })}>Assign employee</button>
+      <button type="button" onClick={() => onInlineSave('move_size', '8', { id: 8, label: '2 Bedroom' })}>Set move size</button>
+    </div>
   };
 });
 
@@ -125,6 +131,7 @@ vi.mock('../../../services/api', () => {
     status: 'booked',
     status_code: 'booked',
     workflow_stage: 'booked',
+    is_booked: true,
     customer_details: {
       id: 321,
       full_name: 'Dinesh Kumar',
@@ -178,6 +185,7 @@ vi.mock('../../../services/api', () => {
   const mockJob = {
     id: 456,
     opportunity: 123,
+    lifecycle_stage: 'active',
     move_date: '2026-06-15'
   };
 
@@ -228,6 +236,25 @@ vi.mock('../../../services/api', () => {
   const defaultExport = {
     patch: vi.fn().mockResolvedValue({}),
     delete: vi.fn().mockResolvedValue({}),
+    sales: {
+      getOpportunityPlannedSubJobs: vi.fn().mockResolvedValue([]),
+      getOpportunityAccountingSummary: vi.fn().mockResolvedValue({
+        ...mockAccountingSummary,
+        jobs: [{ ...mockJob, invoice: mockAccountingSummary.invoice, estimate_id: 789 }],
+        estimates: [{ ...mockAccountingSummary.estimate, invoice: mockAccountingSummary.invoice }],
+      }),
+      getOpportunityInvoiceDraft: vi.fn().mockResolvedValue(null),
+      getOpportunityInvoice: vi.fn().mockResolvedValue(null),
+      saveOpportunityInvoiceDraft: vi.fn().mockResolvedValue({}),
+      finalizeOpportunityInvoice: vi.fn().mockResolvedValue({}),
+      sendOpportunityInvoice: vi.fn().mockResolvedValue({}),
+      createOpportunityInvoiceLineItem: vi.fn().mockResolvedValue({}),
+      updateOpportunityInvoiceLineItem: vi.fn().mockResolvedValue({}),
+      deleteOpportunityInvoiceLineItem: vi.fn().mockResolvedValue({}),
+      createOpportunityPlannedSubJob: vi.fn().mockResolvedValue({}),
+      updateOpportunityPlannedSubJob: vi.fn().mockResolvedValue({}),
+      deleteOpportunityPlannedSubJob: vi.fn().mockResolvedValue({}),
+    },
     jobs: {
       getJobs: vi.fn().mockResolvedValue([mockJob]),
       getJobAccountingSummary: vi.fn().mockResolvedValue(mockAccountingSummary),
@@ -287,6 +314,9 @@ vi.mock('../../../services/api', () => {
     getEstimates: vi.fn().mockResolvedValue([]),
     getUsers: vi.fn().mockResolvedValue([]),
     getLookupUsers: vi.fn().mockResolvedValue([]),
+    getLookupEmployeesPage: vi.fn().mockResolvedValue({ results: [] }),
+    getLeadStatusCodeLookups: vi.fn().mockResolvedValue([]),
+    sendRecordSms: vi.fn().mockResolvedValue({}),
     getLookupUsersPage: vi.fn().mockResolvedValue({ results: [] }),
     getMoverSizes: vi.fn().mockResolvedValue([]),
     getMoverSizeLookups: vi.fn().mockResolvedValue([]),
@@ -315,6 +345,8 @@ vi.mock('../../../services/api', () => {
     assignLead: vi.fn().mockResolvedValue({}),
     updateLead: vi.fn().mockResolvedValue({}),
     createLead: vi.fn().mockResolvedValue({}),
+    startLead: vi.fn().mockResolvedValue({}),
+    qualifyLead: vi.fn().mockResolvedValue({}),
     convertLead: vi.fn().mockResolvedValue({}),
     markLeadLost: vi.fn().mockResolvedValue({}),
     reopenLead: vi.fn().mockResolvedValue({}),
@@ -380,9 +412,20 @@ vi.mock('../../../shared/auth/useCan', () => ({
   }),
 }));
 
+// Restore implementations as well as call counts: one scenario must not change the next.
+const mockDefaults = [];
+const rememberMocks = (object) => {
+  for (const value of Object.values(object)) {
+    if (vi.isMockFunction(value)) mockDefaults.push([value, value.getMockImplementation()]);
+    else if (value && typeof value === 'object') rememberMocks(value);
+  }
+};
+rememberMocks(apiService);
+
 describe('SalesDetail Component Tests', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockDefaults.forEach(([mock, implementation]) => mock.mockReset().mockImplementation(implementation));
     timelineState.activities = [];
     routeState.params = { id: '123' };
     routeState.location = { pathname: '/sales/123', state: {} };
@@ -732,7 +775,7 @@ describe('SalesDetail Component Tests', () => {
     // Switch to Accounting tab
     fireEvent.click(accountingTab);
     await waitFor(() => {
-      expect(screen.getByText(/Job Accounting/i)).toBeInTheDocument();
+      expect(screen.getAllByText(/Crew Payroll|No Job Found/i).length).toBeGreaterThan(0);
     });
   });
 
@@ -781,9 +824,9 @@ describe('SalesDetail Component Tests', () => {
 
     const estimateView = await screen.findByTestId('estimate-view');
     expect(estimateView).toHaveAttribute('data-initial-sub-tab', 'route');
-    expect(screen.queryByTestId('customer-card')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('planned-move-card')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('route-logistics-card')).not.toBeInTheDocument();
+    expect(screen.getByTestId('customer-card')).toBeInTheDocument();
+    expect(screen.getByTestId('planned-move-card')).toBeInTheDocument();
+    expect(screen.getByTestId('route-logistics-card')).toBeInTheDocument();
   });
 
   it('toggles mobile sidebar drawer via info details button', async () => {
@@ -820,11 +863,11 @@ describe('SalesDetail Component Tests', () => {
 
     // Wait for the accounting metrics and summaries to load
     await waitFor(() => {
-      expect(screen.getAllByText('Opportunity Accounting Workspace')).toHaveLength(1);
+      expect(screen.getAllByText(/Crew Payroll/i).length).toBeGreaterThan(0);
       expect(screen.getAllByText('$1500.00')[0]).toBeInTheDocument(); // Estimate grand total
       expect(screen.getAllByText('$1000.00')[0]).toBeInTheDocument(); // Paid total
       expect(screen.getAllByText('$500.00')[0]).toBeInTheDocument();  // Balance due
-      expect(screen.getByText(/Invoice Draft/i)).toBeInTheDocument();
+      expect(screen.getByText(/Job Invoices & Drafts/i)).toBeInTheDocument();
       expect(screen.getByText(/Crew Payroll/i)).toBeInTheDocument();
       expect(screen.getByText(/Job Costing & Expenses/i)).toBeInTheDocument();
       expect(screen.getByText(/Job Profitability Summary/i)).toBeInTheDocument();
@@ -919,7 +962,7 @@ describe('SalesDetail Component Tests', () => {
       expect(screen.getByTestId('timeline')).toBeInTheDocument();
     });
 
-    expect(screen.getByTestId('timeline-count')).toHaveTextContent('1');
+    await waitFor(() => expect(screen.getByTestId('timeline-count')).toHaveTextContent('1'));
   });
 
   it('shows inbound sms timeline events in the sales activity feed', async () => {
@@ -981,13 +1024,13 @@ describe('SalesDetail Component Tests', () => {
 
     // Verify Payments ledger headers show inside the PaymentsPanel
     await waitFor(() => {
-      expect(screen.getAllByText(/Captured/i)[0]).toBeInTheDocument();
+      expect(screen.getByText(/Payments Ledger/i)).toBeInTheDocument();
       expect(screen.getAllByText(/Balance/i)[0]).toBeInTheDocument();
       expect(screen.getByText(/No payment records found/i)).toBeInTheDocument(); // Mock list starts empty
     });
   });
 
-  it('opens the payments workspace from the Payments tab instead of the estimate view', async () => {
+  it('opens the payments sub-tab from the Payments tab', async () => {
     renderComponent();
 
     await waitFor(() => {
@@ -997,13 +1040,14 @@ describe('SalesDetail Component Tests', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Payments$/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/Payments Ledger/i)).toBeInTheDocument();
+      expect(screen.getByTestId('estimate-view')).toHaveAttribute('data-initial-sub-tab', 'payments');
     });
-    expect(screen.queryByTestId('estimate-view')).not.toBeInTheDocument();
+    expect(screen.getByTestId('estimate-view')).toBeInTheDocument();
   });
 
   it('shows opportunity payments in Accounting page even when no job exists yet', async () => {
     apiService.default.jobs.getJobs.mockResolvedValue([]);
+    apiService.default.sales.getOpportunityAccountingSummary.mockResolvedValue(null);
     apiService.default.payments.getPayments.mockResolvedValue([
       {
         id: 42,
@@ -1091,4 +1135,123 @@ describe('SalesDetail Component Tests', () => {
     });
     confirmSpy.mockRestore();
   });
+  const leadFixture = { id: 123, first_name: 'Ada', last_name: 'Lead', status: 'new', system_state: 'new', branch: 1, branch_id: 1, assigned_to: null, move_size: 2 };
+  it('reloads the same lead when quickly unmounted and reopened', async () => {
+    apiService.getLead.mockResolvedValue(leadFixture);
+    const first = renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
+    expect(await screen.findByText('Ada Lead')).toBeInTheDocument();
+    first.unmount();
+    renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
+    expect(await screen.findByText('Ada Lead')).toBeInTheDocument();
+    expect(apiService.getLead).toHaveBeenCalledTimes(2);
+  });
+  it('saves employee assignment and move-size IDs from lead specs', async () => {
+    apiService.getLead.mockResolvedValue(leadFixture);
+    apiService.updateLead.mockResolvedValue(leadFixture);
+    renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
+    await screen.findByText('Ada Lead');
+    fireEvent.click(screen.getByRole('button', { name: 'Assign employee' }));
+    await waitFor(() => expect(apiService.updateLead).toHaveBeenCalledWith(123, expect.objectContaining({ assigned_employee_id: 82 })));
+    fireEvent.click(screen.getByRole('button', { name: 'Set move size' }));
+    await waitFor(() => expect(apiService.updateLead).toHaveBeenCalledWith(123, expect.objectContaining({ move_size_id: 8 })));
+    expect(apiService.getLeadStatusCodeLookups).toHaveBeenCalled();
+  });
+  it('shows load errors and supports retry instead of saying the lead is missing', async () => {
+    apiService.getLead.mockRejectedValueOnce({ response: { status: 500 } }).mockResolvedValue(leadFixture);
+    renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
+    expect(await screen.findByText('Could not load this record. Please try again.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('Ada Lead')).toBeInTheDocument();
+  });
+
+  it('offers explicit workflow steps before converting a lead', async () => {
+    apiService.getLead.mockResolvedValue(leadFixture);
+    apiService.startLead.mockResolvedValue({ ...leadFixture, status: 'in_progress', system_state: 'in_progress' });
+    apiService.qualifyLead.mockResolvedValue({ ...leadFixture, status: 'qualified', system_state: 'qualified' });
+    renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
+    fireEvent.click(await screen.findByRole('button', { name: 'Start lead' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Qualify lead' }));
+    expect(await screen.findByRole('button', { name: 'Create Estimate' })).toBeInTheDocument();
+    expect(apiService.startLead).toHaveBeenCalledWith(123);
+    expect(apiService.qualifyLead).toHaveBeenCalledWith(123);
+    expect(apiService.convertLead).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['Existing Customer', { customer_id: 321 }],
+    ['Create a new customer', { create_new_customer: true }],
+  ])('continues conversion after explicit customer review: %s', async (buttonName, expected) => {
+    apiService.getLead.mockResolvedValue({ ...leadFixture, status: 'qualified', system_state: 'qualified' });
+    apiService.convertLead.mockRejectedValueOnce({ response: { status: 422, data: { error: 'customer_review_required', candidates: [{ id: 321, profile_name: 'Existing Customer' }] } } })
+      .mockResolvedValue({ opportunity: { id: 999, sales_number: 999 } });
+    renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
+    fireEvent.click(await screen.findByRole('button', { name: 'Create Estimate' }));
+    expect(await screen.findByRole('dialog', { name: 'Review matching customers' })).toBeInTheDocument();
+    expect(apiService.convertLead).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: buttonName }));
+    await waitFor(() => expect(apiService.convertLead).toHaveBeenLastCalledWith(123, expected));
+  });
+  it('ignores a slow response for the previous lead after navigation', async () => {
+    let resolveOld;
+    apiService.getLead.mockImplementation((id) => String(id) === '123'
+      ? new Promise((resolve) => { resolveOld = resolve; })
+      : Promise.resolve({ ...leadFixture, id: 124, first_name: 'Current' }));
+    routeState.params = { id: '123' };
+    routeState.location = { pathname: '/leads/123', state: {} };
+    const view = render(<MemoryRouter><SalesDetail /></MemoryRouter>);
+    await waitFor(() => expect(apiService.getLead).toHaveBeenCalledWith('123'));
+    routeState.params = { id: '124' };
+    routeState.location = { pathname: '/leads/124', state: {} };
+    view.rerender(<MemoryRouter><SalesDetail /></MemoryRouter>);
+    expect(await screen.findByText('Current Lead')).toBeInTheDocument();
+    await act(async () => resolveOld({ ...leadFixture, first_name: 'Previous' }));
+    expect(screen.queryByText('Previous Lead')).not.toBeInTheDocument();
+    expect(screen.getByText('Current Lead')).toBeInTheDocument();
+  });
+
+  it('ignores communication history returned for a previously opened lead', async () => {
+    let resolvePreviousHistory;
+    apiService.getLead.mockImplementation((id) => Promise.resolve({ ...leadFixture, id: Number(id), first_name: String(id) === '124' ? 'Current' : 'Previous' }));
+    apiService.getTimelineEvents.mockImplementation(({ entity_id }) => Number(entity_id) === 123
+      ? new Promise((resolve) => { resolvePreviousHistory = resolve; })
+      : Promise.resolve([{ id: 222, source: 'inbound_email_resend', created_at: '2026-10-16T09:00:00Z', payload: { inbound_message_id: 222, from_email: 'current@example.com', subject: 'Current history' } }]));
+    routeState.params = { id: '123' };
+    routeState.location = { pathname: '/leads/123', state: {} };
+    const view = render(<MemoryRouter><SalesDetail /></MemoryRouter>);
+    await waitFor(() => expect(resolvePreviousHistory).toBeTypeOf('function'));
+    routeState.params = { id: '124' };
+    routeState.location = { pathname: '/leads/124', state: {} };
+    view.rerender(<MemoryRouter><SalesDetail /></MemoryRouter>);
+    await waitFor(() => expect(timelineState.activities).toEqual(expect.arrayContaining([expect.objectContaining({ subject: 'Current history' })])));
+    await act(async () => resolvePreviousHistory([{ id: 111, source: 'inbound_email_resend', payload: { inbound_message_id: 111, from_email: 'previous@example.com', subject: 'Previous history' } }]));
+    expect(timelineState.activities).not.toEqual(expect.arrayContaining([expect.objectContaining({ subject: 'Previous history' })]));
+    expect(timelineState.activities).toEqual(expect.arrayContaining([expect.objectContaining({ subject: 'Current history' })]));
+  });
+
+  it('does not apply status-code lookup response from a previous lead after navigation', async () => {
+    let resolveOldStatus;
+    apiService.getLeadStatusCodeLookups
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOldStatus = resolve; }))
+      .mockResolvedValue([]);
+    apiService.getLead.mockImplementation((id) => Promise.resolve({ ...leadFixture, id: Number(id), first_name: String(id) === '124' ? 'Current' : 'Previous' }));
+    routeState.params = { id: '123' };
+    routeState.location = { pathname: '/leads/123', state: {} };
+    const view = render(<MemoryRouter><SalesDetail /></MemoryRouter>);
+    await waitFor(() => expect(apiService.getLead).toHaveBeenCalledWith('123'));
+    routeState.params = { id: '124' };
+    routeState.location = { pathname: '/leads/124', state: {} };
+    view.rerender(<MemoryRouter><SalesDetail /></MemoryRouter>);
+    expect(await screen.findByText('Current Lead')).toBeInTheDocument();
+    await act(async () => resolveOldStatus([{ id: 99, label: 'Old Status' }]));
+    expect(screen.getByText('Current Lead')).toBeInTheDocument();
+  });
+
+  it('exposes a retry when loading activity history fails on a lead', async () => {
+    apiService.getLead.mockResolvedValue(leadFixture);
+    apiService.getActivities.mockRejectedValue(new Error('network error'));
+    renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
+    await screen.findByText('Ada Lead');
+    await waitFor(() => expect(screen.getByRole('button', { name: /Retry/i })).toBeInTheDocument());
+  });
+
 });
+

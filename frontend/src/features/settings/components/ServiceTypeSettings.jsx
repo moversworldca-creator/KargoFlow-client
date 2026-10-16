@@ -1,17 +1,16 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import Card from '../../../shared/ui/Card';
-import { 
-  Truck, Plus, Edit2, Trash2, Search, GripVertical,
-  XCircle, Save, Loader2, CheckCircle2, 
-  AlertCircle, Layout, MoreHorizontal, Calendar, Hash, Clock, Building2, Fingerprint, ShieldCheck, Tag
+import {
+  Plus, Edit2, Trash2, Search, GripVertical,
+  XCircle, Loader2, CheckCircle2,
+  AlertCircle, Layout, MoreHorizontal
 } from 'lucide-react';
 import { 
   getServiceTypes, createServiceType, updateServiceType, deleteServiceType 
 } from '../../../services/api';
-import { useAuth } from '../../auth/context/AuthContext';
 
 const ServiceTypeSettings = ({ branchId }) => {
-  const { user } = useAuth();
+  const loadRequestRef = useRef(0);
   const [serviceTypes, setServiceTypes] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -32,24 +31,32 @@ const ServiceTypeSettings = ({ branchId }) => {
     is_active: true
   });
 
-  useEffect(() => {
-    fetchData();
-  }, [branchId]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async (requestId) => {
     setIsLoading(true);
+    setMessage({ type: '', text: '' });
     try {
-      const response = await getServiceTypes({ branch_id: branchId });
+      const params = branchId ? { branch_id: Number(branchId) } : undefined;
+      const response = await getServiceTypes(params);
       const data = Array.isArray(response) ? response : (response?.results || []);
+      if (requestId !== loadRequestRef.current) return;
       setServiceTypes(data);
     } catch (err) {
-      console.error('Save failed:', err);
-      const detail = err.response?.data?.detail || err.message || 'Failed to save service type.';
+      if (requestId !== loadRequestRef.current) return;
+      console.error('Failed to load service types:', err);
+      const detail = err.response?.data?.detail || err.message || 'Failed to load service types.';
       setMessage({ type: 'error', text: detail });
     } finally {
-      setIsLoading(false);
+      if (requestId === loadRequestRef.current) setIsLoading(false);
     }
-  };
+  }, [branchId]);
+
+  useEffect(() => {
+    const requestId = ++loadRequestRef.current;
+    fetchData(requestId);
+    return () => {
+      if (loadRequestRef.current === requestId) loadRequestRef.current += 1;
+    };
+  }, [fetchData]);
 
   const orderedTypes = useMemo(
     () => [...serviceTypes].sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)),
@@ -160,12 +167,8 @@ const ServiceTypeSettings = ({ branchId }) => {
     if (!type) return;
     setIsSaving(true);
     try {
-      const payload = { 
-        ...type, 
-        is_active: !type.is_active
-      };
-      const updated = await updateServiceType(type.id, payload);
-      setServiceTypes(serviceTypes.map(t => t.id === type.id ? updated : t));
+      const updated = await updateServiceType(type.id, { is_active: !type.is_active });
+      setServiceTypes((current) => current.map(t => t.id === type.id ? updated : t));
       setMessage({ type: 'success', text: `Type ${updated.is_active ? 'activated' : 'deactivated'} successfully!` });
       setTimeout(() => setMessage({ type: '', text: '' }), 3000);
     } catch (err) {
@@ -189,11 +192,11 @@ const ServiceTypeSettings = ({ branchId }) => {
       };
       if (editingType) {
         const updated = await updateServiceType(editingType.id, payload);
-        setServiceTypes(serviceTypes.map(t => t.id === editingType.id ? updated : t));
+        setServiceTypes((current) => current.map(t => t.id === editingType.id ? updated : t));
         setMessage({ type: 'success', text: 'Service type updated successfully!' });
       } else {
         const created = await createServiceType(payload);
-        setServiceTypes([...serviceTypes, created]);
+        setServiceTypes((current) => [...current, created]);
         setMessage({ type: 'success', text: 'New service type created!' });
       }
       setShowModal(false);
@@ -218,7 +221,7 @@ const ServiceTypeSettings = ({ branchId }) => {
     setIsSaving(true);
     try {
       await deleteServiceType(deleteTarget.id);
-      setServiceTypes(serviceTypes.filter(t => t.id !== deleteTarget.id));
+      setServiceTypes((current) => current.filter(t => t.id !== deleteTarget.id));
       setShowDeleteConfirm(false);
       setDeleteTarget(null);
       setMessage({ type: 'success', text: 'Service type deleted successfully.' });
@@ -320,6 +323,7 @@ const ServiceTypeSettings = ({ branchId }) => {
                         type="button"
                         onClick={() => handleToggleActive(type)}
                         disabled={isSaving}
+                        aria-label={`${type.is_active ? 'Deactivate' : 'Activate'} ${type.name}`}
                         className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${type.is_active ? 'bg-primary' : 'bg-disabled'} ${isSaving ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                         <span className={`inline-block h-3 w-3 transform rounded-full bg-card transition-transform ${type.is_active ? 'translate-x-5' : 'translate-x-1'}`} />
@@ -328,6 +332,7 @@ const ServiceTypeSettings = ({ branchId }) => {
                     <td className="px-3 sm:px-6 py-3 sm:py-4 text-right relative whitespace-nowrap">
                       <button 
                         onClick={() => setOpenMenuId(openMenuId === type.id ? null : type.id)}
+                        aria-label={`Actions for ${type.name}`}
                         className="p-1.5 sm:p-2 text-muted hover:text-body hover:bg-border rounded-lg transition-all"
                       >
                         <MoreHorizontal size={18} />
@@ -377,14 +382,15 @@ const ServiceTypeSettings = ({ branchId }) => {
           <Card className="max-w-xl w-full p-6 space-y-6 rounded-3xl shadow-2xl animate-in zoom-in duration-200 overflow-y-auto max-h-[90vh]">
             <div className="flex items-start justify-between">
               <h3 className="text-xl font-bold text-heading">{editingType ? 'Edit Service Type' : 'New Service Type'}</h3>
-              <button onClick={() => setShowModal(false)}><XCircle className="text-disabled hover:text-muted" /></button>
+              <button type="button" aria-label="Close service type form" onClick={() => setShowModal(false)}><XCircle className="text-disabled hover:text-muted" /></button>
             </div>
             
             <form onSubmit={handleSave} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5 md:col-span-2">
-                  <label className="text-[0.625rem] font-bold uppercase tracking-widest text-muted ml-1">Type Name*</label>
+                  <label htmlFor="service-type-name" className="text-[0.625rem] font-bold uppercase tracking-widest text-muted ml-1">Type Name*</label>
                   <input 
+                    id="service-type-name"
                     required
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
@@ -392,8 +398,9 @@ const ServiceTypeSettings = ({ branchId }) => {
                   />
                 </div>
                 <div className="space-y-1.5 md:col-span-2">
-                  <label className="text-[0.625rem] font-bold uppercase tracking-widest text-muted ml-1">Description</label>
+                  <label htmlFor="service-type-description" className="text-[0.625rem] font-bold uppercase tracking-widest text-muted ml-1">Description</label>
                   <textarea 
+                    id="service-type-description"
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     className="w-full px-4 py-3 bg-subtle border-none rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-primary/10 min-h-[100px]" 
@@ -409,6 +416,7 @@ const ServiceTypeSettings = ({ branchId }) => {
                 <button
                   type="button"
                   onClick={() => setFormData({ ...formData, is_active: !formData.is_active })}
+                  aria-label={`${formData.is_active ? 'Deactivate' : 'Activate'} service type`}
                   className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${formData.is_active ? 'bg-primary' : 'bg-disabled'}`}
                 >
                   <span className={`inline-block h-4 w-4 transform rounded-full bg-card transition-transform ${formData.is_active ? 'translate-x-6' : 'translate-x-1'}`} />

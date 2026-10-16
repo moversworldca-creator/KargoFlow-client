@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Dashboard from './Dashboard';
 import {
   getBranches,
+  getBranchLookups,
   getDashboardSummary,
   getJobs,
   getLeads,
@@ -13,11 +14,15 @@ import {
 
 vi.mock('../../../services/api', () => ({
   getBranches: vi.fn(),
+  getBranchLookups: vi.fn(),
   getDashboardSummary: vi.fn(),
   getJobs: vi.fn(),
   getLeads: vi.fn(),
   getOpportunities: vi.fn(),
 }));
+
+vi.mock('../leads/pipelineApi', () => ({ getPipelineQueue: vi.fn() }));
+import { getPipelineQueue } from '../leads/pipelineApi';
 
 const mockUser = {
   id: 1,
@@ -174,5 +179,16 @@ describe('Dashboard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /open leads pipeline/i }));
   });
+  it('shows supported pipeline metrics when the legacy dashboard is absent', async () => {
+    vi.mocked(getDashboardSummary).mockRejectedValue({ response: { status: 404 } });
+    vi.mocked(getBranchLookups).mockResolvedValue([{ id: 5, name: 'Main Branch' }]);
+    vi.mocked(getPipelineQueue).mockResolvedValue({ summary: { total: 12, lead_count: 9, opportunity_count: 3, new_count: 4 } });
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    expect(await screen.findByText('Total records')).toBeInTheDocument();
+    expect(screen.getByText('12')).toBeInTheDocument();
+    expect(screen.getByText(/Revenue, payments, dispatch and historical performance are not available/)).toBeInTheDocument();
+    expect(getPipelineQueue).toHaveBeenCalledWith({ branch: '5', all: true });
+  });
+
 });
 

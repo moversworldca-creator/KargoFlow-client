@@ -1,4 +1,7 @@
 import api from "./axios";
+import { readOpportunity } from '../features/crm/leads/opportunityReadApi';
+import { getTenantStaff } from '../features/crm/leads/salesOverviewApi';
+import { recordActivities, recordTasks, createRecordActivity, updateRecordActivity, createRecordTask, updateRecordTask } from '../features/crm/leads/recordWorkApi';
 import { leadApi, leadPayload } from '../features/crm/leads/leadApi';
 import { getPipelineQueue } from '../features/crm/leads/pipelineApi';
 
@@ -40,7 +43,9 @@ export const removeUserBranch = (userId, branchId) => api.delete(`/tenant/users/
 // Employee APIs
 export const getEmployees = (params) => api.get("/tenant/employees/", { params });
 export const getEmployee = (id) => api.get(`/tenant/employees/${id}/`);
-export const inviteEmployee = (data) => api.post("/tenant/employees/invite/", data);
+export const createEmployee = (data) => api.post("/tenant/employees/", data);
+export const updateEmployee = (id, data) => api.patch(`/tenant/employees/${id}/`, data);
+export const inviteEmployee = (id, data = {}) => api.post(`/tenant/employees/${id}/invite/`, data);
 export const terminateEmployee = (id, data = {}) => api.post(`/tenant/employees/${id}/terminate/`, data);
 export const rehireEmployee = (id, data = {}) => api.post(`/tenant/employees/${id}/rehire/`, data);
 export const getEmployeeInvitations = () => api.get("/tenant/employees/invitations/");
@@ -50,43 +55,10 @@ export const revokeEmployeeInvitation = (id) => api.delete(`/tenant/employees/in
 export const getRoles = (params) => api.get("/tenant/rbac/roles/", { params });
 export const getRole = (id) => api.get(`/tenant/rbac/roles/${id}/`);
 export const createRole = (data) => api.post("/tenant/rbac/roles/", data);
-export const updateRole = async (id, data) => {
-  const { permissions: permKeysOrIds, ...roleData } = data || {};
-  let res = null;
-  if (Object.keys(roleData).length > 0) {
-    res = await api.patch(`/tenant/rbac/roles/${id}/`, roleData);
-  }
-  if (Array.isArray(permKeysOrIds)) {
-    try {
-      const currentRes = await getRolePermissions(id);
-      const currentList = Array.isArray(currentRes) ? currentRes : Array.isArray(currentRes?.results) ? currentRes.results : [];
-      const currentKeys = new Set(currentList.map((p) => p.permission_key || p.codename || p));
-
-      const allPermsRes = await getPermissions();
-      const allPerms = Array.isArray(allPermsRes) ? allPermsRes : Array.isArray(allPermsRes?.results) ? allPermsRes.results : [];
-      const permKeyById = new Map(allPerms.map((p) => [Number(p.id), p.permission_key || p.codename]));
-
-      const targetKeys = new Set(permKeysOrIds.map((item) => (typeof item === 'number' ? (permKeyById.get(item) || String(item)) : String(item))));
-
-      for (const key of targetKeys) {
-        if (!currentKeys.has(key)) {
-          await grantRolePermission(id, { permission_key: key, scope: 'company' }).catch(() => {});
-        }
-      }
-      for (const key of currentKeys) {
-        if (!targetKeys.has(key)) {
-          await revokeRolePermission(id, { permission_key: key, scope: 'company' }).catch(() => {});
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to sync role permissions:", e);
-    }
-  }
-  if (res) return res;
-  const roles = await getRoles();
-  return (Array.isArray(roles) ? roles : roles?.results || []).find((role) => Number(role.id) === Number(id));
-};
-export const deleteRole = (id) => api.patch(`/tenant/rbac/roles/${id}/`, { is_active: false });
+export const updateRole = (id, data) => api.patch(`/tenant/rbac/roles/${id}/`, data);
+export const deactivateRole = (id) => api.patch(`/tenant/rbac/roles/${id}/`, { is_active: false });
+export const reactivateRole = (id) => api.patch(`/tenant/rbac/roles/${id}/`, { is_active: true });
+export const deleteRole = deactivateRole;
 export const getRolePermissions = (roleId) => api.get(`/tenant/rbac/roles/${roleId}/permissions/`);
 export const grantRolePermission = (roleId, data) => api.post(`/tenant/rbac/roles/${roleId}/permissions/`, data);
 export const revokeRolePermission = (roleId, data) => api.delete(`/tenant/rbac/roles/${roleId}/permissions/`, { data });
@@ -172,6 +144,11 @@ export const updateLead = async (id, data = {}) => {
     const statusId = data.custom_status_code_id ?? data.custom_status_code;
     updated = await leadApi.setCustomStatus(id, statusId === '' ? null : statusId);
   }
+  if (data.assigned_employee_id !== undefined || data.assigned_to !== undefined || data.assigned_user_id !== undefined) {
+    const employeeId = data.assigned_employee_id;
+    const userId = data.assigned_user_id ?? data.assigned_to;
+    updated = await leadApi.assign(id, employeeId ? { employee_id: Number(employeeId) } : userId ? { user_id: Number(userId) } : null);
+  }
   if (action) updated = await leadApi.transition(id, action, { reason: data.reason || '' });
   return updated || leadApi.get(id);
 };
@@ -186,7 +163,7 @@ export const convertLead = async (id, data = {}) => {
   return {
     ...result,
     opportunity: result.opportunity_id
-      ? { id: result.opportunity_id, sales_number: result.opportunity_number }
+      ? { id: result.opportunity_id, opportunity_number: result.opportunity_number }
       : null,
   };
 };
@@ -264,8 +241,13 @@ export const sendRecordEmail = (entityType, entityId, data) => {
   const kind = entityType === 'opportunity' ? 'opportunities' : 'leads';
   return api.post(`/tenant/${kind}/${entityId}/communications/email/`, data);
 };
-export const getOpportunity = (id) => api.get(`/sales/opportunities/${id}/`);
-export const getOpportunityBySalesNumber = (salesNumber) => api.get(`/sales/opportunities/by-sales-number/${salesNumber}/`);
+export const sendRecordSms = (entityType, entityId, data) => api.post(`/tenant/${entityType === 'opportunity' ? 'opportunities' : 'leads'}/${entityId}/communications/sms/`, data);
+export const getOpportunity = (id) => readOpportunity(id);
+export const getOpportunityBySalesNumber = async (salesNumber) => {
+  const detail = await api.get(`/tenant/pipeline/${salesNumber}/`);
+  if (detail.item?.kind !== 'opportunity') throw new Error('This sales number is not an opportunity.');
+  return readOpportunity(detail.item.id);
+};
 export const duplicateOpportunity = (id) => api.post(`/sales/opportunities/${id}/duplicate/`);
 export const createOpportunity = (data) =>
   api.post("/sales/opportunities/", data);
@@ -300,12 +282,9 @@ export const reopenOpportunity = (id, data = {}) => api.post(`/sales/opportuniti
 export const createOpportunityStop = (data) => api.post("/sales/opportunity-stops/", data);
 export const updateOpportunityStop = (id, data) => api.patch(`/sales/opportunity-stops/${id}/`, data);
 export const deleteOpportunityStop = (id) => api.delete(`/sales/opportunity-stops/${id}/`);
-export const getActivities = (params) =>
-  api.get("/sales/sales-activities/", { params });
-export const createSalesActivity = (data) =>
-  api.post("/sales/sales-activities/", data);
-export const updateSalesActivity = (id, data) =>
-  api.patch(`/sales/sales-activities/${id}/`, data);
+export const getActivities = (params = {}) => params.lead || params.opportunity ? recordActivities(params) : api.get("/sales/sales-activities/", { params });
+export const createSalesActivity = (data) => createRecordActivity(data);
+export const updateSalesActivity = (id, data, target) => target ? updateRecordActivity(id, data, target) : api.patch(`/sales/sales-activities/${id}/`, data);
 export const deleteSalesActivity = (id) =>
   api.delete(`/sales/sales-activities/${id}/`);
 export const getSalesPersonPerformanceSummary = (params) =>
@@ -326,9 +305,9 @@ export const getLoginHistoryReport = (params) =>
   api.get("/reports/login-history/", { params });
 export const getOpportunityBookedByDateReport = (params) =>
   api.get("/sales/reports/opportunities/booked-by-date/", { params });
-export const getTasks = (params) => api.get("/sales/tasks/", { params });
-export const createTask = (data) => api.post("/sales/tasks/", data);
-export const updateTask = (id, data) => api.patch(`/sales/tasks/${id}/`, data);
+export const getTasks = (params = {}) => params.lead || params.opportunity ? recordTasks(params) : api.get("/sales/tasks/", { params });
+export const createTask = (data) => createRecordTask(data);
+export const updateTask = (id, data, target = data) => target.lead || target.opportunity ? updateRecordTask(id, data, target) : api.patch(`/sales/tasks/${id}/`, data);
 export const getCallLogs = (params) => api.get("/sales/call-logs/", { params });
 export const liststatuscode = (params) => api.get("/sales/status-codes/list-status-codes", { params });  
 export const getStatusCodes = (params) => api.get("/tenant/opportunity-statuses/", { params });
@@ -658,6 +637,8 @@ const API = {
     getPermissions,
     updateRole,
     deleteRole,
+    deactivateRole,
+    reactivateRole,
     updateRolePermissions,
     getRolePermissions,
     grantRolePermission,
@@ -862,8 +843,15 @@ const API = {
 
 export default API;
 
-export const getLookupUsersPage = (search, offset, limit, branch = null) =>
-  api.get('/lookups/users/', { params: { search, offset, limit, ...(branch ? { branch } : {}) } });
+export const getLookupUsersPage = async (search = '', offset = 0, limit = 20, branch = null) => {
+  const users = (await getTenantStaff()).filter((user) => (!branch || user.branches.some((id) => String(id) === String(branch)))
+    && `${user.first_name} ${user.last_name} ${user.email}`.toLowerCase().includes(search.toLowerCase()));
+  return { results: users.slice(offset, offset + limit).map((user) => ({ ...user, label: `${user.first_name} ${user.last_name}`.trim() || user.email })), hasMore: offset + limit < users.length };
+};
+export const getLookupEmployeesPage = async (search, offset, limit, branch = null) => {
+  const page = await api.get('/tenant/employees/', { params: { search, offset, limit, ...(branch ? { branch_id: branch } : {}) } });
+  return { ...page, results: page.results.map((employee) => ({ ...employee, label: `${employee.first_name} ${employee.last_name}`.trim() || employee.email })), hasMore: offset + page.results.length < page.count };
+};
 
 export const getBranchLookupsPage = (search, offset, limit) =>
   api.get('/tenant/branches/', { params: { search, offset, limit } });
