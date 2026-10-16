@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canAll, canAny, getAllowedNavItems, NAV_ITEMS } from './registry';
+import { canAll, canAny, getAllowedNavItems, NAV_ITEMS, PERMISSIONS } from './registry';
 
 describe('Permissions Registry normalization tests', () => {
   it('should grant access if the user has the canonical dot-notation permission', () => {
@@ -53,6 +53,16 @@ describe('Permissions Registry normalization tests', () => {
     const systemAdminCtx = { permissions: [], isSystemAdmin: true };
     expect(canAll(['crm.settings.users.view'], superuserCtx)).toBe(true);
     expect(canAll(['crm.settings.users.view'], systemAdminCtx)).toBe(true);
+  });
+
+  it('uses the backend communication permission for email and SMS actions', () => {
+    const ctx = {
+      permissions: ['communications.conversations.send'],
+      isSuperuser: false,
+      isSystemAdmin: false,
+    };
+    expect(canAll([PERMISSIONS.COMMUNICATIONS_EMAIL_SEND], ctx)).toBe(true);
+    expect(canAll([PERMISSIONS.COMMUNICATIONS_SMS_SEND], ctx)).toBe(true);
   });
 
   it('should not show the Leads nav item when the user only has lead actions', () => {

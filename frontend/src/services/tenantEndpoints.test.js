@@ -1,9 +1,9 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import api from './axios';
-import { getBranches, getCompany, getNotifications, getUnreadNotificationsCount,
+import { assignUserRole, deleteRole, getBranches, getBranchLookups, getBranchLookupsPage, getCompany, getLookupUsers, getNotifications, getTimelineEvents, sendRecordEmail, getUnreadNotificationsCount,
   markNotificationRead, markNotificationUnread, markAllNotificationsRead } from './api';
 
-vi.mock('./axios', () => ({ default: { get: vi.fn(), post: vi.fn() } }));
+vi.mock('./axios', () => ({ default: { get: vi.fn(), post: vi.fn(), patch: vi.fn() } }));
 beforeEach(() => vi.resetAllMocks());
 
 it('loads company and branches through tenant routes', async () => {
@@ -11,6 +11,39 @@ it('loads company and branches through tenant routes', async () => {
   await getBranches();
   expect(api.get).toHaveBeenNthCalledWith(1, '/tenant/companies/3/');
   expect(api.get).toHaveBeenNthCalledWith(2, '/tenant/branches/');
+});
+
+it('loads assignable users through the tenant user route', async () => {
+  await getLookupUsers({ limit: 100 });
+  expect(api.get).toHaveBeenCalledWith('/tenant/users/', { params: { limit: 100 } });
+});
+
+it('loads branch dropdown options through the tenant branch route', async () => {
+  await getBranchLookups({ limit: 50 });
+  await getBranchLookupsPage('north', 0, 20);
+  expect(api.get).toHaveBeenNthCalledWith(1, '/tenant/branches/', { params: { limit: 50 } });
+  expect(api.get).toHaveBeenNthCalledWith(2, '/tenant/branches/', {
+    params: { search: 'north', offset: 0, limit: 20 },
+  });
+});
+
+it('attaches tenant roles without trusting a client supplied company id', async () => {
+  await assignUserRole({ user_id: 12, role_id: 4 });
+  expect(api.post).toHaveBeenCalledWith('/tenant/users/assign-role/', { user_id: 12, role_id: 4 });
+});
+
+it('deactivates custom roles through the supported role update action', async () => {
+  await deleteRole(4);
+  expect(api.patch).toHaveBeenCalledWith('/tenant/rbac/roles/4/', { is_active: false });
+});
+
+it('uses tenant communication routes for lead timelines and email', async () => {
+  await getTimelineEvents({ entity_type: 'lead', entity_id: 4, limit: 20 });
+  await sendRecordEmail('lead', 4, { to: ['lead@example.com'], subject: 'Hello' });
+  expect(api.get).toHaveBeenCalledWith('/tenant/leads/4/communications/', { params: { limit: 20 } });
+  expect(api.post).toHaveBeenCalledWith('/tenant/leads/4/communications/email/', {
+    to: ['lead@example.com'], subject: 'Hello',
+  });
 });
 
 it('unwraps notification records for the header without dropping their fields', async () => {
