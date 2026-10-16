@@ -51,6 +51,8 @@ import SchedulingSettings from "../components/SchedulingSettings";
 import ServiceTypeSettings from "../components/ServiceTypeSettings";
 import StatusCodeSettings from "../components/StatusCodeSettings";
 import TeamManagement from "../components/TeamManagement";
+import DocumentTemplates from "../components/DocumentTemplates";
+import EstimatePortalTemplates from "../components/EstimatePortalTemplates";
 
 const FALLBACK_BRANCHES = [
   { id: "1", name: "Main HQ", is_main: true },
@@ -106,7 +108,7 @@ const SETTINGS_GROUPS = [
   },
   {
     id: "operations",
-    label: "Operations & Scheduling",
+    label: "Operations & Fleet",
     shortLabel: "Operations",
     icon: Truck,
     tabs: [
@@ -157,6 +159,17 @@ const SETTINGS_GROUPS = [
       { id: "templates", label: "Email & SMS Templates", description: "Communication templates and merge tags.", icon: Mail, render: (branchId) => <CommunicationTemplates branchId={branchId} /> },
     ],
   },
+  {
+    id: "documents",
+    label: "Documents & Portals",
+    shortLabel: "Documents",
+    icon: FileSignature,
+    tabs: [
+      { id: "document-templates", label: "Document Templates", description: "Contracts, Bills of Lading (LOC), Invoices, and Credit Card Authorizations.", icon: FileSignature, render: (branchId, subView, itemId) => <DocumentTemplates branchId={Number(branchId) || null} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} /> },
+      { id: "estimate-portal-templates", label: "Estimate Templates", description: "Customer estimate portal templates, rate calculations, and charges layouts.", icon: FileText, render: (branchId, subView, itemId) => <EstimatePortalTemplates branchId={Number(branchId) || null} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} /> },
+      { id: "communication-templates", label: "Email & SMS Templates", description: "Transactional email designs, SMS notification templates, and merge tags.", icon: Mail, render: (branchId, subView, itemId) => <CommunicationTemplates branchId={branchId} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} /> },
+    ],
+  },
 ];
 
 const LEGACY_ROUTES = {
@@ -176,6 +189,9 @@ const LEGACY_ROUTES = {
   "mover-sizes": ["moves", "mover-sizes"],
   communications: ["communications", "setup"],
   "communication-templates": ["communications", "templates"],
+  templates: ["communications", "templates"],
+  "document-templates": ["documents", "document-templates"],
+  "estimate-portal-templates": ["documents", "estimate-portal-templates"],
 };
 
 function fuzzyMatch(query, value) {
@@ -192,7 +208,7 @@ function fuzzyMatch(query, value) {
 
 export default function SettingsHub() {
   const navigate = useNavigate();
-  const { mainGroup, subTab, tabId, subView } = useParams();
+  const { mainGroup, subTab, tabId, subView, itemId } = useParams();
   const { user } = useAuth();
   const useCanResult = useCan();
   const canAny = useCanResult?.canAny || (() => true);
@@ -207,6 +223,14 @@ export default function SettingsHub() {
   const visibleGroups = useMemo(() => {
     return SETTINGS_GROUPS.map((group) => {
       const allowedTabs = group.tabs.filter((tab) => {
+        // Document, Estimate, and Communication templates are accessible to all settings users
+        if (
+          tab.id === "document-templates" ||
+          tab.id === "estimate-portal-templates" ||
+          tab.id === "communication-templates"
+        ) {
+          return true;
+        }
         const required = SETTINGS_TAB_PERMISSIONS[tab.id];
         if (!required || !required.length) return true;
         return canAny(required);
@@ -215,40 +239,43 @@ export default function SettingsHub() {
     }).filter((group) => group.tabs.length > 0);
   }, [canAny]);
 
-  // Determine current active group and active subtab
-  const effectiveMainGroup = mainGroup || tabId;
-  const effectiveSubTab = subTab || subView;
+  // Handle URL normalization and legacy route mapping
+  const legacyMap = LEGACY_ROUTES[mainGroup || tabId];
+  const targetGroupId = legacyMap ? legacyMap[0] : (mainGroup || tabId);
+  const targetSubTabId = legacyMap ? legacyMap[1] : (subTab || subView);
+  const effectiveSubView = subView || (legacyMap && !subTab ? null : subView);
+  const effectiveItemId = itemId || null;
 
   const activeGroup = useMemo(() => {
-    return visibleGroups.find((group) => group.id === effectiveMainGroup) || visibleGroups[0] || SETTINGS_GROUPS[0];
-  }, [effectiveMainGroup, visibleGroups]);
+    return visibleGroups.find((group) => group.id === targetGroupId) || visibleGroups[0] || SETTINGS_GROUPS[0];
+  }, [targetGroupId, visibleGroups]);
 
   const activeTab = useMemo(() => {
-    return activeGroup.tabs.find((tab) => tab.id === effectiveSubTab) || activeGroup.tabs[0];
-  }, [activeGroup, effectiveSubTab]);
+    return activeGroup.tabs.find((tab) => tab.id === targetSubTabId) || activeGroup.tabs[0];
+  }, [activeGroup, targetSubTabId]);
 
   // Handle URL normalization and legacy route redirection
   useEffect(() => {
-    if (!effectiveMainGroup) {
+    if (!mainGroup && !tabId) {
       navigate("/settings/company/profile", { replace: true });
       return;
     }
-    const legacy = LEGACY_ROUTES[effectiveMainGroup];
-    if (legacy && !effectiveSubTab) {
-      navigate(`/settings/${legacy[0]}/${legacy[1]}`, { replace: true });
+    // Clean redirect for 1-tier legacy routes (e.g., /settings/document-templates)
+    if (legacyMap && !subView && !itemId) {
+      navigate(`/settings/${legacyMap[0]}/${legacyMap[1]}`, { replace: true });
       return;
     }
-    const group = visibleGroups.find((item) => item.id === effectiveMainGroup);
+    const group = visibleGroups.find((item) => item.id === targetGroupId);
     if (!group) {
       if (visibleGroups[0]) {
         navigate(`/settings/${visibleGroups[0].id}/${visibleGroups[0].tabs[0].id}`, { replace: true });
       }
       return;
     }
-    if (!effectiveSubTab || !group.tabs.some((tab) => tab.id === effectiveSubTab)) {
+    if (!targetSubTabId || !group.tabs.some((tab) => tab.id === targetSubTabId)) {
       navigate(`/settings/${group.id}/${group.tabs[0].id}`, { replace: true });
     }
-  }, [effectiveMainGroup, effectiveSubTab, navigate, visibleGroups]);
+  }, [mainGroup, tabId, legacyMap, targetGroupId, targetSubTabId, subView, itemId, navigate, visibleGroups]);
 
   // Load live branches
   useEffect(() => {
@@ -453,7 +480,7 @@ export default function SettingsHub() {
 
         {/* Main Content Area (Compact viewport, efficient space usage) */}
         <main className="min-h-0 flex-1 overflow-auto p-2 sm:p-2.5">
-          <div className="mx-auto h-full max-w-7xl">{activeTab && activeTab.render(branchId)}</div>
+          <div className="mx-auto h-full max-w-7xl">{activeTab && activeTab.render(branchId, effectiveSubView, effectiveItemId)}</div>
         </main>
       </div>
     </div>

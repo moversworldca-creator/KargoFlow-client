@@ -316,6 +316,7 @@ function App() {
             <Route path="settings" element={withPermission('/settings', <SettingsHub />)} />
             <Route path="settings/:mainGroup" element={withPermission('/settings', <SettingsHub />)} />
             <Route path="settings/:mainGroup/:subTab" element={withPermission('/settings', <SettingsHub />)} />
+            <Route path="settings/:mainGroup/:subTab/:itemId/:subView" element={withPermission('/settings', <SettingsHub />)} />
             <Route path="settings/:tabId/:itemId/:subView" element={withPermission('/settings', <SettingsHub />)} />
             <Route path="superuser/settings/company" element={<SuperuserRoute><SuperuserCreateCompanyPage /></SuperuserRoute>} />
             <Route path="profile" element={<Profile />} />

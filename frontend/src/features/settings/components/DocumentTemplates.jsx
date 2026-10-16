@@ -2,10 +2,11 @@ import { createPortal } from 'react-dom';
 import { getDocumentContent, getDocumentHtml } from './documentContent';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, CheckCircle2, Loader2, PlusCircle, Save, Trash2, Edit2, ArrowLeft, FileText, Copy, Search, Layout } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Loader2, PlusCircle, Save, Trash2, Edit2, ArrowLeft, FileText, Copy, Search, Layout, CreditCard, Receipt, FileSignature, Truck, ChevronDown } from 'lucide-react';
 
 import Card from '../../../shared/ui/Card';
 import DocumentBuilderFullPage from './DocumentBuilderFullPage';
+import UnifiedTemplateBuilder from './UnifiedTemplateBuilder/UnifiedTemplateBuilder';
 import {
   createDocumentTemplate,
   deleteDocumentTemplate,
@@ -193,6 +194,66 @@ const PRESET_LAYOUTS = [
         <div style="margin-top:6px;"><span data-sign="date" data-key="date_bol"></span></div>
       </div>
     </div>
+  </div>
+</div>`
+  },
+  {
+    name: "Payment Invoice",
+    subject: "Invoice {{Opportunity.sales_number}} — {{Customer.full_name}}",
+    html: `<!-- Payment Invoice -->
+<div style="font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; color:#0f172a; padding: 20px;">
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; padding-bottom:16px; border-bottom:2px solid #e2e8f0;">
+    <div>
+      <div style="font-size:26px; font-weight:900; letter-spacing:-0.03em; color:#1e293b;">{{Company.name}}</div>
+      <div style="font-size:11px; font-weight:600; color:#64748b; margin-top:4px;">{{Company.primary_phone}} • {{Company.email}}</div>
+    </div>
+    <div style="text-align:right;">
+      <div style="font-size:20px; font-weight:900; color:#0f172a; text-transform:uppercase; letter-spacing:0.05em;">INVOICE</div>
+      <div style="font-size:12px; font-weight:700; color:#2563eb; margin-top:2px;">#{{Opportunity.sales_number}}</div>
+      <div style="font-size:11px; color:#64748b; margin-top:2px;">Date: {{Opportunity.move_date}}</div>
+    </div>
+  </div>
+
+  <div style="margin-top:16px; display:flex; gap:16px; flex-wrap:wrap;">
+    <div style="flex:1; min-width:220px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:14px;">
+      <div style="font-size:10px; font-weight:800; text-transform:uppercase; color:#64748b; letter-spacing:0.05em;">Billed To</div>
+      <div style="margin-top:4px; font-size:13px; font-weight:800; color:#0f172a;">{{Customer.full_name}}</div>
+      <div style="font-size:11px; color:#475569; margin-top:2px;">{{Customer.primary_phone}} • {{Customer.email}}</div>
+      <div style="font-size:11px; color:#475569; margin-top:2px;">{{OriginAddress.full_address}}</div>
+    </div>
+    <div style="flex:1; min-width:220px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:14px;">
+      <div style="font-size:10px; font-weight:800; text-transform:uppercase; color:#64748b; letter-spacing:0.05em;">Move Details</div>
+      <div style="font-size:11px; color:#334155; margin-top:4px;"><strong>From:</strong> {{OriginAddress.full_address}}</div>
+      <div style="font-size:11px; color:#334155; margin-top:2px;"><strong>To:</strong> {{DestinationAddress.full_address}}</div>
+      <div style="font-size:11px; color:#334155; margin-top:2px;"><strong>Move Date:</strong> {{Opportunity.move_date}}</div>
+    </div>
+  </div>
+
+  <div style="margin-top:20px; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden;">
+    <table style="width:100%; border-collapse:collapse; font-size:12px;">
+      <thead>
+        <tr style="background:#f1f5f9; color:#475569; text-transform:uppercase; font-size:10px; font-weight:800;">
+          <th style="padding:10px 14px; text-align:left;">Item / Description</th>
+          <th style="padding:10px 14px; text-align:right;">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #f1f5f9;">
+          <td style="padding:12px 14px; font-weight:600; color:#0f172a;">Moving & Transportation Services</td>
+          <td style="padding:12px 14px; text-align:right; font-weight:700; color:#0f172a;">{{Estimate.grand_total}}</td>
+        </tr>
+      </tbody>
+      <tfoot>
+        <tr style="background:#f8fafc; border-top:2px solid #e2e8f0;">
+          <td style="padding:12px 14px; font-weight:900; font-size:13px; text-align:right;">Total Balance Due:</td>
+          <td style="padding:12px 14px; text-align:right; font-weight:900; font-size:14px; color:#2563eb;">{{Estimate.grand_total}}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <div style="margin-top:20px; padding:14px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:12px; font-size:11px; color:#1e40af; line-height:1.5;">
+    <strong>Payment Notice:</strong> All invoices are payable upon completion of delivery. Electronic payments and credit cards are processed securely.
   </div>
 </div>`
   },
@@ -479,6 +540,8 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
   const [typeFilter, setTypeFilter] = useState('all');
   const [activeFilter, setActiveFilter] = useState('all');
   const [branchFilter, setBranchFilter] = useState(branchId ? String(branchId) : '');
+  const [showNewMenu, setShowNewMenu] = useState(false);
+  const pendingNewTypeRef = useRef(null);
 
   useEffect(() => {
     if (branchId !== null) {
@@ -551,7 +614,19 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
     const term = String(searchTerm || '').trim().toLowerCase();
     return (items || []).filter((t) => {
       const matchesSearch = !term || String(t.name || '').toLowerCase().includes(term);
-      const matchesType = typeFilter === 'all' || String(t.template_type || '') === typeFilter;
+      const docType = String(t.template_type || '').toLowerCase();
+      let matchesType = true;
+      if (typeFilter === 'contract') {
+        matchesType = docType === 'contract' || docType === 'agreement' || (!docType.includes('bol') && !docType.includes('invoice') && !docType.includes('credit'));
+      } else if (typeFilter === 'bol') {
+        matchesType = docType === 'bol' || docType.includes('lading') || docType.includes('loc');
+      } else if (typeFilter === 'invoice') {
+        matchesType = docType === 'invoice' || docType.includes('receipt') || docType.includes('bill');
+      } else if (typeFilter === 'credit_card_authorization') {
+        matchesType = docType === 'credit_card_authorization' || docType === 'cc_auth' || docType.includes('card') || docType.includes('auth');
+      } else if (typeFilter !== 'all') {
+        matchesType = docType === typeFilter;
+      }
       const matchesActive =
         activeFilter === 'all' ? true : Boolean(t.is_active) === (activeFilter === 'active');
       const matchesBranch = !branchFilter || String(t.branch || '') === String(branchFilter);
@@ -615,7 +690,8 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
 
-  const beginNewTemplate = () => {
+  const beginNewTemplate = (targetType) => {
+    pendingNewTypeRef.current = targetType || (typeFilter !== 'all' ? typeFilter : 'contract');
     navigate('/settings/document-templates/new/builder');
   };
 
@@ -642,12 +718,24 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
       loadVariables(template.id);
       setView('edit');
     } else {
+      const chosenType = pendingNewTypeRef.current || (typeFilter !== 'all' ? typeFilter : 'contract');
+      pendingNewTypeRef.current = null;
+      const preset = PRESET_LAYOUTS.find((p) => {
+        if (chosenType === 'contract') return p.name === 'Services Contract';
+        if (chosenType === 'bol') return p.name === 'Uniform Bill of Lading';
+        if (chosenType === 'invoice') return p.name === 'Payment Invoice';
+        if (chosenType === 'credit_card_authorization') return p.name === 'Credit Card Auth';
+        return false;
+      });
       setSelectedId(null);
       setVariables([]);
       setDraft({
         ...EMPTY_TEMPLATE,
-        template_type: typeFilter !== 'all' ? typeFilter : 'contract',
-        branch: branchFilter ? Number(branchFilter) : null,
+        template_type: chosenType,
+        name: `New ${chosenType === 'bol' ? 'Bill of Lading (LOC)' : chosenType === 'invoice' ? 'Payment Invoice' : chosenType === 'credit_card_authorization' ? 'Credit Card Authorization' : 'Services Contract'}`,
+        subject: preset?.subject || '',
+        html_content: preset?.html || '',
+        branch: branchFilter ? Number(branchFilter) : branches[0]?.id ? Number(branches[0].id) : null,
       });
       setView('edit');
     }
@@ -906,15 +994,117 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
               <div>
                 <h2 className="text-xl font-bold text-slate-800">Document Templates</h2>
-                <p className="text-sm text-slate-500 mt-1">Manage standard HTML document templates for contracts, invoices, and more.</p>
+                <p className="text-sm text-slate-500 mt-1">Design and manage legal contracts, bills of lading, payment invoices, and credit card authorizations.</p>
               </div>
-              <button
-                type="button"
-                onClick={beginNewTemplate}
-                className="inline-flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-xl font-bold shadow-sm hover:bg-blue-700 transition"
-              >
-                <PlusCircle size={18} /> New Template
-              </button>
+
+              {/* Split Action Button with Template Type Menu */}
+              <div className="relative inline-block">
+                <div className="inline-flex rounded-xl shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => beginNewTemplate(typeFilter !== 'all' ? typeFilter : 'contract')}
+                    className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-l-xl font-bold hover:bg-blue-700 transition text-sm"
+                  >
+                    <PlusCircle size={17} />
+                    <span>
+                      New {typeFilter === 'bol' ? 'Bill of Lading' : typeFilter === 'invoice' ? 'Invoice' : typeFilter === 'credit_card_authorization' ? 'Credit Card Auth' : 'Contract'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewMenu((v) => !v)}
+                    className="bg-blue-700 text-white px-2.5 py-2.5 rounded-r-xl hover:bg-blue-800 transition border-l border-blue-500"
+                    title="Choose template type"
+                  >
+                    <ChevronDown size={15} />
+                  </button>
+                </div>
+
+                {showNewMenu && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setShowNewMenu(false)} />
+                    <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-2xl border border-slate-200 p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
+                      <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Create New Template
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => { setShowNewMenu(false); beginNewTemplate('contract'); }}
+                        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition"
+                      >
+                        <FileSignature size={15} className="text-blue-600" />
+                        <span>Services Contract</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setShowNewMenu(false); beginNewTemplate('bol'); }}
+                        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition"
+                      >
+                        <Truck size={15} className="text-emerald-600" />
+                        <span>Bill of Lading (LOC)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setShowNewMenu(false); beginNewTemplate('invoice'); }}
+                        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition"
+                      >
+                        <Receipt size={15} className="text-amber-600" />
+                        <span>Payment Invoice</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setShowNewMenu(false); beginNewTemplate('credit_card_authorization'); }}
+                        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition"
+                      >
+                        <CreditCard size={15} className="text-purple-600" />
+                        <span>Credit Card Authorization</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Quick Category Navigation Tabs */}
+            <div className="flex items-center gap-2 overflow-x-auto border-b border-slate-100 pb-4 mb-5">
+              {[
+                { id: 'all', label: 'All Documents', icon: FileText },
+                { id: 'contract', label: 'Services Contracts', icon: FileSignature },
+                { id: 'bol', label: 'Bills of Lading (LOC)', icon: Truck },
+                { id: 'invoice', label: 'Payment Invoices', icon: Receipt },
+                { id: 'credit_card_authorization', label: 'Credit Card Auth', icon: CreditCard },
+              ].map((cat) => {
+                const Icon = cat.icon;
+                const active = typeFilter === cat.id;
+                const count = cat.id === 'all'
+                  ? items.length
+                  : items.filter((t) => {
+                      const dt = String(t.template_type || '').toLowerCase();
+                      if (cat.id === 'contract') return dt === 'contract' || dt === 'agreement';
+                      if (cat.id === 'bol') return dt === 'bol' || dt.includes('lading') || dt.includes('loc');
+                      if (cat.id === 'invoice') return dt === 'invoice' || dt.includes('receipt');
+                      if (cat.id === 'credit_card_authorization') return dt === 'credit_card_authorization' || dt === 'cc_auth';
+                      return dt === cat.id;
+                    }).length;
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setTypeFilter(cat.id)}
+                    className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 ${
+                      active
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <Icon size={14} />
+                    <span>{cat.label}</span>
+                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${active ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'}`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
 
             <div className="flex flex-wrap items-center gap-3 mb-6">
@@ -927,16 +1117,6 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
                   className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none text-sm transition-all"
                 />
               </div>
-              <select
-                value={typeFilter}
-                onChange={(e) => setTypeFilter(e.target.value)}
-                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              >
-                <option value="all">All Types</option>
-                {templateTypes.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
               <select
                 value={activeFilter}
                 onChange={(e) => setActiveFilter(e.target.value)}
@@ -967,7 +1147,19 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
             ) : filtered.length === 0 ? (
               <div className="text-center py-12 text-slate-500 bg-slate-50 rounded-2xl border border-slate-100 border-dashed">
                 <FileText className="mx-auto mb-3 opacity-50" size={32} />
-                <p className="font-medium text-sm">No templates found matching your criteria.</p>
+                <p className="font-medium text-sm">
+                  {typeFilter === 'all'
+                    ? 'No document templates found.'
+                    : `No ${typeFilter === 'bol' ? 'Bill of Lading' : typeFilter === 'invoice' ? 'Payment Invoice' : typeFilter === 'credit_card_authorization' ? 'Credit Card Authorization' : 'Contract'} templates yet.`}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => beginNewTemplate(typeFilter !== 'all' ? typeFilter : 'contract')}
+                  className="mt-4 inline-flex items-center gap-2 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2.5 rounded-xl transition"
+                >
+                  <PlusCircle size={15} />
+                  <span>Create {typeFilter === 'bol' ? 'Bill of Lading (LOC)' : typeFilter === 'invoice' ? 'Payment Invoice' : typeFilter === 'credit_card_authorization' ? 'Credit Card Auth' : 'Contract'}</span>
+                </button>
               </div>
             ) : (
               <div className="overflow-x-auto rounded-xl border border-slate-200">
@@ -1040,10 +1232,19 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
 
       {/* Full Page Builder Overlay */}
       {isBuilderOpen ? (
-        <DocumentBuilderFullPage
+        <UnifiedTemplateBuilder
+          mode={
+            draft.template_type === 'bol'
+              ? 'bol'
+              : draft.template_type === 'credit_card_authorization'
+              ? 'cc_auth'
+              : draft.template_type === 'invoice' || draft.template_type === 'payment_receipt'
+              ? 'invoice'
+              : 'contract'
+          }
           draft={draft}
           onChange={(newDraft) => setDraft(newDraft)}
-          onSave={async () => {
+          onSave={async (savedDoc) => {
             const saved = await saveTemplate();
             if (saved?.id) {
               navigate(`/settings/document-templates/${saved.id}/builder`, { replace: true });
@@ -1051,19 +1252,6 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
             return saved;
           }}
           onBack={closeDocumentBuilder}
-          onPreview={() => setIsFullPreviewOpen(true)}
-          onRunLivePreview={runPreview}
-          previewMode={previewMode}
-          onPreviewModeChange={setPreviewMode}
-          previewOpportunityId={previewOpportunityId}
-          onPreviewOpportunityIdChange={setPreviewOpportunityId}
-          previewPlannedSubJobId={previewPlannedSubJobId}
-          onPreviewPlannedSubJobIdChange={setPreviewPlannedSubJobId}
-          previewJobId={previewJobId}
-          onPreviewJobIdChange={setPreviewJobId}
-          scopeType={visibleScopeType}
-          variables={variables}
-          registry={registry}
           branches={branches}
         />
       ) : null}

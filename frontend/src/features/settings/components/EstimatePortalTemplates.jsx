@@ -4,6 +4,7 @@ import { AlertCircle, CheckCircle2, Loader2, PlusCircle, Save, Trash2, Edit2, Ar
 
 import Card from '../../../shared/ui/Card';
 import EstimateBuilderFullPage from './EstimateBuilderFullPage';
+import UnifiedTemplateBuilder from './UnifiedTemplateBuilder/UnifiedTemplateBuilder';
 import {
   createEstimatePortalTemplate,
   deactivateEstimatePortalTemplate,
@@ -952,7 +953,8 @@ export default function EstimatePortalTemplates({ branchId = null, builderRouteV
 
       {/* Full Page Builder Overlay */}
       {isBuilderOpen ? (
-        <EstimateBuilderFullPage
+        <UnifiedTemplateBuilder
+          mode="estimate"
           draft={draft}
           onChange={(newDraft) => setDraft(newDraft)}
           onSave={async () => {
@@ -962,15 +964,7 @@ export default function EstimatePortalTemplates({ branchId = null, builderRouteV
             }
           }}
           onBack={closeEstimateBuilder}
-          onDuplicate={duplicateTemplate}
-          onPreview={() => {
-            closeEstimateBuilder();
-            setIsPreviewOpen(true);
-          }}
-          variables={variables}
-          registry={registry}
           branches={branches}
-          templateTypes={ESTIMATE_PORTAL_TEMPLATE_TYPES}
         />
       ) : null}
 

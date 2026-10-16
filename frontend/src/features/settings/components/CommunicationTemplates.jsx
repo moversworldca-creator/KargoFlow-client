@@ -6,6 +6,7 @@ import { Mail, MessageSquare, Loader2, Edit2, PlusCircle, Trash2, Sparkles, Aler
 import Card from '../../../shared/ui/Card';
 import RichTextEditor from '../../../shared/ui/RichTextEditor';
 import EmailVisualBuilder from './EmailVisualBuilder';
+import UnifiedTemplateBuilder from './UnifiedTemplateBuilder/UnifiedTemplateBuilder';
 import API from '../../../services/api';
 import { normalizePreviewHtml, replaceBranchPlaceholders, resolveRenderableUrl } from '../../crm/utils/emailPreview';
 import {
@@ -2242,17 +2243,15 @@ const CommunicationTemplates = ({
                     <>
                       {editorMode === 'visual' ? (
                         <div className="flex-1 overflow-hidden relative">
-                          <EmailVisualBuilder
+                          <UnifiedTemplateBuilder
                             key={`builder-${restoreKey}`}
-                            value={draft.body_html || ''}
-                            branchLogoUrl={selectedTemplateBranchLogoUrl}
-                            branchName={selectedTemplateBranchName}
-                            forceDynamicBranchTokens={isAutomationBuilder}
-                            onChange={(html) => {
+                            mode="email"
+                            isOverlay={false}
+                            draft={draft}
+                            onChange={(updated) => {
                               clearFieldError('body_html');
-                              setDraft((prev) => ({ ...prev, body_html: html }));
+                              setDraft((prev) => ({ ...prev, body_html: updated.body_html || updated.html_content || '' }));
                             }}
-                            insertTokenRequest={visualInsertRequest}
                           />
                         </div>
                       ) : (
@@ -2294,24 +2293,20 @@ const CommunicationTemplates = ({
                       )}
                     </>
                   ) : (
-                  <div className="flex-1 p-8 flex flex-col overflow-hidden bg-white">
-                    <div className="flex items-center justify-between mb-4">
-                      <label className="text-sm font-bold text-heading">SMS Message Body</label>
-                    </div>
-                    <div className="flex-1 min-h-[300px] flex flex-col">
-                      <RichTextEditor
-                        value={isAutomationBuilder ? automationSmsBody : (draft.body || '')}
-                        onChange={(html) => {
-                          clearFieldError('body');
-                          setDraft((prev) => (
-                            isAutomationBuilder
-                              ? { ...prev, sms_body: html }
-                              : { ...prev, body: html }
-                          ));
-                        }}
-                        placeholder="Type your SMS template text here..."
-                      />
-                    </div>
+                  <div className="flex-1 flex flex-col overflow-hidden bg-white">
+                    <UnifiedTemplateBuilder
+                      mode="sms"
+                      isOverlay={false}
+                      draft={draft}
+                      onChange={(updated) => {
+                        clearFieldError('body');
+                        setDraft((prev) => (
+                          isAutomationBuilder
+                            ? { ...prev, sms_body: updated.body_sms || '' }
+                            : { ...prev, body: updated.body_sms || '' }
+                        ));
+                      }}
+                    />
                   </div>
                 )}
               </div>
