@@ -188,19 +188,10 @@ export default function TenantDirectoryTab({
               >
                 {f.label}
               </button>
-            ))}
-          </div>
-
-          <button
-            onClick={onOpenProvisionModal}
-            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-          >
-            <Plus size={14} />
-            <span>Provision Tenant</span>
-          </button>
+                ))}
+            </div>
         </div>
       </div>
-
       {/* Tenants Table */}
       <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden">
         <div className="overflow-x-auto">
