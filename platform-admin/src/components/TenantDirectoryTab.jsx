@@ -3,7 +3,7 @@ import {
   Building2, Search, Filter, Plus, Shield, 
   ExternalLink, Key, Users, MapPin, MoreHorizontal, 
   CheckCircle2, AlertTriangle, XCircle, Clock, Eye, 
-  Sliders, Loader2, ArrowRight
+  Sliders, Loader2, ArrowRight, Power
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useDebounce } from '../hooks/useDebounce';
@@ -24,6 +24,7 @@ export default function TenantDirectoryTab({
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedTenantDetails, setSelectedTenantDetails] = useState(null);
   const [lifecycleModalTenant, setLifecycleModalTenant] = useState(null);
+  const [openMenuTenantId, setOpenMenuTenantId] = useState(null);
 
   const filteredTenants = tenants.filter((t) => {
     const q = debouncedSearch.toLowerCase().trim();
@@ -87,18 +88,9 @@ export default function TenantDirectoryTab({
         ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
         : 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400';
     return (
-      <div>
         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${tone}`}>{state}</span>
-        {state === 'Provisioning' && (
-          <button
-            onClick={() => setLifecycleModalTenant(tenant)}
-            className="block mt-1 text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
-          >
-            Activate…
-          </button>
-        )}
-      </div>
     );
+      
   };
 
   const getAccessBadge = (tenant) => {
@@ -258,38 +250,122 @@ export default function TenantDirectoryTab({
                       </td>
 
                       <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
+                        <div className="relative inline-flex items-center justify-end">
                           <button
-                            onClick={() => onSelectTenantForEntitlements?.(tenant)}
-                            title="Inspect Entitlements & Overrides"
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
+                            type="button"
+                            onClick={() => setOpenMenuTenantId(openMenuTenantId === tenant.id ? null : tenant.id)}
+                            title="More actions"
+                            aria-label="More actions"
+                            aria-haspopup="true"
+                            aria-expanded={openMenuTenantId === tenant.id}
+                            className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                              openMenuTenantId === tenant.id
+                                ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100'
+                                : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-slate-200'
+                            }`}
                           >
-                            <Sliders size={15} />
+                            <MoreHorizontal size={15} />
                           </button>
 
-                          <button
-                            onClick={() => onInitiateSupportSession?.(tenant)}
-                            title="Start Controlled Support Session"
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 transition-colors"
-                          >
-                            <Key size={15} />
-                          </button>
+                          {openMenuTenantId === tenant.id && (
+                            <>
+                              <div
+                                className="fixed inset-0 z-30"
+                                onClick={() => setOpenMenuTenantId(null)}
+                              />
+                              <div className="absolute right-full top-1/2 -translate-y-1/2 mr-1.5 flex items-center gap-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg p-1 z-40 animate-in fade-in zoom-in-95 duration-100">
+                                {/* Inspect Entitlements */}
+                                <div className="relative group">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenMenuTenantId(null);
+                                      onSelectTenantForEntitlements?.(tenant);
+                                    }}
+                                    aria-label="Inspect Entitlements"
+                                    className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors cursor-pointer flex items-center justify-center"
+                                  >
+                                    <Sliders size={14} />
+                                  </button>
+                                  <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:flex items-center px-2 py-0.5 text-[10px] font-semibold text-white bg-slate-900 dark:bg-slate-950 rounded-md shadow-xs whitespace-nowrap z-50">
+                                    Inspect Entitlements
+                                  </span>
+                                </div>
 
-                          <button
-                            onClick={() => setLifecycleModalTenant(tenant)}
-                            title="Manage Company Lifecycle (Section 2.1)"
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
-                          >
-                            <Shield size={15} />
-                          </button>
+                                {/* Start Support Session */}
+                                <div className="relative group">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenMenuTenantId(null);
+                                      onInitiateSupportSession?.(tenant);
+                                    }}
+                                    aria-label="Start Support Session"
+                                    className="p-1.5 rounded-lg text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 transition-colors cursor-pointer flex items-center justify-center"
+                                  >
+                                    <Key size={14} />
+                                  </button>
+                                  <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:flex items-center px-2 py-0.5 text-[10px] font-semibold text-white bg-slate-900 dark:bg-slate-950 rounded-md shadow-xs whitespace-nowrap z-50">
+                                    Start Support Session
+                                  </span>
+                                </div>
 
-                          <button
-                            onClick={() => setSelectedTenantDetails(tenant)}
-                            title="View Full Tenant Spec"
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                          >
-                            <Eye size={15} />
-                          </button>
+                                {/* Manage Lifecycle */}
+                                <div className="relative group">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenMenuTenantId(null);
+                                      setLifecycleModalTenant(tenant);
+                                    }}
+                                    aria-label="Manage Lifecycle"
+                                    className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors cursor-pointer flex items-center justify-center"
+                                  >
+                                    <Shield size={14} />
+                                  </button>
+                                  <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:flex items-center px-2 py-0.5 text-[10px] font-semibold text-white bg-slate-900 dark:bg-slate-950 rounded-md shadow-xs whitespace-nowrap z-50">
+                                    Manage Lifecycle
+                                  </span>
+                                </div>
+
+                                {/* View Tenant Details */}
+                                <div className="relative group">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenMenuTenantId(null);
+                                      setSelectedTenantDetails(tenant);
+                                    }}
+                                    aria-label="View Tenant Details"
+                                    className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:hover:bg-slate-700/60 transition-colors cursor-pointer flex items-center justify-center"
+                                  >
+                                    <Eye size={14} />
+                                  </button>
+                                  <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:flex items-center px-2 py-0.5 text-[10px] font-semibold text-white bg-slate-900 dark:bg-slate-950 rounded-md shadow-xs whitespace-nowrap z-50">
+                                    View Tenant Details
+                                  </span>
+                                </div>
+
+                                {/* Activation */}
+                                <div className="relative group">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenMenuTenantId(null);
+                                      setLifecycleModalTenant(tenant);
+                                    }}
+                                    aria-label="Activation"
+                                    className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors cursor-pointer flex items-center justify-center"
+                                  >
+                                    <Power size={14} />
+                                  </button>
+                                  <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:flex items-center px-2 py-0.5 text-[10px] font-semibold text-white bg-slate-900 dark:bg-slate-950 rounded-md shadow-xs whitespace-nowrap z-50">
+                                    Activation
+                                  </span>
+                                </div>
+                              </div>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
