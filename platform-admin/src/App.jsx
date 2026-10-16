@@ -17,6 +17,7 @@ import SupportPage from './pages/SupportPage';
 import CommunicationPage from './pages/CommunicationPage';
 import AdminsPage from './pages/AdminsPage';
 import AuditPage from './pages/AuditPage';
+import ProfilePage from './pages/ProfilePage';
 
 function RequireAuth() {
   const { isAuthenticated, isLoading } = usePlatformAuth();
@@ -57,6 +58,7 @@ export default function App() {
           <Route path="/communication" element={<CommunicationPage />} />
           <Route path="/admins" element={<AdminsPage />} />
           <Route path="/audit" element={<AuditPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Route>

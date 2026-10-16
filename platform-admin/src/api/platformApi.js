@@ -14,6 +14,12 @@ export const platformApi = {
   bootstrapSuperAdmin: async (data = {}) => {
     return platformAxios.post('/auth/bootstrap/', data);
   },
+  updateProfile: async (data = {}) => {
+    return platformAxios.put('/auth/profile/', data);
+  },
+  changePassword: async (data = {}) => {
+    return platformAxios.post('/auth/change-password/', data);
+  },
 
   // Dashboard
   getDashboard: async () => {
