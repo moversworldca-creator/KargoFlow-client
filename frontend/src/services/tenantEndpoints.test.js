@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import api from './axios';
-import { assignUserRole, createEmployee, inviteEmployee, deactivateUser, reactivateUser, updateEmployee, deleteRole, getBranches, getBranchLookups, getBranchLookupsPage, getCompany, getLookupUsers, getNotifications, getTimelineEvents, sendRecordEmail, getUnreadNotificationsCount,
+import { setEmployeeTemporaryPassword, acceptEmployeeInvitation, assignUserRole, createEmployee, inviteEmployee, deactivateUser, reactivateUser, updateEmployee, deleteRole, getBranches, getBranchLookups, getBranchLookupsPage, getCompany, getLookupUsers, getNotifications, getTimelineEvents, sendRecordEmail, getUnreadNotificationsCount,
   markNotificationRead, markNotificationUnread, markAllNotificationsRead } from './api';
 
 vi.mock('./axios', () => ({ default: { get: vi.fn(), post: vi.fn(), patch: vi.fn() } }));
@@ -86,4 +86,20 @@ it('uses tenant notification actions and preserves the unread count', async () =
     '/tenant/notifications/7/mark-read/', '/tenant/notifications/7/mark-unread/',
     '/tenant/notifications/mark-all-read/',
   ]);
+});
+
+
+it('accepts invitations publicly without using the administrator session', async () => {
+  await acceptEmployeeInvitation({ token: 'invitation-code', password: 'chosen-password' });
+  expect(api.post).toHaveBeenCalledWith('/tenant/invitations/accept/', {
+    token: 'invitation-code', password: 'chosen-password',
+  }, { skipAuth: true });
+});
+
+
+it('creates a member login through the tenant admin password endpoint', async () => {
+  await setEmployeeTemporaryPassword(2, 'temporary-password');
+  expect(api.post).toHaveBeenCalledWith('/tenant/employees/2/set-temporary-password/', {
+    password: 'temporary-password',
+  });
 });

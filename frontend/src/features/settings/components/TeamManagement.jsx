@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import React, { useState, useEffect, useMemo } from 'react';
 import Card from '../../../shared/ui/Card';
 import { useAuth } from '../../auth/context/AuthContext';
@@ -11,7 +12,7 @@ import {
 } from 'lucide-react';
 import {
   getUsers, getEmployees, createEmployee, updateEmployee, inviteEmployee, assignUserRole, getRoles, getBranches,
-  deactivateUser, reactivateUser,
+  deactivateUser, reactivateUser, getEmployeeInvitations,
 } from '../../../services/api';
 import { PERMISSIONS } from '../../../shared/permissions/registry';
 
@@ -91,7 +92,9 @@ export const mergeUsersWithEmployees = (users, employees) => {
       .filter((employee) => employee?.user_id != null)
       .map((employee) => [String(employee.user_id), employee])
   );
-  return (Array.isArray(users) ? users : []).map((login) => {
+  const logins = Array.isArray(users) ? users : [];
+  const loginIds = new Set(logins.map((login) => String(login.id)));
+  const merged = logins.map((login) => {
     const employee = employeeByUserId.get(String(login.id));
     if (!employee) return login;
     return {
@@ -103,6 +106,18 @@ export const mergeUsersWithEmployees = (users, employees) => {
       branches: login.branches || (employee.primary_branch_id ? [employee.primary_branch_id] : []),
     };
   });
+  const employeesWithoutLogin = (Array.isArray(employees) ? employees : [])
+    .filter((employee) => employee.user_id == null || !loginIds.has(String(employee.user_id)))
+    .map((employee) => ({
+      ...employee,
+      id: employee.user_id ?? `employee-${employee.id}`,
+      employee_id: employee.id,
+      has_login: employee.user_id != null,
+      employee_type: employee.worker_type || '',
+      branches: employee.primary_branch_id ? [employee.primary_branch_id] : [],
+      date_joined: employee.created_at,
+    }));
+  return [...merged, ...employeesWithoutLogin];
 };
 
 export const employeeUpdatePayload = (form) => {
@@ -249,12 +264,12 @@ const UserFormModal = ({ title, initialData, roles, branches, onSave, onCancel, 
             <InputField label="Employee Type" name="employee_type" value={formData.employee_type} onChange={handleChange} placeholder="e.g., mover, dispatcher" />
           </div>
 
-          <ToggleField
+          {initialData?.has_login !== false && <ToggleField
             label="Active"
             description="Disable to prevent login and access."
             enabled={formData.is_active}
             onToggle={() => setFormData(prev => ({ ...prev, is_active: !prev.is_active }))}
-          />
+          />}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-3">
@@ -362,6 +377,18 @@ const TeamManagement = ({ branchId }) => {
   const [showStatusConfirm, setShowStatusConfirm] = useState(false);
   const [userToToggleStatus, setUserToToggleStatus] = useState(null);
   const [assigningRoleUserId, setAssigningRoleUserId] = useState(null);
+  const [invitingEmployeeId, setInvitingEmployeeId] = useState(null);
+  const [invitations, setInvitations] = useState([]);
+  const canInvite = canAll([PERMISSIONS.USER_CREATE]) || canAll([PERMISSIONS.USER_EDIT]);
+
+  useEffect(() => {
+    if (!canInvite) return;
+    let active = true;
+    getEmployeeInvitations().then((data) => {
+      if (active) setInvitations(data?.results || data || []);
+    }).catch(() => { /* Invitations are optional metadata; members still load. */ });
+    return () => { active = false; };
+  }, [canInvite, branchId]);
 
   useEffect(() => {
     const fetchBootstrap = async () => {
@@ -385,6 +412,7 @@ const TeamManagement = ({ branchId }) => {
         setBranches(branchesRes?.results || branchesRes || []);
       } catch (err) {
         console.error('Failed to fetch team members:', err);
+        setMessage({ type: 'error', text: getErrorMessage(err, 'Failed to load team members.') });
       } finally {
         setIsLoading(false);
       }
@@ -494,7 +522,7 @@ const TeamManagement = ({ branchId }) => {
                   <td className="px-3.5 py-2.5">
                     <div className="flex items-center gap-2.5">
                       <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs shrink-0">
-                        {(user.first_name?.[0] || user.email[0]).toUpperCase()}
+                        {(user.first_name?.[0] || user.email?.[0] || '?').toUpperCase()}
                         {user.last_name?.[0]?.toUpperCase()}
                       </div>
                       <div className="min-w-0">
@@ -511,13 +539,13 @@ const TeamManagement = ({ branchId }) => {
                           const resolvedRoles = Array.isArray(user.role_details) && user.role_details.length > 0
                             ? user.role_details
                             : Array.isArray(user.roles) && user.roles.length > 0
-                              ? user.roles.map((roleId) => roleById.get(Number(roleId))).filter(Boolean)
+                              ? user.roles.map((roleId) => roleById.get(Number(roleId)) || { id: Number(roleId), name: `Role #${roleId}` }).filter(Boolean)
                               : [];
                           return resolvedRoles.length > 0 ? resolvedRoles.map((role) => {
                             const roleBranchId = resolveRoleBranchId(role);
                             const scope = roleBranchId
                               ? (branchNameById.get(Number(roleBranchId)) || `Branch #${roleBranchId}`)
-                              : 'Company-wide superuser';
+                              : 'Company-wide';
                             return (
                               <div key={role.id} className="leading-5">
                                 {resolveRoleName(role)}
@@ -528,34 +556,44 @@ const TeamManagement = ({ branchId }) => {
                         })()}
                       </div>
                     </div>
-                    {canEditBranchAware && Number(user.id) !== currentUserId && (
-                      <select
-                        aria-label={`Attach role to ${user.first_name || user.email}`}
-                        value=""
-                        disabled={assigningRoleUserId === user.id}
-                        onChange={async (event) => {
-                          const roleId = Number(event.target.value);
-                          if (!roleId) return;
-                          setAssigningRoleUserId(user.id);
-                          setMessage({ type: '', text: '' });
-                          try {
-                            await assignUserRole({ user_id: user.id, role_id: roleId });
-                            await refreshUsers();
-                            setMessage({ type: 'success', text: 'Role attached successfully!' });
-                          } catch (err) {
-                            setMessage({ type: 'error', text: getErrorMessage(err, 'Failed to attach role.') });
-                          } finally {
-                            setAssigningRoleUserId(null);
-                          }
-                        }}
-                        className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-body disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900"
-                      >
-                        <option value="">{assigningRoleUserId === user.id ? 'Attaching…' : 'Attach role…'}</option>
-                        {(roles || [])
-                          .filter((role) => !(user.roles || []).map(Number).includes(Number(role.id)))
-                          .map((role) => <option key={role.id} value={role.id}>{resolveRoleName(role)}</option>)}
-                      </select>
-                    )}
+                    {canEditBranchAware && user.has_login !== false && Number(user.id) !== currentUserId && (() => {
+                      const userRoleIds = new Set(
+                        (Array.isArray(user.roles) && user.roles.length > 0
+                          ? user.roles
+                          : Array.isArray(user.role_details)
+                            ? user.role_details.map((r) => r.id)
+                            : []
+                        ).map(Number)
+                      );
+                      const attachableRoles = (roles || []).filter((role) => !userRoleIds.has(Number(role.id)));
+                      if (attachableRoles.length === 0) return null;
+                      return (
+                        <select
+                          aria-label={`Attach role to ${user.first_name || user.email}`}
+                          value=""
+                          disabled={assigningRoleUserId === user.id}
+                          onChange={async (event) => {
+                            const roleId = Number(event.target.value);
+                            if (!roleId) return;
+                            setAssigningRoleUserId(user.id);
+                            setMessage({ type: '', text: '' });
+                            try {
+                              await assignUserRole({ user_id: user.id, role_id: roleId });
+                              await refreshUsers();
+                              setMessage({ type: 'success', text: 'Role attached successfully!' });
+                            } catch (err) {
+                              setMessage({ type: 'error', text: getErrorMessage(err, 'Failed to attach role.') });
+                            } finally {
+                              setAssigningRoleUserId(null);
+                            }
+                          }}
+                          className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-body disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900"
+                        >
+                          <option value="">{assigningRoleUserId === user.id ? 'Attaching…' : 'Attach role…'}</option>
+                          {attachableRoles.map((role) => <option key={role.id} value={role.id}>{resolveRoleName(role)}</option>)}
+                        </select>
+                      );
+                    })()}
                   </td>
                   <td className="px-6 py-4">
                     <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.625rem] font-bold uppercase tracking-wider ${
@@ -564,7 +602,7 @@ const TeamManagement = ({ branchId }) => {
                         : 'bg-[#FDE8E8]/30 text-[#791F1F]'
                     }`}>
                       {user.is_active ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-                      {user.is_active ? 'Active' : 'Inactive'}
+                      {user.has_login === false ? 'No login yet' : user.is_active ? 'Active' : 'Inactive'}
                     </div>
                   </td>
                   <td className="px-6 py-4 text-sm text-body">{user.employee_type || 'N/A'}</td>
@@ -572,7 +610,38 @@ const TeamManagement = ({ branchId }) => {
                     {formatJoinedDate(user.date_joined)}
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center justify-end gap-2">
+                      {canInvite && user.has_login === false && user.employment_status === 'active' && (
+                        <Link
+                          to={`/settings/team/members/${user.employee_id}/password`}
+                          className="px-3 py-1.5 rounded-lg border border-primary text-primary text-xs font-semibold whitespace-nowrap"
+                        >
+                          Set temporary password
+                        </Link>
+                      )}
+                      {canInvite && user.has_login === false && (
+                        <button
+                          type="button"
+                          disabled={invitingEmployeeId !== null || !user.email || user.employment_status !== 'active'}
+                          onClick={async () => {
+                            setInvitingEmployeeId(user.employee_id);
+                            setMessage({ type: '', text: '' });
+                            try {
+                              const invitation = await inviteEmployee(user.employee_id, { email: user.email });
+                              setInvitations((prev) => [...prev.filter((item) => String(item.employee_id) !== String(user.employee_id)), invitation]);
+                              setMessage({ type: 'success', text: `Invitation requested for ${user.email}. Ask them to check their email and set a password.` });
+                            } catch (err) {
+                              setMessage({ type: 'error', text: getErrorMessage(err, 'Failed to invite member.') });
+                            } finally {
+                              setInvitingEmployeeId(null);
+                            }
+                          }}
+                          title={!user.email ? 'Edit this member to add an email address first' : 'Send a login invitation'}
+                          className="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold disabled:opacity-50"
+                        >
+                          {invitingEmployeeId === user.employee_id ? 'Sending…' : invitations.some((item) => String(item.employee_id) === String(user.employee_id) && item.status === 'pending') ? 'Resend invitation' : 'Invite to log in'}
+                        </button>
+                      )}
                       {canEditBranchAware && (
                         <button
                           onClick={() => { setUserToEdit(user); setShowEditModal(true); setMessage({ type: '', text: '' }); }}
@@ -582,7 +651,7 @@ const TeamManagement = ({ branchId }) => {
                           <Edit2 size={16} />
                         </button>
                       )}
-                      {canEditBranchAware && (
+                      {canEditBranchAware && user.has_login !== false && (
                         <button
                           onClick={() => { setUserToToggleStatus(user); setShowStatusConfirm(true); setMessage({ type: '', text: '' }); }}
                           className={`p-2 rounded-lg transition-colors ${
@@ -623,7 +692,14 @@ const TeamManagement = ({ branchId }) => {
             setMessage({ type: '', text: '' });
             try {
               const employee = await createEmployee(employeeUpdatePayload(payload));
-              await inviteEmployee(employee.id, { email: payload.email });
+              try {
+                const invitation = await inviteEmployee(employee.id, { email: payload.email });
+                setInvitations((prev) => [...prev, invitation]);
+              } catch (err) {
+                setShowAddModal(false);
+                await refreshUsers();
+                throw new Error(`Member created, but the invitation failed. Use Invite to log in to retry. ${getErrorMessage(err, '')}`);
+              }
               setMessage({ type: 'success', text: 'Employee created and invitation sent successfully!' });
               setShowAddModal(false);
               await refreshUsers();
@@ -658,9 +734,21 @@ const TeamManagement = ({ branchId }) => {
                 throw new Error('This login is not linked to an employee profile and cannot be edited here.');
               }
               await updateEmployee(userToEdit.employee_id, employeeUpdatePayload(payload));
-              if (payload.is_active !== userToEdit.is_active) {
+              if (userToEdit.has_login !== false && payload.is_active !== userToEdit.is_active) {
                 if (payload.is_active) await reactivateUser(userToEdit.id);
                 else await deactivateUser(userToEdit.id);
+              }
+              if (userToEdit.has_login !== false && Array.isArray(payload.roles)) {
+                const currentRoles = new Set((userToEdit.roles || userToEdit.role_details?.map(r => r.id) || []).map(Number));
+                for (const rId of payload.roles) {
+                  if (!currentRoles.has(Number(rId))) {
+                    try {
+                      await assignUserRole({ user_id: userToEdit.id, role_id: Number(rId) });
+                    } catch (e) {
+                      console.warn('Could not assign role', rId, e);
+                    }
+                  }
+                }
               }
               setMessage({ type: 'success', text: 'User updated successfully!' });
               setShowEditModal(false);

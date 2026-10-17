@@ -40,11 +40,14 @@ export const reactivateUser = (id) => api.post(`/tenant/users/${id}/reactivate/`
 export const getUserBranches = (id) => api.get(`/tenant/users/${id}/branches/`);
 export const removeUserBranch = (userId, branchId) => api.delete(`/tenant/users/${userId}/branches/${branchId}/`);
 
+export const acceptEmployeeInvitation = (data) => api.post('/tenant/invitations/accept/', data, { skipAuth: true });
+
 // Employee APIs
 export const getEmployees = (params) => api.get("/tenant/employees/", { params });
 export const getEmployee = (id) => api.get(`/tenant/employees/${id}/`);
 export const createEmployee = (data) => api.post("/tenant/employees/", data);
 export const updateEmployee = (id, data) => api.patch(`/tenant/employees/${id}/`, data);
+export const setEmployeeTemporaryPassword = (id, password) => api.post(`/tenant/employees/${id}/set-temporary-password/`, { password });
 export const inviteEmployee = (id, data = {}) => api.post(`/tenant/employees/${id}/invite/`, data);
 export const terminateEmployee = (id, data = {}) => api.post(`/tenant/employees/${id}/terminate/`, data);
 export const rehireEmployee = (id, data = {}) => api.post(`/tenant/employees/${id}/rehire/`, data);
