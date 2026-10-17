@@ -91,6 +91,27 @@ describe("Phase 4: Reference UI Parity & Multi-Page Viewport Controls", () => {
     expect(handleDeviceChange).toHaveBeenCalledWith("mobile");
   });
 
+  it("4b. renders mobile viewport frame with .mobile-viewport class and unclipped height", () => {
+    const mockItem = { id: "item-1", type: "heading", label: "Mobile Header" };
+    const { container } = render(
+      <DocumentCanvas
+        items={[mockItem]}
+        pageSize="A4"
+        orientation="Portrait"
+        devicePreview="mobile"
+        modeConfig={{ canvasType: "paged" }}
+      />
+    );
+
+    const mobileContainer = container.querySelector(".device-viewport-container.device-mobile");
+    expect(mobileContainer).not.toBeNull();
+
+    const mobileDoc = container.querySelector(".mobile-viewport");
+    expect(mobileDoc).not.toBeNull();
+    expect(mobileDoc.textContent).toContain("Mobile Header");
+    expect(mobileDoc.style.minHeight).toBe("auto");
+  });
+
   it("5. supports Fit Width, Fit Page, and Zoom Reset auto-scaling buttons", () => {
     const handleZoomChange = vi.fn();
     render(
@@ -506,4 +527,67 @@ describe("Phase 4: Reference UI Parity & Multi-Page Viewport Controls", () => {
     expect(docComponent.style.border).toBe("2px dashed rgb(148, 163, 184)");
     expect(docComponent.style.fontFamily).toBe("Roboto, sans-serif");
   });
+
+  it("17. SMS Canvas renders Desktop, Tablet, and Mobile device preview switcher and responds to clicks", () => {
+    const handleDeviceChange = vi.fn();
+    const handleSmsChange = vi.fn();
+
+    const { rerender } = render(
+      <DocumentCanvas
+        mode="sms"
+        modeConfig={{ canvasType: "sms" }}
+        smsText="Your shipment KF-8291 is out for delivery today!"
+        onSmsTextChange={handleSmsChange}
+        devicePreview="desktop"
+        onDevicePreviewChange={handleDeviceChange}
+      />
+    );
+
+    // Verify all 3 device buttons exist in Header Row 2
+    const desktopBtn = screen.getByLabelText("Desktop preview");
+    const tabletBtn = screen.getByLabelText("Tablet preview");
+    const mobileBtn = screen.getByLabelText("Mobile preview");
+
+    expect(desktopBtn).toBeDefined();
+    expect(tabletBtn).toBeDefined();
+    expect(mobileBtn).toBeDefined();
+
+    // Verify desktop preview header
+    expect(screen.getByText(/Desktop \(600px\)/i)).toBeDefined();
+
+    // Click tablet
+    fireEvent.click(tabletBtn);
+    expect(handleDeviceChange).toHaveBeenCalledWith("tablet");
+
+    // Click mobile
+    fireEvent.click(mobileBtn);
+    expect(handleDeviceChange).toHaveBeenCalledWith("mobile");
+
+    // Rerender with mobile view
+    rerender(
+      <DocumentCanvas
+        mode="sms"
+        modeConfig={{ canvasType: "sms" }}
+        smsText="Your shipment KF-8291 is out for delivery today!"
+        onSmsTextChange={handleSmsChange}
+        devicePreview="mobile"
+        onDevicePreviewChange={handleDeviceChange}
+      />
+    );
+    expect(screen.getByText(/Mobile \(340px\)/i)).toBeDefined();
+
+    // Rerender with tablet view
+    rerender(
+      <DocumentCanvas
+        mode="sms"
+        modeConfig={{ canvasType: "sms" }}
+        smsText="Your shipment KF-8291 is out for delivery today!"
+        onSmsTextChange={handleSmsChange}
+        devicePreview="tablet"
+        onDevicePreviewChange={handleDeviceChange}
+      />
+    );
+    expect(screen.getByText(/Tablet \(560px\)/i)).toBeDefined();
+  });
 });
+

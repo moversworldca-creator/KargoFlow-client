@@ -56,6 +56,7 @@ export default function InlineEdit({
   resolveVariables = false,
   placeholder = "",
   allowEmpty = false,
+  style = {},
   onSelect = () => {},
   onCommit = () => {},
   onNext = null,
@@ -90,6 +91,7 @@ export default function InlineEdit({
     if (isMultiline) {
       return (
         <textarea
+          style={style}
           className={`w-full min-w-0 max-w-full px-1.5 py-0.5 rounded border border-blue-500 bg-white text-slate-800 shadow-xs outline-2 outline-blue-500/20 text-inherit font-inherit resize-y break-words [overflow-wrap:anywhere] [word-break:break-word] overflow-auto ${className}`}
           rows={Math.min(10, Math.max(2, (draft.match(/\n/g) || []).length + 1))}
           value={draft}
@@ -113,6 +115,7 @@ export default function InlineEdit({
 
     return (
       <input
+        style={style}
         className={`w-full min-w-0 max-w-full px-1.5 py-0.5 rounded border border-blue-500 bg-white text-slate-800 shadow-xs outline-2 outline-blue-500/20 text-inherit font-inherit break-words [overflow-wrap:anywhere] [word-break:break-word] overflow-hidden text-ellipsis ${className}`}
         value={draft}
         autoFocus
@@ -140,6 +143,7 @@ export default function InlineEdit({
 
   return (
     <span
+      style={style}
       className={`relative rounded-xs min-h-[1.25em] min-w-0 max-w-full break-words [overflow-wrap:anywhere] [word-break:break-word] inline-block ${
         preview ? "cursor-default select-text" : "cursor-text"
       } transition-colors ${

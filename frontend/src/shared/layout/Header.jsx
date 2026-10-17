@@ -121,21 +121,21 @@ const NOTIFICATION_PANEL_DEFS = [
 const NotificationGroupIcon = ({ kind }) => {
   if (kind === 'comms') {
     return (
-      <span className="relative flex h-5 w-5 items-center justify-center">
-        <Mail size={13} className="absolute -left-0.5 -top-0.5" />
-        <MessageSquare size={12} className="absolute -right-0.5 -bottom-0.5" />
+      <span className="relative flex h-4.5 w-4.5 sm:h-5 sm:w-5 md:h-5.5 md:w-5.5 items-center justify-center">
+        <Mail className="absolute -left-0.5 -top-0.5 w-3 h-3 sm:w-3.5 sm:h-3.5 md:w-4 md:h-4" />
+        <MessageSquare className="absolute -right-0.5 -bottom-0.5 w-2.5 h-2.5 sm:w-3 sm:h-3 md:w-3.5 md:h-3.5" />
       </span>
     );
   }
   if (kind === 'updates') {
     return (
-      <span className="relative flex h-5 w-5 items-center justify-center">
-        <ClipboardPlus size={13} className="absolute -left-0.5 -top-0.5" />
-        <UserPlus size={12} className="absolute -right-0.5 -bottom-0.5" />
+      <span className="relative flex h-4.5 w-4.5 sm:h-5 sm:w-5 md:h-5.5 md:w-5.5 items-center justify-center">
+        <ClipboardPlus className="absolute -left-0.5 -top-0.5 w-3 h-3 sm:w-3.5 sm:h-3.5 md:w-4 md:h-4" />
+        <UserPlus className="absolute -right-0.5 -bottom-0.5 w-2.5 h-2.5 sm:w-3 sm:h-3 md:w-3.5 md:h-3.5" />
       </span>
     );
   }
-  return <Clock size={18} />;
+  return <Clock className="w-4 h-4 sm:w-[18px] sm:h-[18px] md:w-5 md:h-5" />;
 };
 
 const getNotificationLabel = (notification) => {
@@ -181,10 +181,10 @@ const DropdownItem = ({ icon: Icon, label, description, category, categoryIcon: 
       event.preventDefault();
       onClick?.(event);
     }}
-    className={`w-full flex items-start gap-3 p-3 hover:bg-black/5 transition-colors text-left group cursor-pointer ${unread ? 'bg-primary/5' : ''} ${isExpired ? 'bg-red-50 dark:bg-red-900/10' : ''} ${className}`}
+    className={`w-full flex items-start gap-2.5 sm:gap-3 p-2.5 sm:p-3 hover:bg-black/5 transition-colors text-left group cursor-pointer ${unread ? 'bg-primary/5' : ''} ${isExpired ? 'bg-red-50 dark:bg-red-900/10' : ''} ${className}`}
   >
-    <div className={`mt-0.5 ${isExpired ? 'text-red-500' : 'text-content-sec group-hover:text-primary'}`}>
-      <Icon size={18} />
+    <div className={`mt-0.5 shrink-0 ${isExpired ? 'text-red-500' : 'text-content-sec group-hover:text-primary'}`}>
+      <Icon className="w-4 h-4 sm:w-[18px] sm:h-[18px]" />
     </div>
     <div className="flex-1 min-w-0">
       <div className="flex justify-between items-start gap-2">
@@ -195,7 +195,7 @@ const DropdownItem = ({ icon: Icon, label, description, category, categoryIcon: 
         <div className="flex gap-1 shrink-0">
           {category ? (
             <span className={`shrink-0 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${isExpired ? 'border-red-500/20 bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 'border-black/10 bg-black/5 text-content-sec'}`}>
-              {CategoryIcon ? <CategoryIcon size={10} /> : null}
+              {CategoryIcon ? <CategoryIcon className="w-2.5 h-2.5 sm:w-3 sm:h-3" /> : null}
               {category}
             </span>
           ) : null}
@@ -209,7 +209,7 @@ const DropdownItem = ({ icon: Icon, label, description, category, categoryIcon: 
               {assignedTo}
             </span>
           ) : null}
-          {RightIcon ? <RightIcon size={16} className="text-content-sec group-hover:text-primary transition-transform self-center" /> : null}
+          {RightIcon ? <RightIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-content-sec group-hover:text-primary transition-transform self-center" /> : null}
         </div>
         {timestamp && <span className={`text-[10px] whitespace-nowrap mt-0.5 ${isExpired ? 'text-red-500 font-bold' : 'text-content-sec'}`}>{timestamp}</span>}
       </div>
@@ -885,7 +885,7 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
           title="Open Menu"
           aria-label="Open Menu"
         >
-          <Menu size={22} className="sm:w-6 sm:h-6" />
+          <Menu className="w-5 h-5 sm:w-5.5 sm:h-5.5 md:w-6 md:h-6" />
         </button>
         <button
           type="button"
@@ -912,7 +912,7 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
             aria-label="Open universal search"
             title="Search (⌘K)"
           >
-            <Search size={14} className="text-slate-400 shrink-0" />
+            <Search className="text-slate-400 shrink-0 w-3.5 h-3.5 sm:w-4 sm:h-4 lg:w-4.5 lg:h-4.5" />
             <span className="hidden lg:inline">Search records...</span>
             <span className="lg:hidden">Search...</span>
             <kbd className="hidden lg:inline-flex items-center px-1.5 py-0.5 text-[9px] font-mono font-semibold bg-white border border-slate-200 rounded text-slate-400">⌘K</kbd>
@@ -925,7 +925,7 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
             aria-label="Open universal search"
             title="Search"
           >
-            <Search size={19} />
+            <Search className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
           </button>
 
           {searchOpen ? (
@@ -941,7 +941,7 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
                       <span>Search</span>
                       <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">▼</span>
                     </div>
-                    <Search size={16} className="text-slate-400 shrink-0" />
+                    <Search className="text-slate-400 shrink-0 w-4 h-4 sm:w-4.5 sm:h-4.5" />
                     <input
                       type="text"
                       placeholder="Search customers, leads, jobs..."
@@ -974,7 +974,7 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
                         }
                       }}
                     />
-                    {searchLoading ? <Loader2 size={12} className="animate-spin text-slate-400 shrink-0" /> : null}
+                    {searchLoading ? <Loader2 className="animate-spin text-slate-400 shrink-0 w-3.5 h-3.5 sm:w-4 sm:h-4" /> : null}
                     <button
                       type="button"
                       onClick={() => setSearchOpen(false)}
@@ -982,7 +982,7 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
                       aria-label="Close search"
                       title="Close"
                     >
-                      <X size={16} />
+                      <X className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
                     </button>
                   </div>
                 </div>
@@ -1037,7 +1037,7 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
                           return (
                             <section key={type} className="overflow-hidden rounded-xl border border-slate-200">
                               <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-1.5 sm:py-2 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                                <Icon size={13} />
+                                <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                                 {heading}
                               </div>
                               <div className="divide-y divide-slate-100">
@@ -1412,7 +1412,7 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
             title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
             aria-label="Toggle theme"
           >
-            {theme === 'dark' ? <Sun size={18} className="sm:w-5 sm:h-5 text-yellow-500" /> : <Moon size={18} className="sm:w-5 sm:h-5 text-slate-600" />}
+            {theme === 'dark' ? <Sun className="w-4 h-4 sm:w-4.5 sm:h-4.5 md:w-5 md:h-5 text-yellow-500" /> : <Moon className="w-4 h-4 sm:w-4.5 sm:h-4.5 md:w-5 md:h-5 text-slate-600" />}
           </button>
 
           {/* User Profile Dropdown */}

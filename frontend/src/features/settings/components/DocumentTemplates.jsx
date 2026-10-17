@@ -2,11 +2,11 @@ import { createPortal } from 'react-dom';
 import { getDocumentContent, getDocumentHtml } from './documentContent';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, CheckCircle2, Loader2, PlusCircle, Save, Trash2, Edit2, ArrowLeft, FileText, Copy, Search, Layout, CreditCard, Receipt, FileSignature, Truck, ChevronDown } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Loader2, PlusCircle, Save, Trash2, Edit2, ArrowLeft, FileText, Copy, Search, Layout, CreditCard, Receipt, FileSignature, Truck, Mail, MessageSquare, ChevronDown } from 'lucide-react';
 
 import Card from '../../../shared/ui/Card';
-import DocumentBuilderFullPage from './DocumentBuilderFullPage';
 import UnifiedTemplateBuilder from './UnifiedTemplateBuilder/UnifiedTemplateBuilder';
+import CreateUniversalDocumentModal from './modals/CreateUniversalDocumentModal';
 import {
   createDocumentTemplate,
   deleteDocumentTemplate,
@@ -15,6 +15,15 @@ import {
   getTemplateVariables,
   previewDocumentTemplate,
   updateDocumentTemplate,
+  getEstimatePortalTemplates,
+  createEstimatePortalTemplate,
+  updateEstimatePortalTemplate,
+  deactivateEstimatePortalTemplate,
+  duplicateEstimatePortalTemplate,
+  getCommunicationTemplates,
+  createCommunicationTemplate,
+  updateCommunicationTemplate,
+  deleteCommunicationTemplate,
   getBranches,
 } from '../../../services/api';
 import api from '../../../services/api';
@@ -522,11 +531,15 @@ const safeList = (payload) => {
   return [];
 };
 
-export default function DocumentTemplates({ branchId = null, builderRouteView = '', builderRouteItemId = null }) {
+export default function DocumentTemplates({ branchId = null, builderRouteView = '', builderRouteItemId = null, onOpenChooser = null }) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [view, setView] = useState('list'); // 'list' | 'edit'
   const [items, setItems] = useState([]);
+  const [legalItems, setLegalItems] = useState([]);
+  const [estimateItems, setEstimateItems] = useState([]);
+  const [commItems, setCommItems] = useState([]);
+  const [activeBuilderMeta, setActiveBuilderMeta] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [draft, setDraft] = useState(EMPTY_TEMPLATE);
   const [variables, setVariables] = useState([]);
@@ -541,6 +554,7 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
   const [activeFilter, setActiveFilter] = useState('all');
   const [branchFilter, setBranchFilter] = useState(branchId ? String(branchId) : '');
   const [showNewMenu, setShowNewMenu] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const pendingNewTypeRef = useRef(null);
 
   useEffect(() => {
@@ -605,7 +619,7 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
 
   const templateTypes = useMemo(() => {
     const unique = Array.from(
-      new Set((items || []).map((t) => String(t.template_type || '').trim()).filter(Boolean))
+      new Set((items || []).map((t) => String(t.template_type || t.unified_type || '').trim()).filter(Boolean))
     ).sort();
     return unique;
   }, [items]);
@@ -614,16 +628,22 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
     const term = String(searchTerm || '').trim().toLowerCase();
     return (items || []).filter((t) => {
       const matchesSearch = !term || String(t.name || '').toLowerCase().includes(term);
-      const docType = String(t.template_type || '').toLowerCase();
+      const docType = String(t.template_type || t.unified_type || '').toLowerCase();
       let matchesType = true;
       if (typeFilter === 'contract') {
-        matchesType = docType === 'contract' || docType === 'agreement' || (!docType.includes('bol') && !docType.includes('invoice') && !docType.includes('credit'));
+        matchesType = (t.source_type === 'legal' || !t.source_type) && (docType === 'contract' || docType === 'agreement' || (!docType.includes('bol') && !docType.includes('invoice') && !docType.includes('credit')));
       } else if (typeFilter === 'bol') {
-        matchesType = docType === 'bol' || docType.includes('lading') || docType.includes('loc');
+        matchesType = (t.source_type === 'legal' || !t.source_type) && (docType === 'bol' || docType.includes('lading') || docType.includes('loc'));
       } else if (typeFilter === 'invoice') {
-        matchesType = docType === 'invoice' || docType.includes('receipt') || docType.includes('bill');
+        matchesType = (t.source_type === 'legal' || !t.source_type) && (docType === 'invoice' || docType.includes('receipt') || docType.includes('bill'));
       } else if (typeFilter === 'credit_card_authorization') {
-        matchesType = docType === 'credit_card_authorization' || docType === 'cc_auth' || docType.includes('card') || docType.includes('auth');
+        matchesType = (t.source_type === 'legal' || !t.source_type) && (docType === 'credit_card_authorization' || docType === 'cc_auth' || docType.includes('card') || docType.includes('auth'));
+      } else if (typeFilter === 'estimate') {
+        matchesType = t.source_type === 'estimate' || docType === 'estimate';
+      } else if (typeFilter === 'email') {
+        matchesType = (t.source_type === 'comm' && String(t.channel || '').toLowerCase() === 'email') || docType === 'email';
+      } else if (typeFilter === 'sms') {
+        matchesType = (t.source_type === 'comm' && String(t.channel || '').toLowerCase() === 'sms') || docType === 'sms';
       } else if (typeFilter !== 'all') {
         matchesType = docType === typeFilter;
       }
@@ -640,9 +660,46 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
     try {
       const params = {};
       if (branchFilter) params.branch = branchFilter;
-      const res = await getDocumentTemplates(params);
-      const list = normalize(res?.data ?? res);
-      setItems(list);
+
+      const [legalRes, estimateRes, commRes] = await Promise.allSettled([
+        getDocumentTemplates(params),
+        getEstimatePortalTemplates ? getEstimatePortalTemplates(params) : Promise.resolve([]),
+        getCommunicationTemplates ? getCommunicationTemplates(params) : Promise.resolve([]),
+      ]);
+
+      const rawLegal = legalRes.status === 'fulfilled' ? normalize(legalRes.value?.data ?? legalRes.value) : [];
+      const rawEstimate = estimateRes.status === 'fulfilled' ? normalize(estimateRes.value?.data ?? estimateRes.value) : [];
+      const rawComm = commRes.status === 'fulfilled' ? normalize(commRes.value?.data ?? commRes.value) : [];
+
+      setLegalItems(rawLegal);
+      setEstimateItems(rawEstimate);
+      setCommItems(rawComm);
+
+      const unifiedLegal = rawLegal.map((t) => ({
+        ...t,
+        source_type: 'legal',
+        unified_type: t.template_type,
+        display_type: t.template_type === 'bol' ? 'BOL' : t.template_type === 'invoice' ? 'Invoice' : t.template_type === 'credit_card_authorization' ? 'CC Auth' : 'Contract',
+        applies_to_label: t.scope_type === 'job' || t.applies_to_entity === 'job' || t.scope_type === 'planned_sub_job' ? 'Job' : 'Opportunity',
+      }));
+
+      const unifiedEstimate = rawEstimate.map((t) => ({
+        ...t,
+        source_type: 'estimate',
+        unified_type: 'estimate',
+        display_type: 'Estimate',
+        applies_to_label: 'Customer Portal',
+      }));
+
+      const unifiedComm = rawComm.map((t) => ({
+        ...t,
+        source_type: 'comm',
+        unified_type: String(t.channel || '').toLowerCase() === 'sms' ? 'sms' : 'email',
+        display_type: String(t.channel || '').toLowerCase() === 'sms' ? 'SMS' : 'Email',
+        applies_to_label: String(t.channel || '').toLowerCase() === 'sms' ? 'SMS Alert' : 'Transactional Email',
+      }));
+
+      setItems([...unifiedLegal, ...unifiedEstimate, ...unifiedComm]);
     } catch (err) {
       setItems([]);
       setMessage({ type: 'error', text: err?.response?.data?.detail || 'Unable to load templates.' });
@@ -767,7 +824,165 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
     setMessage({ type: 'success', text: 'Template duplicated. Click Save to create it.' });
   };
 
+  const handleEditRow = (template) => {
+    setSelectedId(template.id);
+    setDraft({ ...EMPTY_TEMPLATE, ...template });
+    let mode = 'contract';
+    let group = template.source_type || 'legal';
+    if (template.source_type === 'estimate') {
+      mode = 'estimate';
+    } else if (template.source_type === 'comm') {
+      mode = String(template.channel || '').toLowerCase() === 'sms' ? 'sms' : 'email';
+    } else {
+      if (template.template_type === 'bol') mode = 'bol';
+      else if (template.template_type === 'credit_card_authorization') mode = 'cc_auth';
+      else if (template.template_type === 'invoice' || template.template_type === 'payment_receipt') mode = 'invoice';
+      else mode = 'contract';
+    }
+    setActiveBuilderMeta({ group, mode });
+    setIsBuilderOpen(true);
+    if (template.source_type === 'estimate') {
+      navigate(`/settings/estimate-portal-templates/${template.id}/builder`);
+    } else if (template.source_type === 'comm') {
+      navigate(`/settings/documents/communication-templates/${template.id}/builder`);
+    } else {
+      navigate(`/settings/document-templates/${template.id}/builder`);
+    }
+  };
+
+  const getBuilderMode = () => {
+    if (activeBuilderMeta?.mode) return activeBuilderMeta.mode;
+    if (draft?.source_type === 'estimate') return 'estimate';
+    if (draft?.source_type === 'comm') return String(draft.channel || '').toLowerCase() === 'sms' ? 'sms' : 'email';
+    if (draft.template_type === 'bol') return 'bol';
+    if (draft.template_type === 'credit_card_authorization') return 'cc_auth';
+    if (draft.template_type === 'invoice' || draft.template_type === 'payment_receipt') return 'invoice';
+    return 'contract';
+  };
+
+  const handleDuplicateRow = async (template) => {
+    try {
+      setIsLoading(true);
+
+      if (template.source_type === 'estimate') {
+        let res;
+        try {
+          res = await duplicateEstimatePortalTemplate(template.id);
+        } catch {
+          res = await createEstimatePortalTemplate({
+            name: `Copy of ${template.name}`,
+            template_type: template.template_type || 'moving',
+            applies_to_entity: 'opportunity',
+            branch: template.branch ? Number(template.branch) : (branches[0]?.id ? Number(branches[0].id) : null),
+            is_active: true,
+            html_content: template.html_content || '',
+          });
+        }
+        await loadTemplates();
+        notify('success', `Duplicated "${template.name}".`);
+        return;
+      }
+
+      if (template.source_type === 'comm') {
+        const payload = {
+          name: `Copy of ${template.name}`,
+          channel: template.channel,
+          template_key: `${template.template_key || 'template'}_copy_${Date.now().toString(36).slice(-4)}`,
+          subject: template.subject || '',
+          body: template.body || '',
+          body_html: template.body_html || '',
+          branch: template.branch ? Number(template.branch) : (branches[0]?.id ? Number(branches[0].id) : null),
+          is_active: true,
+        };
+        await createCommunicationTemplate(payload);
+        await loadTemplates();
+        notify('success', `Duplicated "${template.name}".`);
+        return;
+      }
+
+      // Legal template duplicate (preserves exact test expectation)
+      const payload = {
+        name: `Copy of ${template.name}`,
+        template_type: template.template_type,
+        applies_to_entity: template.applies_to_entity || 'opportunity',
+        scope_type: template.scope_type || template.applies_to_entity || 'opportunity',
+        applies_to_service_type: template.applies_to_service_type || '',
+        applies_to_binding_type: template.applies_to_binding_type || '',
+        applies_to_opp_type: template.applies_to_opp_type || '',
+        subject: template.subject || '',
+        version: template.version || '1.0',
+        branch: template.branch ? Number(template.branch) : (branches[0]?.id ? Number(branches[0].id) : null),
+        content: template.content
+          ? typeof template.content === 'object'
+            ? JSON.parse(JSON.stringify(template.content))
+            : template.content
+          : '',
+      };
+      const res = await createDocumentTemplate(payload);
+      const saved = res?.data ?? res;
+      setItems((prev) => [saved, ...prev]);
+      notify('success', `Duplicated "${template.name}".`);
+    } catch (err) {
+      notify('error', getApiErrorMessage(err, 'Unable to duplicate template.'));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const saveTemplate = async () => {
+    if (activeBuilderMeta?.group === 'estimate' || draft?.source_type === 'estimate') {
+      const payload = {
+        name: String(draft.name || '').trim(),
+        template_type: String(draft.template_type || 'moving').trim(),
+        applies_to_entity: 'opportunity',
+        subject: String(draft.subject || '').trim(),
+        version: Number(draft.version) || 1,
+        branch: draft.branch ? Number(draft.branch) : null,
+        is_active: Boolean(draft.is_active),
+        html_content: String(draft.html_content || ''),
+      };
+      setIsSaving(true);
+      try {
+        const res = draft.id ? await updateEstimatePortalTemplate(draft.id, payload) : await createEstimatePortalTemplate(payload);
+        const saved = res?.data ?? res;
+        await loadTemplates();
+        notify('success', 'Estimate portal template updated.');
+        return saved;
+      } catch (err) {
+        notify('error', getApiErrorMessage(err, 'Unable to save template.'));
+        return null;
+      } finally {
+        setIsSaving(false);
+      }
+    }
+
+    if (activeBuilderMeta?.group === 'comm' || draft?.source_type === 'comm') {
+      const payload = {
+        name: String(draft.name || '').trim(),
+        channel: draft.channel || 'email',
+        template_key: String(draft.template_key || '').trim(),
+        subject: String(draft.subject || '').trim(),
+        body: String(draft.body || '').trim(),
+        body_html: String(draft.body_html || '').trim(),
+        branch: draft.branch ? Number(draft.branch) : null,
+        is_active: Boolean(draft.is_active),
+      };
+      setIsSaving(true);
+      try {
+        const res = draft.id ? await updateCommunicationTemplate(draft.id, payload) : await createCommunicationTemplate(payload);
+        const saved = res?.data ?? res;
+        await loadTemplates();
+        notify('success', 'Communication template updated.');
+        return saved;
+      } catch (err) {
+        notify('error', getApiErrorMessage(err, 'Unable to save template.'));
+        return null;
+      } finally {
+        setIsSaving(false);
+      }
+    }
+
+    // Default: Legal template
     const payload = {
       name: String(draft.name || '').trim(),
       template_type: String(draft.template_type || '').trim(),
@@ -827,13 +1042,22 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
     }
   };
 
-  const removeTemplate = async (id, name) => {
-    const ok = window.confirm(`Delete template "${name}"?`);
+  const removeTemplate = async (templateOrId, name) => {
+    const id = typeof templateOrId === 'object' ? templateOrId.id : templateOrId;
+    const target = items.find((t) => t.id === id) || (typeof templateOrId === 'object' ? templateOrId : null);
+    const templateName = name || target?.name || 'this template';
+    const ok = window.confirm(`Delete template "${templateName}"?`);
     if (!ok) return;
     setIsDeleting(true);
     setMessage({ type: '', text: '' });
     try {
-      await deleteDocumentTemplate(id);
+      if (target?.source_type === 'estimate') {
+        await deactivateEstimatePortalTemplate(id);
+      } else if (target?.source_type === 'comm') {
+        await deleteCommunicationTemplate(id);
+      } else {
+        await deleteDocumentTemplate(id);
+      }
       await loadTemplates();
       if (selectedId === id) {
         setView('list');
@@ -989,193 +1213,112 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
         </div>
       ) : null}
 
-      <div className="space-y-6">
-          <Card className="p-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-              <div>
-                <h2 className="text-xl font-bold text-slate-800">Document Templates</h2>
-                <p className="text-sm text-slate-500 mt-1">Design and manage legal contracts, bills of lading, payment invoices, and credit card authorizations.</p>
-              </div>
-
-              {/* Split Action Button with Template Type Menu */}
-              <div className="relative inline-block">
-                <div className="inline-flex rounded-xl shadow-sm">
-                  <button
-                    type="button"
-                    onClick={() => beginNewTemplate(typeFilter !== 'all' ? typeFilter : 'contract')}
-                    className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-l-xl font-bold hover:bg-blue-700 transition text-sm"
-                  >
-                    <PlusCircle size={17} />
-                    <span>
-                      New {typeFilter === 'bol' ? 'Bill of Lading' : typeFilter === 'invoice' ? 'Invoice' : typeFilter === 'credit_card_authorization' ? 'Credit Card Auth' : 'Contract'}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowNewMenu((v) => !v)}
-                    className="bg-blue-700 text-white px-2.5 py-2.5 rounded-r-xl hover:bg-blue-800 transition border-l border-blue-500"
-                    title="Choose template type"
-                  >
-                    <ChevronDown size={15} />
-                  </button>
-                </div>
-
-                {showNewMenu && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setShowNewMenu(false)} />
-                    <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-2xl border border-slate-200 p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
-                      <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        Create New Template
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => { setShowNewMenu(false); beginNewTemplate('contract'); }}
-                        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition"
-                      >
-                        <FileSignature size={15} className="text-blue-600" />
-                        <span>Services Contract</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setShowNewMenu(false); beginNewTemplate('bol'); }}
-                        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition"
-                      >
-                        <Truck size={15} className="text-emerald-600" />
-                        <span>Bill of Lading (LOC)</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setShowNewMenu(false); beginNewTemplate('invoice'); }}
-                        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition"
-                      >
-                        <Receipt size={15} className="text-amber-600" />
-                        <span>Payment Invoice</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setShowNewMenu(false); beginNewTemplate('credit_card_authorization'); }}
-                        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded-xl transition"
-                      >
-                        <CreditCard size={15} className="text-purple-600" />
-                        <span>Credit Card Authorization</span>
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
+      <div>
+        <Card className="p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <div>
+              <h2 className="text-xl font-bold text-slate-800">Document Templates</h2>
+              <p className="text-sm text-slate-500 mt-1">
+                Design and manage legal contracts, bills of lading, payment invoices, and credit card authorizations.
+              </p>
             </div>
 
-            {/* Quick Category Navigation Tabs */}
-            <div className="flex items-center gap-2 overflow-x-auto border-b border-slate-100 pb-4 mb-5">
-              {[
-                { id: 'all', label: 'All Documents', icon: FileText },
-                { id: 'contract', label: 'Services Contracts', icon: FileSignature },
-                { id: 'bol', label: 'Bills of Lading (LOC)', icon: Truck },
-                { id: 'invoice', label: 'Payment Invoices', icon: Receipt },
-                { id: 'credit_card_authorization', label: 'Credit Card Auth', icon: CreditCard },
-              ].map((cat) => {
-                const Icon = cat.icon;
-                const active = typeFilter === cat.id;
-                const count = cat.id === 'all'
-                  ? items.length
-                  : items.filter((t) => {
-                      const dt = String(t.template_type || '').toLowerCase();
-                      if (cat.id === 'contract') return dt === 'contract' || dt === 'agreement';
-                      if (cat.id === 'bol') return dt === 'bol' || dt.includes('lading') || dt.includes('loc');
-                      if (cat.id === 'invoice') return dt === 'invoice' || dt.includes('receipt');
-                      if (cat.id === 'credit_card_authorization') return dt === 'credit_card_authorization' || dt === 'cc_auth';
-                      return dt === cat.id;
-                    }).length;
-                return (
-                  <button
-                    key={cat.id}
-                    type="button"
-                    onClick={() => setTypeFilter(cat.id)}
-                    className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 ${
-                      active
-                        ? 'bg-blue-600 text-white shadow-sm'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    <Icon size={14} />
-                    <span>{cat.label}</span>
-                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${active ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'}`}>
-                      {count}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+            {/* In-tab New Document Action Button */}
+            <button
+              type="button"
+              onClick={() => {
+                if (onOpenChooser) {
+                  onOpenChooser('document');
+                } else {
+                  setIsCreateModalOpen(true);
+                }
+              }}
+              className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold shadow-sm transition text-sm shrink-0 cursor-pointer"
+            >
+              <PlusCircle size={18} />
+              <span>+ New Document</span>
+            </button>
+          </div>
 
-            <div className="flex flex-wrap items-center gap-3 mb-6">
-              <div className="relative flex-1 min-w-[200px]">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                <input
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Search templates..."
-                  className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none text-sm transition-all"
-                />
-              </div>
+          <div className="flex flex-wrap items-center gap-3 mb-6">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+              <input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search templates..."
+                className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none text-sm transition-all"
+              />
+            </div>
+            <select
+              value={activeFilter}
+              onChange={(e) => setActiveFilter(e.target.value)}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            >
+              <option value="all">All Statuses</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+            {!branchId && (
               <select
-                value={activeFilter}
-                onChange={(e) => setActiveFilter(e.target.value)}
+                value={branchFilter}
+                onChange={(e) => setBranchFilter(e.target.value)}
                 className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               >
-                <option value="all">All Statuses</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
+                <option value="">All Branches</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
               </select>
-              {!branchId && (
-                <select
-                  value={branchFilter}
-                  onChange={(e) => setBranchFilter(e.target.value)}
-                  className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                >
-                  <option value="">All Branches</option>
-                  {branches.map((b) => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
-                  ))}
-                </select>
-              )}
-            </div>
+            )}
+          </div>
 
-            {isLoading ? (
-              <div className="flex justify-center py-12">
-                <Loader2 className="animate-spin text-blue-500" size={24} />
-              </div>
-            ) : filtered.length === 0 ? (
-              <div className="text-center py-12 text-slate-500 bg-slate-50 rounded-2xl border border-slate-100 border-dashed">
-                <FileText className="mx-auto mb-3 opacity-50" size={32} />
-                <p className="font-medium text-sm">
-                  {typeFilter === 'all'
-                    ? 'No document templates found.'
-                    : `No ${typeFilter === 'bol' ? 'Bill of Lading' : typeFilter === 'invoice' ? 'Payment Invoice' : typeFilter === 'credit_card_authorization' ? 'Credit Card Authorization' : 'Contract'} templates yet.`}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => beginNewTemplate(typeFilter !== 'all' ? typeFilter : 'contract')}
-                  className="mt-4 inline-flex items-center gap-2 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2.5 rounded-xl transition"
-                >
-                  <PlusCircle size={15} />
-                  <span>Create {typeFilter === 'bol' ? 'Bill of Lading (LOC)' : typeFilter === 'invoice' ? 'Payment Invoice' : typeFilter === 'credit_card_authorization' ? 'Credit Card Auth' : 'Contract'}</span>
-                </button>
-              </div>
-            ) : (
+          {isLoading ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="animate-spin text-blue-500" size={24} />
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="text-center py-12 text-slate-500 bg-slate-50 rounded-2xl border border-slate-100 border-dashed">
+              <FileText className="mx-auto mb-3 opacity-50" size={32} />
+              <p className="font-medium text-sm">
+                {typeFilter !== 'all'
+                  ? `No ${typeFilter === 'bol' ? 'Bill of Lading' : typeFilter === 'invoice' ? 'Payment Invoice' : typeFilter === 'credit_card_authorization' ? 'Credit Card Authorization' : 'Contract'} templates found.`
+                  : searchTerm || activeFilter !== 'all' || branchFilter
+                  ? 'No document templates match your filters.'
+                  : 'No document templates found.'}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onOpenChooser) {
+                    onOpenChooser('document');
+                  } else {
+                    setIsCreateModalOpen(true);
+                  }
+                }}
+                className="mt-4 inline-flex items-center gap-2 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2.5 rounded-xl transition"
+              >
+                <PlusCircle size={15} />
+                <span>Create Document</span>
+              </button>
+            </div>
+          ) : (
               <div className="overflow-x-auto rounded-xl border border-slate-200">
                 <table className="w-full text-left text-sm whitespace-nowrap">
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider text-xs font-bold">
                     <tr>
                       <th className="px-6 py-4">Template Name</th>
                       <th className="px-6 py-4">Type</th>
+                      <th className="px-6 py-4">Applies To</th>
                       <th className="px-6 py-4">Version</th>
+                      <th className="px-6 py-4">Branch</th>
                       <th className="px-6 py-4">Status</th>
                       <th className="px-6 py-4 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filtered.map(t => (
-                      <tr key={t.id} className="hover:bg-slate-50 transition-colors">
+                    {filtered.map((t) => (
+                      <tr key={`${t.source_type || 'legal'}-${t.id}`} className="hover:bg-slate-50 transition-colors">
                         <td className="px-6 py-4 font-semibold text-slate-800">
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-500 shrink-0">
@@ -1183,16 +1326,24 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
                             </div>
                             <div>
                               <div>{t.name}</div>
-                              <div className="text-[11px] font-normal text-slate-500">{t.subject || 'No subject'}</div>
+                              <div className="text-[11px] font-normal text-slate-500">{t.subject || t.description || 'No subject'}</div>
                             </div>
                           </div>
                         </td>
                         <td className="px-6 py-4">
                           <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 text-[11px] font-bold uppercase tracking-wider">
-                            {t.template_type}
+                            {t.display_type || t.template_type}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 text-[11px] font-bold">
+                            {t.applies_to_label || (t.scope_type === 'job' || t.applies_to_entity === 'job' || t.scope_type === 'planned_sub_job' ? 'Job' : 'Opportunity')}
                           </span>
                         </td>
                         <td className="px-6 py-4 font-medium text-slate-600">{t.version || '-'}</td>
+                        <td className="px-6 py-4 text-xs font-semibold text-slate-600">
+                          {branches.find((b) => String(b.id) === String(t.branch))?.name || (t.branch ? `Branch #${t.branch}` : 'All Branches')}
+                        </td>
                         <td className="px-6 py-4">
                           {t.is_active ? (
                             <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full">
@@ -1206,14 +1357,22 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
                         </td>
                         <td className="px-6 py-4 text-right space-x-2">
                           <button
-                            onClick={() => navigate(`/settings/document-templates/${t.id}/builder`)}
+                            onClick={() => handleEditRow(t)}
                             className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-indigo-600 hover:border-indigo-200 hover:bg-indigo-50 transition-colors"
                             title="Edit Template"
                           >
                             <Edit2 size={14} />
                           </button>
                           <button
-                            onClick={() => removeTemplate(t.id, t.name)}
+                            onClick={() => handleDuplicateRow(t)}
+                            disabled={isLoading || isSaving}
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50 transition-colors disabled:opacity-50"
+                            title="Duplicate Template"
+                          >
+                            <Copy size={14} />
+                          </button>
+                          <button
+                            onClick={() => removeTemplate(t, t.name)}
                             disabled={isDeleting}
                             className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition-colors disabled:opacity-50"
                             title="Delete Template"
@@ -1230,24 +1389,57 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
           </Card>
         </div>
 
+      {/* Create Document Modal */}
+      <CreateUniversalDocumentModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onCreated={(saved, meta) => {
+          setIsCreateModalOpen(false);
+          const normalizedSaved = {
+            ...saved,
+            source_type: meta.group,
+            unified_type: meta.group === 'estimate' ? 'estimate' : meta.group === 'comm' ? (meta.mode === 'sms' ? 'sms' : 'email') : saved.template_type,
+            display_type: meta.group === 'estimate' ? 'Estimate' : meta.group === 'comm' ? (meta.mode === 'sms' ? 'SMS' : 'Email') : (saved.template_type === 'bol' ? 'BOL' : saved.template_type === 'invoice' ? 'Invoice' : saved.template_type === 'credit_card_authorization' ? 'CC Auth' : 'Contract'),
+            applies_to_label: meta.group === 'estimate' ? 'Customer Portal' : meta.group === 'comm' ? (meta.mode === 'sms' ? 'SMS Alert' : 'Transactional Email') : (saved.scope_type === 'job' ? 'Job' : 'Opportunity'),
+          };
+          setItems((prev) => [normalizedSaved, ...prev]);
+          setDraft({ ...EMPTY_TEMPLATE, ...normalizedSaved });
+          setSelectedId(saved.id);
+          setActiveBuilderMeta({ group: meta.group, mode: meta.mode });
+          setIsBuilderOpen(true);
+          if (meta.group === 'estimate') {
+            navigate(`/settings/estimate-portal-templates/${saved.id}/builder`);
+          } else if (meta.group === 'comm') {
+            navigate(`/settings/documents/communication-templates/${saved.id}/builder`);
+          } else {
+            navigate(`/settings/document-templates/${saved.id}/builder`);
+          }
+        }}
+        existingLegalTemplates={legalItems.length ? legalItems : items.filter((t) => !t.source_type || t.source_type === 'legal')}
+        existingEstimateTemplates={estimateItems.length ? estimateItems : items.filter((t) => t.source_type === 'estimate')}
+        existingCommTemplates={commItems.length ? commItems : items.filter((t) => t.source_type === 'comm')}
+        branches={branches}
+        defaultBranchId={branchFilter || branchId}
+        initialCategory={typeFilter !== 'all' ? typeFilter : 'contract'}
+        presetLayouts={PRESET_LAYOUTS}
+      />
+
       {/* Full Page Builder Overlay */}
       {isBuilderOpen ? (
         <UnifiedTemplateBuilder
-          mode={
-            draft.template_type === 'bol'
-              ? 'bol'
-              : draft.template_type === 'credit_card_authorization'
-              ? 'cc_auth'
-              : draft.template_type === 'invoice' || draft.template_type === 'payment_receipt'
-              ? 'invoice'
-              : 'contract'
-          }
+          mode={getBuilderMode()}
           draft={draft}
           onChange={(newDraft) => setDraft(newDraft)}
           onSave={async (savedDoc) => {
             const saved = await saveTemplate();
             if (saved?.id) {
-              navigate(`/settings/document-templates/${saved.id}/builder`, { replace: true });
+              if (activeBuilderMeta?.group === 'estimate' || draft?.source_type === 'estimate') {
+                navigate(`/settings/estimate-portal-templates/${saved.id}/builder`, { replace: true });
+              } else if (activeBuilderMeta?.group === 'comm' || draft?.source_type === 'comm') {
+                navigate(`/settings/documents/communication-templates/${saved.id}/builder`, { replace: true });
+              } else {
+                navigate(`/settings/document-templates/${saved.id}/builder`, { replace: true });
+              }
             }
             return saved;
           }}

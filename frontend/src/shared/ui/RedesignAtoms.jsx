@@ -227,9 +227,9 @@ export function IconButton({ name, label, tone = "ghost", onClick, className = "
       type={type}
       aria-label={label}
       onClick={onClick}
-      className={`inline-flex h-9 w-9 items-center justify-center rounded-xl transition ${tones[tone] || tones.ghost} ${className}`}
+      className={`inline-flex h-8 w-8 sm:h-9 sm:w-9 lg:h-10 lg:w-10 items-center justify-center rounded-xl transition ${tones[tone] || tones.ghost} ${className}`}
     >
-      <Icon name={name} className="w-[18px] h-[18px]" />
+      <Icon name={name} className="w-3.5 h-3.5 sm:w-4 sm:h-4 lg:w-4.5 lg:h-4.5" />
     </button>
   );
 }
@@ -240,10 +240,10 @@ export function PrimaryBtn({ children, icon, onClick, className = "", disabled =
       type={type}
       onClick={onClick}
       disabled={disabled || loading}
-      className={`inline-flex items-center justify-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-pop transition hover:bg-brand-dark active:translate-y-px disabled:opacity-50 disabled:pointer-events-none ${className}`}
+      className={`inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl bg-brand px-3 sm:px-4 py-2 sm:py-2.5 text-xs sm:text-sm font-semibold text-white shadow-pop transition hover:bg-brand-dark active:translate-y-px disabled:opacity-50 disabled:pointer-events-none ${className}`}
     >
-      {loading ? <LucideIcons.Loader2 className="w-4 h-4 animate-spin" /> : children}
-      {!loading && icon && <Icon name={icon} className="w-4 h-4" />}
+      {loading ? <LucideIcons.Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin" /> : children}
+      {!loading && icon && <Icon name={icon} className="w-3.5 h-3.5 sm:w-4 sm:h-4 lg:w-4.5 lg:h-4.5" />}
     </button>
   );
 }
@@ -259,9 +259,9 @@ export function GhostBtn({ children, icon, onClick, className = "", tone = "defa
       type={type}
       onClick={onClick}
       disabled={disabled}
-      className={`inline-flex items-center justify-center gap-2 rounded-xl px-3.5 py-2.5 text-sm font-semibold ring-1 ring-inset transition active:translate-y-px disabled:opacity-50 disabled:pointer-events-none ${tones[tone] || tones.default} ${className}`}
+      className={`inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl px-3 sm:px-3.5 py-2 sm:py-2.5 text-xs sm:text-sm font-semibold ring-1 ring-inset transition active:translate-y-px disabled:opacity-50 disabled:pointer-events-none ${tones[tone] || tones.default} ${className}`}
     >
-      {icon && <Icon name={icon} className="w-4 h-4" />}
+      {icon && <Icon name={icon} className="w-3.5 h-3.5 sm:w-4 sm:h-4 lg:w-4.5 lg:h-4.5" />}
       {children}
     </button>
   );
@@ -418,7 +418,7 @@ export function CustomerSection({ firstName, lastName, email, phone, editing, on
             editing ? "bg-brand text-white shadow-pop" : "bg-[#F5FEFA] text-emerald-700 hover:bg-[#e2f9ed]"
           }`}
         >
-          <Icon name={editing ? "check" : "pencil"} className="w-3.5 h-3.5" />
+          <Icon name={editing ? "check" : "pencil"} className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           {editing ? "Done" : "Edit"}
         </button>
       </div>
@@ -466,8 +466,8 @@ export function CustomerSection({ firstName, lastName, email, phone, editing, on
           <div className="min-w-0 flex-1">
             <h3 className="text-lg font-extrabold text-ink-900 truncate">{firstName} {lastName}</h3>
             <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-ink-500">
-              <span className="flex items-center gap-1.5"><Icon name="mail" className="w-3.5 h-3.5" /> {email || 'No email'}</span>
-              <span className="flex items-center gap-1.5"><Icon name="phone" className="w-3.5 h-3.5" /> {phone || 'No phone'}</span>
+              <span className="flex items-center gap-1.5"><Icon name="mail" className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> {email || 'No email'}</span>
+              <span className="flex items-center gap-1.5"><Icon name="phone" className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> {phone || 'No phone'}</span>
             </div>
           </div>
         </div>
@@ -504,7 +504,7 @@ export function RouteSection({
             onClick={onStartEdit}
             className="inline-flex items-center gap-1.5 rounded-xl bg-[#F5FEFA] px-2.5 py-1.5 text-xs font-bold text-emerald-700 transition hover:bg-[#e2f9ed]"
           >
-            <Icon name="pencil" className="w-3.5 h-3.5" />
+            <Icon name="pencil" className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             Edit
           </button>
         )}
@@ -553,7 +553,7 @@ export function RouteSection({
           </div>
           <div className="relative flex gap-3">
             <span className="relative z-10 mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white">
-              <Icon name="map-pin" className="w-3 h-3" strokeWidth={3} />
+              <Icon name="map-pin" className="w-3 h-3 sm:w-3.5 sm:h-3.5" strokeWidth={3} />
             </span>
             <div className="min-w-0 flex-1">
               <div className="label-eyebrow text-ink-400">Destination</div>

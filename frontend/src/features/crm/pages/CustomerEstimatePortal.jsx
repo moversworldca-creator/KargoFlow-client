@@ -424,27 +424,48 @@ const decodeHtmlEntities = (raw) => {
 };
 
 const DEFAULT_MOBILE_CSS = `
-  @media (max-width: 768px) {
-      .responsive-grid-3 { grid-template-columns: 1fr !important; }
-      .responsive-grid-2 { grid-template-columns: 1fr !important; }
-      .mobile-padding { padding-left: 1.5rem !important; padding-right: 1.5rem !important; padding-top: 1.5rem !important; }
-      .financial-box-width { width: 100% !important; min-width: 0 !important; }
-      .responsive-flex-end { justify-content: flex-start !important; }
-      .route-container { flex-direction: column !important; align-items: stretch !important; }
-      .route-arrow-h { display: none !important; }
-  }
+@media (max-width: 768px) {
+  .portal-template .responsive-grid-3 { grid-template-columns: 1fr !important; }
+  .portal-template .responsive-grid-2 { grid-template-columns: 1fr !important; }
+  .portal-template .mobile-padding { padding-left: 1rem !important; padding-right: 1rem !important; padding-top: 1.25rem !important; padding-bottom: 1.25rem !important; }
+  .portal-template .financial-box-width { width: 100% !important; min-width: 0 !important; }
+  .portal-template .responsive-flex-end { justify-content: flex-start !important; }
+  .portal-template .route-container { flex-direction: column !important; align-items: stretch !important; }
+  .portal-template .route-arrow-h { display: none !important; }
+  .portal-template .wrap { padding: 16px 12px !important; }
+  .portal-template .section { padding: 18px 14px !important; border-radius: 16px !important; }
+  .portal-template .hero-main { padding: 20px 16px !important; border-radius: 18px !important; }
+  .portal-template .headline { font-size: 22px !important; line-height: 1.25 !important; }
+  .portal-template .grid4 { grid-template-columns: 1fr !important; gap: 12px !important; }
+  .portal-template .meta-row { flex-wrap: wrap !important; gap: 6px !important; }
+}
+
+@media (max-width: 480px) {
+  .portal-template .mobile-padding { padding-left: 0.75rem !important; padding-right: 0.75rem !important; }
+  .portal-template .headline { font-size: 19px !important; }
+  .portal-template .section-title { font-size: 16px !important; }
+}
 `;
 
 const scopePortalCss = (css) => {
-  const combinedCss = `${css || ''} ${DEFAULT_MOBILE_CSS}`;
-  const processed = combinedCss
-    .replace(/\bbody(?![a-zA-Z0-9_-])/g, '&')
-    .replace(/\bhtml(?![a-zA-Z0-9_-])/g, '&')
-    .replace(/:root(?![a-zA-Z0-9_-])/g, '&')
-    .replace(/\.portal-template(?![a-zA-Z0-9_-])/g, '&');
-  return `.portal-template {
-    ${processed}
-  }`;
+  if (!css || !css.trim()) return '';
+  return css.replace(/(^|\})\s*([^{]+)\s*\{/g, (match, p1, p2) => {
+    if (p2.includes('@media') || p2.includes('@keyframes') || p2.includes('@font-face')) {
+      return match;
+    }
+    const scoped = p2
+      .split(',')
+      .map((selector) => {
+        const s = selector.trim();
+        if (!s) return '';
+        if (s === 'body' || s === 'html' || s === ':root' || s === '.portal-template') {
+          return '.portal-template';
+        }
+        return `.portal-template ${s}`;
+      })
+      .join(', ');
+    return `${p1} ${scoped} {`;
+  });
 };
 
 const normalizeTemplateHtml = (raw) => {
@@ -1207,6 +1228,7 @@ export default function CustomerEstimatePortal() {
       {!portalLayout?.ignore_default_styles && !isCustomHtmlMode ? (
         <style dangerouslySetInnerHTML={{ __html: DEFAULT_TEMPLATE_CSS }} />
       ) : null}
+      <style dangerouslySetInnerHTML={{ __html: DEFAULT_MOBILE_CSS }} />
       {activeCss ? <style dangerouslySetInnerHTML={{ __html: scopePortalCss(activeCss) }} /> : null}
       {error ? (
         <div className="mx-auto max-w-6xl px-4 pt-6 sm:px-6 lg:px-8">
@@ -1268,7 +1290,7 @@ export default function CustomerEstimatePortal() {
                 Manage Inventory
               </a>
             ) : null}
-            {!portalAccepted ? (
+            {!portalAccepted && !isCustomHtmlMode ? (
               <button
                 type="button"
                 onClick={() => ctx.openSignaturePad()}
@@ -1283,8 +1305,8 @@ export default function CustomerEstimatePortal() {
       </div>
 
       {isCustomHtmlMode ? (
-        <div className="py-10 px-4">
-          <div className="w-full max-w-[850px] mx-auto bg-white min-h-[1056px] shadow-2xl overflow-hidden">
+        <div className="py-4 sm:py-10 px-2 sm:px-4">
+          <div className="w-full max-w-[850px] mx-auto bg-white min-h-0 sm:min-h-[1056px] shadow-2xl overflow-x-auto rounded-xl sm:rounded-2xl">
             <EstimatePortalTemplateRenderer
               renderedHtml={renderedSafe}
               ctx={ctx}
@@ -1292,7 +1314,7 @@ export default function CustomerEstimatePortal() {
               templateClassName="portal-template portal-template-custom"
             />
             {routeStops.length > 0 && !templateSupportsRouteStops ? (
-              <div className="px-6 pb-10">
+              <div className="px-4 sm:px-6 pb-6 sm:pb-10">
                 <EstimatePortalRouteStopsBlock ctx={ctx} />
               </div>
             ) : null}

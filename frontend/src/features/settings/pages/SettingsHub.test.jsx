@@ -5,13 +5,14 @@ import SettingsHub from './SettingsHub';
 import API from '../../../services/api';
 
 const navigate = vi.fn();
-const routeState = vi.hoisted(() => ({ params: {} }));
+const routeState = vi.hoisted(() => ({ params: {}, pathname: '/settings/company/profile' }));
 const authUser = vi.hoisted(() => ({ id: 1, email: 'admin@test.com', branch_id: 1, is_superuser: true }));
 const permissions = vi.hoisted(() => ({ canAll: () => true, canAny: () => true }));
 
 vi.mock('react-router-dom', async (importOriginal) => ({
   ...(await importOriginal()),
   useNavigate: () => navigate,
+  useLocation: () => ({ pathname: routeState.pathname }),
   useParams: () => routeState.params,
 }));
 
@@ -50,9 +51,22 @@ vi.mock('../components/BranchSettings', () => ({
   default: ({ view }) => <div data-testid="branch-settings-module">Branch Settings: {view}</div>,
 }));
 
+vi.mock('../components/DocumentTemplates', () => ({
+  default: () => <div data-testid="document-templates-module">Document Templates Content</div>,
+}));
+
+vi.mock('../components/EstimatePortalTemplates', () => ({
+  default: () => <div data-testid="estimate-templates-module">Estimate Templates Content</div>,
+}));
+
+vi.mock('../components/CommunicationTemplates', () => ({
+  default: () => <div data-testid="communication-templates-module">Communication Templates Content</div>,
+}));
+
 describe('SettingsHub', () => {
   beforeEach(() => {
     navigate.mockClear();
+    routeState.pathname = '/settings/company/profile';
     routeState.params = { mainGroup: 'company', subTab: 'profile' };
   });
 
@@ -111,5 +125,70 @@ describe('SettingsHub', () => {
     // Verify there is NO floating unsaved changes overlay
     expect(screen.queryByText(/You have unsaved changes/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Discard/i })).not.toBeInTheDocument();
+  });
+
+  it('redirects from /settings/documents to /settings/documents/document-templates', () => {
+    routeState.pathname = '/settings/documents';
+    routeState.params = { mainGroup: 'documents' };
+    render(<SettingsHub />);
+
+    expect(navigate).toHaveBeenCalledWith('/settings/documents/document-templates', { replace: true });
+  });
+
+  it('navigates to /settings/documents/document-templates when clicking Documents in Settings left rail', () => {
+    routeState.pathname = '/settings/company/profile';
+    routeState.params = { mainGroup: 'company', subTab: 'profile' };
+    render(<SettingsHub />);
+
+    const docsButton = screen.getByRole('button', { name: /Documents/i });
+    fireEvent.click(docsButton);
+
+    expect(navigate).toHaveBeenCalledWith('/settings/documents/document-templates');
+  });
+
+  it('renders Documents group cleanly under /settings/documents/document-templates', () => {
+    routeState.pathname = '/settings/documents/document-templates';
+    routeState.params = { mainGroup: 'documents', subTab: 'document-templates' };
+    render(<SettingsHub />);
+
+    expect(screen.getByRole('heading', { name: 'Settings Hub' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Document Templates/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Estimate Templates/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Email & SMS Templates/i })).toBeInTheDocument();
+    expect(screen.getByTestId('document-templates-module')).toBeInTheDocument();
+  });
+
+  it('navigates to estimate templates under /settings/documents when tab is clicked', () => {
+    routeState.pathname = '/settings/documents/document-templates';
+    routeState.params = { mainGroup: 'documents', subTab: 'document-templates' };
+    render(<SettingsHub />);
+
+    const estimateTab = screen.getByRole('tab', { name: /Estimate Templates/i });
+    fireEvent.click(estimateTab);
+
+    expect(navigate).toHaveBeenCalledWith('/settings/documents/estimate-portal-templates');
+  });
+
+  it('renders Documents Hub cleanly when under standalone /documents', () => {
+    routeState.pathname = '/documents/document-templates';
+    routeState.params = { subTab: 'document-templates' };
+    render(<SettingsHub initialGroup="documents" />);
+
+    expect(screen.getByRole('heading', { name: 'Documents Hub' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Document Templates/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Estimate Templates/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /\+ Create Template/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId('document-templates-module')).toBeInTheDocument();
+  });
+
+  it('navigates to estimate templates under /documents when clicked', () => {
+    routeState.pathname = '/documents/document-templates';
+    routeState.params = { subTab: 'document-templates' };
+    render(<SettingsHub initialGroup="documents" />);
+
+    const estimateTab = screen.getByRole('tab', { name: /Estimate Templates/i });
+    fireEvent.click(estimateTab);
+
+    expect(navigate).toHaveBeenCalledWith('/documents/estimate-portal-templates');
   });
 });

@@ -827,6 +827,29 @@
   transition-delay: 150ms;
 }
 
+/* Directional Tooltip Modifiers (Left-Edge & Right-Edge Viewport Protection) */
+.gdoc-tooltip-container.tooltip-left .gdoc-tooltip,
+.gdoc-tooltip-container .gdoc-tooltip.tooltip-left {
+  left: 0;
+  right: auto;
+  transform: translateY(-2px);
+}
+.gdoc-tooltip-container.tooltip-left:hover .gdoc-tooltip,
+.gdoc-tooltip-container:hover .gdoc-tooltip.tooltip-left {
+  transform: translateY(0);
+}
+
+.gdoc-tooltip-container.tooltip-right .gdoc-tooltip,
+.gdoc-tooltip-container .gdoc-tooltip.tooltip-right {
+  left: auto;
+  right: 0;
+  transform: translateY(-2px);
+}
+.gdoc-tooltip-container.tooltip-right:hover .gdoc-tooltip,
+.gdoc-tooltip-container:hover .gdoc-tooltip.tooltip-right {
+  transform: translateY(0);
+}
+
 /* ==========================================================================
    Device Viewport Responsive Canvas (Desktop / Tablet / Mobile)
    ========================================================================== */
@@ -893,14 +916,162 @@
   transition: all 0.25s ease;
 }
 
-/* Tablet Viewport Framing (768px view window) */
+/* Tablet Viewport Specific Adaptations */
 .tablet-viewport {
   width: 100% !important;
+  min-height: auto !important;
+  padding: 36px 32px !important;
+}
+.tablet-viewport .meta-grid {
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+.tablet-viewport .custom-fields-col,
+.tablet-viewport .custom-shipment-grid {
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.tablet-viewport .totals-wrap {
+  grid-template-columns: 1fr 240px;
+  gap: 20px;
+}
+.tablet-viewport .notes-blank-editor-content {
+  min-height: 160px;
+  padding: 12px 14px;
+}
+.tablet-viewport .doc-footer {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.tablet-viewport .doc-footer-details {
+  flex-wrap: wrap;
+  gap: 4px 8px;
 }
 
-/* Mobile Viewport Framing (375px view window) */
+/* Mobile Viewport Specific Adaptations */
 .mobile-viewport {
   width: 100% !important;
+  min-height: auto !important;
+  padding: 20px 14px !important;
+}
+.mobile-viewport .doc-header {
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+.mobile-viewport .doc-title {
+  align-items: flex-start;
+}
+.mobile-viewport .doc-title > .editable-value:first-child {
+  font-size: 22px;
+}
+.mobile-viewport .document-brand {
+  gap: 12px;
+}
+.mobile-viewport .document-brand .brand-mark {
+  width: 54px;
+  height: 54px;
+  border-radius: 12px;
+}
+.mobile-viewport .document-brand .editable-value {
+  font-size: 24px;
+}
+.mobile-viewport .meta-grid {
+  grid-template-columns: 1fr;
+  gap: 14px;
+  padding: 16px 0 20px;
+}
+.mobile-viewport .custom-fields-col,
+.mobile-viewport .custom-shipment-grid {
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+.mobile-viewport .shipment-box {
+  grid-template-columns: 1fr;
+  padding: 12px 12px;
+  gap: 12px;
+  min-height: auto;
+}
+.mobile-viewport .service {
+  border-left: 0;
+  border-top: 1px solid #d8e0e7;
+  padding: 10px 0 0;
+}
+.mobile-viewport .route-line {
+  display: none;
+}
+.mobile-viewport .route-point {
+  padding-left: 0;
+}
+.mobile-viewport .charge-table {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 16px;
+  border-radius: 6px;
+  border: 1px solid #e0e6ec;
+}
+.mobile-viewport .charge-row {
+  min-width: 320px;
+}
+.mobile-viewport .charge-row.head {
+  padding: 0 10px;
+}
+.mobile-viewport .totals-wrap {
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+.mobile-viewport .totals {
+  width: 100%;
+}
+.mobile-viewport .terms-grid {
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+.mobile-viewport .sign-grid {
+  grid-template-columns: 1fr;
+  gap: 20px;
+}
+.mobile-viewport .notes-blank-editor-content {
+  min-height: 130px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+}
+.mobile-viewport .notes-rich-toolbar {
+  padding: 4px 6px;
+  gap: 3px;
+}
+.mobile-viewport .doc-footer {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding-top: 12px;
+  margin-top: 18px;
+  width: 100%;
+}
+.mobile-viewport .doc-footer-details {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+}
+.mobile-viewport .doc-footer-details > .editable-value {
+  width: 100%;
+  word-break: break-all;
+}
+.mobile-viewport .doc-footer-details > .editable-value::after {
+  content: "";
+  display: none;
+}
+.mobile-viewport .doc-footer b.doc-footer-page,
+.mobile-viewport .doc-footer b {
+  align-self: flex-end;
+  margin-top: 2px;
+  padding: 3px 8px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  font-size: 8.5px;
+  font-weight: 700;
+  color: #1764e8;
 }
 
 /* Drag and Drop Canvas Zones & Item Grip Handle */
@@ -934,7 +1105,7 @@
   height: 8px;
   margin: -4px 0;
   position: relative;
-  z-index: 30;
+  z-index: 10;
   transition: height 0.15s ease, background 0.15s ease;
   border-radius: 4px;
 }
@@ -950,6 +1121,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 35;
 }
 .drop-zone.active span {
   display: flex;
@@ -965,6 +1137,7 @@
   margin-top: 10px;
   border: 1px dashed transparent;
   border-radius: 6px;
+  z-index: 10;
 }
 .drop-zone.end:hover {
   border-color: #cbd5e1;
@@ -973,6 +1146,7 @@
   height: 38px;
   border: 2px dashed #1764e8;
   background: #eff6ff;
+  z-index: 35;
 }
 
 /* Notes Component & Rich-Text Editor Page Boundary Containment */

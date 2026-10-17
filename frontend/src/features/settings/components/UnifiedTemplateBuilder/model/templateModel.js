@@ -272,6 +272,32 @@ export function createInitialDocument(mode = "estimate") {
   return baseDoc;
 }
 
+export const createBlankDocument = (
+  pageSize = "A4",
+  orientation = "Portrait"
+) => ({
+  version: 2,
+  id: createId("template"),
+  name: "Blank Estimate Document",
+  updatedAt: null,
+  settings: {
+    category: "Freight Estimate",
+    currency: "USD",
+    validity: "30 days",
+    defaultTax: "0",
+    pageSize,
+    orientation,
+  },
+  items: [],
+  pages: [
+    {
+      id: createId("page"),
+      name: "Page 1",
+      items: [],
+    },
+  ],
+});
+
 export function createHtmlWidget(initialHtml, initialCss, label = "HTML Document") {
   const html = initialHtml ?? DEFAULT_SAMPLE_HTML;
   const css = initialCss ?? DEFAULT_SAMPLE_CSS;

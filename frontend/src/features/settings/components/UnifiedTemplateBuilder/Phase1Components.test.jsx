@@ -4,6 +4,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import InlineEdit, { resolveVariableContent, SAMPLE_LOGISTICS_DATA } from "./components/InlineEdit";
 import NotesRichTextEditor from "./components/NotesRichTextEditor";
 import EditableHtmlBlock from "./components/EditableHtmlBlock";
+import DocumentBlock from "./components/DocumentBlock";
 
 describe("Phase 1: InlineEdit Component", () => {
   it("renders static value when not editing", () => {
@@ -44,6 +45,62 @@ describe("Phase 1: InlineEdit Component", () => {
     fireEvent.blur(input);
 
     expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it("applies inline style prop directly to rendered span and input", () => {
+    const { container } = render(
+      <InlineEdit
+        value="Custom Styled Inline"
+        part="lbl"
+        style={{ fontSize: "28px", fontWeight: 300, color: "rgb(220, 38, 38)" }}
+      />
+    );
+
+    const span = container.querySelector("span");
+    expect(span).toBeInTheDocument();
+    expect(span.style.fontSize).toBe("28px");
+    expect(span.style.fontWeight).toBe("300");
+    expect(span.style.color).toBe("rgb(220, 38, 38)");
+  });
+});
+
+describe("Phase 1: DocumentBlock Header & Heading Typography", () => {
+  it("renders Header company name with custom fontSize and fontWeight without Tailwind class collisions", () => {
+    const headerItem = {
+      id: "hdr-1",
+      type: "header",
+      label: "Official Quote",
+      style: {
+        fontSize: 34,
+        fontWeight: 300,
+        fontFamily: "Georgia, serif",
+        color: "#1e3a8a",
+      },
+      fields: [
+        { id: "companyName", label: "Company", value: "Acme Freight International" },
+        { id: "estimateTitle", label: "Title", value: "ESTIMATE 2026" },
+      ],
+    };
+
+    const { container } = render(
+      <DocumentBlock
+        item={headerItem}
+        isSelected={true}
+        preview={false}
+        onSelect={vi.fn()}
+        onUpdate={vi.fn()}
+        onDelete={vi.fn()}
+        onDuplicate={vi.fn()}
+      />
+    );
+
+    const companySpan = screen.getByText("Acme Freight International");
+    expect(companySpan).toBeInTheDocument();
+    expect(companySpan.style.fontSize).toBe("34px");
+    expect(companySpan.style.fontWeight).toBe("300");
+    expect(companySpan.style.fontFamily).toBe("Georgia, serif");
+    expect(companySpan.className).not.toContain("text-xl");
+    expect(companySpan.className).not.toContain("font-bold");
   });
 });
 

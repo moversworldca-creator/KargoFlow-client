@@ -1982,7 +1982,7 @@ export default function EmailVisualBuilder({ value, onChange, insertTokenRequest
                     onChange={(e) => updateBlock(activeBlock.id, { content: e.target.value })}
                     placeholder="<div>Write HTML here...</div>"
                     spellCheck={false}
-                    className="min-h-[240px] w-full resize-y rounded-xl bg-[#111827] px-3 py-3 font-mono text-xs leading-relaxed text-slate-100 outline-none focus:ring-2 focus:ring-primary/20"
+                    className="min-h-[240px] w-full resize-y rounded-xl bg-white border border-slate-200 px-3 py-3 font-mono text-xs leading-relaxed text-slate-800 placeholder:text-slate-400 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-3">

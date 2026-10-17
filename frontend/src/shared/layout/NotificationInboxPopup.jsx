@@ -126,7 +126,7 @@ const NotificationInboxPopup = ({ label, icon: Icon, categories, onClose }) => {
         onKeyDown={(e) => e.key === 'Enter' && navigate(record.action_url || record.url)}
       >
         <div className="pt-1 text-content-sec">
-          <CategoryIcon size={16} />
+          <CategoryIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex justify-between">
@@ -158,13 +158,13 @@ const NotificationInboxPopup = ({ label, icon: Icon, categories, onClose }) => {
                   onClick={(e) => handleActionClick(e, record, 'complete')}
                   className="px-2 py-1 bg-green-50 hover:bg-green-100 text-green-700 rounded text-[10px] font-bold transition-colors"
                 >
-                  <Check size={12} className="inline mr-1" /> Complete
+                  <Check className="inline mr-1 w-3 h-3 sm:w-3.5 sm:h-3.5" /> Complete
                 </button>
                 <button 
                   onClick={(e) => handleActionClick(e, record, 'snooze')}
                   className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[10px] font-bold transition-colors"
                 >
-                  <Clock size={12} className="inline mr-1" /> Snooze
+                  <Clock className="inline mr-1 w-3 h-3 sm:w-3.5 sm:h-3.5" /> Snooze
                 </button>
               </>
             )}
@@ -184,16 +184,16 @@ const NotificationInboxPopup = ({ label, icon: Icon, categories, onClose }) => {
     <div className="fixed inset-x-2 top-16 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-3 w-auto sm:w-[26rem] md:w-[30rem] max-w-[calc(100vw-1rem)] bg-brand-surface rounded-2xl shadow-xl border border-brand-border overflow-hidden z-[9999] animate-in fade-in slide-in-from-top-2 duration-200">
       <div className="p-4 bg-brand-sidebar border-b border-brand-border flex justify-between items-center">
         <div className="flex items-center gap-2 font-bold text-content-main">
-          <Icon size={18} className="text-primary" />
+          <Icon className="text-primary w-4 h-4 sm:w-[18px] sm:h-[18px]" />
           <span>{label}</span>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={fetchRecords} className="p-1 text-content-sec hover:text-primary transition-colors" title="Refresh">
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            <RefreshCw className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
           {onClose && (
             <button onClick={onClose} className="p-1 text-content-sec hover:text-content-main sm:hidden transition-colors" title="Close">
-              <X size={16} />
+              <X className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
             </button>
           )}
         </div>

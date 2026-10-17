@@ -161,6 +161,23 @@ export async function idbSet(key, value) {
   });
 }
 
+export async function idbDelete(key) {
+  const db = await openDatabase();
+  if (!db) return false;
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.delete(key);
+      req.onsuccess = () => resolve(true);
+      req.onerror = () => resolve(false);
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
 /**
  * Saves document into IndexedDB and LocalStorage fallback
  */

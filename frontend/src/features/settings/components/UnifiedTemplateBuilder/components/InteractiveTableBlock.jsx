@@ -32,6 +32,7 @@ import {
   deleteSelectedCells,
   deleteRowKeepGap,
   deleteColKeepGap,
+  restoreSpacerCell,
 } from "../core/tableOperations";
 
 export default function InteractiveTableBlock({
@@ -49,10 +50,17 @@ export default function InteractiveTableBlock({
   const isLayout = Boolean(settings.isLayout);
 
   // Cell Selection State
-  const [selectedCellId, setSelectedCellId] = useState(null);
-  const [multiCellIds, setMultiCellIds] = useState([]);
+  const [selectedCellId, setSelectedCellId] = useState(selection?.cellId || null);
+  const [multiCellIds, setMultiCellIds] = useState(selection?.cellId ? [selection.cellId] : []);
   const [isSelectingRange, setIsSelectingRange] = useState(false);
   const dragStartCellIdRef = useRef(null);
+
+  useEffect(() => {
+    if (selection?.cellId && selection.cellId !== selectedCellId) {
+      setSelectedCellId(selection.cellId);
+      setMultiCellIds([selection.cellId]);
+    }
+  }, [selection?.cellId]);
 
   // Modals
   const [splitDialogOpen, setSplitDialogOpen] = useState(false);
@@ -64,9 +72,28 @@ export default function InteractiveTableBlock({
   const selRowIdx = primaryCoord ? primaryCoord.row : -1;
   const selColIdx = primaryCoord ? primaryCoord.col : -1;
 
-  const selCellObj = primaryCoord
+  let selCellObj = primaryCoord
     ? matrix[primaryCoord.row]?.[primaryCoord.col]?.cell
     : null;
+
+  if (!selCellObj && selectedCellId) {
+    for (const r of rows) {
+      for (const c of r.cells || []) {
+        if (c.id === selectedCellId) {
+          selCellObj = c;
+          break;
+        }
+        if (c.subGrid && c.subGrid.cells) {
+          const sc = c.subGrid.cells.find((s) => s.id === selectedCellId);
+          if (sc) {
+            selCellObj = sc;
+            break;
+          }
+        }
+      }
+      if (selCellObj) break;
+    }
+  }
 
   // Clear sub-selection when item unselects
   useEffect(() => {
@@ -78,7 +105,7 @@ export default function InteractiveTableBlock({
 
   // Handle cell click / selection
   const handleCellClick = (cellId, e) => {
-    e.stopPropagation();
+    if (e && e.stopPropagation) e.stopPropagation();
     onSelect();
     setSelectedCellId(cellId);
     setMultiCellIds([cellId]);
@@ -113,7 +140,7 @@ export default function InteractiveTableBlock({
     return () => window.removeEventListener("pointerup", handlePointerUp);
   }, []);
 
-  // Update attributes on currently selected cells
+  // Update attributes on currently selected cells (including subgrid cells)
   const updateSelectedCells = (patch) => {
     const targetSet = new Set(multiCellIds.length > 0 ? multiCellIds : [selectedCellId]);
     const nextRows = rows.map((r) => ({
@@ -121,6 +148,48 @@ export default function InteractiveTableBlock({
       cells: (r.cells || []).map((c) => {
         if (targetSet.has(c.id)) {
           return { ...c, ...patch };
+        }
+        if (c.subGrid && c.subGrid.cells) {
+          const hasTargetSubcell = c.subGrid.cells.some((sc) => targetSet.has(sc.id));
+          if (hasTargetSubcell) {
+            return {
+              ...c,
+              subGrid: {
+                ...c.subGrid,
+                cells: c.subGrid.cells.map((sc) =>
+                  targetSet.has(sc.id) ? { ...sc, ...patch } : sc
+                ),
+              },
+            };
+          }
+        }
+        return c;
+      }),
+    }));
+    onItem({ ...item, tableRows: nextRows });
+  };
+
+  // Restore spacer cell (top-level cell or subgrid cell)
+  const handleRestoreSpacer = (cellId) => {
+    const next = restoreSpacerCell(rows, cellId);
+    onItem({ ...item, tableRows: next });
+  };
+
+  // Handle content change inside a subgrid cell
+  const handleSubcellContentChange = (parentCellId, subcellId, newContent) => {
+    const nextRows = rows.map((r) => ({
+      ...r,
+      cells: (r.cells || []).map((c) => {
+        if (c.id === parentCellId && c.subGrid && c.subGrid.cells) {
+          return {
+            ...c,
+            subGrid: {
+              ...c.subGrid,
+              cells: c.subGrid.cells.map((sc) =>
+                sc.id === subcellId ? { ...sc, content: newContent } : sc
+              ),
+            },
+          };
         }
         return c;
       }),
@@ -198,10 +267,12 @@ export default function InteractiveTableBlock({
     const onPointerUp = () => {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
     };
 
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
   };
 
   // Row Height Resize Drag Handler
@@ -223,10 +294,12 @@ export default function InteractiveTableBlock({
     const onPointerUp = () => {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
     };
 
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
   };
 
   const hasSelectedCell = Boolean(selectedCellId);
@@ -279,6 +352,7 @@ export default function InteractiveTableBlock({
             }}
             className="px-2 py-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded text-[11px] font-semibold transition"
             title="Insert row above"
+            aria-label="Insert row above"
           >
             + Row ↑
           </button>
@@ -295,6 +369,7 @@ export default function InteractiveTableBlock({
             }}
             className="px-2 py-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded text-[11px] font-semibold transition"
             title="Insert row below"
+            aria-label="Insert row below"
           >
             + Row ↓
           </button>
@@ -310,6 +385,7 @@ export default function InteractiveTableBlock({
             }}
             className="px-2 py-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded text-[11px] font-semibold transition"
             title="Insert column left"
+            aria-label="Insert column left"
           >
             + Col ←
           </button>
@@ -327,6 +403,7 @@ export default function InteractiveTableBlock({
             }}
             className="px-2 py-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded text-[11px] font-semibold transition"
             title="Insert column right"
+            aria-label="Insert column right"
           >
             + Col →
           </button>
@@ -385,11 +462,46 @@ export default function InteractiveTableBlock({
             <Italic size={14} />
           </button>
 
+          {/* Cell Font Size Stepper */}
+          <div className="flex items-center bg-slate-100 rounded-md p-0.5 border border-slate-200">
+            <button
+              type="button"
+              onClick={() => {
+                const cur = selCellObj?.fontSize || 12;
+                updateSelectedCells({ fontSize: Math.max(8, cur - 1) });
+              }}
+              className="p-1 hover:bg-white rounded text-slate-600 transition"
+              title="Decrease font size"
+              aria-label="Decrease font size"
+            >
+              <Minus size={12} />
+            </button>
+            <span className="text-[11px] font-semibold text-slate-700 px-1.5 min-w-[32px] text-center select-none font-mono">
+              {selCellObj?.fontSize || 12}px
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                const cur = selCellObj?.fontSize || 12;
+                updateSelectedCells({ fontSize: Math.min(48, cur + 1) });
+              }}
+              className="p-1 hover:bg-white rounded text-slate-600 transition"
+              title="Increase font size"
+              aria-label="Increase font size"
+            >
+              <Plus size={12} />
+            </button>
+          </div>
+
+          <span className="w-px h-4 bg-slate-200 mx-0.5" />
+
+          {/* Alignment */}
           <button
             type="button"
             onClick={() => updateSelectedCells({ textAlign: "left" })}
             className="p-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 rounded transition"
             title="Align Left"
+            aria-label="Align left"
           >
             <AlignLeft size={14} />
           </button>
@@ -398,6 +510,7 @@ export default function InteractiveTableBlock({
             onClick={() => updateSelectedCells({ textAlign: "center" })}
             className="p-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 rounded transition"
             title="Align Center"
+            aria-label="Align center"
           >
             <AlignCenter size={14} />
           </button>
@@ -406,6 +519,7 @@ export default function InteractiveTableBlock({
             onClick={() => updateSelectedCells({ textAlign: "right" })}
             className="p-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 rounded transition"
             title="Align Right"
+            aria-label="Align right"
           >
             <AlignRight size={14} />
           </button>
@@ -516,7 +630,7 @@ export default function InteractiveTableBlock({
           <table className="w-full border-collapse text-xs table-fixed">
             <tbody>
               {rows.map((row) => (
-                <tr key={row.id} style={{ height: row.height || 36 }}>
+                <tr key={row.id} style={{ height: row.height ? `${row.height}px` : "auto", minHeight: row.height || 36 }}>
                   {(row.cells || []).map((cell) => {
                     const isCellSelected =
                       multiCellIds.includes(cell.id) || selectedCellId === cell.id;
@@ -535,6 +649,8 @@ export default function InteractiveTableBlock({
                             ? "transparent"
                             : cell.backgroundColor || (isLayout ? "transparent" : "#ffffff"),
                           color: cell.color || "#0f172a",
+                          fontSize: cell.fontSize ? `${cell.fontSize}px` : undefined,
+                          fontFamily: cell.fontFamily || undefined,
                           fontWeight: cell.bold ? 700 : undefined,
                           fontStyle: cell.italic ? "italic" : undefined,
                           textAlign: cell.textAlign || "left",
@@ -542,7 +658,7 @@ export default function InteractiveTableBlock({
                           wordBreak: "break-word",
                           overflowWrap: "anywhere",
                         }}
-                        className={`transition relative p-2 min-h-[36px] cursor-text break-words overflow-hidden [overflow-wrap:anywhere] [word-break:break-word] ${
+                        className={`transition relative p-2 min-h-[36px] cursor-text break-words [overflow-wrap:anywhere] [word-break:break-word] ${
                           isLayout
                             ? "border border-dashed border-slate-200 hover:border-blue-300"
                             : isSpacer
@@ -554,8 +670,104 @@ export default function InteractiveTableBlock({
                             : ""
                         }`}
                       >
-                        {isSpacer ? (
-                          <div className="h-4" />
+                        {cell.subGrid && cell.subGrid.cells ? (
+                          <div
+                            className="custom-table-subgrid w-full h-full"
+                            style={{
+                              display: "grid",
+                              gridTemplateRows: `repeat(${cell.subGrid.rows || 1}, 1fr)`,
+                              gridTemplateColumns: `repeat(${cell.subGrid.cols || 1}, 1fr)`,
+                              minHeight: `${Math.max(34, (cell.subGrid.rows || 1) * 24)}px`,
+                              gap: "2px",
+                              boxSizing: "border-box",
+                            }}
+                          >
+                            {cell.subGrid.cells.map((sc) => {
+                              const isScSelected =
+                                multiCellIds.includes(sc.id) || selectedCellId === sc.id;
+                              const isScSpacer = Boolean(sc.isSpacer);
+
+                              return (
+                                <div
+                                  key={sc.id}
+                                  data-cell-id={sc.id}
+                                  onClick={(e) => handleCellClick(sc.id, e)}
+                                  onPointerDown={(e) => handleCellPointerDown(sc.id, e)}
+                                  onPointerEnter={() => handleCellPointerEnter(sc.id)}
+                                  style={{
+                                    backgroundColor: isScSpacer
+                                      ? "transparent"
+                                      : sc.backgroundColor || "#ffffff",
+                                    color: sc.color || cell.color || "#0f172a",
+                                    fontSize: (sc.fontSize || cell.fontSize) ? `${sc.fontSize || cell.fontSize}px` : undefined,
+                                    fontFamily: sc.fontFamily || cell.fontFamily || undefined,
+                                    fontWeight: sc.bold || cell.bold ? 700 : undefined,
+                                    fontStyle: sc.italic || cell.italic ? "italic" : undefined,
+                                    textAlign: sc.textAlign || cell.textAlign || "left",
+                                    verticalAlign: sc.verticalAlign || cell.verticalAlign || "middle",
+                                    wordBreak: "break-word",
+                                    overflowWrap: "anywhere",
+                                  }}
+                                  className={`relative p-1.5 min-h-[24px] border border-dashed border-slate-300 transition ${
+                                    isScSelected
+                                      ? "ring-2 ring-blue-500 ring-inset bg-blue-50/50 z-10"
+                                      : "hover:border-blue-400"
+                                  }`}
+                                >
+                                  {isScSpacer ? (
+                                    <div className="flex items-center justify-between text-[10px] text-slate-400 py-0.5">
+                                      <span>(Gap)</span>
+                                      {!preview && (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleRestoreSpacer(sc.id);
+                                          }}
+                                          className="text-blue-600 hover:underline font-semibold"
+                                        >
+                                          + Restore
+                                        </button>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <InlineEdit
+                                      value={sc.content || ""}
+                                      part={`cell_${sc.id}`}
+                                      selection={selectedCellId === sc.id ? `cell_${sc.id}` : selection}
+                                      preview={preview}
+                                      resolveVariables={resolveVariables}
+                                      allowEmpty={true}
+                                      className="w-full min-w-0 max-w-full text-inherit block break-words [overflow-wrap:anywhere] [word-break:break-word]"
+                                      onSelect={() => {
+                                        onSelect();
+                                        handleCellClick(sc.id, { stopPropagation: () => {} });
+                                      }}
+                                      onCommit={(val) => handleSubcellContentChange(cell.id, sc.id, val)}
+                                      onNext={() => handleMoveToNextCell(sc.id)}
+                                    />
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : isSpacer ? (
+                          <div className="flex items-center justify-between text-[11px] text-slate-400 py-1">
+                            <span>(Gap)</span>
+                            {!preview && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRestoreSpacer(cell.id);
+                                }}
+                                className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 text-[10px] font-semibold transition"
+                                title="Restore this spacer cell"
+                              >
+                                + Restore
+                              </button>
+                            )}
+                          </div>
                         ) : cell.items && cell.items.length > 0 ? (
                           <div className="space-y-1">
                             {cell.items.map((it) => (

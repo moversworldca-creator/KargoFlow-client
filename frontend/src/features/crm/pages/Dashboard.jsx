@@ -186,22 +186,22 @@ function DashboardHeader({
             className="hidden sm:inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 shadow-xs hover:border-slate-300 hover:bg-slate-50/80 transition-all cursor-pointer text-left group"
             title="View today's active jobs"
           >
-            <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-emerald-50 text-emerald-600 group-hover:bg-emerald-100 transition-colors">
-              <Truck className="w-3 h-3" />
+            <span className="inline-flex h-5 w-5 sm:h-5.5 sm:w-5.5 items-center justify-center rounded-md bg-emerald-50 text-emerald-600 group-hover:bg-emerald-100 transition-colors">
+              <Truck className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
             </span>
             <span className="text-[11px] font-medium text-slate-600">
               Active today: <span className="font-mono font-bold tabular-nums text-slate-900">{activeJobsCount}</span>
             </span>
-            <ChevronRight className="w-3 h-3 text-slate-300 group-hover:text-slate-600 transition-colors -ml-0.5" />
+            <ChevronRight className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-slate-300 group-hover:text-slate-600 transition-colors -ml-0.5" />
           </button>
 
           {/* Primary Action: Instant Booking */}
           <button
             type="button"
             onClick={() => navigate('/leads/new')}
-            className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-slate-900 px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-slate-800 active:scale-98 transition-all cursor-pointer whitespace-nowrap"
+            className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-slate-900 px-3 sm:px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-slate-800 active:scale-98 transition-all cursor-pointer whitespace-nowrap"
           >
-            <Zap className="w-3.5 h-3.5 text-amber-400" />
+            <Zap className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
             <span>Instant booking</span>
           </button>
         </div>
@@ -215,7 +215,7 @@ function DashboardHeader({
           onClick={() => navigate('/leads/table/pipeline')}
           className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100/80 hover:bg-slate-200/70 text-slate-700 transition-colors font-medium cursor-pointer shrink-0"
         >
-          <Target className="w-3 h-3 text-blue-600" />
+          <Target className="w-3 h-3 sm:w-3.5 sm:h-3.5 lg:w-4 lg:h-4 text-blue-600" />
           <span>Pipeline & Quotes</span>
         </button>
         <button
@@ -223,7 +223,7 @@ function DashboardHeader({
           onClick={() => navigate('/jobs')}
           className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100/80 hover:bg-slate-200/70 text-slate-700 transition-colors font-medium cursor-pointer shrink-0"
         >
-          <Calendar className="w-3 h-3 text-emerald-600" />
+          <Calendar className="w-3 h-3 sm:w-3.5 sm:h-3.5 lg:w-4 lg:h-4 text-emerald-600" />
           <span>Dispatch & Jobs</span>
         </button>
         <button
@@ -231,7 +231,7 @@ function DashboardHeader({
           onClick={() => navigate('/accounting/invoices')}
           className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100/80 hover:bg-slate-200/70 text-slate-700 transition-colors font-medium cursor-pointer shrink-0"
         >
-          <Receipt className="w-3 h-3 text-violet-600" />
+          <Receipt className="w-3 h-3 sm:w-3.5 sm:h-3.5 lg:w-4 lg:h-4 text-violet-600" />
           <span>Billing & Invoices</span>
         </button>
         <button
@@ -239,7 +239,7 @@ function DashboardHeader({
           onClick={() => navigate('/leads/new')}
           className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100/80 hover:bg-slate-200/70 text-slate-700 transition-colors font-medium cursor-pointer shrink-0"
         >
-          <UserPlus className="w-3 h-3 text-amber-600" />
+          <UserPlus className="w-3 h-3 sm:w-3.5 sm:h-3.5 lg:w-4 lg:h-4 text-amber-600" />
           <span>New Lead</span>
         </button>
       </div>
@@ -257,7 +257,7 @@ function DeltaBadge({ value, suffix = "%" }) {
     <span className={`inline-flex items-center gap-0.5 text-xs font-semibold font-mono tabular-nums ${
       up ? "text-emerald-600" : "text-rose-600"
     }`}>
-      <Icon name={up ? "trending-up" : "trending-down"} className="w-3 h-3" />
+      <Icon name={up ? "trending-up" : "trending-down"} className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
       {up ? "+" : ""}{value.toFixed(1)}{suffix}
     </span>
   );
@@ -267,18 +267,18 @@ function KpiCard({ icon, tint, label, value, sub, delta, deltaSuffix, onClick, h
   return (
     <div 
       onClick={onClick}
-      className={`rounded-2xl border border-slate-200 bg-white p-4.5 shadow-xs transition-all duration-150 ${
+      className={`rounded-2xl border border-slate-200 bg-white p-3.5 sm:p-4 lg:p-4.5 shadow-xs transition-all duration-150 ${
         onClick ? 'hover:border-slate-300 hover:shadow-md cursor-pointer group' : ''
       }`}
     >
       <div className="flex items-center justify-between">
-        <span className={`inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-50 border border-slate-100 ${tint} transition-transform duration-150 ${onClick ? 'group-hover:scale-105' : ''}`}>
-          <Icon name={icon} className="w-4 h-4" />
+        <span className={`inline-flex h-8 w-8 sm:h-9 sm:w-9 lg:h-10 lg:w-10 items-center justify-center rounded-xl bg-slate-50 border border-slate-100 ${tint} transition-transform duration-150 ${onClick ? 'group-hover:scale-105' : ''}`}>
+          <Icon name={icon} className="w-4 h-4 sm:w-4.5 sm:h-4.5 lg:w-5 lg:h-5" />
         </span>
         <div className="flex items-center gap-1.5">
           {delta != null && <DeltaBadge value={delta} suffix={deltaSuffix} />}
           {onClick && (
-            <ChevronRight className="w-3.5 h-3.5 text-slate-300 group-hover:text-slate-600 group-hover:translate-x-0.5 transition-all" />
+            <ChevronRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-300 group-hover:text-slate-600 group-hover:translate-x-0.5 transition-all" />
           )}
         </div>
       </div>

@@ -9,7 +9,7 @@ export default defineConfig({
     ...(process.env.PLAYWRIGHT_USE_SYSTEM_CHROME === '1' ? { channel: 'chrome' } : {}),
   },
   webServer: {
-    command: 'VITE_ENABLE_PLAYWRIGHT_HARNESS=1 npm run dev -- --host 127.0.0.1 --port 4173',
+    command: 'npm run dev -- --host 127.0.0.1 --port 4173',
     port: 4173,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

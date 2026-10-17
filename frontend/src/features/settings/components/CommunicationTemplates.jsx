@@ -526,6 +526,7 @@ const CommunicationTemplates = ({
   builderRouteState = null,
   basePath = '/settings/templates',
   closePath = null,
+  onOpenChooser = null,
 }) => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -1605,13 +1606,6 @@ const CommunicationTemplates = ({
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <button
-            onClick={handleSeedDefaults}
-            disabled={isSeeding}
-            className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-border text-body rounded-xl text-xs sm:text-sm font-bold hover:bg-border transition-all whitespace-nowrap"
-          >
-            {isSeeding ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />} Load Starter
-          </button>
-          <button
             onClick={() => setShowCategoryModal(true)}
             className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-border text-body rounded-xl text-xs sm:text-sm font-bold hover:bg-border/80 transition-all border border-subtle whitespace-nowrap"
           >
@@ -1619,12 +1613,18 @@ const CommunicationTemplates = ({
           </button>
           <div className="relative">
             <button
-              onClick={() => setShowTypeSelectionModal(!showTypeSelectionModal)}
+              onClick={() => {
+                if (onOpenChooser) {
+                  onOpenChooser('communication');
+                } else {
+                  setShowTypeSelectionModal(!showTypeSelectionModal);
+                }
+              }}
               className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-primary text-white rounded-xl text-xs sm:text-sm font-bold shadow-md hover:bg-[#003d2f] transition-all whitespace-nowrap"
             >
-              <PlusCircle size={18} /> Add Template
+              <PlusCircle size={18} /> New Document
             </button>
-            {showTypeSelectionModal && (
+            {!onOpenChooser && showTypeSelectionModal && (
               <>
                 <div
                   className="fixed inset-0 z-40"

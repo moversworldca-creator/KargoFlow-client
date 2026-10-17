@@ -628,3 +628,234 @@ export function deleteSelectedCells(rows, selectedCellIds, behavior = "keep-gap"
   // Fallback to keep-gap
   return deleteCellsKeepGap(rows, selectedCellIds);
 }
+
+/**
+ * Restores a spacer cell (keep-gap cell) back to an active editable cell.
+ */
+export function restoreSpacerCell(rows, cellId) {
+  return rows.map((r) => ({
+    ...r,
+    cells: (r.cells || []).map((c) => {
+      if (c.id === cellId) {
+        return {
+          ...c,
+          isSpacer: false,
+        };
+      }
+      if (c.subGrid && c.subGrid.cells) {
+        return {
+          ...c,
+          subGrid: {
+            ...c.subGrid,
+            cells: c.subGrid.cells.map((sc) =>
+              sc.id === cellId ? { ...sc, isSpacer: false } : sc
+            ),
+          },
+        };
+      }
+      return c;
+    }),
+  }));
+}
+
+/**
+ * Checks whether a horizontal split at boundary splitRowIndex produces two non-empty tables
+ * without crossing merged rows.
+ */
+export function checkHorizontalSplitValidity(rows, splitRowIndex) {
+  if (splitRowIndex <= 0 || splitRowIndex >= rows.length) {
+    return {
+      valid: false,
+      reason: "Split position must produce two non-empty tables.",
+    };
+  }
+
+  const { matrix } = buildLogicalGrid(rows);
+  for (let r = 0; r < splitRowIndex; r++) {
+    for (let c = 0; c < (matrix[r]?.length || 0); c++) {
+      const cellInfo = matrix[r][c];
+      if (cellInfo && cellInfo.isOrigin) {
+        const bottomRow = cellInfo.row + cellInfo.rowSpan - 1;
+        if (bottomRow >= splitRowIndex) {
+          return {
+            valid: false,
+            reason: `Row boundary crosses a merged cell spanning rows ${cellInfo.row + 1} to ${bottomRow + 1}.`,
+          };
+        }
+      }
+    }
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Checks whether a vertical split at boundary splitColIndex produces two non-empty tables
+ * without crossing merged columns.
+ */
+export function checkVerticalSplitValidity(rows, splitColIndex) {
+  const { matrix, maxCols } = buildLogicalGrid(rows);
+  if (splitColIndex <= 0 || splitColIndex >= maxCols) {
+    return {
+      valid: false,
+      reason: "Split position must produce two non-empty tables.",
+    };
+  }
+
+  for (let r = 0; r < matrix.length; r++) {
+    for (let c = 0; c < splitColIndex; c++) {
+      const cellInfo = matrix[r][c];
+      if (cellInfo && cellInfo.isOrigin) {
+        const rightCol = cellInfo.col + cellInfo.colSpan - 1;
+        if (rightCol >= splitColIndex) {
+          return {
+            valid: false,
+            reason: `Column boundary crosses a merged cell spanning columns ${String.fromCharCode(65 + cellInfo.col)} to ${String.fromCharCode(65 + rightCol)}.`,
+          };
+        }
+      }
+    }
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Splits a table horizontally at boundary splitRowIndex into two tables.
+ */
+export function splitTableHorizontal(rows, settings = {}, splitRowIndex) {
+  const validity = checkHorizontalSplitValidity(rows, splitRowIndex);
+  if (!validity.valid) {
+    throw new Error(validity.reason || "Invalid horizontal split boundary");
+  }
+
+  const rows1 = rows.slice(0, splitRowIndex).map((r) => ({
+    ...r,
+    id: createId("trow"),
+    cells: (r.cells || []).map((c) => ({ ...c })),
+  }));
+
+  const rows2 = rows.slice(splitRowIndex).map((r) => ({
+    ...r,
+    id: createId("trow"),
+    cells: (r.cells || []).map((c) => ({
+      ...c,
+      id: createId("cell"),
+    })),
+  }));
+
+  const settings1 = {
+    ...settings,
+    rowCount: rows1.length,
+    rowHeights: settings.rowHeights
+      ? settings.rowHeights.slice(0, splitRowIndex)
+      : undefined,
+  };
+
+  const settings2 = {
+    ...settings,
+    rowCount: rows2.length,
+    rowHeights: settings.rowHeights
+      ? settings.rowHeights.slice(splitRowIndex)
+      : undefined,
+    headerRow: false,
+  };
+
+  return {
+    table1: { rows: rows1, settings: settings1 },
+    table2: { rows: rows2, settings: settings2 },
+  };
+}
+
+/**
+ * Splits a table vertically at boundary splitColIndex into two tables with normalized column widths.
+ */
+export function splitTableVertical(rows, settings = {}, splitColIndex) {
+  const validity = checkVerticalSplitValidity(rows, splitColIndex);
+  if (!validity.valid) {
+    throw new Error(validity.reason || "Invalid vertical split boundary");
+  }
+
+  const { matrix, maxCols } = buildLogicalGrid(rows);
+  const rows1 = [];
+  const rows2 = [];
+
+  for (let r = 0; r < rows.length; r++) {
+    const leftCells = [];
+    const rightCells = [];
+
+    const seenIds1 = new Set();
+    for (let c = 0; c < splitColIndex; c++) {
+      const cellInfo = matrix[r][c];
+      if (cellInfo && cellInfo.isOrigin && !seenIds1.has(cellInfo.cell.id)) {
+        seenIds1.add(cellInfo.cell.id);
+        leftCells.push({ ...cellInfo.cell });
+      }
+    }
+
+    const seenIds2 = new Set();
+    for (let c = splitColIndex; c < maxCols; c++) {
+      const cellInfo = matrix[r][c];
+      if (cellInfo && cellInfo.isOrigin && !seenIds2.has(cellInfo.cell.id)) {
+        seenIds2.add(cellInfo.cell.id);
+        rightCells.push({
+          ...cellInfo.cell,
+          id: createId("cell"),
+        });
+      }
+    }
+
+    rows1.push({
+      ...rows[r],
+      id: createId("trow"),
+      cells: leftCells,
+    });
+
+    rows2.push({
+      ...rows[r],
+      id: createId("trow"),
+      cells: rightCells,
+    });
+  }
+
+  const origWidths =
+    settings.columnWidths && settings.columnWidths.length === maxCols
+      ? settings.columnWidths
+      : Array.from({ length: maxCols }, () => 100 / maxCols);
+
+  const leftWidthsRaw = origWidths.slice(0, splitColIndex);
+  const rightWidthsRaw = origWidths.slice(splitColIndex);
+
+  const sumLeft = leftWidthsRaw.reduce((a, b) => a + b, 0) || 1;
+  const sumRight = rightWidthsRaw.reduce((a, b) => a + b, 0) || 1;
+
+  const leftWidths = leftWidthsRaw.map((w) => Math.round((w / sumLeft) * 100));
+  const diffLeft = 100 - leftWidths.reduce((a, b) => a + b, 0);
+  if (leftWidths.length > 0) leftWidths[0] += diffLeft;
+
+  const rightWidths = rightWidthsRaw.map((w) =>
+    Math.round((w / sumRight) * 100)
+  );
+  const diffRight = 100 - rightWidths.reduce((a, b) => a + b, 0);
+  if (rightWidths.length > 0) rightWidths[0] += diffRight;
+
+  return {
+    table1: {
+      rows: rows1,
+      settings: {
+        ...settings,
+        colCount: leftWidths.length,
+        columnWidths: leftWidths,
+      },
+    },
+    table2: {
+      rows: rows2,
+      settings: {
+        ...settings,
+        colCount: rightWidths.length,
+        columnWidths: rightWidths,
+      },
+    },
+  };
+}
+

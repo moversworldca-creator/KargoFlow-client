@@ -5,6 +5,7 @@ import TransferModal from "./modals/TransferModal";
 import VersionHistoryModal from "./modals/VersionHistoryModal";
 import PreviewModal from "./modals/PreviewModal";
 import { validateTemplateDocument } from "./model/templateModel";
+import { compileDocumentToHtml } from "./model/htmlCompiler";
 
 describe("Phase 3: TransferModal Component (JSON Import/Export)", () => {
   it("renders export and import action buttons", () => {
@@ -156,6 +157,44 @@ describe("Phase 3: PreviewModal Component with Print & Export", () => {
     expect(screen.getByText(/Raw Variables/i)).toBeInTheDocument();
     expect(screen.getByText(/\{\{company_name\}\}/i)).toBeInTheDocument();
   });
+
+  it("renders clean SMS preview card without device hardware background and supports Desktop, Tablet, Mobile toggles", () => {
+    const sampleDoc = {
+      name: "SMS Dispatch Notification",
+      settings: {},
+      items: [],
+    };
+
+    render(
+      <PreviewModal
+        isOpen={true}
+        doc={sampleDoc}
+        mode="sms"
+        smsText="Hi {{customer_name}}, your driver is on the way!"
+        onClose={vi.fn()}
+      />
+    );
+
+    // Verify clean header and delivered badge
+    expect(screen.getByText(/SMS Notification • Recipient View/i)).toBeInTheDocument();
+    expect(screen.getByText(/Delivered/i)).toBeInTheDocument();
+
+    // Verify resolved sample variable
+    expect(screen.getByText(/Hi Alex Customer, your driver is on the way!/i)).toBeInTheDocument();
+
+    // Verify Desktop, Tablet, Mobile buttons are present in toolbar
+    expect(screen.getByTitle(/Desktop 600px Preview/i)).toBeInTheDocument();
+    expect(screen.getByTitle(/Tablet 560px Preview/i)).toBeInTheDocument();
+    expect(screen.getByTitle(/Mobile 340px Preview/i)).toBeInTheDocument();
+
+    // Click tablet
+    fireEvent.click(screen.getByTitle(/Tablet 560px Preview/i));
+    expect(screen.getByText("560px")).toBeInTheDocument();
+
+    // Click mobile
+    fireEvent.click(screen.getByTitle(/Mobile 340px Preview/i));
+    expect(screen.getByText("340px")).toBeInTheDocument();
+  });
 });
 
 describe("Phase 3: Schema Validation Engine", () => {
@@ -188,4 +227,38 @@ describe("Phase 3: Schema Validation Engine", () => {
     expect(errors.length).toBeGreaterThan(0);
     expect(errors).toContain("Template name is required");
   });
+
+  it("compiles table cells to standalone HTML preserving cell fontSize and fontFamily styles", () => {
+    const docWithStyledTable = {
+      name: "Table Typography Export",
+      settings: { pageSize: "A4", orientation: "Portrait" },
+      items: [
+        {
+          id: "table-exp-1",
+          type: "table",
+          tableRows: [
+            {
+              id: "r-1",
+              cells: [
+                {
+                  id: "c-1",
+                  content: "Styled Freight Cell",
+                  fontSize: 16,
+                  fontFamily: "Georgia, serif",
+                  color: "#1e40af",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const compiledHtml = compileDocumentToHtml(docWithStyledTable);
+    expect(compiledHtml).toContain("font-size: 16px;");
+    expect(compiledHtml).toContain("font-family: Georgia, serif;");
+    expect(compiledHtml).toContain("color: #1e40af;");
+    expect(compiledHtml).toContain("Styled Freight Cell");
+  });
 });
+

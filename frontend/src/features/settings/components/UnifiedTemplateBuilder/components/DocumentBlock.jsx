@@ -1,9 +1,16 @@
-import React from "react";
+import React, { useRef } from "react";
 import {
   Trash2,
   Copy,
   PenTool,
   GripVertical,
+  ImageIcon,
+  Upload,
+  ArrowUp,
+  ArrowDown,
+  Pencil,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import InlineEdit from "./InlineEdit";
 import NotesRichTextEditor from "./NotesRichTextEditor";
@@ -17,12 +24,19 @@ export default function DocumentBlock({
   onUpdate,
   onDelete,
   onDuplicate,
+  onMoveUp,
+  onMoveDown,
+  onToggleVisibility,
+  isFirst = false,
+  isLast = false,
   preview = false,
   resolveVariables = false,
   selection = null,
   onSelectPart = () => {},
   onOpenHtmlEditor = () => {},
 }) {
+  const style = item.style || {};
+
   const renderContent = () => {
     switch (item.type) {
       case "header": {
@@ -33,9 +47,13 @@ export default function DocumentBlock({
         const numberField =
           item.fields?.find((f) => f.id === "estimateNumber")?.value || "{{estimate_number}}";
 
+        const hasCustomSize = Boolean(style.fontSize);
+        const hasCustomWeight = style.fontWeight !== undefined || style.bold !== undefined;
+        const fontW = style.bold ? 700 : style.fontWeight;
+
         return (
-          <div className="doc-header flex justify-between items-start pb-4 border-b-2 border-slate-200 w-full max-w-full min-w-0 box-border">
-            <div className="min-w-0 flex-1 pr-4">
+          <div className="doc-header flex flex-wrap sm:flex-nowrap justify-between items-start gap-3 pb-4 border-b-2 border-slate-200 w-full max-w-full min-w-0 box-border">
+            <div className="min-w-0 flex-1 pr-2">
               <InlineEdit
                 value={companyField}
                 part="companyName"
@@ -54,10 +72,18 @@ export default function DocumentBlock({
                     : [...currentFields, { id: "companyName", label: "Company Name", value: val }];
                   onUpdate({ ...item, fields: nextFields });
                 }}
-                className="text-xl font-bold text-slate-800 break-words [overflow-wrap:anywhere] [word-break:break-word]"
+                className={`text-inherit font-inherit break-words [overflow-wrap:anywhere] [word-break:break-word] ${
+                  hasCustomSize ? "" : "text-xl"
+                } ${hasCustomWeight ? "" : "font-bold"}`}
+                style={{
+                  fontSize: style.fontSize ? `${style.fontSize}px` : undefined,
+                  fontWeight: fontW,
+                  fontFamily: style.fontFamily || undefined,
+                  color: style.color || undefined,
+                }}
               />
             </div>
-            <div className="text-right min-w-0 shrink-0 max-w-[45%]">
+            <div className="text-right min-w-0 max-w-full sm:max-w-[55%]">
               <InlineEdit
                 value={titleField}
                 part="estimateTitle"
@@ -76,7 +102,14 @@ export default function DocumentBlock({
                     : [...currentFields, { id: "estimateTitle", label: "Title", value: val }];
                   onUpdate({ ...item, label: val, fields: nextFields });
                 }}
-                className="text-lg font-bold text-blue-600 block break-words [overflow-wrap:anywhere] [word-break:break-word]"
+                className={`text-blue-600 block break-words [overflow-wrap:anywhere] [word-break:break-word] ${
+                  hasCustomSize ? "" : "text-lg"
+                } ${hasCustomWeight ? "" : "font-bold"}`}
+                style={{
+                  fontSize: style.fontSize ? `${Math.max(12, Math.round(style.fontSize * 0.9))}px` : undefined,
+                  fontWeight: fontW,
+                  fontFamily: style.fontFamily || undefined,
+                }}
               />
               <InlineEdit
                 value={numberField}
@@ -107,7 +140,10 @@ export default function DocumentBlock({
       case "shipment": {
         const visibleFields = (item.fields || []).filter((f) => f.visible !== false);
         return (
-          <div className="shipment-box bg-slate-50 border border-slate-200/80 rounded-lg p-4 w-full max-w-full min-w-0 box-border overflow-hidden">
+          <div
+            style={{ fontSize: style.fontSize ? `${style.fontSize}px` : undefined }}
+            className="shipment-box bg-slate-50 border border-slate-200/80 rounded-lg p-4 w-full max-w-full min-w-0 box-border overflow-hidden"
+          >
             <div className="mb-3 min-w-0">
               <InlineEdit
                 value={item.label}
@@ -123,7 +159,7 @@ export default function DocumentBlock({
                 className="text-xs font-bold uppercase tracking-wider text-blue-600 break-words [overflow-wrap:anywhere] [word-break:break-word]"
               />
             </div>
-            <div className="meta-grid grid grid-cols-2 gap-x-4 gap-y-2 text-xs w-full max-w-full">
+            <div className="meta-grid grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs w-full max-w-full">
               {visibleFields.map((f) => (
                 <div key={f.id} className="flex flex-col min-w-0 max-w-full overflow-hidden">
                   <InlineEdit
@@ -173,7 +209,7 @@ export default function DocumentBlock({
         const cols = (item.columns || []).filter((c) => c.visible !== false);
         return (
           <div className="charge-table border border-slate-200 rounded-lg overflow-hidden w-full max-w-full min-w-0 box-border">
-            <div className="bg-slate-900 text-white px-4 py-2 text-xs font-bold uppercase tracking-wider truncate">
+            <div className="bg-slate-100 text-slate-800 border-b border-slate-200 px-4 py-2 text-xs font-bold uppercase tracking-wider truncate">
               <InlineEdit
                 value={item.label}
                 part="label"
@@ -185,17 +221,21 @@ export default function DocumentBlock({
                   onSelectPart("label");
                 }}
                 onCommit={(val) => onUpdate({ ...item, label: val })}
-                className="text-white break-words"
+                className="text-slate-800 break-words"
               />
             </div>
-            <table className="w-full text-xs table-fixed">
+            <div className="w-full overflow-x-auto print:overflow-visible">
+              <table
+                className="w-full min-w-[500px] table-fixed"
+                style={{ fontSize: style.fontSize ? `${style.fontSize}px` : undefined }}
+              >
               <thead className="bg-slate-100 text-slate-700 border-b border-slate-200 font-semibold">
                 <tr>
                   {cols.map((col) => (
                     <th
                       key={col.id}
                       style={{ width: col.width ? `${col.width}%` : undefined }}
-                      className={`p-2.5 text-${col.align || "left"} break-words overflow-hidden text-ellipsis`}
+                      className={`p-2.5 text-${col.align || "left"} break-words overflow-visible align-top`}
                     >
                       <InlineEdit
                         value={col.label}
@@ -253,14 +293,18 @@ export default function DocumentBlock({
               </tbody>
             </table>
           </div>
-        );
+        </div>
+      );
       }
 
       case "totals": {
         const visibleFields = (item.fields || []).filter((f) => f.visible !== false);
         return (
           <div className="totals-wrap flex justify-end w-full max-w-full min-w-0">
-            <div className="totals w-72 max-w-full bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1.5 text-xs box-border">
+            <div
+              style={{ fontSize: style.fontSize ? `${style.fontSize}px` : undefined }}
+              className="totals w-72 max-w-full bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1.5 box-border"
+            >
               {visibleFields.map((f) => (
                 <div key={f.id} className="flex justify-between items-center py-0.5 gap-2 min-w-0">
                   <InlineEdit
@@ -380,6 +424,7 @@ export default function DocumentBlock({
               value={item.content || item.variable || ""}
               preview={preview}
               isSelected={isSelected}
+              style={item.style}
               onSelect={onSelect}
               onChange={(html) => onUpdate({ ...item, content: html })}
             />
@@ -404,6 +449,10 @@ export default function DocumentBlock({
       }
 
       case "heading": {
+        const hasCustomSize = Boolean(style.fontSize);
+        const hasCustomWeight = style.fontWeight !== undefined || style.bold !== undefined;
+        const fontW = style.bold ? 700 : style.fontWeight;
+
         return (
           <div className="heading-widget my-1 w-full max-w-full min-w-0 overflow-hidden">
             <InlineEdit
@@ -417,13 +466,35 @@ export default function DocumentBlock({
                 onSelectPart("content");
               }}
               onCommit={(val) => onUpdate({ ...item, content: val, label: val })}
-              className="text-lg font-bold text-slate-800 break-words [overflow-wrap:anywhere] [word-break:break-word] w-full block"
+              className={`break-words [overflow-wrap:anywhere] [word-break:break-word] w-full block ${
+                hasCustomSize ? "" : "text-lg"
+              } ${hasCustomWeight ? "" : "font-bold"} ${style.color ? "" : "text-slate-800"}`}
+              style={{
+                fontSize: style.fontSize ? `${style.fontSize}px` : undefined,
+                fontWeight: fontW,
+                fontFamily: style.fontFamily || undefined,
+                color: style.color || undefined,
+                textAlign: style.align || style.textAlign || undefined,
+                textTransform: style.textTransform || undefined,
+                letterSpacing: style.letterSpacing ? `${style.letterSpacing}px` : undefined,
+                textDecoration: [
+                  style.underline ? "underline" : "",
+                  style.strikethrough ? "line-through" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ") || undefined,
+                fontStyle: style.italic ? "italic" : undefined,
+              }}
             />
           </div>
         );
       }
 
       case "text": {
+        const hasCustomSize = Boolean(style.fontSize);
+        const hasCustomWeight = style.fontWeight !== undefined || style.bold !== undefined;
+        const fontW = style.bold ? 700 : style.fontWeight;
+
         return (
           <div className="text-block-widget my-1 w-full max-w-full min-w-0 overflow-hidden">
             <InlineEdit
@@ -437,8 +508,94 @@ export default function DocumentBlock({
                 onSelectPart("content");
               }}
               onCommit={(val) => onUpdate({ ...item, content: val })}
-              className="text-xs text-slate-700 leading-relaxed break-words [overflow-wrap:anywhere] [word-break:break-word] w-full block"
+              className={`leading-relaxed break-words [overflow-wrap:anywhere] [word-break:break-word] w-full block ${
+                hasCustomSize ? "" : "text-xs"
+              } ${hasCustomWeight ? "" : "font-normal"} ${style.color ? "" : "text-slate-700"}`}
+              style={{
+                fontSize: style.fontSize ? `${style.fontSize}px` : undefined,
+                fontWeight: fontW,
+                fontFamily: style.fontFamily || undefined,
+                color: style.color || undefined,
+                lineHeight: style.lineHeight || undefined,
+                textAlign: style.align || style.textAlign || undefined,
+                textTransform: style.textTransform || undefined,
+                letterSpacing: style.letterSpacing ? `${style.letterSpacing}px` : undefined,
+                textDecoration: [
+                  style.underline ? "underline" : "",
+                  style.strikethrough ? "line-through" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ") || undefined,
+                fontStyle: style.italic ? "italic" : undefined,
+              }}
             />
+          </div>
+        );
+      }
+
+      case "image": {
+        const imgSrc = item.image?.src || item.content || "";
+        const imgWidth = item.image?.width || 80;
+        const imgAlign = item.image?.align || "left";
+        const justifyClass =
+          imgAlign === "center"
+            ? "justify-center"
+            : imgAlign === "right"
+            ? "justify-end"
+            : "justify-start";
+
+        return (
+          <div className={`doc-image-widget w-full flex ${justifyClass} my-2`}>
+            {imgSrc ? (
+              <img
+                src={imgSrc}
+                alt={item.label || "Document Image"}
+                style={{ width: `${imgWidth}%`, maxWidth: "100%", height: "auto" }}
+                className="rounded-lg object-contain border border-slate-200"
+              />
+            ) : (
+              <div
+                style={{ width: `${imgWidth}%` }}
+                className="border-2 border-dashed border-slate-300 rounded-lg p-6 bg-slate-50 flex flex-col items-center justify-center text-slate-400 gap-2 min-h-[100px]"
+              >
+                <ImageIcon size={28} className="text-slate-400" />
+                <span className="text-xs font-semibold text-slate-500">
+                  {item.label || "Image Block (Upload or set URL in inspector)"}
+                </span>
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      case "footer": {
+        const hasCustomSize = Boolean(style.fontSize);
+        return (
+          <div
+            style={{ fontSize: style.fontSize ? `${style.fontSize}px` : undefined }}
+            className="doc-footer-widget w-full pt-4 mt-2 border-t border-slate-200 flex justify-between items-center text-xs text-slate-500"
+          >
+            <div className="flex-1 pr-4">
+              <InlineEdit
+                value={item.content || item.label || "Thank you for choosing our services."}
+                part="content"
+                selection={selection}
+                preview={preview}
+                resolveVariables={resolveVariables}
+                onSelect={() => {
+                  onSelect();
+                  onSelectPart("content");
+                }}
+                onCommit={(val) => onUpdate({ ...item, content: val })}
+                className={`text-slate-500 leading-normal ${hasCustomSize ? "" : "text-xs"}`}
+                style={{
+                  fontSize: style.fontSize ? `${style.fontSize}px` : undefined,
+                }}
+              />
+            </div>
+            <div className="shrink-0 text-right font-mono text-[11px] text-slate-400">
+              Page 1 of 1
+            </div>
           </div>
         );
       }
@@ -475,7 +632,6 @@ export default function DocumentBlock({
 
   if (item.visible === false) return null;
 
-  const style = item.style || {};
   const decorations = [
     style.underline ? "underline" : "",
     style.strikethrough ? "line-through" : "",
@@ -516,6 +672,12 @@ export default function DocumentBlock({
           : "100%",
   };
 
+  if (preview && item.visible === false) {
+    return null;
+  }
+
+  const isHidden = item.visible === false;
+
   return (
     <div
       onClick={(e) => {
@@ -523,12 +685,22 @@ export default function DocumentBlock({
         onSelect();
       }}
       style={blockStyle}
-      className={`group doc-component relative rounded-lg transition border-2 p-3 max-w-full box-border overflow-hidden ${
+      className={`group doc-component relative rounded-lg transition border-2 p-3 max-w-full box-border overflow-visible hover:z-30 ${
         isSelected
-          ? "border-blue-500 bg-blue-50/10 shadow-xs selected"
-          : "border-transparent hover:border-slate-300"
+          ? "border-blue-500 bg-blue-50/10 shadow-xs selected z-30"
+          : isHidden
+            ? "border-dashed border-amber-300 bg-amber-50/20 opacity-70"
+            : "border-transparent hover:border-slate-300"
       }`}
     >
+      {/* Hidden Status Badge */}
+      {!preview && isHidden && (
+        <div className="absolute top-1.5 left-2 flex items-center gap-1 text-[10px] text-amber-700 bg-amber-100/80 border border-amber-300 px-1.5 py-0.5 rounded font-medium select-none z-10">
+          <EyeOff size={11} />
+          <span>Hidden from preview</span>
+        </div>
+      )}
+
       {/* Drag Reorder Handle */}
       {!preview && (
         <button
@@ -552,10 +724,73 @@ export default function DocumentBlock({
       {/* Floating Action Bar on Hover/Select */}
       {!preview && (
         <div
-          className={`absolute -top-3 right-3 flex items-center gap-1 bg-white border border-slate-200 rounded-md shadow-xs px-1 py-0.5 z-10 transition ${
+          className={`absolute -top-3.5 right-3 flex items-center gap-0.5 bg-white border border-slate-200 rounded-md shadow-md px-1 py-0.5 z-40 transition ${
             isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
           }`}
         >
+          {onMoveUp && (
+            <button
+              type="button"
+              disabled={isFirst}
+              onClick={(e) => {
+                e.stopPropagation();
+                onMoveUp();
+              }}
+              className="p-1 text-slate-500 hover:text-blue-600 rounded hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-500"
+              title="Move block up"
+              aria-label="Move block up"
+            >
+              <ArrowUp size={13} />
+            </button>
+          )}
+          {onMoveDown && (
+            <button
+              type="button"
+              disabled={isLast}
+              onClick={(e) => {
+                e.stopPropagation();
+                onMoveDown();
+              }}
+              className="p-1 text-slate-500 hover:text-blue-600 rounded hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-500"
+              title="Move block down"
+              aria-label="Move block down"
+            >
+              <ArrowDown size={13} />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect();
+              if (item.type === "html" || item.htmlContent) {
+                onOpenHtmlEditor();
+              }
+            }}
+            className="p-1 text-slate-500 hover:text-blue-600 rounded hover:bg-slate-100"
+            title="Edit content"
+            aria-label="Edit content"
+          >
+            <Pencil size={13} />
+          </button>
+          {onToggleVisibility && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleVisibility();
+              }}
+              className={`p-1 rounded hover:bg-slate-100 ${
+                isHidden
+                  ? "text-amber-600 hover:text-amber-700 bg-amber-50"
+                  : "text-slate-500 hover:text-slate-800"
+              }`}
+              title={isHidden ? "Show block in preview" : "Hide block from preview"}
+              aria-label={isHidden ? "Show block in preview" : "Hide block from preview"}
+            >
+              {isHidden ? <EyeOff size={13} /> : <Eye size={13} />}
+            </button>
+          )}
           <button
             type="button"
             onClick={(e) => {
@@ -564,6 +799,7 @@ export default function DocumentBlock({
             }}
             className="p-1 text-slate-500 hover:text-slate-800 rounded hover:bg-slate-100"
             title="Duplicate block"
+            aria-label="Duplicate block"
           >
             <Copy size={13} />
           </button>
@@ -575,6 +811,7 @@ export default function DocumentBlock({
             }}
             className="p-1 text-red-500 hover:text-red-700 rounded hover:bg-red-50"
             title="Delete block"
+            aria-label="Delete block"
           >
             <Trash2 size={13} />
           </button>

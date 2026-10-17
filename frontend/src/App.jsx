@@ -49,7 +49,7 @@ const MainLayout = () => {
   const { logout, user } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
   const location = useLocation();
-  const isSettingsRoute = location.pathname.startsWith('/settings');
+  const isSettingsRoute = location.pathname.startsWith('/settings') || location.pathname.startsWith('/documents');
 
   return (
     <div className="flex h-screen font-body text-heading bg-page overflow-hidden selection:bg-primary-tint selection:text-primary">
@@ -171,8 +171,8 @@ const PageTitleUpdater = () => {
       if (pathname === '/communication') return 'Communication';
       if (pathname === '/marketing') return 'Marketing';
       if (pathname === '/automation') return 'Automation';
-      if (pathname.startsWith('/settings')) {
-        // Handled dynamically in Settings.jsx, return null to skip setting title
+      if (pathname.startsWith('/settings') || pathname.startsWith('/documents')) {
+        // Handled dynamically in Settings.jsx / Documents, return null to skip setting title
         return null;
       }
       if (pathname === '/superuser/settings/company') return 'Superuser - Create Company Profile';
@@ -313,10 +313,16 @@ function App() {
 
             <Route path="crm/activities" element={withPermission('/crm/activities', <CRMHub defaultTab="activities" />)} />
 
+            <Route path="documents" element={withPermission('/documents', <SettingsHub initialGroup="documents" />)} />
+            <Route path="documents/:subTab" element={withPermission('/documents', <SettingsHub initialGroup="documents" />)} />
+            <Route path="documents/:subTab/:itemId/:subView" element={withPermission('/documents', <SettingsHub initialGroup="documents" />)} />
+            <Route path="documents/:subTab/:subView" element={withPermission('/documents', <SettingsHub initialGroup="documents" />)} />
+
             <Route path="settings" element={withPermission('/settings', <SettingsHub />)} />
             <Route path="settings/:mainGroup" element={withPermission('/settings', <SettingsHub />)} />
             <Route path="settings/:mainGroup/:subTab" element={withPermission('/settings', <SettingsHub />)} />
             <Route path="settings/:mainGroup/:subTab/:itemId/:subView" element={withPermission('/settings', <SettingsHub />)} />
+            <Route path="settings/:mainGroup/:subTab/:subView" element={withPermission('/settings', <SettingsHub />)} />
             <Route path="settings/:tabId/:itemId/:subView" element={withPermission('/settings', <SettingsHub />)} />
             <Route path="superuser/settings/company" element={<SuperuserRoute><SuperuserCreateCompanyPage /></SuperuserRoute>} />
             <Route path="profile" element={<Profile />} />

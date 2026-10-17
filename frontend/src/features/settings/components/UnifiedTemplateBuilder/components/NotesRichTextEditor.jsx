@@ -21,6 +21,8 @@ import {
   ChevronUp,
   ChevronDown,
   Sliders,
+  Type,
+  Palette,
 } from "lucide-react";
 import { compressImageFile } from "../core/storageService";
 
@@ -28,6 +30,7 @@ export default function NotesRichTextEditor({
   value = "",
   preview = false,
   isSelected = false,
+  style = {},
   onSelect = () => {},
   onChange = () => {},
 }) {
@@ -35,6 +38,7 @@ export default function NotesRichTextEditor({
   const editorRef = useRef(null);
   const fileInputRef = useRef(null);
   const [currentFontSize, setCurrentFontSize] = useState("3");
+  const [currentFontFamily, setCurrentFontFamily] = useState("Inter, sans-serif");
   const savedNotesRangeRef = useRef(null);
   const isTypingRef = useRef(false);
 
@@ -115,6 +119,15 @@ export default function NotesRichTextEditor({
   const handleFontSizeChange = (val) => {
     setCurrentFontSize(val);
     runCmd("fontSize", val);
+  };
+
+  const handleFontFamilyChange = (val) => {
+    setCurrentFontFamily(val);
+    runCmd("fontName", val);
+  };
+
+  const handleColorChange = (command, val) => {
+    runCmd(command, val);
   };
 
   const stepFontSize = (delta) => {
@@ -234,6 +247,24 @@ export default function NotesRichTextEditor({
           aria-label="Rich text formatting"
           onMouseDown={(e) => e.preventDefault()}
         >
+          {/* Font Family */}
+          <div className="flex items-center border border-slate-200 rounded-lg p-0.5 bg-slate-50">
+            <select
+              aria-label="Font family"
+              value={currentFontFamily}
+              onChange={(e) => handleFontFamilyChange(e.target.value)}
+              className="text-xs font-medium bg-transparent px-1.5 py-0.5 outline-none text-slate-700 cursor-pointer"
+            >
+              <option value="Inter, sans-serif">Inter</option>
+              <option value="'Plus Jakarta Sans', sans-serif">Plus Jakarta Sans</option>
+              <option value="Roboto, sans-serif">Roboto</option>
+              <option value="Arial, sans-serif">Arial</option>
+              <option value="Georgia, serif">Georgia</option>
+              <option value="'Times New Roman', serif">Times New Roman</option>
+              <option value="monospace">Monospace</option>
+            </select>
+          </div>
+
           {/* Font Size */}
           <div className="flex items-center border border-slate-200 rounded-lg p-0.5 bg-slate-50">
             <select
@@ -356,6 +387,28 @@ export default function NotesRichTextEditor({
             </button>
           </div>
 
+          {/* Text and Highlight Colors */}
+          <div className="flex items-center border border-slate-200 rounded-lg p-0.5 bg-slate-50 gap-0.5">
+            <label className="p-1 hover:bg-white rounded text-slate-700 cursor-pointer flex items-center" title="Text Color">
+              <Type size={13} />
+              <input
+                type="color"
+                defaultValue="#0f172a"
+                onChange={(e) => handleColorChange("foreColor", e.target.value)}
+                className="sr-only"
+              />
+            </label>
+            <label className="p-1 hover:bg-white rounded text-amber-500 cursor-pointer flex items-center" title="Highlight Color">
+              <Palette size={13} />
+              <input
+                type="color"
+                defaultValue="#fef08a"
+                onChange={(e) => handleColorChange("hiliteColor", e.target.value)}
+                className="sr-only"
+              />
+            </label>
+          </div>
+
           <span className="w-px h-5 bg-slate-200 mx-1" />
 
           {/* Alignment */}
@@ -466,7 +519,7 @@ export default function NotesRichTextEditor({
         contentEditable={!preview}
         suppressContentEditableWarning
         data-placeholder="Click here to type notes, terms, or insert tables/images..."
-        className={`notes-blank-editor-content p-4 outline-none min-h-[80px] w-full max-w-full box-border break-words [overflow-wrap:anywhere] [word-break:break-word] whitespace-pre-wrap text-xs leading-relaxed text-slate-700 ${
+        className={`notes-blank-editor-content p-4 outline-none min-h-[80px] w-full max-w-full box-border break-words [overflow-wrap:anywhere] [word-break:break-word] whitespace-pre-wrap leading-relaxed text-slate-700 ${
           preview ? "cursor-default" : "cursor-text"
         }`}
         style={{
@@ -476,6 +529,10 @@ export default function NotesRichTextEditor({
           overflowWrap: "anywhere",
           whiteSpace: "pre-wrap",
           overflowX: "hidden",
+          fontFamily: style?.fontFamily || undefined,
+          fontSize: style?.fontSize ? `${style.fontSize}px` : undefined,
+          color: style?.color || undefined,
+          textAlign: style?.align || undefined,
         }}
         onInput={() => {
           isTypingRef.current = true;

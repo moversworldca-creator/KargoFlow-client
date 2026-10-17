@@ -15,8 +15,8 @@ export const WIDGET_CATEGORIES = {
   COMMON: [
     { id: "heading", label: "Heading", type: "heading", icon: "Heading" },
     { id: "text", label: "Text Block", type: "text", icon: "Type" },
-    { id: "notes", label: "Notes", type: "notes", icon: "StickyNote" },
-    { id: "table", label: "Custom Table", type: "table", icon: "Table" },
+    { id: "notes", label: "Notes", type: "notes", icon: "NotebookPen" },
+    { id: "table", label: "Custom Table", type: "table", icon: "Table2" },
     { id: "layout", label: "Content Layout (Columns)", type: "layout", icon: "Columns" },
     { id: "custom_field", label: "Custom Field...", type: "custom_field", icon: "Sliders" },
     { id: "html", label: "Custom HTML Block", type: "html", icon: "Code2" },
@@ -76,10 +76,14 @@ export const WIDGET_CATEGORIES = {
 
   // Email widgets
   EMAIL: [
+    { id: "header", label: "Header Section", type: "header", icon: "LayoutTemplate" },
     { id: "email_preheader", label: "Preheader & Subject", type: "text", icon: "Mail" },
-    { id: "email_banner", label: "Hero Banner & Logo", type: "image", icon: "Image" },
+    { id: "shipment", label: "Move Route & Logistics", type: "shipment", icon: "Truck" },
+    { id: "charges", label: "Itemized Charges Table", type: "charges", icon: "Table" },
+    { id: "totals", label: "Financial Summary & Deposit", type: "totals", icon: "Calculator" },
     { id: "email_button", label: "Call-to-Action Button", type: "button", icon: "MousePointerClick" },
-    { id: "email_callout", label: "Highlight Callout Box", type: "text", icon: "AlertCircle" },
+    { id: "email_callout", label: "Highlight Callout Box", type: "text", icon: "CircleAlert" },
+    { id: "terms", label: "Terms & Conditions", type: "terms", icon: "ScrollText" },
     { id: "email_footer", label: "Email Footer & Unsubscribe", type: "footer", icon: "FileCode" },
   ],
 

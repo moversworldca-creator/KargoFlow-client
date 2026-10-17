@@ -12,6 +12,7 @@ import {
   ListOrdered,
   RemoveFormatting,
   Palette,
+  Type,
   Code2,
 } from "lucide-react";
 import { sanitizeHtml, scopeCss } from "../core/htmlSanitizer";
@@ -131,6 +132,49 @@ export default function EditableHtmlBlock({
     }
   };
 
+  const handleStyleChange = (val) => {
+    restoreSavedRange();
+    const sel = window.getSelection();
+    if (!sel) return;
+    const tagWithoutBrackets = val.replace(/[<>]/g, "").toLowerCase();
+    const tagWithBrackets = `<${tagWithoutBrackets}>`;
+
+    let success = false;
+    try {
+      success = document.execCommand("formatBlock", false, tagWithBrackets);
+    } catch {
+      // Ignore
+    }
+    if (!success) {
+      try {
+        success = document.execCommand("formatBlock", false, tagWithoutBrackets);
+      } catch {
+        // Ignore
+      }
+    }
+    saveSelection();
+    updateFormatStatus();
+    syncContent();
+  };
+
+  const handleColorChange = (type, color) => {
+    restoreSavedRange();
+    if (containerRef.current) {
+      containerRef.current.focus();
+    }
+    document.execCommand("styleWithCSS", false, "true");
+    if (type === "foreColor") {
+      document.execCommand("foreColor", false, color);
+    } else {
+      if (!document.execCommand("hiliteColor", false, color)) {
+        document.execCommand("backColor", false, color);
+      }
+    }
+    saveSelection();
+    updateFormatStatus();
+    syncContent();
+  };
+
   const exec = (command, value = null) => {
     restoreSavedRange();
     if (containerRef.current && !containerRef.current.contains(document.activeElement)) {
@@ -162,14 +206,19 @@ export default function EditableHtmlBlock({
       {/* Floating Toolbar */}
       {!preview && isSelected && (
         <div
-          className="flex flex-wrap items-center justify-between gap-1.5 p-2 bg-slate-900 text-white rounded-t-xl text-xs select-none shadow-lg animate-in fade-in duration-150"
-          onMouseDown={(e) => e.preventDefault()}
+          className="flex flex-wrap items-center justify-between gap-1.5 p-2 bg-white text-slate-700 border border-slate-200 rounded-t-xl text-xs select-none shadow-md animate-in fade-in duration-150"
+          onMouseDown={(e) => {
+            const target = e.target;
+            if (target.tagName !== "SELECT" && target.tagName !== "INPUT") {
+              e.preventDefault();
+            }
+          }}
         >
           <div className="flex items-center gap-1">
             <button
               type="button"
               className={`p-1.5 rounded transition ${
-                activeFormats.bold ? "bg-blue-600 text-white font-bold" : "hover:bg-slate-800 text-slate-300"
+                activeFormats.bold ? "bg-blue-600 text-white font-bold" : "hover:bg-slate-100 text-slate-600"
               }`}
               onClick={() => exec("bold")}
               title="Bold"
@@ -179,7 +228,7 @@ export default function EditableHtmlBlock({
             <button
               type="button"
               className={`p-1.5 rounded transition ${
-                activeFormats.italic ? "bg-blue-600 text-white italic" : "hover:bg-slate-800 text-slate-300"
+                activeFormats.italic ? "bg-blue-600 text-white italic" : "hover:bg-slate-100 text-slate-600"
               }`}
               onClick={() => exec("italic")}
               title="Italic"
@@ -189,7 +238,7 @@ export default function EditableHtmlBlock({
             <button
               type="button"
               className={`p-1.5 rounded transition ${
-                activeFormats.underline ? "bg-blue-600 text-white underline" : "hover:bg-slate-800 text-slate-300"
+                activeFormats.underline ? "bg-blue-600 text-white underline" : "hover:bg-slate-100 text-slate-600"
               }`}
               onClick={() => exec("underline")}
               title="Underline"
@@ -199,7 +248,7 @@ export default function EditableHtmlBlock({
             <button
               type="button"
               className={`p-1.5 rounded transition ${
-                activeFormats.strike ? "bg-blue-600 text-white line-through" : "hover:bg-slate-800 text-slate-300"
+                activeFormats.strike ? "bg-blue-600 text-white line-through" : "hover:bg-slate-100 text-slate-600"
               }`}
               onClick={() => exec("strikeThrough")}
               title="Strikethrough"
@@ -207,11 +256,32 @@ export default function EditableHtmlBlock({
               <Strikethrough size={13} />
             </button>
 
-            <span className="w-px h-4 bg-slate-700 mx-1" />
+            <span className="w-px h-4 bg-slate-200 mx-1" />
+
+            {/* Block Style Dropdown */}
+            <select
+              value={activeFormats.style || ""}
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                saveSelection();
+              }}
+              onChange={(e) => handleStyleChange(e.target.value)}
+              className="bg-white text-slate-700 text-[11px] font-medium border border-slate-200 rounded px-1.5 py-1 focus:outline-hidden cursor-pointer hover:bg-slate-50"
+            >
+              <option value="">Style...</option>
+              <option value="<h1>">Heading 1</option>
+              <option value="<h2>">Heading 2</option>
+              <option value="<h3>">Heading 3</option>
+              <option value="<h4>">Heading 4</option>
+              <option value="<p>">Paragraph</option>
+              <option value="<blockquote>">Quote</option>
+            </select>
+
+            <span className="w-px h-4 bg-slate-200 mx-1" />
 
             <button
               type="button"
-              className={`p-1.5 rounded ${activeFormats.alignLeft ? "bg-blue-600 text-white" : "hover:bg-slate-800 text-slate-300"}`}
+              className={`p-1.5 rounded ${activeFormats.alignLeft ? "bg-blue-600 text-white" : "hover:bg-slate-100 text-slate-600"}`}
               onClick={() => exec("justifyLeft")}
               title="Align Left"
             >
@@ -219,7 +289,7 @@ export default function EditableHtmlBlock({
             </button>
             <button
               type="button"
-              className={`p-1.5 rounded ${activeFormats.alignCenter ? "bg-blue-600 text-white" : "hover:bg-slate-800 text-slate-300"}`}
+              className={`p-1.5 rounded ${activeFormats.alignCenter ? "bg-blue-600 text-white" : "hover:bg-slate-100 text-slate-600"}`}
               onClick={() => exec("justifyCenter")}
               title="Align Center"
             >
@@ -227,7 +297,7 @@ export default function EditableHtmlBlock({
             </button>
             <button
               type="button"
-              className={`p-1.5 rounded ${activeFormats.alignRight ? "bg-blue-600 text-white" : "hover:bg-slate-800 text-slate-300"}`}
+              className={`p-1.5 rounded ${activeFormats.alignRight ? "bg-blue-600 text-white" : "hover:bg-slate-100 text-slate-600"}`}
               onClick={() => exec("justifyRight")}
               title="Align Right"
             >
@@ -235,18 +305,18 @@ export default function EditableHtmlBlock({
             </button>
             <button
               type="button"
-              className={`p-1.5 rounded ${activeFormats.alignJustify ? "bg-blue-600 text-white" : "hover:bg-slate-800 text-slate-300"}`}
+              className={`p-1.5 rounded ${activeFormats.alignJustify ? "bg-blue-600 text-white" : "hover:bg-slate-100 text-slate-600"}`}
               onClick={() => exec("justifyFull")}
               title="Justify"
             >
               <AlignJustify size={13} />
             </button>
 
-            <span className="w-px h-4 bg-slate-700 mx-1" />
+            <span className="w-px h-4 bg-slate-200 mx-1" />
 
             <button
               type="button"
-              className={`p-1.5 rounded ${activeFormats.bulletList ? "bg-blue-600 text-white" : "hover:bg-slate-800 text-slate-300"}`}
+              className={`p-1.5 rounded ${activeFormats.bulletList ? "bg-blue-600 text-white" : "hover:bg-slate-100 text-slate-600"}`}
               onClick={() => exec("insertUnorderedList")}
               title="Bullet List"
             >
@@ -254,15 +324,54 @@ export default function EditableHtmlBlock({
             </button>
             <button
               type="button"
-              className={`p-1.5 rounded ${activeFormats.numberList ? "bg-blue-600 text-white" : "hover:bg-slate-800 text-slate-300"}`}
+              className={`p-1.5 rounded ${activeFormats.numberList ? "bg-blue-600 text-white" : "hover:bg-slate-100 text-slate-600"}`}
               onClick={() => exec("insertOrderedList")}
               title="Numbered List"
             >
               <ListOrdered size={13} />
             </button>
+
+            <span className="w-px h-4 bg-slate-200 mx-1" />
+
+            {/* Text Color Picker */}
+            <label
+              className="relative p-1.5 rounded hover:bg-slate-100 text-slate-600 cursor-pointer flex items-center"
+              title="Text Color"
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                saveSelection();
+              }}
+            >
+              <Type size={13} />
+              <input
+                type="color"
+                value={activeFormats.foreColor || "#0f172a"}
+                onChange={(e) => handleColorChange("foreColor", e.target.value)}
+                className="sr-only"
+              />
+            </label>
+
+            {/* Highlight Background Color Picker */}
+            <label
+              className="relative p-1.5 rounded hover:bg-slate-100 text-amber-500 cursor-pointer flex items-center"
+              title="Highlight Color"
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                saveSelection();
+              }}
+            >
+              <Palette size={13} />
+              <input
+                type="color"
+                value={activeFormats.hiliteColor || "#fef08a"}
+                onChange={(e) => handleColorChange("hiliteColor", e.target.value)}
+                className="sr-only"
+              />
+            </label>
+
             <button
               type="button"
-              className="p-1.5 hover:bg-slate-800 rounded text-slate-300"
+              className="p-1.5 hover:bg-slate-100 rounded text-slate-600"
               onClick={() => exec("removeFormat")}
               title="Clear Formatting"
             >

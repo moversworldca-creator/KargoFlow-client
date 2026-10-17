@@ -14,6 +14,7 @@ import {
   X,
   Bot,
   CreditCard,
+  FileText,
 } from 'lucide-react';
 import companyLogo from '../../assets/comapny_logo.png';
 import { useAuth } from '../../features/auth/context/AuthContext';
@@ -30,6 +31,7 @@ const Sidebar = ({ isOpen, onClose }) => {
     '/marketing': Megaphone,
     '/automation': Bot,
     '/analytics': BarChart2,
+    '/documents': FileText,
     '/settings': SettingsIcon,
   };
   const navItems = getAllowedNavItems(NAV_ITEMS, permissionContext).map((item) => ({
@@ -38,7 +40,7 @@ const Sidebar = ({ isOpen, onClose }) => {
   }));
 
   const sidebarClasses = `
-    fixed inset-y-0 left-0 z-50 w-20 bg-[#043976] flex flex-col items-center py-6 transition-transform duration-300 lg:static lg:translate-x-0 
+    fixed inset-y-0 left-0 z-50 w-16 sm:w-18 lg:w-20 bg-[#043976] flex flex-col items-center py-5 sm:py-6 transition-transform duration-300 lg:static lg:translate-x-0 
     ${isOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'}
   `;
 
@@ -54,24 +56,25 @@ const Sidebar = ({ isOpen, onClose }) => {
 
       <aside className={sidebarClasses}>
         {isOpen && (
-          <div className="lg:hidden absolute top-4 right-[-40px]">
+          <div className="lg:hidden absolute top-4 right-[-38px] sm:right-[-42px]">
              <button 
                onClick={onClose}
-               className="p-2 bg-[#043976] text-white rounded-r-lg shadow-md cursor-pointer"
+               className="p-1.5 sm:p-2 bg-[#043976] text-white rounded-r-lg shadow-md cursor-pointer flex items-center justify-center"
+               aria-label="Close menu"
              >
-               <X size={20} />
+               <X className="w-4 h-4 sm:w-5 sm:h-5" />
              </button>
           </div>
         )}
 
-        <NavLink to="/" className="mb-8 flex h-12 w-12 items-center justify-center rounded-xl bg-transparent transition-transform hover:scale-105">
+        <NavLink to="/" className="mb-6 sm:mb-7 lg:mb-8 flex h-9 w-9 sm:h-10 sm:w-10 lg:h-12 lg:w-12 items-center justify-center rounded-xl bg-transparent transition-transform hover:scale-105">
           <img
             src={companyLogo}
             alt="Company logo"
             className="h-full w-full object-contain"
           />
         </NavLink>
-        <nav className="flex-1 flex flex-col gap-4 w-full px-3">
+        <nav className="flex-1 flex flex-col gap-3 sm:gap-3.5 lg:gap-4 w-full px-2 sm:px-2.5 lg:px-3">
           {navItems.map((item, idx) => {
             const Icon = item.icon;
             return (
@@ -88,7 +91,7 @@ const Sidebar = ({ isOpen, onClose }) => {
                 }`}
                 title={item.label}
               >
-                <Icon size={22} strokeWidth={2} />
+                <Icon className="w-[18px] h-[18px] sm:w-5 sm:h-5 lg:w-6 lg:h-6 shrink-0 transition-transform duration-200 group-hover:scale-110" strokeWidth={2} />
                 <span className="absolute left-full ml-4 px-2 py-1 bg-[#043976] border border-white/20 text-white text-xs rounded-lg shadow-md opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-50">
                   {item.label}
                 </span>

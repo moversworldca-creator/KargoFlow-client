@@ -13,6 +13,7 @@ import CustomFieldModal from "./modals/CustomFieldModal";
 import { getModeConfig } from "./config/modeRegistry";
 import {
   createInitialDocument,
+  createBlankDocument,
   createTableWidget,
   createContentLayoutWidget,
   createHtmlWidget,
@@ -40,6 +41,7 @@ export default function UnifiedTemplateBuilder({
   branchId,
   branches,
   isOverlay = true,
+  visualInsertRequest = null,
 }) {
   const modeConfig = getModeConfig(mode);
   const initialSource = draft || template;
@@ -48,12 +50,24 @@ export default function UnifiedTemplateBuilder({
   const [doc, setDoc] = useState(() => {
     let initial;
     if (initialSource && typeof initialSource === "object") {
-      if (initialSource.items) initial = initialSource;
-      else if (initialSource.content && typeof initialSource.content === "object" && initialSource.content.items) {
+      if (initialSource.items && Array.isArray(initialSource.items) && initialSource.items.length > 0) {
+        initial = initialSource;
+      } else if (initialSource.content && typeof initialSource.content === "object" && Array.isArray(initialSource.content.items) && initialSource.content.items.length > 0) {
         initial = initialSource.content;
       }
     }
-    if (!initial) initial = createInitialDocument(mode);
+    if (!initial) {
+      const existingEmailHtml = initialSource?.body_html || initialSource?.html_content || (mode === "email" ? initialSource?.body : "");
+      if (mode === "email" && existingEmailHtml) {
+        initial = createBlankDocument("A4", "Portrait");
+        initial.name = initialSource?.name || "Email Template";
+        const emailWidget = createHtmlWidget(existingEmailHtml, initialSource?.body_css || "", "Email Content");
+        initial.items = [emailWidget];
+        initial.pages = [{ id: "page-1", name: "Page 1", items: [emailWidget] }];
+      } else {
+        initial = createInitialDocument(mode);
+      }
+    }
 
     // Ensure pages exist
     if (!initial.pages || !Array.isArray(initial.pages) || initial.pages.length === 0) {
@@ -62,13 +76,26 @@ export default function UnifiedTemplateBuilder({
         pages: [{ id: "page-1", name: "Page 1", items: initial.items || [] }],
       };
     }
+    initial.settings = {
+      ...(initial.settings || {}),
+      subject: initialSource?.subject || initial.settings?.subject || "",
+      template_key: initialSource?.template_key || initial.settings?.template_key || "",
+      branch: initialSource?.branch || branchId || initial.settings?.branch || null,
+      category: initialSource?.category || initial.settings?.category || (mode === "email" ? "Email" : mode === "sms" ? "SMS" : "Estimate"),
+    };
     return initial;
   });
 
-  // SMS Text State
   const [smsText, setSmsText] = useState(() => {
     return initialSource?.body_sms || initialSource?.sms_body || initialSource?.body || (typeof value === "string" ? value : "") || "";
   });
+
+  useEffect(() => {
+    const nextSms = initialSource?.body_sms || initialSource?.sms_body || initialSource?.body || (typeof value === "string" ? value : "") || "";
+    if (nextSms && nextSms !== smsText) {
+      setSmsText(nextSms);
+    }
+  }, [initialSource?.body_sms, initialSource?.sms_body, initialSource?.body, value]);
 
   // Editor State
   const [selectedItemId, setSelectedItemId] = useState(null);
@@ -81,11 +108,17 @@ export default function UnifiedTemplateBuilder({
   const [orientation, setOrientation] = useState(modeConfig.defaultOrientation || "Portrait");
   const [isSaving, setIsSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    if (typeof window !== "undefined") {
+      return window.innerWidth >= 1024;
+    }
+    return true;
+  });
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
 
   // History Stack for Undo/Redo
-  const [history, setHistory] = useState([]);
-  const [historyIdx, setHistoryIdx] = useState(-1);
+  const [history, setHistory] = useState(() => [deepClone(doc)]);
+  const [historyIdx, setHistoryIdx] = useState(0);
 
   // Template Library Shelf (up to 25 templates)
   const [library, setLibrary] = useState(() => loadLibrarySync());
@@ -212,7 +245,7 @@ export default function UnifiedTemplateBuilder({
     (newDoc, markDirty = true) => {
       setHistory((prev) => {
         const next = prev.slice(0, historyIdx + 1);
-        next.push(doc);
+        next.push(deepClone(newDoc));
         return next;
       });
       setHistoryIdx((prev) => prev + 1);
@@ -228,24 +261,52 @@ export default function UnifiedTemplateBuilder({
           html_content: compiledHtml,
           body_html: compiledHtml,
           body_sms: smsText,
+          subject: newDoc.settings?.subject || initialSource?.subject || "",
+          template_key: newDoc.settings?.template_key || initialSource?.template_key || "",
+          branch: newDoc.settings?.branch || initialSource?.branch || branchId || null,
+          category: newDoc.settings?.category || initialSource?.category || null,
         });
       }
     },
-    [doc, historyIdx, onChange, mode, initialSource, smsText]
+    [historyIdx, onChange, mode, initialSource, smsText, branchId]
+  );
+
+  const handleSmsChange = useCallback(
+    (text) => {
+      setSmsText(text);
+      setIsDirty(true);
+      if (onChange) {
+        onChange({
+          ...(initialSource || {}),
+          name: doc.name,
+          content: doc,
+          body_sms: text,
+          body: text,
+          sms_body: text,
+          subject: doc.settings?.subject || initialSource?.subject || "",
+          template_key: doc.settings?.template_key || initialSource?.template_key || "",
+          branch: doc.settings?.branch || initialSource?.branch || branchId || null,
+          category: doc.settings?.category || initialSource?.category || null,
+        });
+      }
+    },
+    [onChange, initialSource, doc, branchId]
   );
 
   const handleUndo = () => {
-    if (historyIdx >= 0) {
-      const targetDoc = history[historyIdx];
-      setHistoryIdx((prev) => prev - 1);
+    if (historyIdx > 0 && history[historyIdx - 1]) {
+      const prevIdx = historyIdx - 1;
+      const targetDoc = deepClone(history[prevIdx]);
+      setHistoryIdx(prevIdx);
       setDoc(targetDoc);
     }
   };
 
   const handleRedo = () => {
-    if (historyIdx + 1 < history.length) {
-      const targetDoc = history[historyIdx + 1];
-      setHistoryIdx((prev) => prev + 1);
+    if (historyIdx + 1 < history.length && history[historyIdx + 1]) {
+      const nextIdx = historyIdx + 1;
+      const targetDoc = deepClone(history[nextIdx]);
+      setHistoryIdx(nextIdx);
       setDoc(targetDoc);
     }
   };
@@ -332,6 +393,25 @@ export default function UnifiedTemplateBuilder({
     const nextItems = pages.flatMap((p) => p.items);
     updateDoc({ ...doc, pages, items: nextItems });
     setSelectedItemId(layoutItem.id);
+  };
+
+  // Direct Creation on Page (Mouse Drag or Click on Blank Canvas)
+  const handleDirectCreateItem = (itemConfig = {}, pageIndex = 0) => {
+    const defaultLabel = itemConfig.label || itemConfig.type || "Text Block";
+    const newItem = createWidget(defaultLabel, itemConfig);
+    const pages = getCurrentPages();
+    const safePageIndex = Math.max(0, Math.min(pages.length - 1, pageIndex));
+    const targetItems = [...(pages[safePageIndex]?.items || [])];
+    targetItems.push(newItem);
+    pages[safePageIndex] = {
+      ...pages[safePageIndex],
+      items: targetItems,
+    };
+    const nextItems = pages.flatMap((p) => p.items);
+    updateDoc({ ...doc, pages, items: nextItems });
+    setSelectedItemId(newItem.id);
+    setToastMessage(`Created ${newItem.label || "Text Box"}`);
+    return newItem;
   };
 
   // Drag and Drop Handler: Inserts new widgets or moves existing blocks to exact page and index
@@ -428,8 +508,7 @@ export default function UnifiedTemplateBuilder({
 
   const handleInsertVariable = (tag) => {
     if (mode === "sms") {
-      setSmsText((prev) => `${prev} ${tag}`);
-      setIsDirty(true);
+      handleSmsChange(smsText ? `${smsText} ${tag}` : tag);
       return;
     }
 
@@ -439,11 +518,32 @@ export default function UnifiedTemplateBuilder({
         const updated = {
           ...selected,
           content: `${selected.content || ""} ${tag}`,
+          htmlContent: selected.htmlContent ? `${selected.htmlContent} ${tag}` : undefined,
         };
         handleUpdateItem(updated);
+        return;
       }
     }
+
+    const firstBlock = (doc.items || []).find((it) => it.type === "html" || it.type === "typography" || it.type === "meta");
+    if (firstBlock) {
+      const updated = {
+        ...firstBlock,
+        content: `${firstBlock.content || ""} ${tag}`,
+        htmlContent: firstBlock.htmlContent ? `${firstBlock.htmlContent} ${tag}` : undefined,
+      };
+      handleUpdateItem(updated);
+    } else {
+      handleInsertCustomField({ label: "Variable", value: tag, variable: tag });
+    }
   };
+
+  useEffect(() => {
+    if (visualInsertRequest?.token) {
+      handleInsertVariable(visualInsertRequest.token);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visualInsertRequest]);
 
   const handleUpdateItem = (updatedItem) => {
     const pages = getCurrentPages().map((page) => ({
@@ -484,6 +584,38 @@ export default function UnifiedTemplateBuilder({
     const nextItems = pages.flatMap((p) => p.items);
     updateDoc({ ...doc, pages, items: nextItems });
     setSelectedItemId(duplicated.id);
+  };
+
+  const handleMoveItem = (itemId, direction) => {
+    const pages = getCurrentPages();
+    for (let pIdx = 0; pIdx < pages.length; pIdx++) {
+      const items = pages[pIdx].items || [];
+      const itemIdx = items.findIndex((it) => it.id === itemId);
+      if (itemIdx !== -1) {
+        const targetIdx = direction === "up" ? itemIdx - 1 : itemIdx + 1;
+        if (targetIdx >= 0 && targetIdx < items.length) {
+          const nextItems = [...items];
+          const temp = nextItems[itemIdx];
+          nextItems[itemIdx] = nextItems[targetIdx];
+          nextItems[targetIdx] = temp;
+          pages[pIdx].items = nextItems;
+          const allItems = pages.flatMap((p) => p.items);
+          updateDoc({ ...doc, pages, items: allItems });
+          return;
+        }
+      }
+    }
+  };
+
+  const handleToggleItemVisibility = (itemId) => {
+    const pages = getCurrentPages().map((page) => ({
+      ...page,
+      items: (page.items || []).map((it) =>
+        it.id === itemId ? { ...it, visible: it.visible === false ? true : false } : it
+      ),
+    }));
+    const nextItems = pages.flatMap((p) => p.items);
+    updateDoc({ ...doc, pages, items: nextItems });
   };
 
   // Multi-Page Handlers
@@ -633,6 +765,10 @@ export default function UnifiedTemplateBuilder({
         body_sms: smsText,
         pageSize,
         orientation,
+        subject: doc.settings?.subject || initialSource?.subject || "",
+        template_key: doc.settings?.template_key || initialSource?.template_key || "",
+        branch: doc.settings?.branch || initialSource?.branch || branchId || null,
+        category: doc.settings?.category || initialSource?.category || null,
       };
 
       await handleSaveToLibrary(doc);
@@ -665,6 +801,10 @@ export default function UnifiedTemplateBuilder({
         body_sms: smsText,
         pageSize,
         orientation,
+        subject: doc.settings?.subject || initialSource?.subject || "",
+        template_key: doc.settings?.template_key || initialSource?.template_key || "",
+        branch: doc.settings?.branch || initialSource?.branch || branchId || null,
+        category: doc.settings?.category || initialSource?.category || null,
         is_draft: true,
       };
 
@@ -692,7 +832,7 @@ export default function UnifiedTemplateBuilder({
       <TopNavbar
         title={doc.name}
         onTitleChange={(name) => updateDoc({ ...doc, name })}
-        canUndo={historyIdx >= 0}
+        canUndo={historyIdx > 0}
         canRedo={historyIdx + 1 < history.length}
         onUndo={handleUndo}
         onRedo={handleRedo}
@@ -713,6 +853,8 @@ export default function UnifiedTemplateBuilder({
         onPrint={handleDirectPrint}
         isSidebarOpen={isSidebarOpen}
         onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+        isPanelOpen={isPanelOpen}
+        onTogglePanel={() => setIsPanelOpen(!isPanelOpen)}
       />
 
       {/* Main Workspace (Left Sidebar + Center Canvas + Right Inspector) */}
@@ -749,6 +891,19 @@ export default function UnifiedTemplateBuilder({
             onInsertLayout={() => setIsLayoutDialogOpen(true)}
             onInsertVariable={handleInsertVariable}
             onOpenCustomFieldDialog={() => setIsCustomFieldModalOpen(true)}
+            templateSettings={{
+              subject: doc.settings?.subject || "",
+              template_key: doc.settings?.template_key || "",
+              branch: doc.settings?.branch || null,
+              category: doc.settings?.category || "",
+            }}
+            onTemplateSettingsChange={(patch) =>
+              updateDoc({
+                ...doc,
+                settings: { ...(doc.settings || {}), ...patch },
+              })
+            }
+            branches={branches || []}
           />
         </div>
 
@@ -757,9 +912,15 @@ export default function UnifiedTemplateBuilder({
           items={doc.items || []}
           pages={doc.pages || []}
           selectedItemId={selectedItemId}
+          selectedItem={selectedItem}
+          documentSettings={doc.settings || {}}
+          onUpdateDocumentSettings={(settings) => updateDoc({ ...doc, settings })}
           onSelectItem={(id) => {
             setSelectedItemId(id);
             setSelection({ itemId: id, part: null });
+            if (typeof window !== "undefined" && window.innerWidth < 1280) {
+              setIsPanelOpen(true);
+            }
           }}
           onUpdateItem={handleUpdateItem}
           onDeleteItem={handleDeleteItem}
@@ -773,10 +934,7 @@ export default function UnifiedTemplateBuilder({
           pageSize={pageSize}
           orientation={orientation}
           smsText={smsText}
-          onSmsTextChange={(text) => {
-            setSmsText(text);
-            setIsDirty(true);
-          }}
+          onSmsTextChange={handleSmsChange}
           preview={false}
           resolveVariables={resolveVariables}
           selection={selection}
@@ -797,25 +955,50 @@ export default function UnifiedTemplateBuilder({
           onInsertLayout={() => setIsLayoutDialogOpen(true)}
           onOpenCustomFieldDialog={() => setIsCustomFieldModalOpen(true)}
           onDropInPage={handleDropInPage}
+          onMoveItemUp={(id) => handleMoveItem(id, "up")}
+          onMoveItemDown={(id) => handleMoveItem(id, "down")}
+          onToggleItemVisibility={handleToggleItemVisibility}
+          onDirectCreateItem={handleDirectCreateItem}
         />
 
-        {/* Right Inspector Panel */}
-        <RightPropertiesPanel
-          selectedItem={selectedItem}
-          selection={selection}
-          onUpdateItem={handleUpdateItem}
-          onDeleteItem={() => handleDeleteItem(selectedItemId)}
-          onDuplicateItem={() => handleDuplicateItem(selectedItem)}
-          documentSettings={doc.settings}
-          onUpdateDocumentSettings={(settings) => updateDoc({ ...doc, settings })}
-          docName={doc.name}
-          onUpdateDocName={(name) => updateDoc({ ...doc, name })}
-          pageSize={pageSize}
-          onPageSizeChange={setPageSize}
-          orientation={orientation}
-          onOrientationChange={setOrientation}
-          mode={mode}
-        />
+        {/* Right Inspector Panel: Static in xl (>=1280px), Drawer below xl */}
+        {/* Drawer Backdrop Overlay for screens < 1280px */}
+        {isPanelOpen && (
+          <div
+            className="fixed inset-0 bg-slate-900/30 backdrop-blur-2xs z-40 xl:hidden"
+            onClick={() => setIsPanelOpen(false)}
+            aria-label="Close properties panel overlay"
+          />
+        )}
+
+        <div
+          className={`shrink-0 z-40 transition-transform duration-200 xl:translate-x-0 ${
+            isPanelOpen
+              ? "fixed right-0 top-14 bottom-0 shadow-2xl xl:static xl:shadow-none translate-x-0"
+              : "fixed right-0 top-14 bottom-0 translate-x-full xl:static xl:translate-x-0"
+          }`}
+        >
+          <RightPropertiesPanel
+            selectedItem={selectedItem}
+            selection={selection}
+            onUpdateItem={handleUpdateItem}
+            onDeleteItem={() => handleDeleteItem(selectedItemId)}
+            onDuplicateItem={() => handleDuplicateItem(selectedItem)}
+            documentSettings={doc.settings}
+            onUpdateDocumentSettings={(settings) => updateDoc({ ...doc, settings })}
+            docName={doc.name}
+            onUpdateDocName={(name) => updateDoc({ ...doc, name })}
+            pageSize={pageSize}
+            onPageSizeChange={setPageSize}
+            orientation={orientation}
+            onOrientationChange={setOrientation}
+            mode={mode}
+            branches={branches || []}
+            smsText={smsText}
+            devicePreview={devicePreview}
+            onClosePanel={() => setIsPanelOpen(false)}
+          />
+        </div>
       </div>
 
       {/* Hidden File Input for JSON Schema Import */}
@@ -829,9 +1012,18 @@ export default function UnifiedTemplateBuilder({
 
       {/* Floating Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-[80000] bg-slate-900 text-white text-xs px-4 py-2.5 rounded-xl shadow-2xl border border-slate-700 animate-in fade-in slide-in-from-bottom-2 duration-150 flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-400" />
-          <span>{toastMessage}</span>
+        <div className="fixed bottom-6 right-6 z-[80000] bg-slate-900 text-white text-xs px-4 py-2.5 rounded-xl shadow-2xl border border-slate-700 animate-in fade-in slide-in-from-bottom-2 duration-150 flex items-center gap-2.5">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+          <span className="font-medium">{toastMessage}</span>
+          <button
+            type="button"
+            onClick={() => setToastMessage("")}
+            className="text-slate-400 hover:text-white p-0.5 rounded transition ml-1"
+            title="Dismiss notification"
+            aria-label="Dismiss notification"
+          >
+            ×
+          </button>
         </div>
       )}
 
@@ -884,8 +1076,13 @@ export default function UnifiedTemplateBuilder({
         mode={mode}
         pageSize={pageSize}
         orientation={orientation}
+        smsText={smsText}
         onClose={() => setIsPreviewOpen(false)}
         onExportJson={handleExportJson}
+        onUpdateDoc={updateDoc}
+        onUpdateItem={handleUpdateItem}
+        onDeleteItem={handleDeleteItem}
+        onDuplicateItem={handleDuplicateItem}
       />
 
       <TransferModal

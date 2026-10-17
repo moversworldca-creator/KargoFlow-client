@@ -12,6 +12,7 @@ import {
   Eye,
   EyeOff,
   Plus,
+  Minus,
   ArrowUp,
   ArrowDown,
   Columns,
@@ -22,9 +23,18 @@ import {
   Check,
   AlertCircle,
   X,
+  ImageIcon,
+  Upload,
+  Mail,
+  MessageSquare,
+  Info,
+  Monitor,
+  Tablet,
+  Smartphone,
 } from "lucide-react";
 import { createId } from "../model/templateModel";
 import { getVariablesForMode } from "../config/variableRegistry";
+import { analyzeSmsText } from "../core/smsCalculator";
 import {
   insertRows,
   insertCols,
@@ -88,19 +98,326 @@ export default function RightPropertiesPanel({
   orientation = "Portrait",
   onOrientationChange = () => {},
   mode = "estimate",
+  branches = [],
+  smsText = "",
+  devicePreview = "desktop",
+  onClosePanel = () => {},
 }) {
   const [insertCount, setInsertCount] = useState(1);
 
   // 1. If no item selected, display document-level settings
   if (!selectedItem) {
+    if (mode === "email") {
+      return (
+        <aside className="w-80 bg-white border-l border-slate-200 p-4 flex flex-col h-[calc(100vh-3.5rem)] select-none overflow-y-auto">
+          <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <Mail size={16} className="text-blue-600" />
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                Email Settings
+              </h3>
+            </div>
+            <button
+              type="button"
+              onClick={onClosePanel}
+              className="xl:hidden p-1 text-slate-400 hover:text-slate-600 rounded"
+              title="Close panel"
+              aria-label="Close panel"
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div className="space-y-3.5 text-xs">
+            <div>
+              <label className="block text-slate-600 font-semibold mb-1">Template Name</label>
+              <input
+                type="text"
+                value={docName}
+                onChange={(e) => onUpdateDocName(e.target.value)}
+                placeholder="e.g. Booking Confirmation Email"
+                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-800 font-medium"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-600 font-semibold mb-1">Email Subject</label>
+              <input
+                type="text"
+                value={documentSettings?.subject || ""}
+                onChange={(e) =>
+                  onUpdateDocumentSettings({ ...documentSettings, subject: e.target.value })
+                }
+                placeholder="e.g. Your Move Quote #{{estimate_number}}"
+                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-800 font-medium"
+              />
+              <span className="text-[10px] text-slate-400 mt-0.5 block">Supports dynamic merge tags like {'{{customer_name}}'}</span>
+            </div>
+
+            <div>
+              <label className="block text-slate-600 font-semibold mb-1">Template Key</label>
+              <input
+                type="text"
+                value={documentSettings?.template_key || ""}
+                onChange={(e) =>
+                  onUpdateDocumentSettings({ ...documentSettings, template_key: e.target.value })
+                }
+                placeholder="e.g. quote_sent, job_confirmed"
+                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-800 font-mono font-medium"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-600 font-semibold mb-1">Category</label>
+              <input
+                type="text"
+                value={documentSettings?.category || "Email"}
+                onChange={(e) =>
+                  onUpdateDocumentSettings({ ...documentSettings, category: e.target.value })
+                }
+                placeholder="e.g. Transactional, Marketing, Notifications"
+                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-700"
+              />
+            </div>
+
+            {branches && branches.length > 0 && (
+              <div>
+                <label className="block text-slate-600 font-semibold mb-1">Branch Scope</label>
+                <select
+                  value={documentSettings?.branch || ""}
+                  onChange={(e) =>
+                    onUpdateDocumentSettings({
+                      ...documentSettings,
+                      branch: e.target.value ? Number(e.target.value) : null,
+                    })
+                  }
+                  className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-700 font-medium"
+                >
+                  <option value="">All Branches (Global)</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Responsive Viewport Card */}
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+              <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                <span>Responsive Viewport</span>
+                <span className="text-blue-600 font-semibold capitalize">{devicePreview}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-1.5 text-center">
+                <div className={`p-2 rounded-lg border text-xs font-semibold ${devicePreview === "desktop" ? "bg-white border-blue-300 text-blue-600 shadow-2xs" : "bg-white/60 border-slate-200 text-slate-500"}`}>
+                  <Monitor size={15} className="mx-auto mb-1 text-slate-600" />
+                  <div>600px</div>
+                  <div className="text-[9px] font-normal text-slate-400">Desktop</div>
+                </div>
+                <div className={`p-2 rounded-lg border text-xs font-semibold ${devicePreview === "tablet" ? "bg-white border-blue-300 text-blue-600 shadow-2xs" : "bg-white/60 border-slate-200 text-slate-500"}`}>
+                  <Tablet size={15} className="mx-auto mb-1 text-slate-600" />
+                  <div>560px</div>
+                  <div className="text-[9px] font-normal text-slate-400">Tablet</div>
+                </div>
+                <div className={`p-2 rounded-lg border text-xs font-semibold ${devicePreview === "mobile" ? "bg-white border-blue-300 text-blue-600 shadow-2xs" : "bg-white/60 border-slate-200 text-slate-500"}`}>
+                  <Smartphone size={15} className="mx-auto mb-1 text-slate-600" />
+                  <div>360px</div>
+                  <div className="text-[9px] font-normal text-slate-400">Mobile</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-auto p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-500 leading-relaxed">
+            <p className="font-semibold text-slate-700 mb-1">Email Inspector Toolkit</p>
+            Select any section heading, paragraph, callout box, table, or button on the email canvas to inspect and customize typography, spacing, colors, and variables.
+          </div>
+        </aside>
+      );
+    }
+
+    if (mode === "sms") {
+      const smsAnalysis = analyzeSmsText(smsText || "");
+      return (
+        <aside className="w-80 bg-white border-l border-slate-200 p-4 flex flex-col h-[calc(100vh-3.5rem)] select-none overflow-y-auto">
+          <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <MessageSquare size={16} className="text-emerald-600" />
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                SMS Settings
+              </h3>
+            </div>
+            <button
+              type="button"
+              onClick={onClosePanel}
+              className="xl:hidden p-1 text-slate-400 hover:text-slate-600 rounded"
+              title="Close panel"
+              aria-label="Close panel"
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div className="space-y-3.5 text-xs">
+            <div>
+              <label className="block text-slate-600 font-semibold mb-1">Template Name</label>
+              <input
+                type="text"
+                value={docName}
+                onChange={(e) => onUpdateDocName(e.target.value)}
+                placeholder="e.g. Appointment Reminder SMS"
+                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-800 font-medium"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-600 font-semibold mb-1">Template Key</label>
+              <input
+                type="text"
+                value={documentSettings?.template_key || ""}
+                onChange={(e) =>
+                  onUpdateDocumentSettings({ ...documentSettings, template_key: e.target.value })
+                }
+                placeholder="e.g. reminder_sms, dispatched_sms"
+                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-800 font-mono font-medium"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-600 font-semibold mb-1">Category</label>
+              <input
+                type="text"
+                value={documentSettings?.category || "SMS"}
+                onChange={(e) =>
+                  onUpdateDocumentSettings({ ...documentSettings, category: e.target.value })
+                }
+                placeholder="e.g. SMS Notifications, Alerts"
+                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-700"
+              />
+            </div>
+
+            {branches && branches.length > 0 && (
+              <div>
+                <label className="block text-slate-600 font-semibold mb-1">Branch Scope</label>
+                <select
+                  value={documentSettings?.branch || ""}
+                  onChange={(e) =>
+                    onUpdateDocumentSettings({
+                      ...documentSettings,
+                      branch: e.target.value ? Number(e.target.value) : null,
+                    })
+                  }
+                  className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-700 font-medium"
+                >
+                  <option value="">All Branches (Global)</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* SMS Message Font Size */}
+            <div>
+              <label className="block text-slate-600 font-semibold mb-1">Message Font Size (px)</label>
+              <div className="flex items-center border border-slate-200 rounded-lg bg-slate-50 overflow-hidden focus-within:ring-1 focus-within:ring-blue-500 focus-within:bg-white">
+                <button
+                  type="button"
+                  onClick={() =>
+                    onUpdateDocumentSettings({
+                      ...documentSettings,
+                      fontSize: Math.max(10, (documentSettings?.fontSize || 13) - 1),
+                    })
+                  }
+                  className="p-1.5 hover:bg-slate-200 text-slate-600 transition"
+                  title="Decrease SMS font size"
+                  aria-label="Decrease SMS font size"
+                >
+                  <Minus size={12} />
+                </button>
+                <input
+                  type="number"
+                  min="10"
+                  max="24"
+                  aria-label="Message font size"
+                  value={documentSettings?.fontSize || 13}
+                  onChange={(e) =>
+                    onUpdateDocumentSettings({
+                      ...documentSettings,
+                      fontSize: Math.max(10, Math.min(24, Number(e.target.value) || 13)),
+                    })
+                  }
+                  className="w-full px-1 py-1 text-center bg-transparent border-0 outline-none text-xs font-semibold text-slate-800"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    onUpdateDocumentSettings({
+                      ...documentSettings,
+                      fontSize: Math.min(24, (documentSettings?.fontSize || 13) + 1),
+                    })
+                  }
+                  className="p-1.5 hover:bg-slate-200 text-slate-600 transition"
+                  title="Increase SMS font size"
+                  aria-label="Increase SMS font size"
+                >
+                  <Plus size={12} />
+                </button>
+              </div>
+            </div>
+
+            {/* Carrier Diagnostics Card */}
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+              <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                <span>Carrier Payload Metrics</span>
+                <span className="font-mono text-emerald-700 font-semibold">{smsAnalysis.encoding}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-center">
+                <div className="p-2 bg-white rounded-lg border border-slate-200">
+                  <div className="text-base font-bold text-slate-800">{smsAnalysis.charCount}</div>
+                  <div className="text-[10px] text-slate-500">Total Characters</div>
+                </div>
+                <div className="p-2 bg-white rounded-lg border border-slate-200">
+                  <div className="text-base font-bold text-slate-800">{smsAnalysis.segments}</div>
+                  <div className="text-[10px] text-slate-500">SMS Segment{smsAnalysis.segments === 1 ? "" : "s"}</div>
+                </div>
+              </div>
+              <div className="text-[10.5px] text-slate-500">
+                {smsAnalysis.encoding === "GSM-7"
+                  ? "Standard GSM-7 7-bit charset (160 characters per single message segment)."
+                  : "Unicode UCS-2 characters detected (70 characters per segment)."}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-auto p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-500 leading-relaxed">
+            <p className="font-semibold text-slate-700 mb-1">SMS Simulator</p>
+            Edit your message directly in the interactive smartphone simulator or insert merge tags from the left sidebar.
+          </div>
+        </aside>
+      );
+    }
+
     const isLandscape = String(orientation).toLowerCase() === "landscape";
     return (
       <aside className="w-80 bg-white border-l border-slate-200 p-4 flex flex-col h-[calc(100vh-3.5rem)] select-none overflow-y-auto">
-        <div className="flex items-center gap-2 pb-3 mb-4 border-b border-slate-100">
-          <Sliders size={16} className="text-blue-600" />
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-            Document Settings
-          </h3>
+        <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <Sliders size={16} className="text-blue-600" />
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+              Document Settings
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClosePanel}
+            className="xl:hidden p-1 text-slate-400 hover:text-slate-600 rounded"
+            title="Close panel"
+            aria-label="Close panel"
+          >
+            <X size={16} />
+          </button>
         </div>
         <div className="space-y-3.5 text-xs">
           <div>
@@ -153,8 +470,6 @@ export default function RightPropertiesPanel({
             </div>
           </div>
 
-
-
           <div>
             <label className="block text-slate-600 font-semibold mb-1">Estimate Validity Period</label>
             <input
@@ -166,6 +481,55 @@ export default function RightPropertiesPanel({
               placeholder="e.g. 30 days"
               className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-700"
             />
+          </div>
+
+          {/* Base Document Font Size */}
+          <div>
+            <label className="block text-slate-600 font-semibold mb-1">Base Document Font Size (px)</label>
+            <div className="flex items-center border border-slate-200 rounded-lg bg-slate-50 overflow-hidden focus-within:ring-1 focus-within:ring-blue-500 focus-within:bg-white">
+              <button
+                type="button"
+                onClick={() =>
+                  onUpdateDocumentSettings({
+                    ...documentSettings,
+                    fontSize: Math.max(8, (documentSettings?.fontSize || 12) - 1),
+                  })
+                }
+                className="p-1.5 hover:bg-slate-200 text-slate-600 transition"
+                title="Decrease base font size"
+                aria-label="Decrease base font size"
+              >
+                <Minus size={12} />
+              </button>
+              <input
+                type="number"
+                min="8"
+                max="32"
+                aria-label="Base font size"
+                value={documentSettings?.fontSize || 12}
+                onChange={(e) =>
+                  onUpdateDocumentSettings({
+                    ...documentSettings,
+                    fontSize: Math.max(8, Math.min(32, Number(e.target.value) || 12)),
+                  })
+                }
+                className="w-full px-1 py-1 text-center bg-transparent border-0 outline-none text-xs font-semibold text-slate-800"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  onUpdateDocumentSettings({
+                    ...documentSettings,
+                    fontSize: Math.min(32, (documentSettings?.fontSize || 12) + 1),
+                  })
+                }
+                className="p-1.5 hover:bg-slate-200 text-slate-600 transition"
+                title="Increase base font size"
+                aria-label="Increase base font size"
+              >
+                <Plus size={12} />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -349,6 +713,15 @@ export default function RightPropertiesPanel({
           >
             <Trash2 size={13} />
           </button>
+          <button
+            type="button"
+            onClick={onClosePanel}
+            className="xl:hidden p-1.5 text-slate-400 hover:text-slate-600 rounded ml-1"
+            title="Close panel"
+            aria-label="Close panel"
+          >
+            <X size={15} />
+          </button>
         </div>
       </div>
 
@@ -409,6 +782,8 @@ export default function RightPropertiesPanel({
                   type="button"
                   onClick={() => handleAddRow("above")}
                   className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-[11px] text-left transition"
+                  title="Insert row above"
+                  aria-label="Insert row above"
                 >
                   + Row Above {insertCount > 1 ? `(${insertCount})` : ""}
                 </button>
@@ -416,6 +791,8 @@ export default function RightPropertiesPanel({
                   type="button"
                   onClick={() => handleAddRow("below")}
                   className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-[11px] text-left transition"
+                  title="Insert row below"
+                  aria-label="Insert row below"
                 >
                   + Row Below {insertCount > 1 ? `(${insertCount})` : ""}
                 </button>
@@ -423,6 +800,8 @@ export default function RightPropertiesPanel({
                   type="button"
                   onClick={() => handleAddCol("left")}
                   className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-[11px] text-left transition"
+                  title="Insert column left"
+                  aria-label="Insert column left"
                 >
                   + Col Left {insertCount > 1 ? `(${insertCount})` : ""}
                 </button>
@@ -430,6 +809,8 @@ export default function RightPropertiesPanel({
                   type="button"
                   onClick={() => handleAddCol("right")}
                   className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-[11px] text-left transition"
+                  title="Insert column right"
+                  aria-label="Insert column right"
                 >
                   + Col Right {insertCount > 1 ? `(${insertCount})` : ""}
                 </button>
@@ -579,6 +960,68 @@ export default function RightPropertiesPanel({
                 <span className="text-[10px] text-blue-600 font-semibold">
                   {multiCellIds.length > 1 ? `${multiCellIds.length} Cells Selected` : selCellObj ? "Active" : "All Cells"}
                 </span>
+              </div>
+
+              {/* Cell Font Family & Size */}
+              <div className="grid grid-cols-3 gap-2">
+                <div className="col-span-2">
+                  <label className="block text-[11px] font-medium text-slate-600 mb-1">Cell Font</label>
+                  <select
+                    value={selCellObj?.fontFamily || ""}
+                    onChange={(e) => updateCell({ fontFamily: e.target.value })}
+                    className="w-full px-2 py-1 bg-white border border-slate-200 rounded text-[11px] text-slate-700"
+                  >
+                    <option value="">Default (Table Font)</option>
+                    {FONT_FAMILIES.map((group) => (
+                      <optgroup key={group.group} label={group.group}>
+                        {group.fonts.map((f) => (
+                          <option key={f.value} value={f.value}>
+                            {f.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-600 mb-1">Size (px)</label>
+                  <div className="flex items-center border border-slate-200 rounded-lg bg-white overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cur = selCellObj?.fontSize || 12;
+                        updateCell({ fontSize: Math.max(8, cur - 1) });
+                      }}
+                      className="p-1 hover:bg-slate-100 text-slate-600 transition"
+                      title="Decrease cell font size"
+                      aria-label="Decrease cell font size"
+                    >
+                      <Minus size={11} />
+                    </button>
+                    <input
+                      type="number"
+                      min="8"
+                      max="48"
+                      placeholder="12"
+                      aria-label="Cell font size"
+                      value={selCellObj?.fontSize || ""}
+                      onChange={(e) => updateCell({ fontSize: e.target.value ? Number(e.target.value) : undefined })}
+                      className="w-full px-1 py-1 text-center bg-transparent border-0 outline-none text-[11px] text-slate-700 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cur = selCellObj?.fontSize || 12;
+                        updateCell({ fontSize: Math.min(48, cur + 1) });
+                      }}
+                      className="p-1 hover:bg-slate-100 text-slate-600 transition"
+                      title="Increase cell font size"
+                      aria-label="Increase cell font size"
+                    >
+                      <Plus size={11} />
+                    </button>
+                  </div>
+                </div>
               </div>
 
               {/* Text formatting & colors */}
@@ -781,25 +1224,36 @@ export default function RightPropertiesPanel({
                   </button>
                   <button
                     type="button"
-                    onClick={() =>
+                    onClick={() => {
+                      const newCol = {
+                        id: createId("col"),
+                        label: "New Column",
+                        key: `custom_${chargesCols.length + 1}`,
+                        width: 15,
+                        align: "right",
+                        visible: true,
+                      };
+                      const allCols = [...chargesCols, newCol];
+                      const visibleCols = allCols.filter((c) => c.visible !== false);
+                      const eq = Math.floor(100 / visibleCols.length);
+                      const rem = 100 - eq * visibleCols.length;
+                      let vIdx = 0;
+                      const nextCols = allCols.map((c) => {
+                        if (c.visible === false) return c;
+                        const w = vIdx === 0 ? eq + rem : eq;
+                        vIdx++;
+                        return { ...c, width: w };
+                      });
                       onUpdateItem({
                         ...selectedItem,
-                        columns: [
-                          ...chargesCols,
-                          {
-                            id: createId("col"),
-                            label: "New Column",
-                            key: `custom_${chargesCols.length + 1}`,
-                            width: 15,
-                            align: "right",
-                            visible: true,
-                          },
-                        ],
-                      })
-                    }
+                        columns: nextCols,
+                      });
+                    }}
                     className="px-2 py-0.5 text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition"
+                    title="Add column"
+                    aria-label="Add column"
                   >
-                    + Add
+                    + Add Column
                   </button>
                 </div>
               </div>
@@ -1155,6 +1609,137 @@ export default function RightPropertiesPanel({
         )}
 
         {/* ========================================================================= */}
+        {/* 4B. IMAGE & LOGO INSPECTOR (when selectedItem.type === "image")           */}
+        {/* ========================================================================= */}
+        {selectedItem.type === "image" && (
+          <div className="space-y-3 pt-2 border-t border-slate-100">
+            <span className="font-bold text-slate-800 flex items-center gap-1.5">
+              <ImageIcon size={14} className="text-blue-600" />
+              Image & Logo Settings
+            </span>
+
+            {/* Image URL Input */}
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Image URL / Data</label>
+              <input
+                type="text"
+                value={selectedItem.image?.src || selectedItem.content || ""}
+                onChange={(e) =>
+                  onUpdateItem({
+                    ...selectedItem,
+                    content: e.target.value,
+                    image: { ...(selectedItem.image || {}), src: e.target.value },
+                  })
+                }
+                placeholder="https://example.com/logo.png or data:image/..."
+                className="w-full px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono"
+              />
+            </div>
+
+            {/* Upload File Input */}
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Upload Image</label>
+              <label className="flex items-center justify-center gap-2 p-2 bg-slate-50 border border-dashed border-slate-300 rounded-lg cursor-pointer hover:bg-slate-100 transition text-xs text-slate-600 font-medium">
+                <Upload size={14} className="text-slate-500" />
+                <span>Choose Image File...</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onload = (event) => {
+                        const dataUrl = event.target?.result;
+                        onUpdateItem({
+                          ...selectedItem,
+                          content: dataUrl,
+                          image: { ...(selectedItem.image || {}), src: dataUrl },
+                        });
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            {/* Image Width Slider */}
+            <div>
+              <div className="flex justify-between items-center mb-1">
+                <label className="text-[11px] text-slate-600 font-medium">Image Width</label>
+                <span className="text-[10px] font-mono text-slate-500">{selectedItem.image?.width || 80}%</span>
+              </div>
+              <input
+                type="range"
+                min="10"
+                max="100"
+                value={selectedItem.image?.width || 80}
+                onChange={(e) =>
+                  onUpdateItem({
+                    ...selectedItem,
+                    image: { ...(selectedItem.image || {}), width: Number(e.target.value) },
+                  })
+                }
+                className="w-full cursor-pointer"
+              />
+            </div>
+
+            {/* Alignment */}
+            <div>
+              <label className="block text-[11px] font-medium text-slate-600 mb-1">Alignment</label>
+              <div className="grid grid-cols-3 gap-1">
+                {(["left", "center", "right"]).map((al) => (
+                  <button
+                    key={al}
+                    type="button"
+                    onClick={() =>
+                      onUpdateItem({
+                        ...selectedItem,
+                        image: { ...(selectedItem.image || {}), align: al },
+                      })
+                    }
+                    className={`py-1.5 rounded-lg text-xs font-semibold border transition ${
+                      (selectedItem.image?.align || "left") === al
+                        ? "bg-blue-600 text-white border-blue-600"
+                        : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    {al.charAt(0).toUpperCase() + al.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* 4C. FOOTER BLOCK INSPECTOR (when selectedItem.type === "footer")          */}
+        {/* ========================================================================= */}
+        {selectedItem.type === "footer" && (
+          <div className="space-y-3 pt-2 border-t border-slate-100">
+            <span className="font-bold text-slate-800">Footer Text & Disclaimer</span>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Footer Message</label>
+              <textarea
+                rows={3}
+                value={selectedItem.content || selectedItem.label || ""}
+                onChange={(e) =>
+                  onUpdateItem({
+                    ...selectedItem,
+                    content: e.target.value,
+                    label: e.target.value,
+                  })
+                }
+                placeholder="Footer disclaimer, copyright, or contact information..."
+                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
         {/* 5. COMPLETE TYPOGRAPHY SECTION (for non-table items or fallback)          */}
         {/* ========================================================================= */}
         {selectedItem.type !== "table" && (
@@ -1186,14 +1771,35 @@ export default function RightPropertiesPanel({
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="block text-[11px] text-slate-500 font-medium mb-1">Size (px)</label>
-                <input
-                  type="number"
-                  min="7"
-                  max="72"
-                  value={style.fontSize || 12}
-                  onChange={(e) => handleStyleChange({ fontSize: Number(e.target.value) })}
-                  className="w-full px-2 py-1 bg-slate-50 border border-slate-200 rounded-md focus:bg-white text-xs font-medium"
-                />
+                <div className="flex items-center border border-slate-200 rounded-lg bg-slate-50 overflow-hidden focus-within:ring-1 focus-within:ring-blue-500 focus-within:bg-white">
+                  <button
+                    type="button"
+                    onClick={() => handleStyleChange({ fontSize: Math.max(7, (style.fontSize || 12) - 1) })}
+                    className="p-1.5 hover:bg-slate-200 text-slate-600 transition"
+                    title="Decrease font size"
+                    aria-label="Decrease font size"
+                  >
+                    <Minus size={12} />
+                  </button>
+                  <input
+                    type="number"
+                    min="7"
+                    max="72"
+                    aria-label="Font size"
+                    value={style.fontSize || 12}
+                    onChange={(e) => handleStyleChange({ fontSize: Math.max(7, Math.min(72, Number(e.target.value) || 12)) })}
+                    className="w-full px-1 py-1 text-center bg-transparent border-0 outline-none text-xs font-semibold text-slate-800"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleStyleChange({ fontSize: Math.min(72, (style.fontSize || 12) + 1) })}
+                    className="p-1.5 hover:bg-slate-200 text-slate-600 transition"
+                    title="Increase font size"
+                    aria-label="Increase font size"
+                  >
+                    <Plus size={12} />
+                  </button>
+                </div>
               </div>
               <div>
                 <label className="block text-[11px] text-slate-500 font-medium mb-1">Weight</label>

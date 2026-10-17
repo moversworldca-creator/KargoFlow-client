@@ -9,6 +9,9 @@ import {
   splitMergedCell,
   deleteRowKeepGap,
   deleteColKeepGap,
+  restoreSpacerCell,
+  splitTableHorizontal,
+  splitTableVertical,
 } from "./core/tableOperations";
 import { createTableWidget } from "./model/templateModel";
 
@@ -64,6 +67,35 @@ describe("Phase 2: Table Operations Core Engine", () => {
     const result = deleteColKeepGap(rows, [1]);
     expect(result[0].cells[1].isSpacer).toBe(true);
     expect(result[0].cells[1].content).toBe("");
+
+    // Restore spacer cell
+    const restored = restoreSpacerCell(result, "c2");
+    expect(restored[0].cells[1].isSpacer).toBe(false);
+  });
+
+  it("splits table horizontally into two separate tables", () => {
+    const rows = [
+      { id: "r1", cells: [{ id: "c1", content: "Row 1" }] },
+      { id: "r2", cells: [{ id: "c2", content: "Row 2" }] },
+    ];
+    const { table1, table2 } = splitTableHorizontal(rows, {}, 1);
+    expect(table1.rows.length).toBe(1);
+    expect(table2.rows.length).toBe(1);
+    expect(table1.rows[0].cells[0].content).toBe("Row 1");
+    expect(table2.rows[0].cells[0].content).toBe("Row 2");
+  });
+
+  it("splits table vertically into two separate tables with normalized widths", () => {
+    const rows = [
+      { id: "r1", cells: [{ id: "c1", content: "A1" }, { id: "c2", content: "B1" }] },
+    ];
+    const { table1, table2 } = splitTableVertical(rows, { columnWidths: [50, 50] }, 1);
+    expect(table1.rows[0].cells.length).toBe(1);
+    expect(table2.rows[0].cells.length).toBe(1);
+    expect(table1.rows[0].cells[0].content).toBe("A1");
+    expect(table2.rows[0].cells[0].content).toBe("B1");
+    expect(table1.settings.columnWidths).toEqual([100]);
+    expect(table2.settings.columnWidths).toEqual([100]);
   });
 });
 
@@ -175,6 +207,120 @@ describe("Phase 2: InteractiveTableBlock Component", () => {
     expect(onItem).toHaveBeenCalled();
     const updated = onItem.mock.calls[0][0];
     expect(updated.tableRows[0].cells[0].content).toBe("Item Description");
+  });
+
+  it("renders subGrid subcells when cell has a subGrid structure", () => {
+    const tableWithSubgrid = {
+      id: "table-subgrid",
+      type: "table",
+      label: "Subgrid Table",
+      tableRows: [
+        {
+          id: "tr1",
+          height: 50,
+          cells: [
+            {
+              id: "parent-cell-1",
+              content: "",
+              subGrid: {
+                rows: 2,
+                cols: 1,
+                cells: [
+                  { id: "sub-1", content: "Primary Service" },
+                  { id: "sub-2", content: "Accessorial Charge" },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+      tableSettings: { columnWidths: [100] },
+    };
+
+    render(
+      <InteractiveTableBlock
+        item={tableWithSubgrid}
+        isSelected={true}
+        preview={false}
+      />
+    );
+
+    expect(screen.getByText("Primary Service")).toBeInTheDocument();
+    expect(screen.getByText("Accessorial Charge")).toBeInTheDocument();
+  });
+
+  it("renders + Restore button on spacer cell and restores on click", () => {
+    const onItem = vi.fn();
+    const tableWithSpacer = {
+      id: "table-spacer",
+      type: "table",
+      label: "Spacer Table",
+      tableRows: [
+        {
+          id: "tr1",
+          height: 36,
+          cells: [
+            { id: "spacer-cell-1", isSpacer: true, content: "" },
+          ],
+        },
+      ],
+      tableSettings: { columnWidths: [100] },
+    };
+
+    render(
+      <InteractiveTableBlock
+        item={tableWithSpacer}
+        isSelected={true}
+        preview={false}
+        onItem={onItem}
+      />
+    );
+
+    const restoreBtn = screen.getByRole("button", { name: /\+ Restore/i });
+    expect(restoreBtn).toBeInTheDocument();
+    fireEvent.click(restoreBtn);
+
+    expect(onItem).toHaveBeenCalled();
+    const updated = onItem.mock.calls[0][0];
+    expect(updated.tableRows[0].cells[0].isSpacer).toBe(false);
+  });
+
+  it("renders cell fontSize and fontFamily inline styles when provided", () => {
+    const tableWithFontStyles = {
+      id: "table-fonts",
+      type: "table",
+      label: "Custom Fonts Table",
+      tableRows: [
+        {
+          id: "tr1",
+          height: 40,
+          cells: [
+            {
+              id: "cell-font-1",
+              content: "Custom Styled Cell",
+              fontSize: 18,
+              fontFamily: "Georgia, serif",
+              color: "#2563eb",
+            },
+          ],
+        },
+      ],
+      tableSettings: { columnWidths: [100] },
+    };
+
+    const { container } = render(
+      <InteractiveTableBlock
+        item={tableWithFontStyles}
+        isSelected={true}
+        preview={false}
+      />
+    );
+
+    const td = container.querySelector("td");
+    expect(td).toBeInTheDocument();
+    expect(td.style.fontSize).toBe("18px");
+    expect(td.style.fontFamily).toBe("Georgia, serif");
+    expect(td.style.color).toBe("rgb(37, 99, 235)");
   });
 });
 
