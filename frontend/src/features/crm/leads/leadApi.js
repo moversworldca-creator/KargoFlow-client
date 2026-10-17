@@ -94,4 +94,8 @@ export const leadApi = {
   consent: (id) => api.get(`${BASE}${id}/consent/`),
   stateHistory: (id) => api.get(`${BASE}${id}/state-history/`),
   dispositions: (id) => api.get(`${BASE}${id}/dispositions/`),
+  duplicateReviews: (id) => api.get(`${BASE}${id}/duplicate-reviews/`),
+  resolveDuplicateReview: (id, reviewId, data) => api.post(`${BASE}${id}/duplicate-reviews/${reviewId}/resolve/`, data),
+  listDuplicateQueue: (params = {}) => api.get(`${BASE}duplicate-reviews/`, { params }),
 };
+

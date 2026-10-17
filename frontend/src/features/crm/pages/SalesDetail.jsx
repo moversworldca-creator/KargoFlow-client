@@ -39,6 +39,9 @@ import LeadSpecs from '../components/LeadSpecs';
 import RingCentralEmbeddablePanel from '../components/RingCentralEmbeddablePanel';
 import MovablePanel from '../components/MovablePanel';
 import CategorizedFilesPanel from '../../files/components/CategorizedFilesPanel';
+import DuplicateComparisonModal from '../components/duplicates/DuplicateComparisonModal';
+import InboundProvenanceCard from '../components/inbound/InboundProvenanceCard';
+import { leadApi } from '../leads/leadApi';
 
 const resolveSpecLookupLabel = (value, options = []) => {
   const normalizedValue = String(value ?? '').trim();
@@ -2184,6 +2187,8 @@ const SalesDetail = () => {
   const [inboundHtmlModalOpen, setInboundHtmlModalOpen] = useState(false);
   const [inboundHtmlModalContent, setInboundHtmlModalContent] = useState('');
   const [inboundHtmlModalSubject, setInboundHtmlModalSubject] = useState('');
+  const [duplicateReviews, setDuplicateReviews] = useState([]);
+  const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
 
   const hasPermission = useCallback((permission) => canAll([permission]), [canAll]);
   const requiresAnyPermission = useCallback((permissions) => canAny(permissions), [canAny]);
@@ -3021,6 +3026,11 @@ const SalesDetail = () => {
         }
 
         setOpportunity(leadData);
+        if (leadData?.id) {
+          leadApi.duplicateReviews(leadData.id)
+            .then(res => setDuplicateReviews(Array.isArray(res) ? res : res?.results || []))
+            .catch(() => setDuplicateReviews([]));
+        }
         return;
       }
 
@@ -8270,6 +8280,29 @@ const SalesDetail = () => {
 	        transparent={true}
 	      />
 
+      {isLeadPath && duplicateReviews.some(r => r.decision === 'pending') && (
+        <div className="mx-auto max-w-8xl px-2 pt-2 pb-1">
+          <div className="flex items-center justify-between rounded-2xl border border-amber-300 bg-amber-50 p-3.5 text-amber-900 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-200">
+            <div className="flex items-center gap-2.5">
+              <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
+              <div>
+                <span className="font-bold text-xs block">Potential Duplicate Lead Detected</span>
+                <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                  This inbound lead matches email or phone of another record. Please review and record a staff decision.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsDuplicateModalOpen(true)}
+              className="rounded-xl bg-amber-600 hover:bg-amber-700 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition active:scale-95 shrink-0"
+            >
+              Review Duplicate
+            </button>
+          </div>
+        </div>
+      )}
+
       <main className="w-full px-1 py-2 sm:px-2 lg:px-2">
         <div className="grid grid-cols-12 gap-2 lg:gap-3">
           <div className={mainColumnClass}>
@@ -8297,6 +8330,11 @@ const SalesDetail = () => {
                   plannedMove={plannedMove}
                 />
                 </>
+              )}
+              {isLeadPath && opportunity && (opportunity.branch_routing_source || opportunity.lead_provider_id || opportunity.utm_source) && (
+                <div className="col-span-full">
+                  <InboundProvenanceCard lead={opportunity} />
+                </div>
               )}
               {['Estimate', 'Files & Photos', 'Accounting', 'Documents', 'Payments'].includes(activeTab) && (
               <RouteLogisticsCard
@@ -11255,6 +11293,22 @@ const SalesDetail = () => {
       >
         <RingCentralEmbeddablePanel />
       </MovablePanel>
+
+      {isLeadPath && duplicateReviews.find(r => r.decision === 'pending') && (
+        <DuplicateComparisonModal
+          isOpen={isDuplicateModalOpen}
+          onClose={() => setIsDuplicateModalOpen(false)}
+          subjectLead={opportunity}
+          review={duplicateReviews.find(r => r.decision === 'pending')}
+          onResolved={() => {
+            if (opportunity?.id) {
+              leadApi.duplicateReviews(opportunity.id)
+                .then(res => setDuplicateReviews(Array.isArray(res) ? res : res?.results || []))
+                .catch(() => setDuplicateReviews([]));
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
