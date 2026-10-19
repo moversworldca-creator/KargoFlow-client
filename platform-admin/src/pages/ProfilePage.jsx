@@ -27,7 +27,7 @@ export default function ProfilePage() {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   // Password fields
-  const [currentPassword, setCurrentPassword] = useState('secretDummyPassword123');
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -117,6 +117,10 @@ export default function ProfilePage() {
   // Change password
   const handleChangePassword = async (e) => {
     if (e) e.preventDefault();
+    if (!currentPassword) {
+      showToast('Please enter your current password.', 'error');
+      return;
+    }
     if (!newPassword) {
       showToast('Please type a new password.', 'error');
       return;
@@ -132,11 +136,17 @@ export default function ProfilePage() {
         current_password: currentPassword,
         new_password: newPassword,
       });
-      showToast('Operator password updated and validated.', 'success');
+      showToast('Operator password updated successfully.', 'success');
       setNewPassword('');
+      setCurrentPassword('');
     } catch (err) {
       console.error(err);
-      showToast(err?.response?.data?.error || 'Failed to update password.', 'error');
+      const backendError = err?.response?.data?.error;
+      const friendlyMessage =
+        backendError === 'invalid_current_password'
+          ? 'Current password is incorrect.'
+          : (backendError || 'Failed to update password.');
+      showToast(friendlyMessage, 'error');
     } finally {
       setIsUpdatingPassword(false);
     }
@@ -443,6 +453,7 @@ export default function ProfilePage() {
                       type={showCurrentPassword ? 'text' : 'password'}
                       value={currentPassword}
                       onChange={(e) => setCurrentPassword(e.target.value)}
+                      placeholder="Enter current password"
                       className="block w-full pl-9 pr-9 py-2 text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-800 dark:text-slate-100 font-medium"
                     />
                     <button

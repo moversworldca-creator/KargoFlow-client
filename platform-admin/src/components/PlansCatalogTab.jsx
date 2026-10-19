@@ -261,6 +261,8 @@ export default function PlansCatalogTab({
     });
 
     const cleanBaseName = (basePlan.name || '').replace(/\s*v\d+(\.\d+)?$/i, '');
+    const cents = basePlan.base_price_cents ?? basePlan.base_price_minor ?? 29900;
+    const dollars = isNaN(cents) ? 299 : parseFloat((cents / 100).toFixed(2));
     setNewPlan({
       code: (basePlan.code || '').toLowerCase(),
       name: `${cleanBaseName} v${nextVer}`,
@@ -268,7 +270,7 @@ export default function PlansCatalogTab({
       version: nextVer,
       billing_interval: basePlan.billing_interval || 'month',
       currency: basePlan.currency || 'USD',
-      base_price_cents: basePlan.base_price_cents ?? basePlan.base_price_minor ?? 29900,
+      base_price_dollars: dollars,
       is_public: false,
       features: initialFeatures,
       limits: initialLimits,
@@ -297,7 +299,7 @@ export default function PlansCatalogTab({
     version: 1,
     billing_interval: 'month',
     currency: 'USD',
-    base_price_cents: 29900,
+    base_price_dollars: 299,
     is_public: true,
     limits: {},
     features: {},
@@ -339,7 +341,7 @@ export default function PlansCatalogTab({
       version: 1,
       billing_interval: 'month',
       currency: 'USD',
-      base_price_cents: 29900,
+      base_price_dollars: 299,
       is_public: true,
       features: initialFeatures,
       limits: initialLimits,
@@ -351,7 +353,8 @@ export default function PlansCatalogTab({
   const getPlanPrice = (plan) => {
     const cents = plan?.base_price_cents ?? plan?.base_price_minor ?? 0;
     if (isNaN(cents)) return '0';
-    return (cents / 100).toFixed(0);
+    const dollars = cents / 100;
+    return cents % 100 === 0 ? dollars.toFixed(0) : dollars.toFixed(2);
   };
 
   // Helper: extract limit value whether limits is an array of objects or a dict
@@ -485,7 +488,7 @@ export default function PlansCatalogTab({
   // Open Edit Modal
   const handleOpenEditModal = (plan) => {
     const cents = plan.base_price_cents ?? plan.base_price_minor ?? 0;
-    const dollars = isNaN(cents) ? 0 : Math.round(cents / 100);
+    const dollars = isNaN(cents) ? 0 : parseFloat((cents / 100).toFixed(2));
 
     setEditingPlan(plan);
     setEditPlanForm({
@@ -517,7 +520,7 @@ export default function PlansCatalogTab({
       // Only include price and interval if plan is draft / unlocked
       if (!isLocked) {
         payload.billing_interval = editPlanForm.billing_interval;
-        payload.base_price_minor = Math.round((Number(editPlanForm.base_price_dollars) || 0) * 100);
+        payload.base_price_minor = Math.round((parseFloat(editPlanForm.base_price_dollars) || 0) * 100);
       }
 
       await platformApi.updatePlan(editingPlan.id, payload);
@@ -578,7 +581,7 @@ export default function PlansCatalogTab({
         version: Number(newPlan.version) || 1,
         billing_interval: newPlan.billing_interval,
         currency: newPlan.currency || 'USD',
-        base_price_minor: Number(newPlan.base_price_cents) || 0,
+        base_price_minor: Math.round((parseFloat(newPlan.base_price_dollars) || 0) * 100),
         is_public: Boolean(newPlan.is_public),
         features: featuresList,
         limits: limitsList,
@@ -1562,10 +1565,12 @@ export default function PlansCatalogTab({
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
                     <input
                       type="number"
+                      step="0.01"
                       min="0"
                       disabled={editingPlan?.status === 'active' || editingPlan?.is_current}
                       value={editPlanForm.base_price_dollars}
-                      onChange={(e) => setEditPlanForm({ ...editPlanForm, base_price_dollars: Math.max(0, Number(e.target.value)) })}
+                      onChange={(e) => setEditPlanForm({ ...editPlanForm, base_price_dollars: e.target.value })}
+                      placeholder="e.g. 3.99"
                       className="w-full pl-7 pr-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 font-mono font-bold focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                   </div>
@@ -1697,15 +1702,20 @@ export default function PlansCatalogTab({
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-slate-700 dark:text-slate-300 font-bold uppercase tracking-wider mb-1">
-                    Price (Cents)
+                    Price (USD $)
                   </label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={newPlan.base_price_cents}
-                    onChange={(e) => setNewPlan({ ...newPlan, base_price_cents: Number(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 font-mono"
-                  />
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={newPlan.base_price_dollars}
+                      onChange={(e) => setNewPlan({ ...newPlan, base_price_dollars: e.target.value })}
+                      placeholder="e.g. 3.99"
+                      className="w-full pl-7 pr-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 font-mono font-bold"
+                    />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-slate-700 dark:text-slate-300 font-bold uppercase tracking-wider mb-1">

@@ -427,7 +427,8 @@ export default function ProvisionTenantModal({ isOpen, onClose, onTenantProvisio
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {plans.map((p) => {
                   const isSelected = String(formData.plan_id) === String(p.id);
-                  const price = Math.round((p.base_price_cents ?? p.base_price_minor ?? 0) / 100);
+                  const rawCents = p.base_price_cents ?? p.base_price_minor ?? 0;
+                  const price = (rawCents / 100).toFixed(rawCents % 100 === 0 ? 0 : 2);
 
                   const getL = (key) => {
                     if (Array.isArray(p.limits)) {

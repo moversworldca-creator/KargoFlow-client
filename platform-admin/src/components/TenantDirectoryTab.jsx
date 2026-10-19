@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Building2, Search, Filter, Plus, Shield, 
-  ExternalLink, Key, Users, MapPin, MoreHorizontal, 
+  ExternalLink, Key, Users, MapPin, MoreHorizontal, MoreVertical,
   CheckCircle2, AlertTriangle, XCircle, Clock, Eye, 
   Sliders, Loader2, ArrowRight
 } from 'lucide-react';
@@ -24,6 +24,18 @@ export default function TenantDirectoryTab({
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedTenantDetails, setSelectedTenantDetails] = useState(null);
   const [lifecycleModalTenant, setLifecycleModalTenant] = useState(null);
+  const [activeActionMenuTenantId, setActiveActionMenuTenantId] = useState(null);
+  const actionMenuRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (actionMenuRef.current && !actionMenuRef.current.contains(event.target)) {
+        setActiveActionMenuTenantId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const filteredTenants = tenants.filter((t) => {
     const q = debouncedSearch.toLowerCase().trim();
@@ -80,24 +92,17 @@ export default function TenantDirectoryTab({
   };
 
   const getStateBadge = (tenant) => {
-    const state = tenant.functional_state || (tenant.is_active ? 'Active' : 'Provisioning');
-    const tone = state === 'Active'
-      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400'
-      : state === 'Provisioning'
-        ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
-        : 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400';
+    const isActive = tenant.functional_state === 'Active' && tenant.is_active !== false;
     return (
-      <div>
-        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${tone}`}>{state}</span>
-        {state === 'Provisioning' && (
-          <button
-            onClick={() => setLifecycleModalTenant(tenant)}
-            className="block mt-1 text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
-          >
-            Activate…
-          </button>
-        )}
-      </div>
+      <span
+        className={`px-2 py-0.5 rounded-full text-[10px] font-bold inline-block ${
+          isActive
+            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400'
+            : 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400'
+        }`}
+      >
+        {isActive ? 'Active' : 'Deactive'}
+      </span>
     );
   };
 
@@ -225,8 +230,11 @@ export default function TenantDirectoryTab({
                   </td>
                 </tr>
               ) : (
-                filteredTenants.map((tenant) => {
+                filteredTenants.map((tenant, idx) => {
                   const planObj = plans.find((p) => p.id === tenant.plan_id) || { name: tenant.subscription_plan || 'Custom' };
+                  const isTenantActive = tenant.functional_state === 'Active' && tenant.is_active !== false;
+                  const isMenuOpen = activeActionMenuTenantId === tenant.id;
+                  const openUpwards = idx >= filteredTenants.length - 2 && filteredTenants.length > 2;
                   return (
                     <tr key={tenant.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
                       <td className="py-2.5 px-3.5">
@@ -261,44 +269,105 @@ export default function TenantDirectoryTab({
 
                       <td className="py-3 px-4">
                         <div className="text-[11px] text-slate-600 dark:text-slate-400">
-                          <div>Users: <span className="font-bold text-slate-800 dark:text-slate-200">{tenant.active_users_count || 1}</span></div>
-                          <div>Branches: <span className="font-bold text-slate-800 dark:text-slate-200">{tenant.active_branches_count || 1}</span></div>
+                          <div>Users: <span className="font-bold text-slate-800 dark:text-slate-200">{tenant.active_users_count ?? tenant.users_count ?? 1}</span></div>
+                          <div>Branches: <span className="font-bold text-slate-800 dark:text-slate-200">{tenant.active_branches_count ?? tenant.branches_count ?? 1}</span></div>
                         </div>
                       </td>
 
                       <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
+                        <div 
+                          className="relative inline-block text-left" 
+                          ref={isMenuOpen ? actionMenuRef : null}
+                        >
                           <button
-                            onClick={() => onSelectTenantForEntitlements?.(tenant)}
-                            title="Inspect Entitlements & Overrides"
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveActionMenuTenantId(isMenuOpen ? null : tenant.id);
+                            }}
+                            className={`p-1.5 rounded-lg text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer ${
+                              isMenuOpen ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white' : ''
+                            }`}
+                            title="Actions"
                           >
-                            <Sliders size={15} />
+                            <MoreVertical size={16} />
                           </button>
 
-                          <button
-                            onClick={() => onInitiateSupportSession?.(tenant)}
-                            title="Start Controlled Support Session"
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 transition-colors"
-                          >
-                            <Key size={15} />
-                          </button>
+                          {isMenuOpen && (
+                            <div
+                              className={`absolute right-0 w-60 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl p-1 z-30 animate-in fade-in zoom-in-95 duration-100 ${
+                                openUpwards ? 'bottom-full mb-1' : 'top-full mt-1'
+                              }`}
+                            >
+                              {/* Activate Tenant for deactive/provisioning tenants */}
+                              {!isTenantActive && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveActionMenuTenantId(null);
+                                      setLifecycleModalTenant(tenant);
+                                    }}
+                                    className="w-full text-left px-3 py-2 text-xs font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50/80 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 rounded-lg flex items-center gap-2.5 transition-colors cursor-pointer border border-emerald-200/60 dark:border-emerald-800/40"
+                                  >
+                                    <CheckCircle2 size={14} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                    <span>Activate Tenant…</span>
+                                  </button>
+                                  <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+                                </>
+                              )}
 
-                          <button
-                            onClick={() => setLifecycleModalTenant(tenant)}
-                            title="Manage Company Lifecycle (Section 2.1)"
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
-                          >
-                            <Shield size={15} />
-                          </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveActionMenuTenantId(null);
+                                  onSelectTenantForEntitlements?.(tenant);
+                                }}
+                                className="w-full text-left px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-blue-950/40 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg flex items-center gap-2.5 transition-colors cursor-pointer"
+                              >
+                                <Sliders size={14} className="text-blue-600 dark:text-blue-400 shrink-0" />
+                                <span>Inspect Entitlements & Overrides</span>
+                              </button>
 
-                          <button
-                            onClick={() => setSelectedTenantDetails(tenant)}
-                            title="View Full Tenant Spec"
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                          >
-                            <Eye size={15} />
-                          </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveActionMenuTenantId(null);
+                                  onInitiateSupportSession?.(tenant);
+                                }}
+                                className="w-full text-left px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-amber-50 dark:hover:bg-amber-950/40 hover:text-amber-600 dark:hover:text-amber-400 rounded-lg flex items-center gap-2.5 transition-colors cursor-pointer"
+                              >
+                                <Key size={14} className="text-amber-500 dark:text-amber-400 shrink-0" />
+                                <span>Controlled Support Session</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveActionMenuTenantId(null);
+                                  setLifecycleModalTenant(tenant);
+                                }}
+                                className="w-full text-left px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-purple-50 dark:hover:bg-purple-950/40 hover:text-purple-600 dark:hover:text-purple-400 rounded-lg flex items-center gap-2.5 transition-colors cursor-pointer"
+                              >
+                                <Shield size={14} className="text-purple-600 dark:text-purple-400 shrink-0" />
+                                <span>Manage Lifecycle (Section 2.1)</span>
+                              </button>
+
+                              <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActiveActionMenuTenantId(null);
+                                  setSelectedTenantDetails(tenant);
+                                }}
+                                className="w-full text-left px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg flex items-center gap-2.5 transition-colors cursor-pointer"
+                              >
+                                <Eye size={14} className="text-slate-500 dark:text-slate-400 shrink-0" />
+                                <span>View Full Tenant Spec</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </td>
                     </tr>

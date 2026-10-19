@@ -18,7 +18,7 @@ export const platformApi = {
     return platformAxios.put('/auth/profile/', data);
   },
   changePassword: async (data = {}) => {
-    return platformAxios.post('/auth/change-password/', data);
+    return platformAxios.post('/auth/password-change/', data);
   },
 
   // Dashboard
