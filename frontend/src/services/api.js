@@ -31,14 +31,19 @@ export const changePassword = (data) => api.post("/auth/password-change/", data)
 export const getUsers = (params) => api.get("/tenant/users/", { params });
 export const getLookupUsers = (params = { limit: 50 }) => api.get("/tenant/users/", { params });
 export const getUser = (id) => api.get(`/tenant/users/${id}/`);
-export const createUser = (data) => api.post("/tenant/users/", data);
 export const updateUser = (id, data) => api.patch(`/tenant/users/${id}/`, data);
-export const deleteUser = (id) => api.delete(`/tenant/users/${id}/`);
+// One role per user per branch: { user_id, role_id, branch_id }. A new role in a
+// branch replaces the one held there. branch_id null only for the system roles
+// held company-wide (Company Admin, crew roles).
 export const assignUserRole = (data) => api.post("/tenant/users/assign-role/", data);
+export const unassignUserRole = (data) => api.post("/tenant/users/unassign-role/", data);
 export const deactivateUser = (id) => api.post(`/tenant/users/${id}/deactivate/`);
 export const reactivateUser = (id) => api.post(`/tenant/users/${id}/reactivate/`);
 export const getUserBranches = (id) => api.get(`/tenant/users/${id}/branches/`);
+export const addUserBranch = (userId, branchId) => api.post(`/tenant/users/${userId}/branches/`, { branch_id: Number(branchId) });
 export const removeUserBranch = (userId, branchId) => api.delete(`/tenant/users/${userId}/branches/${branchId}/`);
+// Roles, branch memberships and direct overrides of one login (users.view).
+export const getUserAccess = (userId) => api.get(`/tenant/users/${userId}/access/`);
 
 export const acceptEmployeeInvitation = (data) => api.post('/tenant/invitations/accept/', data, { skipAuth: true });
 
@@ -52,11 +57,10 @@ export const inviteEmployee = (id, data = {}) => api.post(`/tenant/employees/${i
 export const terminateEmployee = (id, data = {}) => api.post(`/tenant/employees/${id}/terminate/`, data);
 export const rehireEmployee = (id, data = {}) => api.post(`/tenant/employees/${id}/rehire/`, data);
 export const getEmployeeInvitations = () => api.get("/tenant/employees/invitations/");
-export const revokeEmployeeInvitation = (id) => api.delete(`/tenant/employees/invitations/${id}/revoke/`);
+export const revokeEmployeeInvitation = (id) => api.post(`/tenant/employees/invitations/${id}/revoke/`);
 
 // Role APIs
 export const getRoles = (params) => api.get("/tenant/rbac/roles/", { params });
-export const getRole = (id) => api.get(`/tenant/rbac/roles/${id}/`);
 export const createRole = (data) => api.post("/tenant/rbac/roles/", data);
 export const updateRole = (id, data) => api.patch(`/tenant/rbac/roles/${id}/`, data);
 export const deactivateRole = (id) => api.patch(`/tenant/rbac/roles/${id}/`, { is_active: false });
@@ -65,10 +69,20 @@ export const deleteRole = deactivateRole;
 export const getRolePermissions = (roleId) => api.get(`/tenant/rbac/roles/${roleId}/permissions/`);
 export const grantRolePermission = (roleId, data) => api.post(`/tenant/rbac/roles/${roleId}/permissions/`, data);
 export const revokeRolePermission = (roleId, data) => api.delete(`/tenant/rbac/roles/${roleId}/permissions/`, { data });
-export const updateRolePermissions = (roleId, permissions) => api.post(`/tenant/rbac/roles/${roleId}/permissions/`, { permissions });
 
 // Permission APIs
 export const getPermissions = () => api.get("/tenant/rbac/permissions/");
+
+// Direct user overrides (ALLOW / DENY). Listing needs rbac_overrides.view,
+// creating and revoking rbac_overrides.manage.
+export const getUserOverrides = (params = {}) => api.get("/tenant/rbac/user-overrides/", { params });
+export const createUserOverride = (data) => api.post("/tenant/rbac/user-overrides/", data);
+export const revokeUserOverride = (id) => api.post(`/tenant/rbac/user-overrides/${id}/revoke/`);
+// The backend's explanation of one authorization decision (rbac_permissions.view).
+export const explainAccess = (data) => api.post("/tenant/rbac/explain/", data);
+
+// Plan features and subscription access mode (entitlements.view).
+export const getEntitlementSnapshot = () => api.get("/tenant/entitlements/snapshot/");
 
 // Core APIs
 export const getAuditLogs = (params = {}) => api.get("/tenant/audit-logs/", { params });
@@ -628,21 +642,17 @@ const API = {
     getUsers,
     getLookupUsers,
     getUser,
-    createUser,
     updateUser,
-    deleteUser,
     assignUserRole,
     deactivateUser,
     reactivateUser,
     getRoles,
-    getRole,
     createRole,
     getPermissions,
     updateRole,
     deleteRole,
     deactivateRole,
     reactivateRole,
-    updateRolePermissions,
     getRolePermissions,
     grantRolePermission,
     revokeRolePermission,
