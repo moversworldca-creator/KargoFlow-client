@@ -51,6 +51,7 @@ import SchedulingSettings from "../components/SchedulingSettings";
 import ServiceTypeSettings from "../components/ServiceTypeSettings";
 import StatusCodeSettings from "../components/StatusCodeSettings";
 import TeamManagement from "../components/TeamManagement";
+import AccessOverview from "../userManagement/AccessOverview";
 
 const FALLBACK_BRANCHES = [
   { id: "1", name: "Main HQ", is_main: true },
@@ -121,6 +122,7 @@ const SETTINGS_GROUPS = [
     tabs: [
       { id: "members", label: "Team Members", description: "Accounts and branch access.", icon: Users, render: (branchId) => <TeamManagement branchId={branchId} /> },
       { id: "roles", label: "Roles & Permissions", description: "Granular access scopes.", icon: ShieldCheck, render: (branchId) => <RolesPermissions branchId={branchId} /> },
+      { id: "access", label: "Access Overrides", description: "Per-user ALLOW / DENY and access explanations.", icon: ShieldCheck, render: () => <AccessOverview /> },
       { id: "audit-logs", label: "Audit Logs", description: "Changes and login history.", icon: Activity, render: (branchId) => <AuditLogs branchId={branchId} /> },
     ],
   },
@@ -197,7 +199,7 @@ export default function SettingsHub() {
   const useCanResult = useCan();
   const canAny = useCanResult?.canAny || (() => true);
 
-  const initialBranches = useMemo(loadCachedBranches, []);
+  const initialBranches = useMemo(() => loadCachedBranches(), []);
   const [branches, setBranches] = useState(initialBranches);
   const [branchId, setBranchId] = useState(() => loadInitialBranchId(initialBranches));
   const [branchStatus, setBranchStatus] = useState("loading");
