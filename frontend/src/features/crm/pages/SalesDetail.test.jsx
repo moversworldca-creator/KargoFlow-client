@@ -83,6 +83,10 @@ vi.mock('../components/EstimateView', () => {
   };
 });
 
+vi.mock('../../estimates/components/EstimatesWorkspace', () => ({
+  default: ({ opportunityId }) => <div data-testid="estimates-workspace" data-opportunity-id={opportunityId}>Estimates workspace</div>,
+}));
+
 vi.mock('../components/StorageView', () => {
   return {
     default: () => <div data-testid="storage-view" />
@@ -815,15 +819,17 @@ describe('SalesDetail Component Tests', () => {
     expect(screen.getByRole('button', { name: /^Accounting$/i })).toBeDisabled();
   });
 
-  it('opens the estimate page on the routed estimate sub-tab', async () => {
+  it('opens the Opportunity Estimates workspace on the estimate tab', async () => {
     renderComponent({
       initialEntry: '/crm/opportunity/998/estimate/route',
       routePath: '/crm/:entityType/:id/:tabId/:estimateTabId',
       params: { entityType: 'opportunity', id: '998', tabId: 'estimate', estimateTabId: 'route' },
     });
 
-    const estimateView = await screen.findByTestId('estimate-view');
-    expect(estimateView).toHaveAttribute('data-initial-sub-tab', 'route');
+    const workspace = await screen.findByTestId('estimates-workspace');
+    // The workspace is bound to the loaded Opportunity record (the mocked API returns record 123).
+    expect(workspace).toHaveAttribute('data-opportunity-id', '123');
+    expect(screen.queryByTestId('estimate-view')).not.toBeInTheDocument();
     expect(screen.getByTestId('customer-card')).toBeInTheDocument();
     expect(screen.getByTestId('planned-move-card')).toBeInTheDocument();
     expect(screen.getByTestId('route-logistics-card')).toBeInTheDocument();

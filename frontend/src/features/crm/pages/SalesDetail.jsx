@@ -34,6 +34,7 @@ import { getLookupEmployeesPage, getLeadStatusCodeLookups, getLookupUsersPage, g
 import { useMoverSizesLookup } from '../../../shared/queries/sharedQueries';
 
 import EstimateView from '../components/EstimateView';
+import EstimatesWorkspace from '../../estimates/components/EstimatesWorkspace';
 import PaymentsPanel from '../components/PaymentsPanel';
 import StorageView from '../components/StorageView';
 import LeadSpecs from '../components/LeadSpecs';
@@ -8428,40 +8429,25 @@ const SalesDetail = () => {
               </div>
             )}
 
-            {activeTab === "Estimate" && (
-                <EstimateView
-                  onRefresh={fetchOpportunity}
-                  opportunity={isLeadPath ? estimateOpportunity : opportunity}
-                  sourceType={isLeadPath ? 'lead' : 'opportunity'}
-                  isLoadingLinkedOpportunity={isLeadPath && isLoadingEstimateOpportunity}
-                  opportunityJobs={opportunityJobs}
-                  subJobServiceOptions={computedSubJobServiceOptions}
-                  selectedSubJobId={selectedEstimateJobId}
-                  onSelectedSubJobChange={setSelectedEstimateJobId}
-                  onCreateSubJob={createSubJobFromServiceType}
-                  onRefreshSubJobs={loadOpportunityJobs}
-                  onDeleteSelectedSubJob={deleteSelectedEstimateJob}
-                  onUpdateSelectedSubJob={updateSelectedEstimateJobPlanning}
-                  triggerSendEstimate={sendEstimateNonce}
-                  triggerViewEstimate={triggerViewEstimateNonce}
-                  view={view}
-                  initialSubTab={estimateInitialSubTab}
-                  onSubTabChange={(subTab) => {
-                    if (subTab === 'documents') {
-                      setActiveTab('Documents');
-                      navigateToDetailTab('Documents');
-                    } else if (subTab === 'payments') {
-                      setActiveTab('Payments');
-                      navigateToDetailTab('Payments');
-                    } else {
-                      navigateToEstimateSubTab(subTab);
-                    }
-                  }}
-                  isOpportunityLocked={isOpportunityLost}
-                  canCreateOpportunity={canCreateOpportunity()}
-                  canEditOpportunity={canEditOpportunity()}
-                />
-            )}
+            {activeTab === "Estimate" && (() => {
+                // Estimates / Quotes engine: every Estimate belongs to the Opportunity.
+                const estimateOwner = isLeadPath ? estimateOpportunity : opportunity;
+                const ownerId = Number(estimateOwner?.id) || null;
+                if (isLeadPath && isLoadingEstimateOpportunity) return <div role="status" className="p-6 text-xs text-slate-500">Loading…</div>;
+                if (!ownerId) {
+                  return (
+                    <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-600">
+                      Estimates are created on an Opportunity. Convert this lead to an Opportunity first.
+                    </div>
+                  );
+                }
+                return (
+                  <EstimatesWorkspace
+                    opportunityId={ownerId}
+                    customerEmail={estimateOwner?.customer_details?.email || estimateOwner?.email || ''}
+                  />
+                );
+              })()}
 
             {activeTab === "Documents" && (
                 <EstimateView
