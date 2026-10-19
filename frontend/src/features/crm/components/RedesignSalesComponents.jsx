@@ -298,6 +298,9 @@ export function CustomerCard({
 }) {
   const [copiedField, setCopiedField] = useState(null);
   const displayPhone = formatPhoneDisplay(phone);
+  const fallbackNameParts = String(customerName || '').trim().split(/\s+/).filter(Boolean);
+  const resolvedFirstName = String(firstName || '').trim() || fallbackNameParts[0] || '';
+  const resolvedLastName = String(lastName || '').trim() || fallbackNameParts.slice(1).join(' ');
 
   const handleCopy = (type, text) => {
     if (!text) return;
@@ -332,9 +335,9 @@ export function CustomerCard({
                 </div>
                 <div className="min-w-0 flex-1">
                   <h2 className="flex flex-wrap items-center text-lg lg:text-xl 2xl:text-2xl font-black tracking-tight text-slate-900 leading-tight w-full break-words gap-x-1">
-                    <InlineEdit value={firstName} placeholder="First Name" onSave={(val) => onInlineSave('first_name', val)} className="break-words" />
+                    <InlineEdit value={resolvedFirstName} placeholder="First Name" onSave={(val) => onInlineSave('first_name', val)} className="break-words" />
                     <InlineEdit
-                      value={lastName}
+                      value={resolvedLastName}
                       placeholder="Add last name"
                       renderDisplay={(value) => value || (
                         <span className="inline-flex items-center gap-1 rounded-md border border-dashed border-transparent bg-transparent px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-300 opacity-60 not-italic transition-colors group-hover:border-slate-200 group-hover:bg-slate-50 group-hover:text-slate-400 group-hover:opacity-100">
@@ -573,7 +576,7 @@ export function PlannedMoveCard({
     draftArrivalWindowStart && draftArrivalWindowEnd
       ? `${formatTimeAMPM(draftArrivalWindowStart)} - ${formatTimeAMPM(draftArrivalWindowEnd)}`
       : 'No time selected';
-  const canOpenScheduler = !isLeadPath && hasBranch;
+  const canOpenScheduler = Boolean(isLeadPath || hasBranch);
   const openSchedulerPopup = () => {
     if (!canOpenScheduler) return;
     onStartEdit?.();
@@ -662,6 +665,44 @@ export function PlannedMoveCard({
           </button>
         </div>
       </article>
+      {isLeadPath && isAvailabilityModalOpen ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-[2px]">
+          <button type="button" className="absolute inset-0" onClick={closeSchedulerPopup} aria-label="Close move date editor" />
+          <div className="relative z-10 w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-black">Planned move</div>
+                <h3 className="mt-1 text-xl font-black text-slate-900">Edit move date</h3>
+              </div>
+              <button type="button" onClick={closeSchedulerPopup} className="rounded-full border border-slate-200 p-2 text-black hover:bg-slate-50" aria-label="Close move date editor">
+                <Icon name="x" className="h-4 w-4" />
+              </button>
+            </div>
+            <label className="mt-5 block space-y-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-black">Move date</span>
+              <input
+                type="date"
+                aria-label="Move date"
+                ref={modalDateInputRef}
+                value={moveDate ? String(moveDate).slice(0, 10) : ''}
+                onChange={(event) => onMoveDateChange?.(event.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-900 outline-none focus:border-brand focus:ring-2 focus:ring-brand/10"
+              />
+            </label>
+            <div className="mt-6 flex items-center justify-end gap-3">
+              {moveDate && onClearSchedule ? (
+                <button type="button" onClick={clearSchedule} disabled={saving} className="rounded-lg border border-rose-200 px-4 py-2.5 text-sm font-bold text-rose-600 disabled:opacity-60">
+                  Clear date
+                </button>
+              ) : null}
+              <button type="button" onClick={closeSchedulerPopup} className="px-4 py-2.5 text-sm font-semibold text-black">Cancel</button>
+              <button type="button" onClick={applyScheduler} disabled={saving || !moveDate} className="rounded-lg bg-brand px-5 py-2.5 text-sm font-bold text-white disabled:opacity-60">
+                {saving ? 'Saving…' : 'Save date'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {!isLeadPath && hasBranch && isAvailabilityModalOpen ? (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-[2px] animate-in fade-in duration-200">
           <button
