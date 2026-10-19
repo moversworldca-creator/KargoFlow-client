@@ -339,6 +339,14 @@ export const SETTINGS_TAB_PERMISSIONS = {
   communications: [PERMISSIONS.COMPANY_ADMIN],
   'communication-setup': [PERMISSIONS.COMPANY_ADMIN],
   audit: [PERMISSIONS.AUDIT_VIEW],
+  // Pricing & Tariffs (backend keys; each action inside checks its own key).
+  tariffs: ['pricing.view'],
+  'pricing-skills': ['pricing.view'],
+  'contract-pricing': ['pricing.view'],
+  'pricing-taxes': ['pricing.view'],
+  'pricing-policy': ['pricing.view'],
+  'pricing-approvals': ['pricing.view'],
+  'price-simulator': ['pricing.simulate'],
 };
 
 export const SETTINGS_ENTRY_PERMISSIONS = Array.from(
