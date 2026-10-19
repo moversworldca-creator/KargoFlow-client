@@ -146,7 +146,7 @@ const SETTINGS_GROUPS = [
     tabs: [
       { id: "mover-types", label: "Mover Types", description: "Residential and commercial rules.", icon: Truck, render: (branchId) => <MoverTypeSettings branchId={branchId} /> },
       { id: "service-types", label: "Service Types", description: "Moving and packing services.", icon: Boxes, render: (branchId) => <ServiceTypeSettings branchId={branchId} /> },
-      { id: "mover-sizes", label: "Mover Sizes", description: "Home volume classifications.", icon: SlidersHorizontal, render: (branchId) => <MoverSizeSettings branchId={branchId} /> },
+      { id: "move-sizes", label: "Move Sizes", description: "Home volume classifications.", icon: SlidersHorizontal, render: (branchId) => <MoverSizeSettings branchId={branchId} /> },
     ],
   },
   {
@@ -175,7 +175,8 @@ const LEGACY_ROUTES = {
   "opportunity-loss-reasons": ["sales", "loss-reasons"],
   "mover-types": ["moves", "mover-types"],
   "service-types": ["moves", "service-types"],
-  "mover-sizes": ["moves", "mover-sizes"],
+  "mover-sizes": ["moves", "move-sizes"],
+  "move-sizes": ["moves", "move-sizes"],
   communications: ["communications", "setup"],
   "communication-templates": ["communications", "templates"],
 };
@@ -219,15 +220,19 @@ export default function SettingsHub() {
 
   // Determine current active group and active subtab
   const effectiveMainGroup = mainGroup || tabId;
-  const effectiveSubTab = subTab || subView;
+  const rawSubTab = subTab || subView;
+  const effectiveSubTab = rawSubTab === "mover-sizes" ? "move-sizes" : rawSubTab;
 
   const activeGroup = useMemo(() => {
     return visibleGroups.find((group) => group.id === effectiveMainGroup) || visibleGroups[0] || SETTINGS_GROUPS[0];
   }, [effectiveMainGroup, visibleGroups]);
 
   const activeTab = useMemo(() => {
-    return activeGroup.tabs.find((tab) => tab.id === effectiveSubTab) || activeGroup.tabs[0];
-  }, [activeGroup, effectiveSubTab]);
+    return (
+      activeGroup.tabs.find((tab) => tab.id === effectiveSubTab || (tab.id === "move-sizes" && rawSubTab === "mover-sizes")) ||
+      activeGroup.tabs[0]
+    );
+  }, [activeGroup, effectiveSubTab, rawSubTab]);
 
   // Handle URL normalization and legacy route redirection
   useEffect(() => {

@@ -33,6 +33,7 @@ const PaymentsPage = React.lazy(() => import('./features/payments/pages/Payments
 const Settings = React.lazy(() => import('./features/settings/pages/Settings'));
 const SettingsHub = React.lazy(() => import('./features/settings/pages/SettingsHub'));
 const SuperuserCreateCompanyPage = React.lazy(() => import('./features/settings/pages/SuperuserCreateCompanyPage'));
+import MailboxOAuthCallback from './features/settings/pages/MailboxOAuthCallback';
 import MemberPasswordPage from './features/settings/pages/MemberPasswordPage';
 import AcceptInvitationPage from './features/auth/pages/AcceptInvitationPage';
 import LoginPage from './features/auth/pages/LoginPage';
@@ -317,6 +318,7 @@ function App() {
 
             <Route path="crm/activities" element={withPermission('/crm/activities', <CRMHub defaultTab="activities" />)} />
 
+            <Route path="settings/communications/mailbox/callback" element={<MailboxOAuthCallback />} />
             <Route path="settings/team/members/:employeeId/password" element={
               <PermissionRoute required={[PERMISSIONS.USER_CREATE]} fallbackPath={homePath}>
                 <MemberPasswordPage />
