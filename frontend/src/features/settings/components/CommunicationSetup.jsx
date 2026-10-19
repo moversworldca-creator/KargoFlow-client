@@ -178,7 +178,8 @@ export default function CommunicationSetup({ branchId = null }) {
   const [selectedNumbers, setSelectedNumbers] = useState([]);
   const [quotedOrder, setQuotedOrder] = useState(null);
   const [assignmentForm, setAssignmentForm] = useState({ phone_number_id: '', branch_id: branchId || '', employee_id: '' });
-  const [mailboxProvider, setMailboxProvider] = useState('google');
+  // Must match the backend's mailbox providers (enums.OAUTH_MAILBOX_PROVIDERS): gmail | microsoft365.
+  const [mailboxProvider, setMailboxProvider] = useState('gmail');
   const [mailboxHint, setMailboxHint] = useState('');
 
   const refreshAll = async () => {
@@ -751,8 +752,8 @@ export default function CommunicationSetup({ branchId = null }) {
                 <p className="mt-0.5 text-[11px] text-body">Connect personal or branch mailboxes for replies and inbound sync.</p>
               </div>
               <SelectField label="Provider" value={mailboxProvider} onChange={setMailboxProvider}>
-                <option value="google">Google</option>
-                <option value="microsoft">Microsoft</option>
+                <option value="gmail">Google (Gmail / Workspace)</option>
+                <option value="microsoft365">Microsoft 365 / Outlook</option>
               </SelectField>
               <TextInput label="Login hint" value={mailboxHint} onChange={setMailboxHint} placeholder="person@example.com" type="email" />
               <ActionButton onClick={startOAuth} icon={Inbox} size="sm" disabled={savingKey === 'mailbox-oauth'}>Start OAuth</ActionButton>
