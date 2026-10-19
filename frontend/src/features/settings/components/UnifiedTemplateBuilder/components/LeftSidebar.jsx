@@ -1,7 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { getBuilderVariables, getBuilderBlocks, getBuilderSettings, getBuilderMeta } from "../../../../../services/api";
 import {
   Blocks,
+  Bookmark,
   Tags,
+  ShieldCheck,
   Settings2,
   Search,
   Plus,
@@ -28,7 +31,6 @@ import {
   QrCode,
   Building,
   CreditCard,
-  ShieldCheck,
   Lock,
   MapPin,
   Sliders,
@@ -51,9 +53,11 @@ import {
   GripVertical,
   StickyNote,
   NotebookPen,
+  X,
 } from "lucide-react";
 import { getWidgetsForMode } from "../config/widgetToolboxConfig";
-import { getVariablesForMode } from "../config/variableRegistry";
+import { getVariablesForMode, normalizeBuilderVariableGroups } from "../config/variableRegistry";
+import { BACKEND_WIDGET_ICONS } from "../config/backendWidgetIcons";
 
 const ICON_MAP = {
   Heading,
@@ -100,6 +104,7 @@ const ICON_MAP = {
   MessageSquare,
   Link,
   ShieldAlert,
+  X,
 };
 
 export default function LeftSidebar({
@@ -120,14 +125,95 @@ export default function LeftSidebar({
   onOpenCustomFieldDialog = () => {},
   templateSettings = {},
   onTemplateSettingsChange = () => {},
+  branchId = null,
   branches = [],
+  onClose = () => {},
 }) {
   const [activeTab, setActiveTab] = useState("widgets"); // widgets | variables | settings
   const [searchTerm, setSearchTerm] = useState("");
   const [copiedTag, setCopiedTag] = useState(null);
 
-  const { specific, common } = getWidgetsForMode(mode);
-  const variableGroups = getVariablesForMode(mode);
+  const { common = [], specific = [] } = getWidgetsForMode(mode) || {};
+  const defaultGroups = getVariablesForMode(mode);
+  const [variableGroups, setVariableGroups] = useState(defaultGroups);
+  const [savedBlocks, setSavedBlocks] = useState([]);
+  const [backendPalette, setBackendPalette] = useState({ kind: null, blocks: [], error: "" });
+  const [builderSettings, setBuilderSettings] = useState(null);
+  const fallbackBranchId = branches[0]?.id;
+  const activeBuilderKind = ["estimate", "estimate_portal"].includes(mode) ? "estimate_portal" : mode === "invoice" ? "invoice" : "document";
+  const backendWidgets = backendPalette.kind === activeBuilderKind ? backendPalette.blocks : [];
+  const backendWidgetsError = backendPalette.kind === activeBuilderKind ? backendPalette.error : "";
+
+  useEffect(() => {
+    let isMounted = true;
+    const kind = activeBuilderKind;
+    const variableBranchId = branchId || fallbackBranchId;
+    if (!["email", "sms"].includes(mode) && typeof getBuilderMeta === "function") {
+      getBuilderMeta(kind)
+        .then((res) => {
+          const data = res?.data ?? res;
+          if (!Array.isArray(data?.blocks)) {
+            throw new Error("The Builder widget palette response is invalid.");
+          }
+          if (isMounted) setBackendPalette({ kind, blocks: data.blocks, error: "" });
+        })
+        .catch((error) => {
+          if (isMounted) {
+            setBackendPalette({
+              kind,
+              blocks: [],
+              error: error?.response?.data?.detail || error.message || "Unable to load Builder widgets.",
+            });
+          }
+        });
+    }
+    if (!["email", "sms"].includes(mode) && typeof getBuilderVariables === "function") {
+      getBuilderVariables(kind, variableBranchId ? { branch_id: variableBranchId } : {})
+        .then((res) => {
+          const data = res?.data ?? res;
+          const formatted = normalizeBuilderVariableGroups(data);
+          if (isMounted && formatted.length > 0) {
+            setVariableGroups(formatted);
+          }
+        })
+        .catch(() => {
+          // Fallback gracefully to default static registry
+        });
+    }
+
+    // Also load reusable saved clauses/blocks from backend
+    if (typeof getBuilderBlocks === "function") {
+      getBuilderBlocks()
+        .then((res) => {
+          const data = res?.data ?? res;
+          const list = Array.isArray(data) ? data : data?.results || [];
+          if (isMounted && Array.isArray(list)) {
+            setSavedBlocks(list);
+          }
+        })
+        .catch(() => {
+          // Ignore if unconfigured
+        });
+    }
+
+    // Load publishing & approval policy
+    if (typeof getBuilderSettings === "function") {
+      getBuilderSettings()
+        .then((res) => {
+          if (isMounted && res?.data) {
+            setBuilderSettings(res.data);
+          }
+        })
+        .catch(() => {
+          // Default
+        });
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [mode, branchId, fallbackBranchId, activeBuilderKind]);
+
   const isLandscape = String(orientation).toLowerCase() === "landscape";
 
   const handleCopyTag = (tag) => {
@@ -139,18 +225,18 @@ export default function LeftSidebar({
     }
   };
 
-  const renderIcon = (iconName) => {
-    const Component = ICON_MAP[iconName] || Blocks;
-    return <Component size={16} />;
+  const renderIcon = (iconName, size = 16) => {
+    const Component = typeof iconName === "string" ? ICON_MAP[iconName] || Blocks : iconName || Blocks;
+    return <Component size={size} strokeWidth={1.8} aria-hidden="true" focusable="false" />;
   };
 
   const filterItem = (text) =>
     !searchTerm || text.toLowerCase().includes(searchTerm.toLowerCase());
 
   return (
-    <aside className="w-72 bg-white border-r border-slate-200 flex flex-col h-[calc(100vh-3.5rem)] select-none">
+    <aside className="w-72 max-w-[85vw] bg-white border-r border-slate-200 flex flex-col h-full min-h-0 select-none">
       {/* 3 Tab Switcher */}
-      <div className="flex border-b border-slate-200 bg-slate-50">
+      <div className="flex items-center border-b border-slate-200 bg-slate-50">
         <button
           type="button"
           onClick={() => setActiveTab("widgets")}
@@ -193,6 +279,17 @@ export default function LeftSidebar({
           <Settings2 size={14} />
           <span>Settings</span>
         </button>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="lg:hidden p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition shrink-0 cursor-pointer"
+            title="Close Sidebar"
+            aria-label="Close Sidebar"
+          >
+            <X size={16} />
+          </button>
+        )}
       </div>
 
       {/* Search Input (for widgets and tags) */}
@@ -216,13 +313,27 @@ export default function LeftSidebar({
         {activeTab === "widgets" ? (
           <>
             {/* Feature-Specific Widgets */}
-            {specific.filter((w) => filterItem(w.label)).length > 0 && (
+            {(!["email", "sms"].includes(mode) ? backendWidgets.length > 0 : specific.length > 0) && (
               <div>
                 <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2 px-1">
-                  {mode === "email" ? "Email Widgets" : mode === "sms" ? "SMS Widgets" : "Document Widgets"}
+                  {["email", "sms"].includes(mode) ? (mode === "email" ? "Email Widgets" : "SMS Widgets") : "Document Widgets"}
                 </h3>
                 <div className="grid grid-cols-1 gap-1.5">
-                  {specific
+                  {(!["email", "sms"].includes(mode)
+                    ? backendWidgets.map((block) => ({
+                        id: `backend_${block.type}`,
+                        type: "builder_block",
+                        block_type: block.type,
+                        label: block.label,
+                        description: block.description,
+                        category: block.category,
+                        props_schema: block.props_schema,
+                        container: block.container,
+                        interactive: block.interactive,
+                        pdf_only: block.pdf_only,
+                        icon: BACKEND_WIDGET_ICONS[block.type],
+                      }))
+                    : specific)
                     .filter((w) => filterItem(w.label))
                     .map((widget) => (
                       <button
@@ -240,14 +351,22 @@ export default function LeftSidebar({
                       >
                         <GripVertical size={13} className="text-slate-300 group-hover:text-slate-500 shrink-0" />
                         <span className="text-slate-500 group-hover:text-blue-600">
-                          {renderIcon(widget.icon)}
+                          {renderIcon(widget.icon, widget.type === "builder_block" ? 19 : 16)}
                         </span>
                         <span className="truncate flex-1">{widget.label}</span>
                         <Plus size={14} className="opacity-0 group-hover:opacity-100 transition" />
                       </button>
                     ))}
                 </div>
+                {backendWidgetsError && !["email", "sms"].includes(mode) && (
+                  <p role="alert" className="mt-2 text-[11px] text-red-600">{backendWidgetsError}</p>
+                )}
               </div>
+            )}
+            {backendWidgetsError && !["email", "sms"].includes(mode) && backendWidgets.length === 0 && (
+              <p role="alert" className="rounded-md border border-red-200 bg-red-50 p-2 text-[11px] text-red-700">
+                Unable to load document widgets: {backendWidgetsError}
+              </p>
             )}
 
             {/* Standard Common Layout & Grid Widgets (Non-SMS Modes) */}
@@ -289,6 +408,44 @@ export default function LeftSidebar({
                         </span>
                         <span className="truncate flex-1">{widget.label}</span>
                         <Plus size={14} className="opacity-0 group-hover:opacity-100 transition" />
+                      </button>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            {/* Reusable Saved Blocks from Backend */}
+            {savedBlocks.length > 0 && (
+              <div>
+                <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2 px-1">
+                  Saved Reusable Blocks
+                </h3>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {savedBlocks
+                    .filter((b) => filterItem(b.name || b.label || "Block"))
+                    .map((block) => (
+                      <button
+                        key={block.id}
+                        type="button"
+                        onClick={() => {
+                          const html =
+                            block.blocks?.[0]?.html ||
+                            (typeof block.content === "string" ? block.content : block.blocks?.[0]?.content) ||
+                            block.description ||
+                            `<p><strong>${block.name}</strong></p>`;
+                          onAddWidget({
+                            id: `custom_block_${block.id}_${Date.now()}`,
+                            type: "html",
+                            label: block.name || "Saved Clause",
+                            htmlContent: html,
+                          });
+                        }}
+                        className="flex items-center gap-2 px-2.5 py-2 text-left text-xs font-medium text-slate-700 bg-indigo-50/50 hover:bg-indigo-50 text-indigo-900 border border-indigo-200/80 rounded-md transition group"
+                        title="Click to insert this saved block"
+                      >
+                        <Bookmark size={13} className="text-indigo-500 shrink-0" />
+                        <span className="truncate flex-1 font-semibold">{block.name}</span>
+                        <Plus size={14} className="opacity-0 group-hover:opacity-100 text-indigo-600 transition" />
                       </button>
                     ))}
                 </div>
@@ -382,8 +539,17 @@ export default function LeftSidebar({
           /* Settings Tab: Visual Orientation Cards & Template Library Quick Shelf */
           <div className="space-y-4 text-xs">
             <div className="space-y-3">
-              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 px-1">
-                {mode === "email" ? "EMAIL SETTINGS" : mode === "sms" ? "SMS SETTINGS" : "PAGE SETTINGS"}
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 px-1 flex items-center justify-between">
+                <span>{mode === "email" ? "EMAIL SETTINGS" : mode === "sms" ? "SMS SETTINGS" : "PAGE SETTINGS"}</span>
+                {builderSettings && (
+                  <span
+                    className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200"
+                    title="Publishing review requirements configured in builder settings"
+                  >
+                    <ShieldCheck size={11} className="text-blue-600" />
+                    <span>Review {builderSettings.require_approval ? "Required" : "Direct"}</span>
+                  </span>
+                )}
               </div>
 
               {mode === "email" && (
@@ -446,6 +612,21 @@ export default function LeftSidebar({
                   className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-md focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-blue-500 font-medium"
                 />
               </div>
+
+              {(mode === "email" || mode === "sms") && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Description
+                  </label>
+                  <input
+                    type="text"
+                    value={templateSettings?.description || ""}
+                    onChange={(e) => onTemplateSettingsChange?.({ description: e.target.value })}
+                    placeholder="What this template is used for"
+                    className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-md focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-blue-500 font-medium"
+                  />
+                </div>
+              )}
 
               {mode !== "email" && mode !== "sms" && (
                 <>
@@ -590,4 +771,3 @@ export default function LeftSidebar({
     </aside>
   );
 }
-

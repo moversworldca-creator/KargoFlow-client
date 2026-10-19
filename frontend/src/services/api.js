@@ -1,6 +1,7 @@
 import api from "./axios";
 import { leadApi, leadPayload } from '../features/crm/leads/leadApi';
 import { getPipelineQueue } from '../features/crm/leads/pipelineApi';
+import { toBackendDocument } from '../features/settings/components/UnifiedTemplateBuilder/core/documentAdapter';
 
 const FILE_TARGET_TYPE_MAP = {
   lead: "leads.lead",
@@ -461,11 +462,162 @@ export const createInventoryItemTemplate = (data) => api.post("/inventory-item-t
 export const updateInventoryItemTemplate = (id, data) => api.patch(`/inventory-item-templates/${id}/`, data);
 export const deleteInventoryItemTemplate = (id) => api.delete(`/inventory-item-templates/${id}/`);
 export const getEstimateCatalogItems = (params) => api.get("/catalog-items/", { params });
-export const getEstimatePortalTemplates = (params) => api.get("/portal-templates/", { params });
-export const createEstimatePortalTemplate = (data) => api.post("/portal-templates/", data);
-export const updateEstimatePortalTemplate = (id, data) => api.patch(`/portal-templates/${id}/`, data);
-export const deactivateEstimatePortalTemplate = (id) => api.delete(`/portal-templates/${id}/`);
-export const duplicateEstimatePortalTemplate = (id) => api.post(`/portal-templates/${id}/duplicate/`, {});
+export const getEstimatePortalTemplates = async (params = {}) => {
+  try {
+    const builderParams = {
+      kind: "estimate_portal",
+      ...(params?.branch ? { branch_id: params.branch } : {}),
+      ...(params?.branch_id ? { branch_id: params.branch_id } : {}),
+      ...(params?.q ? { q: params.q } : {}),
+    };
+    const res = await api.get("/tenant/builder/templates/", { params: builderParams });
+    const payload = res?.data ?? res;
+    const items = Array.isArray(payload) ? payload : (Array.isArray(payload?.results) ? payload.results : []);
+    const normalized = items.map((t) => ({
+      ...t,
+      template_type: t.subtype || t.template_type,
+      branch: t.branch_id,
+      is_active: t.state === "active" || t.is_active,
+    }));
+    return { ...res, data: normalized };
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return api.get("/portal-templates/", { params });
+    }
+    throw err;
+  }
+};
+
+const VALID_ESTIMATE_SUBTYPES = ['binding', 'non_binding', 'hourly', 'flat_rate'];
+
+const toBackendTemplateDocument = (data, mode) => {
+  if (data.document?.sections) return data.document;
+
+  const content = data.content && typeof data.content === "object" && !Array.isArray(data.content)
+    ? data.content
+    : {};
+  const legacyTokenAliases = {
+    "branch.logo_url": "company.logo_url",
+    "company.primary_phone": "company.phone",
+    "customer.primary_phone": "customer.phone",
+    "opportunity.move_date": "move.date",
+    "opportunity.opportunity_number": "opportunity.number",
+    "opportunity.sales_number": "opportunity.number",
+    "originaddress.full_address": "move.origin_address",
+    "destinationaddress.full_address": "move.destination_address",
+  };
+  const normalizeLegacyTokens = (html) =>
+    String(html || "").replace(/\{\{\s*([^{}|]+?)\s*(\|[^{}]*)?\}\}/g, (_match, token, filters = "") => {
+      const normalizedToken = token.trim().toLowerCase();
+      return `{{${legacyTokenAliases[normalizedToken] || normalizedToken}${filters}}}`;
+    });
+  const htmlContent = data.html_content || content.html_content || data.body_html || content.body_html ||
+    (typeof data.content === "string" ? data.content : "");
+  return toBackendDocument(
+    {
+      ...content,
+      name: content.name || data.name,
+      html_content: normalizeLegacyTokens(htmlContent),
+    },
+    mode
+  );
+};
+
+export const normalizeEstimateSubtype = (raw) => {
+  if (!raw) return 'binding';
+  const val = String(raw).toLowerCase().trim();
+  if (VALID_ESTIMATE_SUBTYPES.includes(val)) return val;
+  if (val === 'moving' || val === 'standard' || val === 'commercial') return 'non_binding';
+  if (val === 'minimal') return 'flat_rate';
+  if (val === 'long_distance') return 'binding';
+  return 'binding';
+};
+
+export const createEstimatePortalTemplate = async (data) => {
+  const isBuilderPayload = Boolean(data?.kind);
+  const rawSubtype = data?.subtype || data?.template_type;
+  const normalizedSubtype = normalizeEstimateSubtype(rawSubtype);
+  const builderData = isBuilderPayload
+    ? {
+        ...data,
+        subtype: normalizeEstimateSubtype(data.subtype),
+      }
+    : {
+        kind: "estimate_portal",
+        subtype: normalizedSubtype,
+        name: data.name,
+        description: data.description || "",
+        branch_id: data.branch ? Number(data.branch) : (data.branch_id ? Number(data.branch_id) : null),
+      };
+  if (data.document || data.content || data.html_content) {
+    builderData.document = toBackendTemplateDocument(data, "estimate_portal");
+  }
+
+  try {
+    const res = await api.post("/tenant/builder/templates/", builderData);
+    const created = res?.data ?? res;
+    const normalized = {
+      ...created,
+      template_type: created.subtype || normalizedSubtype,
+      html_content: data.html_content,
+      lock_version: created.draft_revision?.lock_version,
+    };
+    return { ...res, data: normalized };
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return api.post("/portal-templates/", data);
+    }
+    throw err;
+  }
+};
+
+export const updateEstimatePortalTemplate = async (id, data) => {
+  try {
+    const rawSubtype = data.subtype || data.template_type;
+    const updateData = {
+      ...(data.name ? { name: data.name } : {}),
+      ...(data.description !== undefined ? { description: data.description } : {}),
+      ...(rawSubtype ? { subtype: normalizeEstimateSubtype(rawSubtype) } : {}),
+    };
+    const res = await api.patch(`/tenant/builder/templates/${id}/`, updateData);
+    if (data.content || data.html_content || data.document) {
+      const backendDoc = toBackendTemplateDocument(data, "estimate_portal");
+      const draftRes = await api.put(`/tenant/builder/templates/${id}/draft/`, {
+        lock_version: data.lock_version || 1,
+        document: backendDoc,
+      });
+      return { ...res, draft: draftRes?.data };
+    }
+    return res;
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return api.patch(`/portal-templates/${id}/`, data);
+    }
+    throw err;
+  }
+};
+
+export const deactivateEstimatePortalTemplate = async (id) => {
+  try {
+    return await api.delete(`/tenant/builder/templates/${id}/`);
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return api.delete(`/portal-templates/${id}/`);
+    }
+    throw err;
+  }
+};
+
+export const duplicateEstimatePortalTemplate = async (id) => {
+  try {
+    return await api.post(`/tenant/builder/templates/${id}/duplicate/`, {});
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return api.post(`/portal-templates/${id}/duplicate/`, {});
+    }
+    throw err;
+  }
+};
 export const createEstimateCatalogItem = (data) => api.post("/catalog-items/", data);
 export const updateEstimateCatalogItem = (id, data) => api.patch(`/catalog-items/${id}/`, data);
 export const deactivateEstimateCatalogItem = (id) => api.delete(`/catalog-items/${id}/`);
@@ -500,15 +652,357 @@ export const getPublicSquareOrder = (token, orderId) =>
 export const getPublicContractPortal = (token) => api.get("/public/contracts/portal/", { params: { token } });
 export const signPublicContractPortal = (data) => api.post("/public/contracts/portal/sign/", data);
 
-export const getDocumentTemplates = (params) => api.get("/documents/templates/", { params });
-export const createDocumentTemplate = (data) => api.post("/documents/templates/", data);
-export const updateDocumentTemplate = (id, data) => api.patch(`/documents/templates/${id}/`, data);
-export const deleteDocumentTemplate = (id) => api.delete(`/documents/templates/${id}/`);
-export const getDocumentVariableRegistry = () => api.get("/documents/variables/");
-export const previewDocumentTemplate = (id, data) => api.post(`/documents/templates/${id}/preview/`, data);
+// Builder API — Backend Tenant Builder
+export const getBuilderMeta = (kind, params = {}) =>
+  api.get("/tenant/builder/meta/", { params: { kind, ...params } });
+
+export const getBuilderVariables = (kind, params = {}) =>
+  api.get("/tenant/builder/variables/", { params: { kind, ...params } });
+
+export const getBuilderCustomVariables = (params = {}) =>
+  api.get("/tenant/builder/variables/custom/", { params });
+
+export const getBuilderCustomVariable = (id) =>
+  api.get(`/tenant/builder/variables/${id}/`);
+
+export const createBuilderCustomVariable = (data) =>
+  api.post("/tenant/builder/variables/", data);
+
+export const updateBuilderCustomVariable = (id, data) =>
+  api.patch(`/tenant/builder/variables/${id}/`, data);
+
+export const deleteBuilderCustomVariable = (id) =>
+  api.delete(`/tenant/builder/variables/${id}/`);
+
+export const getBuilderTemplates = (params = {}) =>
+  api.get("/tenant/builder/templates/", { params });
+
+export const getBuilderTemplate = (id) =>
+  api.get(`/tenant/builder/templates/${id}/`);
+
+export const createBuilderTemplate = (data) =>
+  api.post("/tenant/builder/templates/", data);
+
+export const updateBuilderTemplate = (id, data) =>
+  api.patch(`/tenant/builder/templates/${id}/`, data);
+
+export const archiveBuilderTemplate = (id) =>
+  api.delete(`/tenant/builder/templates/${id}/`);
+
+export const activateBuilderTemplate = (id) =>
+  api.post(`/tenant/builder/templates/${id}/activate/`);
+
+export const deactivateBuilderTemplate = (id) =>
+  api.post(`/tenant/builder/templates/${id}/deactivate/`);
+
+export const duplicateBuilderTemplate = (id, data = {}) =>
+  api.post(`/tenant/builder/templates/${id}/duplicate/`, data);
+
+export const getBuilderTemplateDraft = (id) =>
+  api.get(`/tenant/builder/templates/${id}/draft/`);
+
+export const startBuilderTemplateDraft = (id) =>
+  api.post(`/tenant/builder/templates/${id}/draft/`);
+
+export const saveBuilderTemplateDraft = (id, data) =>
+  api.put(`/tenant/builder/templates/${id}/draft/`, data);
+
+export const discardBuilderTemplateDraft = (id) =>
+  api.delete(`/tenant/builder/templates/${id}/draft/`);
+
+export const validateBuilderTemplateDraft = (id) =>
+  api.post(`/tenant/builder/templates/${id}/draft/validate/`);
+
+export const submitBuilderTemplateDraft = (id, data = {}) =>
+  api.post(`/tenant/builder/templates/${id}/draft/submit/`, data);
+
+export const withdrawBuilderTemplateDraft = (id) =>
+  api.post(`/tenant/builder/templates/${id}/draft/withdraw/`);
+
+export const publishBuilderTemplateDraft = (id) =>
+  api.post(`/tenant/builder/templates/${id}/draft/publish/`);
+
+export const getBuilderTemplateRevisions = (id) =>
+  api.get(`/tenant/builder/templates/${id}/revisions/`);
+
+export const getBuilderTemplateRevision = (id, revisionId) =>
+  api.get(`/tenant/builder/templates/${id}/revisions/${revisionId}/`);
+
+export const restoreBuilderTemplateRevision = (id, revisionId) =>
+  api.post(`/tenant/builder/templates/${id}/revisions/${revisionId}/restore/`);
+
+export const compareBuilderTemplateRevisions = (id, fromRev, toRev) =>
+  api.get(`/tenant/builder/templates/${id}/compare/`, { params: { from: fromRev, to: toRev } });
+
+export const previewBuilderTemplate = (id, data = {}, config = {}) => {
+  const requestConfig = { ...config };
+  if (data.format === "pdf" && !requestConfig.responseType) {
+    requestConfig.responseType = "blob";
+  }
+  return api.post(`/tenant/builder/templates/${id}/preview/`, data, requestConfig);
+};
+
+export const getBuilderBlocks = (params = {}) =>
+  api.get("/tenant/builder/blocks/", { params });
+
+export const getBuilderBlock = (id) =>
+  api.get(`/tenant/builder/blocks/${id}/`);
+
+export const createBuilderBlock = (data) =>
+  api.post("/tenant/builder/blocks/", data);
+
+export const updateBuilderBlock = (id, data) =>
+  api.patch(`/tenant/builder/blocks/${id}/`, data);
+
+export const archiveBuilderBlock = (id) =>
+  api.delete(`/tenant/builder/blocks/${id}/`);
+
+export const activateBuilderBlock = (id) =>
+  api.post(`/tenant/builder/blocks/${id}/activate/`);
+
+export const publishBuilderBlock = (id) =>
+  api.post(`/tenant/builder/blocks/${id}/publish/`);
+
+export const saveBuilderBlockDraft = (id, data) =>
+  api.put(`/tenant/builder/blocks/${id}/draft/`, data);
+
+export const discardBuilderBlockDraft = (id) =>
+  api.delete(`/tenant/builder/blocks/${id}/draft/`);
+
+export const getBuilderBlockUsage = (id) =>
+  api.get(`/tenant/builder/blocks/${id}/usage/`);
+
+export const getBuilderAssignments = (params = {}) =>
+  api.get("/tenant/builder/assignments/", { params });
+
+export const getBuilderAssignment = (id) =>
+  api.get(`/tenant/builder/assignments/${id}/`);
+
+export const createBuilderAssignment = (data) =>
+  api.post("/tenant/builder/assignments/", data);
+
+export const updateBuilderAssignment = (id, data) =>
+  api.patch(`/tenant/builder/assignments/${id}/`, data);
+
+export const deleteBuilderAssignment = (id) =>
+  api.delete(`/tenant/builder/assignments/${id}/`);
+
+export const reorderBuilderAssignments = (data) =>
+  api.post("/tenant/builder/assignments/reorder/", data);
+
+export const resolveBuilderAssignment = (params = {}) =>
+  api.get("/tenant/builder/assignments/resolve/", { params });
+
+export const getBuilderApprovals = (params = {}) =>
+  api.get("/tenant/builder/approvals/", { params });
+
+export const getBuilderApproval = (id) =>
+  api.get(`/tenant/builder/approvals/${id}/`);
+
+export const approveBuilderReview = (id, data = {}) =>
+  api.post(`/tenant/builder/approvals/${id}/approve/`, data);
+
+export const rejectBuilderReview = (id, data = {}) =>
+  api.post(`/tenant/builder/approvals/${id}/reject/`, data);
+
+export const createBuilderRender = (data, config = {}) =>
+  api.post("/tenant/builder/renders/", data, config);
+
+export const getBuilderRender = (id) =>
+  api.get(`/tenant/builder/renders/${id}/`);
+
+export const getBuilderSnapshot = (id) =>
+  api.get(`/tenant/builder/snapshots/${id}/`);
+
+export const getBuilderSnapshotPdf = (id) =>
+  api.get(`/tenant/builder/snapshots/${id}/pdf/`, { responseType: "blob" });
+
+export const issueBuilderWorkflow = (stage, data = {}) =>
+  api.post(`/tenant/builder/workflow/${stage}/`, data);
+
+export const getBuilderSettings = () =>
+  api.get("/tenant/builder/settings/");
+
+export const updateBuilderSettings = (data) =>
+  api.put("/tenant/builder/settings/current/", data);
+
+export const getDocumentTemplates = async (params = {}) => {
+  try {
+    const builderParams = {
+      ...(params?.kind ? { kind: params.kind } : {}),
+      ...(params?.branch ? { branch_id: params.branch } : {}),
+      ...(params?.branch_id ? { branch_id: params.branch_id } : {}),
+      ...(params?.q ? { q: params.q } : {}),
+      ...(params?.subtype ? { subtype: params.subtype } : {}),
+    };
+    const res = await api.get("/tenant/builder/templates/", { params: builderParams });
+    const payload = res?.data ?? res;
+    let items = Array.isArray(payload) ? payload : (Array.isArray(payload?.results) ? payload.results : []);
+    if (!params?.kind) {
+      items = items.filter((t) => t.kind === "document" || t.kind === "invoice");
+    }
+    const normalized = items.map((t) => ({
+      ...t,
+      template_type: t.kind === "invoice"
+        ? "invoice"
+        : (t.subtype === "cc_authorization" ? "credit_card_authorization" : (t.subtype || t.template_type)),
+      scope_type: t.kind === "invoice" ? "invoice" : (t.subtype === "bol" ? "job" : "opportunity"),
+      branch: t.branch_id,
+      is_active: t.state === "active" || t.is_active,
+    }));
+    return { ...res, data: normalized };
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return api.get("/documents/templates/", { params });
+    }
+    throw err;
+  }
+};
+
+export const createDocumentTemplate = async (data) => {
+  const kind = data.kind ||
+    (data.scope_type === "invoice" || data.template_type === "invoice" ? "invoice" : "document");
+  const requestedSubtype = data.subtype || data.template_type || "contract";
+  const invoiceSubtypes = ["final", "deposit", "storage", "progress"];
+  const subtype = kind === "invoice"
+    ? (invoiceSubtypes.includes(requestedSubtype) ? requestedSubtype : "final")
+    : (["credit_card_authorization", "cc_auth"].includes(requestedSubtype)
+        ? "cc_authorization"
+        : requestedSubtype);
+  const builderData = {
+    kind,
+    subtype,
+    name: data.name,
+    description: data.description || "",
+    branch_id: data.branch_id ?? (data.branch ? Number(data.branch) : null),
+  };
+  if (data.document || data.content || data.html_content) {
+    builderData.document = toBackendTemplateDocument(data, kind === "invoice" ? "invoice" : subtype);
+  }
+
+  try {
+    const res = await api.post("/tenant/builder/templates/", builderData);
+    const created = res?.data ?? res;
+    const normalized = {
+      ...created,
+      template_type: created.kind === "invoice"
+        ? "invoice"
+        : (created.subtype === "cc_authorization" ? "credit_card_authorization" : (created.subtype || data.template_type)),
+      scope_type: created.kind === "invoice" ? "invoice" : (data.scope_type || (created.subtype === "bol" ? "job" : "opportunity")),
+      branch: created.branch_id,
+      html_content: data.html_content,
+      content: data.content,
+      lock_version: created.draft_revision?.lock_version,
+    };
+    return { ...res, data: normalized };
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return api.post("/documents/templates/", data);
+    }
+    throw err;
+  }
+};
+
+export const updateDocumentTemplate = async (id, data) => {
+  try {
+    const rawSubtype = data.subtype || data.template_type;
+    const kind = data.scope_type === "invoice" || rawSubtype === "invoice" ? "invoice" : "document";
+    const invoiceSubtypes = ["final", "deposit", "storage", "progress"];
+    const subtype = kind === "invoice"
+      ? (invoiceSubtypes.includes(rawSubtype) ? rawSubtype : "final")
+      : (["credit_card_authorization", "cc_auth"].includes(rawSubtype) ? "cc_authorization" : rawSubtype);
+    const updateData = {
+      ...(data.name ? { name: data.name } : {}),
+      ...(data.description !== undefined ? { description: data.description } : {}),
+      ...(subtype ? { subtype } : {}),
+    };
+    const res = await api.patch(`/tenant/builder/templates/${id}/`, updateData);
+    if (data.content || data.html_content || data.document) {
+      const mode = kind === "invoice" ? "invoice" : (subtype || "contract");
+      const backendDoc = toBackendTemplateDocument(data, mode);
+      const draftRes = await api.put(`/tenant/builder/templates/${id}/draft/`, {
+        lock_version: data.lock_version || 1,
+        document: backendDoc,
+      });
+      return { ...res, draft: draftRes?.data };
+    }
+    return res;
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return api.patch(`/documents/templates/${id}/`, data);
+    }
+    throw err;
+  }
+};
+
+export const publishDocumentTemplate = async (id) => {
+  try {
+    await api.post(`/tenant/builder/templates/${id}/draft/validate/`);
+  } catch (valErr) {
+    console.warn("Template draft validation notice:", valErr?.response?.data || valErr?.message);
+  }
+  return await api.post(`/tenant/builder/templates/${id}/draft/publish/`);
+};
+
+export const deleteDocumentTemplate = async (id) => {
+  try {
+    return await api.delete(`/tenant/builder/templates/${id}/`);
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return api.delete(`/documents/templates/${id}/`);
+    }
+    throw err;
+  }
+};
+
+export const activateDocumentTemplate = activateBuilderTemplate;
+export const deactivateDocumentTemplate = deactivateBuilderTemplate;
+
+export const getDocumentVariableRegistry = async (kind = "document") => {
+  try {
+    const params = typeof kind === "object" ? kind : { kind: kind || "document" };
+    return await api.get("/tenant/builder/variables/", { params });
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return api.get("/documents/variables/");
+    }
+    throw err;
+  }
+};
+
+export const previewDocumentTemplate = async (id, data = {}) => {
+  try {
+    const isStructured = Boolean(data?.source && data?.format);
+    const payload = isStructured
+      ? data
+      : {
+          format: data.format || "html",
+          audience: data.audience || "customer",
+          source: data.source || (data.opportunity ? { type: data.effectiveScopeType === "job" || data.job ? "job" : "opportunity", id: Number(data.job || data.opportunity) } : {}),
+          revision: data.revision || "",
+          ...(data.document ? { document: data.document } : {}),
+        };
+    return await api.post(`/tenant/builder/templates/${id}/preview/`, payload);
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return api.post(`/documents/templates/${id}/preview/`, data);
+    }
+    throw err;
+  }
+};
+
 export const regenerateOpportunityDocuments = (opportunityId) => api.post(`/documents/opportunities/${opportunityId}/regenerate/`, {});
 
-export const getTemplateVariables = (params) => api.get("/documents/template-variables/", { params });
+export const getTemplateVariables = async (params) => {
+  try {
+    return await api.get("/tenant/builder/variables/", { params });
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return api.get("/documents/template-variables/", { params });
+    }
+    throw err;
+  }
+};
 export const createTemplateVariable = (data) => api.post("/documents/template-variables/", data);
 export const updateTemplateVariable = (id, data) => api.patch(`/documents/template-variables/${id}/`, data);
 export const deleteTemplateVariable = (id) => api.delete(`/documents/template-variables/${id}/`);
@@ -574,15 +1068,86 @@ export const createPaymentGateway = (data) => api.post("/integrations/payment-ga
 export const updatePaymentGateway = (id, data) => api.patch(`/integrations/payment-gateways/${id}/`, data);
 export const verifyPaymentGateway = (id) => api.post(`/integrations/payment-gateways/${id}/verify/`);
 
-export const getCommunicationTemplates = (params) => api.get("/integrations/communication-templates/", { params });
-export const getCommunicationTemplate = (id) => api.get(`/integrations/communication-templates/${id}/`);
+export const getCommunicationTemplates = async (params = {}) => {
+  try {
+    return await api.get("/tenant/communications/templates/", { params });
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return api.get("/integrations/communication-templates/", { params });
+    }
+    throw err;
+  }
+};
+export const getCommunicationTemplate = async (id) => {
+  try {
+    return await api.get(`/tenant/communications/templates/${id}/`);
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return api.get(`/integrations/communication-templates/${id}/`);
+    }
+    throw err;
+  }
+};
 export const getCommunicationTemplateVariables = (params) =>
   api.get("/integrations/communication-templates/variables/", { params });
 export const getCommunicationTemplateKeys = (params) =>
   api.get("/integrations/communication-templates/template-keys/", { params });
-export const createCommunicationTemplate = (data) => api.post("/integrations/communication-templates/", data);
-export const updateCommunicationTemplate = (id, data) => api.patch(`/integrations/communication-templates/${id}/`, data);
-export const deleteCommunicationTemplate = (id) => api.delete(`/integrations/communication-templates/${id}/`);
+const toTenantCommunicationTemplatePayload = (data, partial = false) => {
+  const payload = {};
+  const has = (key) => Object.prototype.hasOwnProperty.call(data, key);
+
+  if (!partial || has("name")) payload.name = data.name;
+  if (!partial || has("description")) payload.description = data.description || "";
+  if (!partial || has("channel")) payload.channel = data.channel;
+  if (!partial || has("subject")) payload.subject = data.subject || "";
+  if (!partial || has("body_html")) payload.body_html = data.body_html || "";
+  if (!partial || has("body_text") || has("body") || has("sms_body")) {
+    payload.body_text = data.body_text ?? data.sms_body ?? data.body ?? "";
+  }
+  if (!partial || has("branch_id") || has("branch")) {
+    payload.branch_id = data.branch_id ?? data.branch ?? null;
+  }
+  if (!partial || has("is_active")) payload.is_active = data.is_active ?? true;
+
+  return payload;
+};
+
+export const createCommunicationTemplate = async (data) => {
+  try {
+    return await api.post(
+      "/tenant/communications/templates/",
+      toTenantCommunicationTemplatePayload(data)
+    );
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return api.post("/integrations/communication-templates/", data);
+    }
+    throw err;
+  }
+};
+export const updateCommunicationTemplate = async (id, data) => {
+  try {
+    return await api.patch(
+      `/tenant/communications/templates/${id}/`,
+      toTenantCommunicationTemplatePayload(data, true)
+    );
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return api.patch(`/integrations/communication-templates/${id}/`, data);
+    }
+    throw err;
+  }
+};
+export const deleteCommunicationTemplate = async (id) => {
+  try {
+    return await api.delete(`/tenant/communications/templates/${id}/`);
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return api.delete(`/integrations/communication-templates/${id}/`);
+    }
+    throw err;
+  }
+};
 export const seedCommunicationTemplates = (data = {}) =>
   api.post("/integrations/communication-templates/seed-defaults/", data);
 export const previewCommunicationTemplate = (data) => api.post("/integrations/communication-templates/preview/", data);
@@ -592,9 +1157,36 @@ export const createCommunicationTemplateCategory = (data) => api.post("/integrat
 export const updateCommunicationTemplateCategory = (id, data) => api.patch(`/integrations/communication-template-categories/${id}/`, data);
 export const deleteCommunicationTemplateCategory = (id) => api.delete(`/integrations/communication-template-categories/${id}/`);
 
+// Additional Tenant Communications APIs
+export const getNotificationTemplates = (params) => api.get("/tenant/communications/notification-templates/", { params });
+export const createNotificationTemplate = (data) => api.post("/tenant/communications/notification-templates/", data);
+export const updateNotificationTemplate = (id, data) => api.patch(`/tenant/communications/notification-templates/${id}/`, data);
+export const deleteNotificationTemplate = (id) => api.delete(`/tenant/communications/notification-templates/${id}/`);
+export const getCommunicationCatalog = (params) => api.get("/tenant/communications/catalog/", { params });
+export const getCommunicationReviews = (params) => api.get("/tenant/communications/review/", { params });
+export const getMySmsNumbers = (params) => api.get("/tenant/communications/my-sms-numbers/", { params });
+
 // Automations APIs
-export const getAutomationWorkflows = (params) => api.get("/automations/workflows/", { params });
-export const createAutomationWorkflow = (data) => api.post("/automations/workflows/", data);
+export const getAutomationWorkflows = async (params = {}) => {
+  try {
+    return await api.get("/tenant/communications/automations/", { params });
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return api.get("/automations/workflows/", { params });
+    }
+    throw err;
+  }
+};
+export const createAutomationWorkflow = async (data) => {
+  try {
+    return await api.post("/tenant/communications/automations/", data);
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return api.post("/automations/workflows/", data);
+    }
+    throw err;
+  }
+};
 export const updateAutomationWorkflow = (id, data) => api.patch(`/automations/workflows/${id}/`, data);
 export const deleteAutomationWorkflow = (id) => api.delete(`/automations/workflows/${id}/`);
 export const activateAutomationWorkflow = (id) => api.post(`/automations/workflows/${id}/activate/`, {});
@@ -630,6 +1222,77 @@ export const createMoverSize = (data) => api.post("/tenant/move-sizes/", data);
 export const updateMoverSize = (id, data) => api.patch(`/tenant/move-sizes/${id}/`, data);
 export const deleteMoverSize = (id) => api.delete(`/tenant/move-sizes/${id}/`);
 export const seedStatusCodes = (data = {}) => api.post("/tenant/opportunity-statuses/", data);
+
+// Opportunity Configurations
+export const getOpportunityStatuses = (params) => api.get("/tenant/opportunity-statuses/", { params });
+export const createOpportunityStatus = (data) => api.post("/tenant/opportunity-statuses/", data);
+export const updateOpportunityStatus = (id, data) => api.patch(`/tenant/opportunity-statuses/${id}/`, data);
+export const deleteOpportunityStatus = (id) => api.delete(`/tenant/opportunity-statuses/${id}/`);
+
+export const getOpportunityTypes = (params) => api.get("/tenant/opportunity-types/", { params });
+export const createOpportunityType = (data) => api.post("/tenant/opportunity-types/", data);
+export const updateOpportunityType = (id, data) => api.patch(`/tenant/opportunity-types/${id}/`, data);
+export const deleteOpportunityType = (id) => api.delete(`/tenant/opportunity-types/${id}/`);
+
+export const getCancellationReasons = (params) => api.get("/tenant/cancellation-reasons/", { params });
+export const createCancellationReason = (data) => api.post("/tenant/cancellation-reasons/", data);
+export const updateCancellationReason = (id, data) => api.patch(`/tenant/cancellation-reasons/${id}/`, data);
+export const deleteCancellationReason = (id) => api.delete(`/tenant/cancellation-reasons/${id}/`);
+
+export const getOpportunityTags = (params) => api.get("/tenant/opportunity-tags/", { params });
+export const createOpportunityTag = (data) => api.post("/tenant/opportunity-tags/", data);
+export const updateOpportunityTag = (id, data) => api.patch(`/tenant/opportunity-tags/${id}/`, data);
+export const deleteOpportunityTag = (id) => api.delete(`/tenant/opportunity-tags/${id}/`);
+
+export const getOpportunityCustomFields = (params) => api.get("/tenant/opportunity-fields/", { params });
+export const createOpportunityCustomField = (data) => api.post("/tenant/opportunity-fields/", data);
+export const updateOpportunityCustomField = (id, data) => api.patch(`/tenant/opportunity-fields/${id}/`, data);
+export const deleteOpportunityCustomField = (id) => api.delete(`/tenant/opportunity-fields/${id}/`);
+
+export const getBookingPolicy = () => api.get("/tenant/booking-policy/");
+export const updateBookingPolicy = (data) => api.put("/tenant/booking-policy/current/", data);
+
+// Lead Configurations & Intake
+export const getDisqualificationReasons = (params) => api.get("/tenant/disqualification-reasons/", { params });
+export const createDisqualificationReason = (data) => api.post("/tenant/disqualification-reasons/", data);
+export const updateDisqualificationReason = (id, data) => api.patch(`/tenant/disqualification-reasons/${id}/`, data);
+export const deleteDisqualificationReason = (id) => api.delete(`/tenant/disqualification-reasons/${id}/`);
+
+export const getLeadRoutingRules = (params) => api.get("/tenant/lead-routing-rules/", { params });
+export const createLeadRoutingRule = (data) => api.post("/tenant/lead-routing-rules/", data);
+export const updateLeadRoutingRule = (id, data) => api.patch(`/tenant/lead-routing-rules/${id}/`, data);
+export const deleteLeadRoutingRule = (id) => api.delete(`/tenant/lead-routing-rules/${id}/`);
+
+export const getLeadBranchRoutes = (params) => api.get("/tenant/lead-branch-routes/", { params });
+export const createLeadBranchRoute = (data) => api.post("/tenant/lead-branch-routes/", data);
+export const updateLeadBranchRoute = (id, data) => api.patch(`/tenant/lead-branch-routes/${id}/`, data);
+export const deleteLeadBranchRoute = (id) => api.delete(`/tenant/lead-branch-routes/${id}/`);
+
+export const getLeadSettings = () => api.get("/tenant/lead-settings/");
+export const updateLeadSettings = (data) => api.put("/tenant/lead-settings/current/", data);
+
+export const getLeadImports = (params) => api.get("/tenant/lead-imports/", { params });
+export const createLeadImport = (data) => api.post("/tenant/lead-imports/", data);
+export const getLeadIntakeEvents = (params) => api.get("/tenant/lead-intake-events/", { params });
+
+// Platform Core APIs
+export const getPlatformUsers = (params) => api.get("/core/platform-users/", { params });
+export const getCoreTenantAccess = (params) => api.get("/core/tenant-access/", { params });
+export const getCoreTenantSessions = (params) => api.get("/core/tenant-sessions/", { params });
+export const getCorePlans = (params) => api.get("/core/plans/", { params });
+export const getCoreSubscriptions = (params) => api.get("/core/subscriptions/", { params });
+export const getCoreLimits = (params) => api.get("/core/limits/", { params });
+export const getCoreFeatures = (params) => api.get("/core/features/", { params });
+export const getCoreTenants = (params) => api.get("/core/tenants/", { params });
+export const getCoreAddons = (params) => api.get("/core/add-ons/", { params });
+export const getCoreDashboard = (params) => api.get("/core/dashboard/", { params });
+
+// Tenant Users, Compensations & Invitations
+export const acceptTenantInvitation = (data) => api.post("/tenant/invitations/accept/", data);
+export const getUserCompensations = (params) => api.get("/tenant/user-compensations/", { params });
+export const createUserCompensation = (data) => api.post("/tenant/user-compensations/", data);
+export const updateUserCompensation = (id, data) => api.patch(`/tenant/user-compensations/${id}/`, data);
+export const deleteUserCompensation = (id) => api.delete(`/tenant/user-compensations/${id}/`);
 
 // Legacy support for API object
 const API = {

@@ -3,10 +3,10 @@ import { X, FileSpreadsheet, Loader2, AlertCircle, ArrowLeft } from 'lucide-reac
 import { createEstimatePortalTemplate } from '../../../../services/api';
 
 export const ESTIMATE_PORTAL_TYPES = [
-  { id: 'moving', label: 'Standard Moving Portal' },
-  { id: 'hourly', label: 'Hourly Rate Portal' },
-  { id: 'flat_rate', label: 'Flat Rate Portal' },
-  { id: 'long_distance', label: 'Long Distance Portal' },
+  { id: 'binding', label: 'Binding Estimate' },
+  { id: 'non_binding', label: 'Non-Binding Estimate' },
+  { id: 'hourly', label: 'Hourly Rate Estimate' },
+  { id: 'flat_rate', label: 'Flat Rate Estimate' },
 ];
 
 export const ESTIMATE_PRESET_LAYOUTS = [
@@ -23,8 +23,8 @@ export default function CreateEstimatePortalModal({
   branches = [],
   defaultBranchId = null,
 }) {
-  const [name, setName] = useState('Standard Moving Estimate Portal');
-  const [templateType, setTemplateType] = useState('moving');
+  const [name, setName] = useState('Binding Estimate Portal');
+  const [templateType, setTemplateType] = useState('binding');
   const [startingLayout, setStartingLayout] = useState('standard');
   const [selectedBranch, setSelectedBranch] = useState(defaultBranchId ? String(defaultBranchId) : '');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -34,8 +34,8 @@ export default function CreateEstimatePortalModal({
 
   useEffect(() => {
     if (isOpen) {
-      setName('Standard Moving Estimate Portal');
-      setTemplateType('moving');
+      setName('Binding Estimate Portal');
+      setTemplateType('binding');
       setStartingLayout('standard');
       setSelectedBranch(defaultBranchId ? String(defaultBranchId) : (branches[0]?.id ? String(branches[0].id) : ''));
       setErrorMessage('');
@@ -59,6 +59,7 @@ export default function CreateEstimatePortalModal({
     try {
       const payload = {
         name: cleanName,
+        subtype: templateType,
         template_type: templateType,
         applies_to_entity: 'opportunity',
         subject: cleanName,
@@ -72,7 +73,7 @@ export default function CreateEstimatePortalModal({
       const created = res?.data ?? res;
       onCreated?.(created);
     } catch (err) {
-      const msg = err?.response?.data?.detail || err?.response?.data?.name?.[0] || err?.message || 'Unable to create estimate template.';
+      const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.response?.data?.name?.[0] || err?.message || 'Unable to create estimate template.';
       setErrorMessage(msg);
     } finally {
       setIsSubmitting(false);
@@ -155,10 +156,12 @@ export default function CreateEstimatePortalModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1">
+              <label htmlFor="modal-portal-type-select" className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1">
                 Portal Type
               </label>
               <select
+                id="modal-portal-type-select"
+                aria-label="Portal Type"
                 value={templateType}
                 onChange={(e) => setTemplateType(e.target.value)}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"

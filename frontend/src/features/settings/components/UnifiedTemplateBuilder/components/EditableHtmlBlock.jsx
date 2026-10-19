@@ -74,6 +74,7 @@ export default function EditableHtmlBlock({
     lastSyncedHtmlRef.current = sanitized;
     if (sanitized !== item.htmlContent) {
       onItem({
+        ...item,
         htmlContent: sanitized,
         content: sanitized,
       });
@@ -192,7 +193,7 @@ export default function EditableHtmlBlock({
         isSelected
           ? "border-blue-500 shadow-sm ring-2 ring-blue-500/10"
           : "border-slate-200 hover:border-slate-300"
-      } ${preview ? "border-transparent" : "bg-white"}`}
+      } ${preview ? "border-transparent" : "bg-white"} w-full max-w-full overflow-hidden`}
       onClick={(e) => {
         if (!preview) {
           e.stopPropagation();
@@ -398,7 +399,7 @@ export default function EditableHtmlBlock({
         ref={containerRef}
         contentEditable={!preview}
         suppressContentEditableWarning
-        className={`p-4 outline-none min-h-[60px] text-xs ${scopeClass} ${
+        className={`p-4 outline-none min-h-[60px] text-xs max-w-full overflow-x-auto [word-break:break-word] [&_img]:max-w-full [&_img]:h-auto [&_table]:max-w-full ${scopeClass} ${
           preview ? "cursor-default" : "cursor-text"
         }`}
         onInput={() => {

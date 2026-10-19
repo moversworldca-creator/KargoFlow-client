@@ -14,7 +14,6 @@ import {
   X,
   Bot,
   CreditCard,
-  FileText,
 } from 'lucide-react';
 import companyLogo from '../../assets/comapny_logo.png';
 import { useAuth } from '../../features/auth/context/AuthContext';
@@ -31,7 +30,6 @@ const Sidebar = ({ isOpen, onClose }) => {
     '/marketing': Megaphone,
     '/automation': Bot,
     '/analytics': BarChart2,
-    '/documents': FileText,
     '/settings': SettingsIcon,
   };
   const navItems = getAllowedNavItems(NAV_ITEMS, permissionContext).map((item) => ({

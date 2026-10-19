@@ -29,6 +29,18 @@ import {
   saveLibrary,
   loadLibrarySync,
 } from "./core/storageService";
+import {
+  getBuilderTemplateDraft,
+  saveBuilderTemplateDraft,
+  publishBuilderTemplateDraft,
+  discardBuilderTemplateDraft,
+  validateBuilderTemplateDraft,
+} from "../../../../services/api";
+import {
+  toBackendDocument,
+  createBackendWidget,
+  fromBackendDocument,
+} from "./core/documentAdapter";
 
 export default function UnifiedTemplateBuilder({
   mode = "estimate",
@@ -42,9 +54,13 @@ export default function UnifiedTemplateBuilder({
   branches,
   isOverlay = true,
   visualInsertRequest = null,
+  onModeChange,
+  onSendTestEmail,
+  isSendingTest = false,
 }) {
   const modeConfig = getModeConfig(mode);
   const initialSource = draft || template;
+  const targetTemplateId = initialSource?.id || template?.id || draft?.id;
 
   // Template Document Model
   const [doc, setDoc] = useState(() => {
@@ -78,6 +94,11 @@ export default function UnifiedTemplateBuilder({
     }
     initial.settings = {
       ...(initial.settings || {}),
+      pageSize: initial.settings?.pageSize || modeConfig.defaultPageSize || "A4",
+      orientation:
+        String(initial.settings?.orientation || modeConfig.defaultOrientation || "Portrait").toLowerCase() === "landscape"
+          ? "Landscape"
+          : "Portrait",
       subject: initialSource?.subject || initial.settings?.subject || "",
       template_key: initialSource?.template_key || initial.settings?.template_key || "",
       branch: initialSource?.branch || branchId || initial.settings?.branch || null,
@@ -97,6 +118,36 @@ export default function UnifiedTemplateBuilder({
     }
   }, [initialSource?.body_sms, initialSource?.sms_body, initialSource?.body, value]);
 
+  // Server draft hydration on mount/change
+  useEffect(() => {
+    let isCancelled = false;
+    const targetId = template?.id || draft?.id || initialSource?.id;
+    if (targetId) {
+      getBuilderTemplateDraft(targetId)
+        .then((res) => {
+          if (isCancelled) return;
+          const draftData = res?.data ?? res;
+          if (draftData?.document?.sections && Array.isArray(draftData.document.sections)) {
+            const loaded = fromBackendDocument(draftData.document, {
+              name: draftData.template?.name || template?.name || draft?.name || doc.name,
+              mode,
+            });
+            if (loaded) {
+              const lockVersion = draftData.revision?.lock_version || draftData.lock_version || 1;
+              updateDoc({ ...loaded, lock_version: lockVersion, isHydratedFromServer: true });
+            }
+          }
+        })
+        .catch((err) => {
+          // Graceful fallback to initial doc if draft cannot be fetched (e.g. offline/mock)
+          console.warn("Could not load backend draft on mount:", err?.message);
+        });
+    }
+    return () => {
+      isCancelled = true;
+    };
+  }, [template?.id, draft?.id, initialSource?.id]);
+
   // Editor State
   const [selectedItemId, setSelectedItemId] = useState(null);
   const [selection, setSelection] = useState(null);
@@ -104,8 +155,11 @@ export default function UnifiedTemplateBuilder({
   const [activeHtmlItem, setActiveHtmlItem] = useState(null);
   const [zoom, setZoom] = useState(100);
   const [devicePreview, setDevicePreview] = useState("desktop");
-  const [pageSize, setPageSize] = useState(modeConfig.defaultPageSize || "A4");
-  const [orientation, setOrientation] = useState(modeConfig.defaultOrientation || "Portrait");
+  const pageSize = doc.settings?.pageSize || modeConfig.defaultPageSize || "A4";
+  const orientation =
+    String(doc.settings?.orientation || modeConfig.defaultOrientation || "Portrait").toLowerCase() === "landscape"
+      ? "Landscape"
+      : "Portrait";
   const [isSaving, setIsSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
@@ -265,6 +319,7 @@ export default function UnifiedTemplateBuilder({
           template_key: newDoc.settings?.template_key || initialSource?.template_key || "",
           branch: newDoc.settings?.branch || initialSource?.branch || branchId || null,
           category: newDoc.settings?.category || initialSource?.category || null,
+          description: newDoc.settings?.description || initialSource?.description || "",
         });
       }
     },
@@ -311,18 +366,46 @@ export default function UnifiedTemplateBuilder({
     }
   };
 
-  // Orientation Toggle Handler
-  const handleToggleOrientation = () => {
-    const next = orientation === "Landscape" ? "Portrait" : "Landscape";
-    setOrientation(next);
+  // Orientation Change & Toggle Handler
+  const handleOrientationChange = (next) => {
+    const normalizedOrientation = String(next).toLowerCase() === "landscape" ? "Landscape" : "Portrait";
+    const pages = getCurrentPages().map((page) => ({
+      ...page,
+      orientation: normalizedOrientation,
+    }));
     updateDoc({
       ...doc,
       settings: {
         ...(doc.settings || {}),
-        orientation: next,
+        orientation: normalizedOrientation,
       },
+      pages,
     });
-    setToastMessage(`Orientation: ${next}`);
+    setToastMessage(`Orientation: ${normalizedOrientation}`);
+  };
+
+  const handlePageSizeChange = (next) => {
+    const pages = getCurrentPages().map((page) => ({
+      ...page,
+      pageSize: next,
+    }));
+    updateDoc({
+      ...doc,
+      settings: {
+        ...(doc.settings || {}),
+        pageSize: next,
+      },
+      pages,
+    });
+  };
+
+  const handleToggleOrientation = () => {
+    const next = String(orientation).toLowerCase() === "landscape" ? "Portrait" : "Landscape";
+    handleOrientationChange(next);
+  };
+
+  const handlePreviewDocUpdate = (updatedDoc) => {
+    updateDoc(updatedDoc);
   };
 
   // Helper: Get or Init current pages
@@ -333,22 +416,32 @@ export default function UnifiedTemplateBuilder({
     return [{ id: "page-1", name: "Page 1", items: [...(doc.items || [])] }];
   }, [doc.pages, doc.items]);
 
+  const appendItemToTargetPage = (item) => {
+    const pages = getCurrentPages();
+    const selectedPageIndex = pages.findIndex((page) =>
+      (page.items || []).some((pageItem) => pageItem.id === selectedItemId)
+    );
+    const targetPageIndex = selectedPageIndex >= 0 ? selectedPageIndex : pages.length - 1;
+    pages[targetPageIndex] = {
+      ...pages[targetPageIndex],
+      items: [...(pages[targetPageIndex].items || []), item],
+    };
+    const nextItems = pages.flatMap((page) => page.items);
+    updateDoc({ ...doc, pages, items: nextItems });
+    setSelectedItemId(item.id);
+  };
+
   // Widget Actions
   const handleAddWidget = (widgetConfig) => {
     if (widgetConfig.type === "custom_field" || widgetConfig.id === "custom_field") {
       setIsCustomFieldModalOpen(true);
       return;
     }
-    const newItem = createWidget(widgetConfig.label || widgetConfig.type);
-    const pages = getCurrentPages();
-    const lastIdx = pages.length - 1;
-    pages[lastIdx] = {
-      ...pages[lastIdx],
-      items: [...(pages[lastIdx].items || []), newItem],
-    };
-    const nextItems = pages.flatMap((p) => p.items);
-    updateDoc({ ...doc, pages, items: nextItems });
-    setSelectedItemId(newItem.id);
+    const backendKind = ["estimate", "estimate_portal"].includes(mode) ? "estimate_portal" : mode === "invoice" ? "invoice" : "document";
+    const newItem = widgetConfig.type === "builder_block"
+      ? createBackendWidget({ ...widgetConfig, type: widgetConfig.block_type }, backendKind)
+      : createWidget(widgetConfig.label || widgetConfig.type, widgetConfig);
+    appendItemToTargetPage(newItem);
   };
 
   const handleInsertCustomField = ({ label, value: val, variable }) => {
@@ -357,42 +450,18 @@ export default function UnifiedTemplateBuilder({
       value: val,
       variable,
     });
-    const pages = getCurrentPages();
-    const lastIdx = pages.length - 1;
-    pages[lastIdx] = {
-      ...pages[lastIdx],
-      items: [...(pages[lastIdx].items || []), customItem],
-    };
-    const nextItems = pages.flatMap((p) => p.items);
-    updateDoc({ ...doc, pages, items: nextItems });
-    setSelectedItemId(customItem.id);
+    appendItemToTargetPage(customItem);
     setToastMessage(`Added Custom Field: ${label}`);
   };
 
   const handleInsertTable = (rows, cols) => {
     const tableItem = createTableWidget(rows, cols, "");
-    const pages = getCurrentPages();
-    const lastIdx = pages.length - 1;
-    pages[lastIdx] = {
-      ...pages[lastIdx],
-      items: [...(pages[lastIdx].items || []), tableItem],
-    };
-    const nextItems = pages.flatMap((p) => p.items);
-    updateDoc({ ...doc, pages, items: nextItems });
-    setSelectedItemId(tableItem.id);
+    appendItemToTargetPage(tableItem);
   };
 
   const handleInsertLayout = (preset) => {
     const layoutItem = createContentLayoutWidget(preset, 1, 2, "Content Layout");
-    const pages = getCurrentPages();
-    const lastIdx = pages.length - 1;
-    pages[lastIdx] = {
-      ...pages[lastIdx],
-      items: [...(pages[lastIdx].items || []), layoutItem],
-    };
-    const nextItems = pages.flatMap((p) => p.items);
-    updateDoc({ ...doc, pages, items: nextItems });
-    setSelectedItemId(layoutItem.id);
+    appendItemToTargetPage(layoutItem);
   };
 
   // Direct Creation on Page (Mouse Drag or Click on Blank Canvas)
@@ -451,7 +520,10 @@ export default function UnifiedTemplateBuilder({
         return;
       }
 
-      const newItem = createWidget(widgetConfig.label || widgetConfig.type);
+      const backendKind = ["estimate", "estimate_portal"].includes(mode) ? "estimate_portal" : mode === "invoice" ? "invoice" : "document";
+      const newItem = widgetConfig.type === "builder_block"
+        ? createBackendWidget({ ...widgetConfig, type: widgetConfig.block_type }, backendKind)
+        : createWidget(widgetConfig.label || widgetConfig.type, widgetConfig);
       const targetItems = [...(pages[safePageIndex].items || [])];
       const safeInsertIndex = Math.max(0, Math.min(targetItems.length, itemIndex));
       targetItems.splice(safeInsertIndex, 0, newItem);
@@ -619,14 +691,18 @@ export default function UnifiedTemplateBuilder({
   };
 
   // Multi-Page Handlers
+  const createBlankPage = (name, sourcePage = null) => ({
+    id: createId("page"),
+    name,
+    pageSize: sourcePage?.pageSize || pageSize,
+    orientation: sourcePage?.orientation || orientation,
+    items: [],
+  });
+
   const handleAddPage = () => {
     const pages = getCurrentPages();
     const newPageNum = pages.length + 1;
-    const newPage = {
-      id: createId("page"),
-      name: `Page ${newPageNum}`,
-      items: [],
-    };
+    const newPage = createBlankPage(`Page ${newPageNum}`);
     const nextPages = [...pages, newPage];
     updateDoc({
       ...doc,
@@ -638,11 +714,7 @@ export default function UnifiedTemplateBuilder({
 
   const handleAddPageBefore = (index) => {
     const pages = getCurrentPages();
-    const newPage = {
-      id: createId("page"),
-      name: `Page ${index + 1}`,
-      items: [],
-    };
+    const newPage = createBlankPage(`Page ${index + 1}`, pages[index]);
     pages.splice(index, 0, newPage);
     const reindexed = pages.map((p, idx) => ({ ...p, name: `Page ${idx + 1}` }));
     updateDoc({
@@ -655,11 +727,7 @@ export default function UnifiedTemplateBuilder({
 
   const handleAddPageAfter = (index) => {
     const pages = getCurrentPages();
-    const newPage = {
-      id: createId("page"),
-      name: `Page ${index + 2}`,
-      items: [],
-    };
+    const newPage = createBlankPage(`Page ${index + 2}`, pages[index]);
     pages.splice(index + 1, 0, newPage);
     const reindexed = pages.map((p, idx) => ({ ...p, name: `Page ${idx + 1}` }));
     updateDoc({
@@ -678,6 +746,8 @@ export default function UnifiedTemplateBuilder({
     const duplicatedPage = {
       id: createId("page"),
       name: `${targetPage.name || `Page ${index + 1}`} (Copy)`,
+      pageSize: targetPage.pageSize || pageSize,
+      orientation: targetPage.orientation || orientation,
       items: duplicatedItems,
     };
     pages.splice(index + 1, 0, duplicatedPage);
@@ -734,10 +804,8 @@ export default function UnifiedTemplateBuilder({
     const loaded = deepClone(templateDoc);
     if (!loaded.pages || !Array.isArray(loaded.pages) || loaded.pages.length === 0) {
       loaded.pages = [{ id: "page-1", name: "Page 1", items: loaded.items || [] }];
-    }
+    };
     updateDoc(loaded);
-    if (loaded.settings?.pageSize) setPageSize(loaded.settings.pageSize);
-    if (loaded.settings?.orientation) setOrientation(loaded.settings.orientation);
     setSelectedItemId(null);
     setToastMessage(`Loaded "${loaded.name}" from template library`);
   };
@@ -756,10 +824,15 @@ export default function UnifiedTemplateBuilder({
     setIsSaving(true);
     try {
       const compiledHtml = compileDocumentToHtml(doc, mode);
+      const backendDoc = toBackendDocument(doc, mode);
+      const targetTemplateId = initialSource?.id || template?.id || draft?.id;
+      const currentLock = doc.lock_version || draft?.lock_version || 1;
+
       const payload = {
         name: doc.name,
         mode,
         content: doc,
+        document: backendDoc,
         html_content: compiledHtml,
         body_html: compiledHtml,
         body_sms: smsText,
@@ -769,10 +842,31 @@ export default function UnifiedTemplateBuilder({
         template_key: doc.settings?.template_key || initialSource?.template_key || "",
         branch: doc.settings?.branch || initialSource?.branch || branchId || null,
         category: doc.settings?.category || initialSource?.category || null,
+        template_type: doc.settings?.template_type || initialSource?.template_type || (mode === "estimate" ? "moving" : "contract"),
+        version: doc.version || initialSource?.version || 1,
+        lock_version: currentLock,
       };
 
       await handleSaveToLibrary(doc);
       await saveDocument(doc);
+
+      if (targetTemplateId) {
+        try {
+          const draftRes = await saveBuilderTemplateDraft(targetTemplateId, {
+            lock_version: currentLock,
+            document: backendDoc,
+          });
+          const nextLock = draftRes?.data?.revision?.lock_version || draftRes?.data?.lock_version || (currentLock + 1);
+          setDoc((prev) => ({ ...prev, lock_version: nextLock }));
+        } catch (serverErr) {
+          if (serverErr?.response?.status === 409) {
+            setToastMessage("Conflict: Template was modified elsewhere. Please refresh.");
+            setIsSaving(false);
+            return;
+          }
+          console.warn("Backend draft save warning:", serverErr?.message);
+        }
+      }
 
       if (onSave) {
         await onSave(payload);
@@ -792,10 +886,15 @@ export default function UnifiedTemplateBuilder({
     setIsSaving(true);
     try {
       const compiledHtml = compileDocumentToHtml(doc, mode);
+      const backendDoc = toBackendDocument(doc, mode);
+      const targetTemplateId = initialSource?.id || template?.id || draft?.id;
+      const currentLock = doc.lock_version || draft?.lock_version || 1;
+
       const payload = {
         name: doc.name,
         mode,
         content: doc,
+        document: backendDoc,
         html_content: compiledHtml,
         body_html: compiledHtml,
         body_sms: smsText,
@@ -806,10 +905,29 @@ export default function UnifiedTemplateBuilder({
         branch: doc.settings?.branch || initialSource?.branch || branchId || null,
         category: doc.settings?.category || initialSource?.category || null,
         is_draft: true,
+        lock_version: currentLock,
       };
 
       await handleSaveToLibrary({ ...doc, name: `${doc.name} (Draft)` });
       await saveDocument(doc);
+
+      if (targetTemplateId) {
+        try {
+          const draftRes = await saveBuilderTemplateDraft(targetTemplateId, {
+            lock_version: currentLock,
+            document: backendDoc,
+          });
+          const nextLock = draftRes?.data?.revision?.lock_version || draftRes?.data?.lock_version || (currentLock + 1);
+          setDoc((prev) => ({ ...prev, lock_version: nextLock }));
+        } catch (serverErr) {
+          if (serverErr?.response?.status === 409) {
+            setToastMessage("Conflict: Template was modified elsewhere. Please refresh.");
+            setIsSaving(false);
+            return;
+          }
+          console.warn("Backend draft save warning:", serverErr?.message);
+        }
+      }
 
       if (onSave) {
         await onSave(payload);
@@ -819,6 +937,62 @@ export default function UnifiedTemplateBuilder({
     } catch (err) {
       console.error("Draft error:", err);
       setToastMessage("Draft saved to local storage");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Discard Draft Handler
+  const handleDiscardDraft = async () => {
+    const targetTemplateId = initialSource?.id || template?.id || draft?.id;
+    if (!targetTemplateId) return;
+    const ok = window.confirm("Discard uncommitted draft changes and revert to the published revision?");
+    if (!ok) return;
+
+    setIsSaving(true);
+    try {
+      await discardBuilderTemplateDraft(targetTemplateId);
+      const freshDraft = await getBuilderTemplateDraft(targetTemplateId);
+      const draftData = freshDraft?.data ?? freshDraft;
+      if (draftData?.document?.sections) {
+        const loaded = fromBackendDocument(draftData.document, {
+          name: draftData.template?.name || doc.name,
+          mode,
+        });
+        const lockVersion = draftData.revision?.lock_version || draftData.lock_version || 1;
+        updateDoc({ ...loaded, lock_version: lockVersion });
+      }
+      setIsDirty(false);
+      setToastMessage("Draft reverted to published version.");
+    } catch (err) {
+      console.warn("Discard draft notice:", err?.message);
+      setToastMessage("Reverted to base template.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Publish Handler
+  const handlePublish = async () => {
+    const targetTemplateId = initialSource?.id || template?.id || draft?.id;
+    if (!targetTemplateId) {
+      setToastMessage("Please save the template first before publishing.");
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await handleSave();
+      try {
+        await validateBuilderTemplateDraft(targetTemplateId);
+      } catch (valErr) {
+        console.warn("Pre-publish validation notice:", valErr?.response?.data || valErr?.message);
+      }
+      await publishBuilderTemplateDraft(targetTemplateId);
+      setToastMessage("Template published successfully!");
+    } catch (err) {
+      console.error("Publish error:", err);
+      const detail = err?.response?.data?.detail || err?.response?.data?.error || "Failed to publish template.";
+      setToastMessage(typeof detail === "string" ? detail : "Failed to publish template.");
     } finally {
       setIsSaving(false);
     }
@@ -840,6 +1014,8 @@ export default function UnifiedTemplateBuilder({
         isSaving={isSaving}
         onSave={handleSave}
         onSaveDraft={handleSaveDraft}
+        onDiscardDraft={targetTemplateId ? handleDiscardDraft : null}
+        onPublish={handlePublish}
         onBack={onBack}
         onOpenCode={() => {
           setActiveHtmlItem(null);
@@ -858,24 +1034,31 @@ export default function UnifiedTemplateBuilder({
       />
 
       {/* Main Workspace (Left Sidebar + Center Canvas + Right Inspector) */}
-      <div className="flex flex-1 overflow-hidden relative">
+      <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden relative">
         {/* Mobile Backdrop Overlay when Sidebar is open */}
         {isSidebarOpen && (
           <div
-            className="fixed inset-0 bg-slate-900/30 backdrop-blur-2xs z-30 lg:hidden"
+            className="absolute inset-0 bg-slate-900/40 backdrop-blur-2xs z-30 lg:hidden"
             onClick={() => setIsSidebarOpen(false)}
             aria-label="Close sidebar overlay"
           />
         )}
 
-        {/* Collapsible Left Toolkit Sidebar */}
-        <div className={`${isSidebarOpen ? "block" : "hidden"} shrink-0 z-30 transition-all duration-200`}>
+        {/* Collapsible Left Toolkit Sidebar: Off-canvas drawer on <lg, inline static on lg+ */}
+        <div
+          className={`shrink-0 z-40 transition-transform duration-200 lg:translate-x-0 ${
+            isSidebarOpen
+              ? "fixed left-0 top-14 bottom-0 shadow-2xl lg:static lg:shadow-none translate-x-0"
+              : "fixed left-0 top-14 bottom-0 -translate-x-full lg:static lg:hidden"
+          }`}
+        >
           <LeftSidebar
+            onClose={() => setIsSidebarOpen(false)}
             mode={mode}
             pageSize={pageSize}
-            onPageSizeChange={setPageSize}
+            onPageSizeChange={handlePageSizeChange}
             orientation={orientation}
-            onOrientationChange={setOrientation}
+            onOrientationChange={handleOrientationChange}
             category={doc.settings?.category || "Estimate"}
             onCategoryChange={(cat) =>
               updateDoc({
@@ -904,6 +1087,7 @@ export default function UnifiedTemplateBuilder({
               })
             }
             branches={branches || []}
+            branchId={initialSource?.branch_id || initialSource?.branch || branchId}
           />
         </div>
 
@@ -965,7 +1149,7 @@ export default function UnifiedTemplateBuilder({
         {/* Drawer Backdrop Overlay for screens < 1280px */}
         {isPanelOpen && (
           <div
-            className="fixed inset-0 bg-slate-900/30 backdrop-blur-2xs z-40 xl:hidden"
+            className="absolute inset-0 bg-slate-900/30 backdrop-blur-2xs z-40 xl:hidden"
             onClick={() => setIsPanelOpen(false)}
             aria-label="Close properties panel overlay"
           />
@@ -974,8 +1158,8 @@ export default function UnifiedTemplateBuilder({
         <div
           className={`shrink-0 z-40 transition-transform duration-200 xl:translate-x-0 ${
             isPanelOpen
-              ? "fixed right-0 top-14 bottom-0 shadow-2xl xl:static xl:shadow-none translate-x-0"
-              : "fixed right-0 top-14 bottom-0 translate-x-full xl:static xl:translate-x-0"
+              ? "absolute right-0 top-0 bottom-0 shadow-2xl xl:static xl:shadow-none translate-x-0"
+              : "absolute right-0 top-0 bottom-0 translate-x-full xl:static xl:translate-x-0"
           }`}
         >
           <RightPropertiesPanel
@@ -989,14 +1173,17 @@ export default function UnifiedTemplateBuilder({
             docName={doc.name}
             onUpdateDocName={(name) => updateDoc({ ...doc, name })}
             pageSize={pageSize}
-            onPageSizeChange={setPageSize}
+            onPageSizeChange={handlePageSizeChange}
             orientation={orientation}
-            onOrientationChange={setOrientation}
+            onOrientationChange={handleOrientationChange}
             mode={mode}
             branches={branches || []}
             smsText={smsText}
             devicePreview={devicePreview}
             onClosePanel={() => setIsPanelOpen(false)}
+            onModeChange={onModeChange}
+            onSendTestEmail={onSendTestEmail}
+            isSendingTest={isSendingTest}
           />
         </div>
       </div>
@@ -1079,8 +1266,12 @@ export default function UnifiedTemplateBuilder({
         smsText={smsText}
         onClose={() => setIsPreviewOpen(false)}
         onExportJson={handleExportJson}
-        onUpdateDoc={updateDoc}
+        onUpdateDoc={handlePreviewDocUpdate}
         onUpdateItem={handleUpdateItem}
+        onOpenHtmlEditor={(item) => {
+          setActiveHtmlItem(item || null);
+          setIsCodeModalOpen(true);
+        }}
         onDeleteItem={handleDeleteItem}
         onDuplicateItem={handleDuplicateItem}
       />
@@ -1095,6 +1286,7 @@ export default function UnifiedTemplateBuilder({
       <VersionHistoryModal
         isOpen={isHistoryModalOpen}
         snapshots={snapshots}
+        templateId={initialSource?.id || template?.id || draft?.id || null}
         onClose={() => setIsHistoryModalOpen(false)}
         onCreateSnapshot={handleCreateSnapshot}
         onRestoreSnapshot={handleRestoreSnapshot}

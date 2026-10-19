@@ -74,8 +74,8 @@ export default function CreateCommunicationModal({
         channel,
         template_key: String(templateKey || '').trim().toLowerCase().replace(/\s+/g, '_'),
         subject: channel === 'sms' ? '' : String(subject || '').trim(),
-        body: channel === 'sms' ? 'Hello {{Customer.first_name}}, your booking is confirmed!' : '',
-        body_html: channel === 'email' ? (startingPreset === 'blank' ? '<div></div>' : '<p>Hello {{Customer.first_name}},</p><p>Thank you for choosing us.</p>') : '',
+        body: channel === 'sms' ? 'Hello {{customer.first_name}}, your booking is confirmed!' : '',
+        body_html: channel === 'email' ? (startingPreset === 'blank' ? '<div></div>' : '<p>Hello {{customer.first_name}},</p><p>Thank you for choosing us.</p>') : '',
         branch: selectedBranch ? Number(selectedBranch) : null,
         is_active: true,
       };
@@ -203,19 +203,6 @@ export default function CreateCommunicationModal({
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1">
-                Template Key (Slug)
-              </label>
-              <input
-                type="text"
-                value={templateKey}
-                onChange={(e) => setTemplateKey(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                placeholder="booking_confirmation"
-              />
-            </div>
-
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1">
                 Starting Layout

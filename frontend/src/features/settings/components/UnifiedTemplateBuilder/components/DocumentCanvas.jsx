@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React, { useRef, useState, useEffect, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import DocumentBlock from "./DocumentBlock";
 import { analyzeSmsText } from "../core/smsCalculator";
 import {
@@ -31,6 +32,78 @@ import {
   Tag,
   Receipt,
 } from "lucide-react";
+
+function ScaledPageFrame({ width, zoom, minHeight, children }) {
+  const contentRef = useRef(null);
+  const [contentHeight, setContentHeight] = useState(0);
+  const scale = zoom / 100;
+
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content) return undefined;
+
+    const measureContentHeight = () => {
+      const contentRect = content.getBoundingClientRect();
+      let measuredHeight = Math.max(
+        content.offsetHeight,
+        (contentRect.bottom - contentRect.top) / scale
+      );
+
+      content.querySelectorAll("*").forEach((element) => {
+        const elementRect = element.getBoundingClientRect();
+        measuredHeight = Math.max(
+          measuredHeight,
+          (elementRect.bottom - contentRect.top) / scale
+        );
+      });
+
+      const nextHeight = Math.ceil(measuredHeight);
+      setContentHeight((currentHeight) => currentHeight === nextHeight ? currentHeight : nextHeight);
+    };
+    measureContentHeight();
+
+    const resizeObserver = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(measureContentHeight)
+      : null;
+    resizeObserver?.observe(content);
+    content.querySelectorAll("*").forEach((element) => resizeObserver?.observe(element));
+
+    const mutationObserver = typeof MutationObserver !== "undefined"
+      ? new MutationObserver(() => {
+          content.querySelectorAll("*").forEach((element) => resizeObserver?.observe(element));
+          measureContentHeight();
+        })
+      : null;
+    mutationObserver?.observe(content, { childList: true, subtree: true, attributes: true });
+
+    return () => {
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
+    };
+  }, [width, zoom, minHeight, scale]);
+
+  return (
+    <div
+      className="page-sheet-scale-frame relative isolate shrink-0"
+      style={{
+        width: `${(width * zoom) / 100}px`,
+        height: `${(Math.max(minHeight, contentHeight) * zoom) / 100}px`,
+      }}
+    >
+      <div
+        ref={contentRef}
+        className="page-sheet-wrapper flex flex-col items-center"
+        style={{
+          width,
+          transform: `scale(${scale})`,
+          transformOrigin: "top left",
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
 
 export default function DocumentCanvas({
   items,
@@ -76,9 +149,129 @@ export default function DocumentCanvas({
   onDirectCreateItem = () => {},
 }) {
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
+  const [addMenuPosition, setAddMenuPosition] = useState({ left: 8, top: 52 });
+  const [toolbarTooltip, setToolbarTooltip] = useState(null);
   const [dragOverTarget, setDragOverTarget] = useState(null);
   const [dragCreateBox, setDragCreateBox] = useState(null);
+  const canvasViewportRef = useRef(null);
   const canvasType = modeConfig?.canvasType || "paged";
+  const openAddMenu = (event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const menuWidth = 288;
+    const menuHeight = canvasType === "sms" ? 280 : 460;
+    const maxLeft = Math.max(8, window.innerWidth - menuWidth - 8);
+    setAddMenuPosition({
+      left: Math.min(Math.max(rect.left, 8), maxLeft),
+      top:
+        rect.bottom + menuHeight + 8 <= window.innerHeight
+          ? rect.bottom + 6
+          : Math.max(8, rect.top - menuHeight - 6),
+    });
+    setIsAddMenuOpen(true);
+  };
+  const toggleAddMenu = (event) => {
+    if (isAddMenuOpen) {
+      setIsAddMenuOpen(false);
+    } else {
+      openAddMenu(event);
+    }
+  };
+  const updateToolbarTooltip = (event) => {
+    const button = event.target.closest?.("button[title], button[aria-label]");
+    if (!button || !event.currentTarget.contains(button)) return;
+
+    const label = button.getAttribute("title") || button.getAttribute("aria-label");
+    if (!label) return;
+
+    const rect = button.getBoundingClientRect();
+    const showBelow = rect.bottom + 36 < window.innerHeight;
+    const tooltipWidth = Math.min(
+      window.innerWidth - 16,
+      Math.max(90, label.length * 6.5 + 16)
+    );
+    setToolbarTooltip({
+      label,
+      left: Math.max(
+        8,
+        Math.min(
+          rect.left + (rect.width - tooltipWidth) / 2,
+          window.innerWidth - tooltipWidth - 8
+        )
+      ),
+      top: showBelow ? rect.bottom + 8 : rect.top - 8,
+      placement: showBelow ? "below" : "above",
+    });
+  };
+  const renderToolbarTooltip = () => {
+    if (!toolbarTooltip || typeof document === "undefined") return null;
+    return createPortal(
+      <div
+        role="tooltip"
+        className={`canvas-toolbar-tooltip canvas-toolbar-tooltip-${toolbarTooltip.placement}`}
+        style={{ left: toolbarTooltip.left, top: toolbarTooltip.top }}
+      >
+        {toolbarTooltip.label}
+      </div>,
+      document.body
+    );
+  };
+  const getCanvasAvailableSize = () => {
+    const viewport = canvasViewportRef.current;
+    if (!viewport) return null;
+
+    const styles = window.getComputedStyle(viewport);
+    const horizontalPadding =
+      (Number.parseFloat(styles.paddingLeft) || 0) +
+      (Number.parseFloat(styles.paddingRight) || 0);
+    const verticalPadding =
+      (Number.parseFloat(styles.paddingTop) || 0) +
+      (Number.parseFloat(styles.paddingBottom) || 0);
+
+    return {
+      width: Math.max(0, viewport.clientWidth - horizontalPadding),
+      height: Math.max(0, viewport.clientHeight - verticalPadding),
+    };
+  };
+
+  useEffect(() => {
+    if (canvasType !== "paged" || devicePreview !== "desktop") return undefined;
+    const viewport = canvasViewportRef.current;
+    if (!viewport) return undefined;
+
+    const baseWidth = pageSize === "Letter" ? 816 : 794;
+    const baseHeight = pageSize === "Letter" ? 1056 : pageSize === "Legal" ? 1344 : 1123;
+    const isLandscape = String(orientation).toLowerCase() === "landscape";
+    const pageWidth = isLandscape ? baseHeight : baseWidth;
+    const pageHeight = isLandscape ? baseWidth : baseHeight;
+    const fitToViewport = () => {
+      const styles = window.getComputedStyle(viewport);
+      const horizontalPadding =
+        (Number.parseFloat(styles.paddingLeft) || 0) +
+        (Number.parseFloat(styles.paddingRight) || 0);
+      const verticalPadding =
+        (Number.parseFloat(styles.paddingTop) || 0) +
+        (Number.parseFloat(styles.paddingBottom) || 0);
+      const availableWidth = viewport.clientWidth - horizontalPadding;
+      const availableHeight = viewport.clientHeight - verticalPadding;
+      if (availableWidth <= 0 || availableHeight <= 0) return;
+
+      const fitWidth = (availableWidth / pageWidth) * 92;
+      const fitHeight = (availableHeight / pageHeight) * 92;
+      const fit = Math.min(100, Math.max(30, Math.round(Math.min(fitWidth, fitHeight))));
+      onZoomChange(fit);
+    };
+
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(fitToViewport) : null;
+    observer?.observe(viewport);
+    const resizeFrame = window.requestAnimationFrame(fitToViewport);
+    if (!observer) window.addEventListener("resize", fitToViewport);
+
+    return () => {
+      window.cancelAnimationFrame(resizeFrame);
+      observer?.disconnect();
+      if (!observer) window.removeEventListener("resize", fitToViewport);
+    };
+  }, [canvasType, devicePreview, pageSize, orientation, onZoomChange]);
 
   // Mouse Drag & Click Interactive Creation on Blank Canvas
   const handleSheetMouseDown = (e, pageIndex, isEmail = false) => {
@@ -187,12 +380,23 @@ export default function DocumentCanvas({
     const smsWidth = isMobile ? 340 : isTablet ? 560 : 600;
 
     return (
-      <div className="flex-1 flex flex-col overflow-hidden bg-slate-200/60">
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden bg-slate-200/60">
         {/* Secondary Canvas Toolbar for SMS */}
-        <div className="h-10 border-b border-slate-200 bg-white/95 backdrop-blur-xs px-4 flex items-center justify-between text-xs select-none shadow-2xs z-10 shrink-0">
-          <div className="flex items-center gap-1">
+        <div
+          className="h-11 border-b border-slate-200 bg-white/95 backdrop-blur-xs px-3 sm:px-4 flex items-center justify-between text-xs select-none shadow-2xs z-10 shrink-0 overflow-x-auto no-scrollbar gap-2 sm:gap-4"
+          onMouseOver={updateToolbarTooltip}
+          onFocusCapture={updateToolbarTooltip}
+          onMouseLeave={() => setToolbarTooltip(null)}
+          onBlurCapture={() => setToolbarTooltip(null)}
+          onClickCapture={() => setToolbarTooltip(null)}
+          onScroll={() => setToolbarTooltip(null)}
+        >
+          <div className="flex items-center gap-1.5 shrink-0">
             <div className="gdoc-tooltip-container">
-              <div className="flex items-center gap-1.5 px-2 py-1 text-slate-600 bg-slate-50 border border-slate-200 rounded text-xs font-semibold">
+              <div
+                className="flex items-center gap-1.5 px-2 py-1 text-slate-600 bg-slate-50 border border-slate-200 rounded text-xs font-semibold"
+                title="SMS Dispatch Simulator · GSM-7 & UCS-2"
+              >
                 <MessageSquare size={14} className="text-emerald-600" />
                 <span>SMS Simulator</span>
               </div>
@@ -207,11 +411,12 @@ export default function DocumentCanvas({
                 <div className="gdoc-tooltip-container">
                   <button
                     type="button"
-                    onClick={() => setIsAddMenuOpen(!isAddMenuOpen)}
-                    className={`flex items-center gap-0.5 p-1.5 rounded transition ${
+                    onClick={toggleAddMenu}
+                    className={`h-8 inline-flex items-center justify-center gap-0.5 px-2 rounded-md transition ${
                       isAddMenuOpen ? "bg-emerald-100 text-emerald-700" : "hover:bg-slate-100 text-slate-700"
                     }`}
                     aria-label="Insert Variable Menu"
+                    title="Insert Variable"
                     aria-expanded={isAddMenuOpen}
                   >
                     <Plus size={18} />
@@ -220,13 +425,16 @@ export default function DocumentCanvas({
                   {!isAddMenuOpen && <div className="gdoc-tooltip">Insert Variable</div>}
                 </div>
 
-                {isAddMenuOpen && (
+                {isAddMenuOpen && createPortal(
                   <>
                     <div
-                      className="fixed inset-0 z-40"
+                      className="fixed inset-0 z-[70001]"
                       onClick={() => setIsAddMenuOpen(false)}
                     />
-                    <div className="add-component-dropdown-menu absolute left-0 top-full mt-1.5 w-64 bg-white rounded-xl shadow-2xl border border-slate-200/90 p-2 z-50 text-xs animate-in fade-in zoom-in-95 duration-100">
+                    <div
+                      className="add-component-dropdown-menu fixed w-64 max-w-[calc(100vw-1rem)] bg-white rounded-xl shadow-2xl border border-slate-200/90 p-2 z-[70002] text-xs animate-in fade-in zoom-in-95 duration-100"
+                      style={{ left: addMenuPosition.left, top: addMenuPosition.top }}
+                    >
                       <div className="px-3 pt-1.5 pb-1 font-bold text-[10px] text-slate-400 uppercase tracking-wider select-none">
                         Merge Variables
                       </div>
@@ -254,7 +462,8 @@ export default function DocumentCanvas({
                         </button>
                       ))}
                     </div>
-                  </>
+                  </>,
+                  document.body
                 )}
               </div>
             )}
@@ -264,9 +473,10 @@ export default function DocumentCanvas({
               <div className="gdoc-tooltip-container">
                 <button
                   type="button"
-                  onClick={() => setIsAddMenuOpen(true)}
-                  className="p-1.5 rounded hover:bg-slate-100 text-slate-700 transition"
+                  onClick={openAddMenu}
+                  className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-slate-100 text-slate-700 transition"
                   aria-label="Insert Variable Tag"
+                  title="Insert Variable Tag"
                 >
                   <Tag size={18} />
                 </button>
@@ -277,7 +487,10 @@ export default function DocumentCanvas({
             <div className="h-4 w-px bg-slate-200 mx-0.5" />
 
             <div className="gdoc-tooltip-container">
-              <span className="text-slate-500 text-xs font-medium px-2 py-0.5 bg-slate-50 border border-slate-200 rounded">
+              <span
+                className="text-slate-500 text-xs font-medium px-2 py-0.5 bg-slate-50 border border-slate-200 rounded"
+                title={`Carrier payload: ${analysis.charCount} characters across ${analysis.segments} SMS segment(s)`}
+              >
                 {analysis.charCount} chars · {analysis.segments} segment{analysis.segments === 1 ? "" : "s"} ({analysis.encoding})
               </span>
               <div className="gdoc-tooltip">
@@ -287,13 +500,13 @@ export default function DocumentCanvas({
           </div>
 
           {/* Center: Device Switcher (Desktop 600px / Tablet 560px / Mobile 340px) & Font Size Stepper */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <div className="flex items-center bg-slate-100 rounded-md p-0.5 border border-slate-200">
               <div className="gdoc-tooltip-container">
                 <button
                   type="button"
                   onClick={() => onDevicePreviewChange("desktop")}
-                  className={`p-1.5 rounded transition ${
+                  className={`h-8 w-8 inline-flex items-center justify-center rounded-md transition ${
                     devicePreview === "desktop" ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600 hover:text-slate-900"
                   }`}
                   title="Desktop preview"
@@ -301,14 +514,14 @@ export default function DocumentCanvas({
                 >
                   <Monitor size={17} />
                 </button>
-                <div className="gdoc-tooltip">Desktop preview (600px)</div>
+                <div className="gdoc-tooltip">Desktop (600px)</div>
               </div>
 
               <div className="gdoc-tooltip-container">
                 <button
                   type="button"
                   onClick={() => onDevicePreviewChange("tablet")}
-                  className={`p-1.5 rounded transition ${
+                  className={`h-8 w-8 inline-flex items-center justify-center rounded-md transition ${
                     devicePreview === "tablet" ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600 hover:text-slate-900"
                   }`}
                   title="Tablet preview"
@@ -316,14 +529,14 @@ export default function DocumentCanvas({
                 >
                   <Tablet size={17} />
                 </button>
-                <div className="gdoc-tooltip">Tablet preview (560px)</div>
+                <div className="gdoc-tooltip">Tablet (560px)</div>
               </div>
 
               <div className="gdoc-tooltip-container">
                 <button
                   type="button"
                   onClick={() => onDevicePreviewChange("mobile")}
-                  className={`p-1.5 rounded transition ${
+                  className={`h-8 w-8 inline-flex items-center justify-center rounded-md transition ${
                     devicePreview === "mobile" ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600 hover:text-slate-900"
                   }`}
                   title="Mobile preview"
@@ -331,7 +544,7 @@ export default function DocumentCanvas({
                 >
                   <Smartphone size={17} />
                 </button>
-                <div className="gdoc-tooltip">Mobile preview (340px)</div>
+                <div className="gdoc-tooltip">Mobile (340px)</div>
               </div>
             </div>
 
@@ -346,7 +559,7 @@ export default function DocumentCanvas({
                       fontSize: Math.max(10, (documentSettings?.fontSize || 13) - 1),
                     })
                   }
-                  className="p-1.5 rounded hover:bg-white text-slate-700 transition"
+                  className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-white text-slate-700 transition"
                   title="Decrease message font size"
                   aria-label="Decrease message font size"
                 >
@@ -368,7 +581,7 @@ export default function DocumentCanvas({
                       fontSize: Math.min(24, (documentSettings?.fontSize || 13) + 1),
                     })
                   }
-                  className="p-1.5 rounded hover:bg-white text-slate-700 transition"
+                  className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-white text-slate-700 transition"
                   title="Increase message font size"
                   aria-label="Increase message font size"
                 >
@@ -380,13 +593,13 @@ export default function DocumentCanvas({
           </div>
 
           {/* Right: Standardized Zoom Tools */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5 shrink-0">
             <div className="flex items-center bg-slate-100 rounded-md p-0.5 border border-slate-200">
               <div className="gdoc-tooltip-container">
                 <button
                   type="button"
                   onClick={() => onZoomChange(Math.max(50, zoom - 10))}
-                  className="p-1.5 rounded hover:bg-white text-slate-700 transition"
+                  className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-white text-slate-700 transition"
                   title="Zoom Out"
                   aria-label="Zoom Out"
                 >
@@ -403,7 +616,7 @@ export default function DocumentCanvas({
                 <button
                   type="button"
                   onClick={() => onZoomChange(Math.min(150, zoom + 10))}
-                  className="p-1.5 rounded hover:bg-white text-slate-700 transition"
+                  className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-white text-slate-700 transition"
                   title="Zoom In"
                   aria-label="Zoom In"
                 >
@@ -417,7 +630,7 @@ export default function DocumentCanvas({
               <button
                 type="button"
                 onClick={() => onZoomChange(100)}
-                className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded transition"
+                className="h-8 w-8 inline-flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md transition"
                 title="Fit to Width"
                 aria-label="Fit to Width"
               >
@@ -430,7 +643,7 @@ export default function DocumentCanvas({
               <button
                 type="button"
                 onClick={() => onZoomChange(90)}
-                className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded transition"
+                className="h-8 w-8 inline-flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md transition"
                 title="Fit to Page"
                 aria-label="Fit to Page"
               >
@@ -443,7 +656,7 @@ export default function DocumentCanvas({
               <button
                 type="button"
                 onClick={() => onZoomChange(100)}
-                className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded transition"
+                className="h-8 w-8 inline-flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-md transition"
                 title="Reset Zoom (100%)"
                 aria-label="Reset Zoom"
               >
@@ -453,43 +666,29 @@ export default function DocumentCanvas({
             </div>
           </div>
         </div>
+        {renderToolbarTooltip()}
 
-        <div className="flex-1 overflow-y-auto bg-slate-200/60 p-8 flex flex-col items-center justify-center select-none">
-          <div
-            style={{
-              transform: zoom !== 100 ? `scale(${zoom / 100})` : undefined,
-              transformOrigin: "top center",
-            }}
-            className="flex flex-col items-center transition-all duration-200"
-          >
+        <div
+          className="flex-1 min-w-0 min-h-0 overflow-y-auto overflow-x-auto overscroll-contain bg-slate-200/60 p-4 sm:p-8 flex flex-col items-center justify-start"
+          data-testid="template-canvas-viewport"
+        >
+          <ScaledPageFrame width={smsWidth} zoom={zoom} minHeight={0}>
+            <div className="flex flex-col items-center transition-all duration-200 w-full max-w-full">
             {/* Clean White Card Container (Dynamic Responsive Width: 600px Desktop / 560px Tablet / 340px Mobile) */}
             <div
               style={{
                 width: smsWidth,
                 transition: "width 0.2s ease",
               }}
-              className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden flex flex-col animate-in fade-in duration-150"
+              className="w-full max-w-[min(600px,calc(100vw-1.5rem))] bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden flex flex-col animate-in fade-in duration-150"
             >
               {/* Clean Header Bar */}
               <div className="px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 font-bold flex items-center justify-center text-xs shrink-0">
-                    KF
-                  </div>
                   <div>
-                    <div className="font-semibold text-slate-800 leading-snug">KargoFlow Dispatch</div>
-                    <div className="text-[10px] text-slate-400">
-                      SMS Notification &bull; {isMobile ? "Mobile (340px)" : isTablet ? "Tablet (560px)" : "Desktop (600px)"}
-                    </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-medium text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded">
-                    Viewport: {smsWidth}px
-                  </span>
-                  <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-                    Live Preview
-                  </span>
                 </div>
               </div>
 
@@ -527,7 +726,7 @@ export default function DocumentCanvas({
             {/* Telecom Compliance Metrics */}
             <div
               style={{ width: smsWidth }}
-              className="mt-6 bg-white border border-slate-200 rounded-xl p-4 shadow-xs text-xs space-y-2 transition-all duration-200"
+              className="mt-6 w-full max-w-[min(600px,calc(100vw-1.5rem))] bg-white border border-slate-200 rounded-xl p-3.5 sm:p-4 shadow-xs text-xs space-y-2 transition-all duration-200"
             >
               <div className="flex justify-between items-center">
                 <span className="text-slate-500 font-medium">Character Count:</span>
@@ -554,6 +753,7 @@ export default function DocumentCanvas({
               )}
             </div>
           </div>
+          </ScaledPageFrame>
         </div>
       </div>
     );
@@ -566,13 +766,24 @@ export default function DocumentCanvas({
     const emailWidth = isMobile ? 360 : isTablet ? 560 : 600;
 
     return (
-      <div className="flex-1 flex flex-col overflow-hidden bg-slate-200/60">
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden bg-slate-200/60">
         {/* Secondary Canvas Toolbar for Email */}
-        <div className="h-10 border-b border-slate-200 bg-white/95 backdrop-blur-xs px-4 flex items-center justify-between text-xs select-none shadow-2xs z-10 shrink-0">
-          <div className="flex items-center gap-1">
+        <div
+          className="h-11 border-b border-slate-200 bg-white/95 backdrop-blur-xs px-3 sm:px-4 flex items-center justify-between text-xs select-none shadow-2xs z-10 shrink-0 overflow-x-auto no-scrollbar gap-2 sm:gap-4"
+          onMouseOver={updateToolbarTooltip}
+          onFocusCapture={updateToolbarTooltip}
+          onMouseLeave={() => setToolbarTooltip(null)}
+          onBlurCapture={() => setToolbarTooltip(null)}
+          onClickCapture={() => setToolbarTooltip(null)}
+          onScroll={() => setToolbarTooltip(null)}
+        >
+          <div className="flex items-center gap-1.5 shrink-0">
             {/* Email Format & Dimensions Badge */}
             <div className="gdoc-tooltip-container">
-              <div className="flex items-center gap-1.5 px-2 py-1 text-slate-600 bg-slate-50 border border-slate-200 rounded text-xs font-semibold">
+              <div
+                className="flex items-center gap-1.5 px-2 py-1 text-slate-600 bg-slate-50 border border-slate-200 rounded text-xs font-semibold"
+                title={`Email preview: Responsive width (${emailWidth}px)`}
+              >
                 <Mail size={14} className="text-blue-600" />
                 <span>Email (Responsive)</span>
               </div>
@@ -587,8 +798,9 @@ export default function DocumentCanvas({
                 <button
                   type="button"
                   onClick={() => onAddWidgetClick({ label: "Text Block", type: "text" })}
-                  className="p-1.5 rounded hover:bg-slate-100 text-slate-700 transition"
+                  className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-slate-100 text-slate-700 transition"
                   aria-label="Add Section Block"
+                  title="Add Section Block"
                 >
                   <Plus size={18} />
                 </button>
@@ -602,11 +814,12 @@ export default function DocumentCanvas({
                 <div className="gdoc-tooltip-container">
                   <button
                     type="button"
-                    onClick={() => setIsAddMenuOpen(!isAddMenuOpen)}
-                    className={`flex items-center gap-0.5 p-1.5 rounded transition ${
+                    onClick={toggleAddMenu}
+                    className={`h-8 inline-flex items-center justify-center gap-0.5 px-2 rounded-md transition ${
                       isAddMenuOpen ? "bg-blue-100 text-blue-700" : "hover:bg-slate-100 text-slate-700"
                     }`}
                     aria-label="Add Component Menu"
+                    title="Add Component"
                     aria-expanded={isAddMenuOpen}
                   >
                     <Plus size={18} />
@@ -615,13 +828,16 @@ export default function DocumentCanvas({
                   {!isAddMenuOpen && <div className="gdoc-tooltip">Add Component</div>}
                 </div>
 
-                {isAddMenuOpen && (
+                {isAddMenuOpen && createPortal(
                   <>
                     <div
-                      className="fixed inset-0 z-40"
+                      className="fixed inset-0 z-[70001]"
                       onClick={() => setIsAddMenuOpen(false)}
                     />
-                    <div className="add-component-dropdown-menu absolute left-0 top-full mt-1.5 w-72 bg-white rounded-xl shadow-2xl border border-slate-200/90 p-2 z-50 text-xs animate-in fade-in zoom-in-95 duration-100 max-h-[460px] overflow-y-auto">
+                    <div
+                      className="add-component-dropdown-menu fixed w-72 max-w-[calc(100vw-1rem)] bg-white rounded-xl shadow-2xl border border-slate-200/90 p-2 z-[70002] text-xs animate-in fade-in zoom-in-95 duration-100 max-h-[460px] overflow-y-auto"
+                      style={{ left: addMenuPosition.left, top: addMenuPosition.top }}
+                    >
                       <div className="px-3 pt-1.5 pb-1 font-bold text-[10px] text-slate-400 uppercase tracking-wider select-none">
                         Email Content & Widgets
                       </div>
@@ -711,7 +927,8 @@ export default function DocumentCanvas({
                         </div>
                       </button>
                     </div>
-                  </>
+                  </>,
+                  document.body
                 )}
               </div>
             )}
@@ -723,8 +940,9 @@ export default function DocumentCanvas({
                   <button
                     type="button"
                     onClick={onInsertLayout}
-                    className="p-1.5 rounded hover:bg-slate-100 text-slate-700 transition"
+                    className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-slate-100 text-slate-700 transition"
                     aria-label="Custom Layout"
+                    title="Custom Layout"
                   >
                     <Layout size={18} />
                   </button>
@@ -735,8 +953,9 @@ export default function DocumentCanvas({
                   <button
                     type="button"
                     onClick={onInsertTable}
-                    className="p-1.5 rounded hover:bg-slate-100 text-slate-700 transition"
+                    className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-slate-100 text-slate-700 transition"
                     aria-label="Insert Table"
+                    title="Insert Table"
                   >
                     <Table size={18} />
                   </button>
@@ -747,14 +966,14 @@ export default function DocumentCanvas({
           </div>
 
           {/* Center/Right: Device Switchers & Zoom Controls */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             {/* Device Switcher (Desktop 600px / Tablet 560px / Mobile 360px) */}
             <div className="flex items-center bg-slate-100 rounded-md p-0.5 border border-slate-200">
               <div className="gdoc-tooltip-container">
                 <button
                   type="button"
                   onClick={() => onDevicePreviewChange("desktop")}
-                  className={`p-1.5 rounded transition ${
+                  className={`h-8 w-8 inline-flex items-center justify-center rounded-md transition ${
                     devicePreview === "desktop" ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600 hover:text-slate-900"
                   }`}
                   title="Desktop preview"
@@ -769,7 +988,7 @@ export default function DocumentCanvas({
                 <button
                   type="button"
                   onClick={() => onDevicePreviewChange("tablet")}
-                  className={`p-1.5 rounded transition ${
+                  className={`h-8 w-8 inline-flex items-center justify-center rounded-md transition ${
                     devicePreview === "tablet" ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600 hover:text-slate-900"
                   }`}
                   title="Tablet preview"
@@ -784,7 +1003,7 @@ export default function DocumentCanvas({
                 <button
                   type="button"
                   onClick={() => onDevicePreviewChange("mobile")}
-                  className={`p-1.5 rounded transition ${
+                  className={`h-8 w-8 inline-flex items-center justify-center rounded-md transition ${
                     devicePreview === "mobile" ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600 hover:text-slate-900"
                   }`}
                   title="Mobile preview"
@@ -797,13 +1016,13 @@ export default function DocumentCanvas({
             </div>
 
             {/* Standardized Zoom Tools */}
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5">
               <div className="flex items-center bg-slate-100 rounded-md p-0.5 border border-slate-200">
                 <div className="gdoc-tooltip-container">
                   <button
                     type="button"
                     onClick={() => onZoomChange(Math.max(40, zoom - 10))}
-                    className="p-1.5 rounded hover:bg-white text-slate-700 transition"
+                    className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-white text-slate-700 transition"
                     title="Zoom Out"
                     aria-label="Zoom Out"
                   >
@@ -820,7 +1039,7 @@ export default function DocumentCanvas({
                   <button
                     type="button"
                     onClick={() => onZoomChange(Math.min(200, zoom + 10))}
-                    className="p-1.5 rounded hover:bg-white text-slate-700 transition"
+                    className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-white text-slate-700 transition"
                     title="Zoom In"
                     aria-label="Zoom In"
                   >
@@ -834,7 +1053,7 @@ export default function DocumentCanvas({
                 <button
                   type="button"
                   onClick={() => onZoomChange(100)}
-                  className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded transition"
+                  className="h-8 w-8 inline-flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md transition"
                   title="Fit to Width"
                   aria-label="Fit to Width"
                 >
@@ -847,7 +1066,7 @@ export default function DocumentCanvas({
                 <button
                   type="button"
                   onClick={() => onZoomChange(90)}
-                  className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded transition"
+                  className="h-8 w-8 inline-flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md transition"
                   title="Fit to Page"
                   aria-label="Fit to Page"
                 >
@@ -860,7 +1079,7 @@ export default function DocumentCanvas({
                 <button
                   type="button"
                   onClick={() => onZoomChange(100)}
-                  className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded transition"
+                  className="h-8 w-8 inline-flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-md transition"
                   title="Reset Zoom (100%)"
                   aria-label="Reset Zoom"
                 >
@@ -872,16 +1091,19 @@ export default function DocumentCanvas({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto bg-slate-200/60 p-8 flex justify-center">
-          <div
-            style={{
-              width: emailWidth,
-              transform: zoom !== 100 ? `scale(${zoom / 100})` : undefined,
-              transformOrigin: "top center",
-              fontSize: documentSettings?.fontSize ? `${documentSettings.fontSize}px` : undefined,
-            }}
-            className="bg-white min-h-[700px] shadow-lg rounded-lg border border-slate-200 p-6 space-y-4 transition-all duration-300 relative select-none"
-          >
+        {renderToolbarTooltip()}
+
+        <div
+          className="flex-1 min-w-0 min-h-0 overflow-y-auto overflow-x-auto overscroll-contain bg-slate-200/60 p-4 sm:p-8 flex flex-col items-center justify-start select-none"
+          data-testid="template-canvas-viewport"
+        >
+          <ScaledPageFrame width={emailWidth} zoom={zoom} minHeight={700}>
+            <div
+              style={{
+                fontSize: documentSettings?.fontSize ? `${documentSettings.fontSize}px` : undefined,
+              }}
+              className="w-full max-w-[min(600px,calc(100vw-1.5rem))] bg-white min-h-[700px] shadow-lg rounded-lg border border-slate-200 p-4 sm:p-6 space-y-4 transition-all duration-300 relative select-none"
+            >
             {/* Marquee Drag Box Selection Overlay for Email */}
             {dragCreateBox?.isDragging && dragCreateBox.isEmail && (
               <div
@@ -964,7 +1186,8 @@ export default function DocumentCanvas({
                 />
               ))
             )}
-          </div>
+            </div>
+          </ScaledPageFrame>
         </div>
       </div>
     );
@@ -984,13 +1207,24 @@ export default function DocumentCanvas({
       : [{ id: "page-1", name: "Page 1", items: items || [] }];
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden bg-slate-200/60">
+    <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden bg-slate-200/60">
       {/* Secondary Canvas Toolbar */}
-      <div className="h-10 border-b border-slate-200 bg-white/95 backdrop-blur-xs px-4 flex items-center justify-between text-xs select-none shadow-2xs z-10 shrink-0">
-        <div className="flex items-center gap-1">
+    <div
+      className="h-11 border-b border-slate-200 bg-white/95 backdrop-blur-xs px-3 sm:px-4 flex items-center justify-between text-xs select-none shadow-2xs z-10 shrink-0 overflow-x-auto no-scrollbar gap-2 sm:gap-4"
+      onMouseOver={updateToolbarTooltip}
+      onFocusCapture={updateToolbarTooltip}
+      onMouseLeave={() => setToolbarTooltip(null)}
+      onBlurCapture={() => setToolbarTooltip(null)}
+      onClickCapture={() => setToolbarTooltip(null)}
+      onScroll={() => setToolbarTooltip(null)}
+    >
+      <div className="flex items-center gap-1.5 shrink-0">
           {/* Document Format & Dimensions Badge */}
           <div className="gdoc-tooltip-container tooltip-left">
-            <div className="flex items-center gap-1.5 px-2 py-1 text-slate-600 bg-slate-50 border border-slate-200 rounded text-xs font-semibold">
+            <div
+              className="flex items-center gap-1.5 px-2 py-1 text-slate-600 bg-slate-50 border border-slate-200 rounded text-xs font-semibold"
+              title={`Document preview: ${pageSize} · ${orientation}`}
+            >
               <FileText size={14} className="text-blue-600" />
               <span>{pageSize}</span>
             </div>
@@ -1004,7 +1238,7 @@ export default function DocumentCanvas({
             <button
               type="button"
               onClick={onToggleOrientation}
-              className={`p-1.5 rounded hover:bg-slate-100 text-slate-700 transition ${
+              className={`h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-slate-100 text-slate-700 transition ${
                 isLandscape ? "text-blue-600 bg-blue-50" : ""
               }`}
               title={`Rotate orientation to ${isLandscape ? "Portrait" : "Landscape"}`}
@@ -1055,8 +1289,9 @@ export default function DocumentCanvas({
               <button
                 type="button"
                 onClick={onAddPage}
-                className="p-1.5 rounded hover:bg-slate-100 text-slate-700 transition"
+                className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-slate-100 text-slate-700 transition"
                 aria-label="Add Blank Page"
+                title={`Add Blank Page (${pageSize})`}
               >
                 <Plus size={18} />
               </button>
@@ -1070,11 +1305,12 @@ export default function DocumentCanvas({
               <div className="gdoc-tooltip-container">
                 <button
                   type="button"
-                  onClick={() => setIsAddMenuOpen(!isAddMenuOpen)}
-                  className={`flex items-center gap-0.5 p-1.5 rounded transition ${
+                  onClick={toggleAddMenu}
+                  className={`h-8 inline-flex items-center justify-center gap-0.5 px-2 rounded-md transition ${
                     isAddMenuOpen ? "bg-blue-100 text-blue-700" : "hover:bg-slate-100 text-slate-700"
                   }`}
                   aria-label="Add Component Menu"
+                  title="Add Component"
                   aria-expanded={isAddMenuOpen}
                 >
                   <Plus size={18} />
@@ -1083,13 +1319,16 @@ export default function DocumentCanvas({
                 {!isAddMenuOpen && <div className="gdoc-tooltip">Add Component</div>}
               </div>
 
-              {isAddMenuOpen && (
+              {isAddMenuOpen && createPortal(
                 <>
                   <div
-                    className="fixed inset-0 z-40"
+                    className="fixed inset-0 z-[70001]"
                     onClick={() => setIsAddMenuOpen(false)}
                   />
-                  <div className="add-component-dropdown-menu absolute left-0 top-full mt-1.5 w-72 bg-white rounded-xl shadow-2xl border border-slate-200/90 p-2 z-50 text-xs animate-in fade-in zoom-in-95 duration-100 max-h-[460px] overflow-y-auto">
+                  <div
+                    className="add-component-dropdown-menu fixed w-72 max-w-[calc(100vw-1rem)] bg-white rounded-xl shadow-2xl border border-slate-200/90 p-2 z-[70002] text-xs animate-in fade-in zoom-in-95 duration-100 max-h-[460px] overflow-y-auto"
+                    style={{ left: addMenuPosition.left, top: addMenuPosition.top }}
+                  >
                     <div className="px-3 pt-1.5 pb-1 font-bold text-[10px] text-slate-400 uppercase tracking-wider select-none">
                       Content & Fields
                     </div>
@@ -1235,20 +1474,22 @@ export default function DocumentCanvas({
                       </div>
                     </button>
                   </div>
-                </>
+                </>,
+                document.body
               )}
             </div>
           )}
 
           {/* Direct Layout & Table Shortcuts */}
           {!preview && (
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5">
               <div className="gdoc-tooltip-container">
                 <button
                   type="button"
                   onClick={onInsertLayout}
-                  className="p-1.5 rounded hover:bg-slate-100 text-slate-700 transition"
+                  className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-slate-100 text-slate-700 transition"
                   aria-label="Custom Layout"
+                  title="Custom Layout"
                 >
                   <Layout size={18} />
                 </button>
@@ -1259,8 +1500,9 @@ export default function DocumentCanvas({
                 <button
                   type="button"
                   onClick={onInsertTable}
-                  className="p-1.5 rounded hover:bg-slate-100 text-slate-700 transition"
+                  className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-slate-100 text-slate-700 transition"
                   aria-label="Insert Table"
+                  title="Insert Table"
                 >
                   <Table size={18} />
                 </button>
@@ -1271,14 +1513,14 @@ export default function DocumentCanvas({
         </div>
 
         {/* Center/Right: Device Switchers & Zoom Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           {/* Device Switcher (Desktop / Tablet / Mobile) */}
           <div className="flex items-center bg-slate-100 rounded-md p-0.5 border border-slate-200">
             <div className="gdoc-tooltip-container">
               <button
                 type="button"
                 onClick={() => onDevicePreviewChange("desktop")}
-                className={`p-1.5 rounded transition ${
+                className={`h-8 w-8 inline-flex items-center justify-center rounded-md transition ${
                   devicePreview === "desktop" ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600 hover:text-slate-900"
                 }`}
                 title="Desktop view (Standard page)"
@@ -1293,7 +1535,7 @@ export default function DocumentCanvas({
               <button
                 type="button"
                 onClick={() => onDevicePreviewChange("tablet")}
-                className={`p-1.5 rounded transition ${
+                className={`h-8 w-8 inline-flex items-center justify-center rounded-md transition ${
                   devicePreview === "tablet" ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600 hover:text-slate-900"
                 }`}
                 title="Tablet view (768px)"
@@ -1308,7 +1550,7 @@ export default function DocumentCanvas({
               <button
                 type="button"
                 onClick={() => onDevicePreviewChange("mobile")}
-                className={`p-1.5 rounded transition ${
+                className={`h-8 w-8 inline-flex items-center justify-center rounded-md transition ${
                   devicePreview === "mobile" ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600 hover:text-slate-900"
                 }`}
                 title="Mobile view (375px)"
@@ -1321,13 +1563,13 @@ export default function DocumentCanvas({
           </div>
 
           {/* Zoom Tools */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             <div className="flex items-center bg-slate-100 rounded-md p-0.5 border border-slate-200">
               <div className="gdoc-tooltip-container">
                 <button
                   type="button"
                   onClick={() => onZoomChange(Math.max(40, zoom - 10))}
-                  className="p-1.5 rounded hover:bg-white text-slate-700 transition"
+                  className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-white text-slate-700 transition"
                   title="Zoom Out"
                   aria-label="Zoom Out"
                 >
@@ -1344,7 +1586,7 @@ export default function DocumentCanvas({
                 <button
                   type="button"
                   onClick={() => onZoomChange(Math.min(200, zoom + 10))}
-                  className="p-1.5 rounded hover:bg-white text-slate-700 transition"
+                  className="h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-white text-slate-700 transition"
                   title="Zoom In"
                   aria-label="Zoom In"
                 >
@@ -1358,20 +1600,16 @@ export default function DocumentCanvas({
               <button
                 type="button"
                 onClick={() => {
-                  if (typeof window !== "undefined" && window.innerWidth) {
-                    const availableW = window.innerWidth - (window.innerWidth >= 1280 ? 640 : window.innerWidth >= 1024 ? 320 : 64);
-                    // In jsdom unit tests (1024x768 default), keep standard 115 test contract
-                    if (process?.env?.NODE_ENV === "test" || window.navigator?.userAgent?.includes("jsdom")) {
-                      onZoomChange(115);
-                      return;
-                    }
-                    const fitW = Math.min(150, Math.max(30, Math.round((availableW / pageWidth) * 92)));
-                    onZoomChange(fitW);
-                  } else {
-                    onZoomChange(115);
-                  }
+                  const availableSize = getCanvasAvailableSize();
+                  if (!availableSize || availableSize.width <= 0) return;
+
+                  const fitW = Math.min(
+                    150,
+                    Math.max(30, Math.round((availableSize.width / pageWidth) * 92))
+                  );
+                  onZoomChange(fitW);
                 }}
-                className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded transition"
+                className="h-8 w-8 inline-flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md transition"
                 title="Fit to Width"
                 aria-label="Fit to Width"
               >
@@ -1384,22 +1622,21 @@ export default function DocumentCanvas({
               <button
                 type="button"
                 onClick={() => {
-                  if (typeof window !== "undefined" && window.innerWidth) {
-                    if (process?.env?.NODE_ENV === "test" || window.navigator?.userAgent?.includes("jsdom")) {
-                      onZoomChange(75);
-                      return;
-                    }
-                    const availableW = window.innerWidth - (window.innerWidth >= 1280 ? 640 : window.innerWidth >= 1024 ? 320 : 64);
-                    const availableH = window.innerHeight - 150;
-                    const fitW = (availableW / pageWidth) * 92;
-                    const fitH = (availableH / pageMinHeight) * 92;
-                    const fit = Math.min(100, Math.max(30, Math.round(Math.min(fitW, fitH))));
-                    onZoomChange(fit);
-                  } else {
-                    onZoomChange(75);
+                  const availableSize = getCanvasAvailableSize();
+                  if (
+                    !availableSize ||
+                    availableSize.width <= 0 ||
+                    availableSize.height <= 0
+                  ) {
+                    return;
                   }
+
+                  const fitW = (availableSize.width / pageWidth) * 92;
+                  const fitH = (availableSize.height / pageMinHeight) * 92;
+                  const fit = Math.min(100, Math.max(30, Math.round(Math.min(fitW, fitH))));
+                  onZoomChange(fit);
                 }}
-                className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded transition"
+                className="h-8 w-8 inline-flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md transition"
                 title="Fit to Page"
                 aria-label="Fit to Page"
               >
@@ -1412,7 +1649,7 @@ export default function DocumentCanvas({
               <button
                 type="button"
                 onClick={() => onZoomChange(100)}
-                className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded transition"
+                className="h-8 w-8 inline-flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-md transition"
                 title="Reset Zoom (100%)"
                 aria-label="Reset Zoom"
               >
@@ -1424,20 +1661,29 @@ export default function DocumentCanvas({
         </div>
       </div>
 
+      {renderToolbarTooltip()}
+
       {/* Main Canvas Scroll Area */}
-      <div className="flex-1 overflow-y-auto p-8 flex justify-center">
+      <div
+        ref={canvasViewportRef}
+        className="document-canvas-scroll-area flex-1 min-w-0 min-h-0 overflow-y-auto overflow-x-auto p-4 sm:p-8 flex items-start"
+      >
         {devicePreview === "desktop" ? (
-          <div className="flex flex-col items-center gap-10">
-            {docPages.map((page, pageIndex) => (
-              <div
+          <div className="flex flex-col items-center gap-16 min-w-fit m-auto" data-testid="document-page-stack">
+            {docPages.map((page, pageIndex) => {
+              const pageOrientation = page.orientation || orientation;
+              const pageIsLandscape = String(pageOrientation).toLowerCase() === "landscape";
+              const pageBaseWidth = page.pageSize === "Letter" ? 816 : 794;
+              const pageBaseHeight = page.pageSize === "Letter" ? 1056 : page.pageSize === "Legal" ? 1344 : 1123;
+              const currentPageWidth = pageIsLandscape ? pageBaseHeight : pageBaseWidth;
+              const currentPageHeight = pageIsLandscape ? pageBaseWidth : pageBaseHeight;
+
+              return (
+              <ScaledPageFrame
                 key={page.id || `page-${pageIndex}`}
-                className="page-sheet-wrapper flex flex-col items-center"
-                style={{
-                  width: pageWidth,
-                  transform: `scale(${zoom / 100})`,
-                  transformOrigin: "top center",
-                  marginBottom: Math.max(0, pageMinHeight * (zoom / 100 - 1)),
-                }}
+                width={currentPageWidth}
+                zoom={zoom}
+                minHeight={currentPageHeight + 30}
               >
                 {/* Page Sheet Header */}
                 <div className="page-sheet-header">
@@ -1446,7 +1692,7 @@ export default function DocumentCanvas({
                       {page.name || `Page ${pageIndex + 1}`}
                     </span>
                     <small className="page-subinfo">
-                      {pageSize} · {orientation} (Page {pageIndex + 1} of{" "}
+                      {page.pageSize || pageSize} · {pageOrientation} (Page {pageIndex + 1} of{" "}
                       {docPages.length})
                     </small>
                   </div>
@@ -1536,8 +1782,8 @@ export default function DocumentCanvas({
                 {/* Physical Printable Sheet Canvas */}
                 <div
                   style={{
-                    width: pageWidth,
-                    minHeight: pageMinHeight,
+                    width: currentPageWidth,
+                    minHeight: currentPageHeight,
                     fontSize: documentSettings?.fontSize ? `${documentSettings.fontSize}px` : undefined,
                   }}
                   className="bg-white shadow-xl rounded-sm p-12 space-y-6 transition-all box-border max-w-full overflow-x-hidden relative select-none"
@@ -1709,8 +1955,9 @@ export default function DocumentCanvas({
                     </>
                   )}
                 </div>
-              </div>
-            ))}
+              </ScaledPageFrame>
+              );
+            })}
           </div>
         ) : (
           /* Mobile (375px) / Tablet (768px) Device Frame View */
@@ -1741,7 +1988,7 @@ export default function DocumentCanvas({
                       key={page.id || `dev-page-${pageIndex}`}
                       className="device-page-wrapper"
                       style={{
-                        marginBottom: "32px",
+                        marginBottom: "48px",
                       }}
                     >
                       <div className="device-page-tag">
@@ -1864,4 +2111,3 @@ export default function DocumentCanvas({
     </div>
   );
 }
-

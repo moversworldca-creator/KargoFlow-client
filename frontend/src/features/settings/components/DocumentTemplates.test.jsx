@@ -279,7 +279,7 @@ describe('DocumentTemplates Page & Create Document Modal', () => {
         expect.objectContaining({
           name: 'Commercial Freight Invoice',
           template_type: 'invoice',
-          scope_type: 'opportunity',
+          scope_type: 'invoice',
           branch: 5,
         })
       );

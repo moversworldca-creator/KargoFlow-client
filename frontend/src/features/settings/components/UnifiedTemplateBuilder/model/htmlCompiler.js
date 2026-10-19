@@ -4,7 +4,139 @@
  * suitable for PDF generation, email distribution, and customer portals.
  */
 
-import { scopeCss } from "../core/htmlSanitizer";
+import { sanitizeHtml, scopeCss } from "../core/htmlSanitizer";
+
+const BACKEND_PREVIEW_VALUES = {
+  "company.name": "KargoFlow Moving",
+  "customer.full_name": "Alex Customer",
+  "customer.first_name": "Alex",
+  "customer.email": "alex.customer@example.com",
+  "customer.phone": "(555) 019-2834",
+  "move.date": "June 15, 2026",
+  "move.size": "3 bedroom home",
+  "move.origin_address": "123 Main Street, Vancouver, BC",
+  "move.destination_address": "456 Oak Avenue, Burnaby, BC",
+  "estimate.number": "EST-00042",
+  "estimate.subtotal": "$1,475.00",
+  "estimate.discount": "$50.00",
+  "estimate.tax": "$77.63",
+  "estimate.grand_total": "$1,502.63",
+  "estimate.deposit_amount": "$300.00",
+  "invoice.number": "INV-00128",
+  "invoice.subtotal": "$1,475.00",
+  "invoice.discount": "$50.00",
+  "invoice.tax": "$77.63",
+  "invoice.total": "$1,502.63",
+  "invoice.balance_due": "$1,202.63",
+};
+
+function escapePreviewHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[char]));
+}
+
+function previewMergeFields(value) {
+  return String(value || "").replace(/\{\{\s*([a-zA-Z0-9_.]+)(?:\|([^}]+))?\s*\}\}/g, (token, name) =>
+    BACKEND_PREVIEW_VALUES[name] === undefined ? token : BACKEND_PREVIEW_VALUES[name]
+  );
+}
+
+function safeAlignment(value) {
+  return ["left", "center", "right"].includes(value) ? value : "left";
+}
+
+function compileBackendWidget(item) {
+  const type = item.blockType;
+  const props = item.props || {};
+  const children = Array.isArray(item.children) ? item.children : [];
+  const childHtml = children.map(compileBackendWidget).join("");
+  const table = (columns, rows) => `<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>${columns.map((column) => `<th style="padding:6px;border-bottom:2px solid #cbd5e1;text-align:left">${escapePreviewHtml(column)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td style="padding:6px;border-bottom:1px solid #e2e8f0">${escapePreviewHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  const charges = [
+    ["Moving labor", "5", "$185.00", "$925.00"],
+    ["Moving truck", "1", "$350.00", "$350.00"],
+    ["Packing materials", "1", "$200.00", "$200.00"],
+  ];
+  switch (type) {
+    case "heading": {
+      const level = Math.min(4, Math.max(1, Number(props.level) || 2));
+      return `<h${level} style="text-align:${safeAlignment(props.align)}">${escapePreviewHtml(previewMergeFields(props.text || "Heading"))}</h${level}>`;
+    }
+    case "text":
+      return sanitizeHtml(previewMergeFields(props.html || "")).cleanHtml;
+    case "terms":
+      return `${props.title ? `<h3>${escapePreviewHtml(previewMergeFields(props.title))}</h3>` : ""}${sanitizeHtml(previewMergeFields(props.html || "")).cleanHtml}`;
+    case "table":
+      return table(props.columns || [], props.rows || []);
+    case "variable":
+      return `<p>${props.label ? `${escapePreviewHtml(props.label)}: ` : ""}${escapePreviewHtml(previewMergeFields(`{{${props.token || ""}${props.format ? `|${props.format}` : ""}}}`))}</p>`;
+    case "divider": {
+      const style = ["solid", "dashed", "dotted", "double", "none"].includes(props.style) ? props.style : "solid";
+      const color = /^#[\da-f]{3,8}$/i.test(props.color || "") ? props.color : "#cbd5e1";
+      return `<hr style="border:0;border-top:1px ${style} ${color}">`;
+    }
+    case "spacer":
+      return `<div style="height:${Math.max(4, Number(props.height) || 24)}px"></div>`;
+    case "page_break":
+      return '<div style="page-break-after:always"></div>';
+    case "columns": {
+      const count = Math.min(4, Math.max(2, Number(props.count) || 2));
+      const columns = Array.from({ length: count }, (_, index) => children
+        .filter((child) => Number(child.column || 0) === index)
+        .map(compileBackendWidget).join(""));
+      return `<div style="display:grid;grid-template-columns:repeat(${count},minmax(0,1fr));gap:${Math.max(0, Number(props.gap) || 0)}px">${columns.map((column) => `<div>${column}</div>`).join("")}</div>`;
+    }
+    case "conditional":
+    case "repeater":
+      return `<div>${childHtml}</div>`;
+    case "image":
+      return `<div style="padding:12px;border:1px dashed #cbd5e1;text-align:center;color:#64748b">Uploaded image asset ${escapePreviewHtml(props.asset_id || "(not selected)")}${props.alt ? ` — ${escapePreviewHtml(props.alt)}` : ""}</div>`;
+    case "signature":
+    case "initial":
+      return `<div style="max-width:360px;margin:16px 0"><div>${escapePreviewHtml(props.label || type)}${props.required ? " *" : ""}</div><div style="height:32px;border-bottom:1px solid #64748b"></div><small>Signer: ${escapePreviewHtml(props.signer_role || "customer")}</small></div>`;
+    case "form_field":
+      return `<label style="display:block;margin:8px 0">${escapePreviewHtml(props.label || "Enter a value")}${props.required ? " *" : ""}<div style="height:30px;border:1px solid #cbd5e1;margin-top:4px"></div></label>`;
+    case "button":
+      return `<p style="text-align:${safeAlignment(props.align)}"><span style="display:inline-block;padding:10px 18px;border-radius:6px;background:#1e40af;color:white">${escapePreviewHtml(previewMergeFields(props.label || "Continue"))}</span></p>`;
+    case "move_details":
+      return table(["Move details", ""], [
+        ...(props.show_dates !== false ? [["Move date", "June 15, 2026"]] : []),
+        ...(props.show_move_size !== false ? [["Move size", "3 bedroom home"]] : []),
+        ...(props.show_stops !== false ? [["From", "123 Main Street, Vancouver, BC"], ["To", "456 Oak Avenue, Burnaby, BC"]] : []),
+      ]);
+    case "crew_trucks":
+      return table(["Crew / vehicle", "Assignment"], [
+        ...(props.show_names !== false ? [["Crew lead", "Morgan Chen"], ["Mover", "Taylor Rivera"], ["Mover", "Riley Singh"]] : []),
+        ...(props.show_trucks !== false ? [["Truck", "Truck 12 · 26 ft"]] : []),
+      ]);
+    case "charges":
+    case "line_items":
+      return table(["Description", ...(props.show_quantity !== false ? ["Qty"] : []), "Rate", "Amount"],
+        charges.map(([name, quantity, rate, amount]) => [name, ...(props.show_quantity !== false ? [quantity] : []), rate, amount]));
+    case "estimate_summary":
+    case "totals": {
+      const estimate = type === "estimate_summary";
+      const values = estimate
+        ? [["Subtotal", "$1,475.00"], ...(props.show_discount !== false ? [["Discount", "$50.00"]] : []), ...(props.show_tax !== false ? [["Tax", "$77.63"]] : []), ["Estimate total", "$1,502.63"], ...(props.show_deposit ? [["Deposit due", "$300.00"]] : [])]
+        : [["Subtotal", "$1,475.00"], ...(props.show_discount !== false ? [["Discount", "$50.00"]] : []), ...(props.show_tax !== false ? [["Tax", "$77.63"]] : []), ["Invoice total", "$1,502.63"], ...(props.show_balance !== false ? [["Balance due", "$1,202.63"]] : [])];
+      return table([estimate ? "Estimate summary" : "Invoice totals", "Amount"], values);
+    }
+    case "inventory":
+      return props.mode === "detailed"
+        ? table(["Room", "Item", "Qty", "Volume", "Weight"], [["Living room", "Sofa", "1", "90 cu ft", "180 lbs"], ["Bedroom", "Queen bed", "1", "65 cu ft", "140 lbs"]])
+        : "<p>Inventory summary · 2 rooms · 155 cu ft · 320 lbs</p>";
+    case "payment_history":
+      return table(["Date", ...(props.show_method !== false ? ["Method"] : []), "Amount"], [["June 15, 2026", ...(props.show_method !== false ? ["Visa ending 4242"] : []), "$300.00"]]);
+    case "options":
+      return "<fieldset><legend>Choose a package</legend><p>◯ Standard Move <span style=\"float:right\">$1,502.63</span></p><p>◯ Full-Service Move <span style=\"float:right\">$1,852.63</span></p></fieldset>";
+    case "payment":
+      return `<div><p>${props.amount_source === "balance" ? "Balance due: $1,202.63" : "Deposit due: $300.00"}</p><button disabled>${escapePreviewHtml(props.label || "Pay now")}</button></div>`;
+    case "clause":
+      return `<p>Saved clause ${escapePreviewHtml(props.block_id || "(not selected)")}</p>`;
+    default:
+      return "";
+  }
+}
 
 export function compileDocumentToHtml(doc, mode = "estimate", pageSize = "A4", orientation = "Portrait") {
   if (!doc) return "";
@@ -54,19 +186,22 @@ export function compileDocumentToHtml(doc, mode = "estimate", pageSize = "A4", o
       width: 100%;
       max-width: 100%;
       box-sizing: border-box;
+    }
+    .kargoflow-block:not(.kargoflow-html-block) {
       word-break: break-word;
       overflow-wrap: anywhere;
       page-break-inside: avoid;
       break-inside: avoid;
     }
-    table {
+    .kargoflow-block:not(.kargoflow-html-block) table {
       width: 100%;
       max-width: 100%;
       border-collapse: collapse;
       table-layout: fixed;
       box-sizing: border-box;
     }
-    th, td {
+    .kargoflow-block:not(.kargoflow-html-block) th,
+    .kargoflow-block:not(.kargoflow-html-block) td {
       padding: 8px 12px;
       box-sizing: border-box;
       word-break: break-word;
@@ -103,12 +238,16 @@ export function compileDocumentToHtml(doc, mode = "estimate", pageSize = "A4", o
 function compileItemToHtml(item) {
   if (!item) return "";
 
+  if (item.type === "builder_block") {
+    return `<div class="kargoflow-block">${compileBackendWidget(item)}</div>`;
+  }
+
   if (item.type === "html") {
     const scopeClass = `html-doc-${item.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
     const scopedStyle = item.cssContent
       ? `<style>${scopeCss(item.cssContent, scopeClass)}</style>`
       : "";
-    return `<div class="kargoflow-block ${scopeClass}">${scopedStyle}${item.htmlContent || item.content || ""}</div>`;
+    return `<div class="kargoflow-block kargoflow-html-block ${scopeClass}">${scopedStyle}${item.htmlContent || item.content || ""}</div>`;
   }
 
   if (item.type === "header") {

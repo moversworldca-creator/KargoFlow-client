@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import UnifiedTemplateBuilder from "./UnifiedTemplateBuilder";
 import TopNavbar, { Logo } from "./components/TopNavbar";
 import LeftSidebar from "./components/LeftSidebar";
@@ -112,9 +112,191 @@ describe("Phase 4: Reference UI Parity & Multi-Page Viewport Controls", () => {
     expect(mobileDoc.style.minHeight).toBe("auto");
   });
 
+  it("4c. automatically fits landscape paper to the builder viewport", () => {
+    let observer;
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback) {
+          this.callback = callback;
+          observer = this;
+        }
+
+        observe(target) {
+          this.target = target;
+          Object.defineProperty(target, "clientWidth", { configurable: true, value: 800 });
+          Object.defineProperty(target, "clientHeight", { configurable: true, value: 650 });
+          this.callback();
+        }
+
+        disconnect() {}
+      }
+    );
+
+    try {
+      const handleZoomChange = vi.fn();
+      render(
+        <DocumentCanvas
+          items={[]}
+          pageSize="A4"
+          orientation="Landscape"
+          zoom={100}
+          onZoomChange={handleZoomChange}
+          devicePreview="desktop"
+          modeConfig={{ canvasType: "paged" }}
+        />
+      );
+
+      expect(handleZoomChange).toHaveBeenCalledWith(66);
+
+      Object.defineProperty(observer.target, "clientWidth", { configurable: true, value: 600 });
+      act(() => observer.callback());
+
+      expect(handleZoomChange).toHaveBeenLastCalledWith(49);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("4d. reserves the scaled landscape page width in the canvas layout", () => {
+    const { container } = render(
+      <DocumentCanvas
+        items={[]}
+        pageSize="A4"
+        orientation="Landscape"
+        zoom={66}
+        devicePreview="desktop"
+        modeConfig={{ canvasType: "paged" }}
+      />
+    );
+
+    const scaleFrame = container.querySelector(".page-sheet-scale-frame");
+    const page = container.querySelector(".page-sheet-wrapper");
+    expect(scaleFrame.style.width).toBe("741.18px");
+    expect(page.style.width).toBe("1123px");
+    expect(page.style.transform).toBe("scale(0.66)");
+    expect(page.style.transformOrigin).toBe("top left");
+  });
+
+  it("4e. keeps a clear blank gap between pages in landscape canvas", () => {
+    const { container } = render(
+      <DocumentCanvas
+        items={[]}
+        pages={[
+          { id: "page-1", name: "Page 1", items: [] },
+          { id: "page-2", name: "Page 2", items: [] },
+        ]}
+        pageSize="A4"
+        orientation="Landscape"
+        zoom={66}
+        devicePreview="desktop"
+        modeConfig={{ canvasType: "paged" }}
+      />
+    );
+
+    expect(container.querySelector('[data-testid="document-page-stack"]')).toHaveClass("gap-16");
+    expect(container.querySelectorAll(".page-sheet-scale-frame")).toHaveLength(2);
+    expect(container.querySelector(".page-sheet-scale-frame")).toHaveClass("isolate");
+  });
+
+  it("4f. reserves layout space when landscape page content exceeds paper height", () => {
+    let pageObserver;
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback) {
+          this.callback = callback;
+        }
+
+        observe(target) {
+          if (target.classList.contains("page-sheet-wrapper")) {
+            pageObserver = this;
+            Object.defineProperty(target, "getBoundingClientRect", {
+              configurable: true,
+              value: () => ({
+                top: 0,
+                bottom: 792,
+                left: 0,
+                right: 741,
+                width: 741,
+                height: 792,
+              }),
+            });
+          }
+        }
+
+        disconnect() {}
+      }
+    );
+
+    try {
+      const { container } = render(
+        <DocumentCanvas
+          items={[]}
+          pages={[{ id: "long-page", name: "Page 1", items: [] }]}
+          pageSize="A4"
+          orientation="Landscape"
+          zoom={66}
+          devicePreview="desktop"
+          modeConfig={{ canvasType: "paged" }}
+        />
+      );
+      act(() => pageObserver.callback());
+
+      expect(container.querySelector(".page-sheet-scale-frame").style.height).toBe("792px");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("4f. new estimate pages inherit the document page size and orientation", () => {
+    const handleChange = vi.fn();
+    const template = {
+      name: "Landscape estimate",
+      content: {
+        name: "Landscape estimate",
+        settings: { pageSize: "A4", orientation: "Landscape" },
+        items: [{ id: "heading-1", type: "heading", label: "Estimate heading" }],
+        pages: [
+          {
+            id: "page-1",
+            name: "Page 1",
+            items: [{ id: "heading-1", type: "heading", label: "Estimate heading" }],
+          },
+        ],
+      },
+    };
+
+    render(
+      <UnifiedTemplateBuilder
+        mode="estimate"
+        template={template}
+        onChange={handleChange}
+        isOverlay={false}
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText("Add Blank Page"));
+
+    expect(handleChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        content: expect.objectContaining({
+          settings: expect.objectContaining({ pageSize: "A4", orientation: "Landscape" }),
+          pages: expect.arrayContaining([
+            expect.objectContaining({
+              name: "Page 2",
+              pageSize: "A4",
+              orientation: "Landscape",
+            }),
+          ]),
+        }),
+      })
+    );
+  });
+
   it("5. supports Fit Width, Fit Page, and Zoom Reset auto-scaling buttons", () => {
     const handleZoomChange = vi.fn();
-    render(
+    const { container } = render(
       <DocumentCanvas
         items={[]}
         pageSize="A4"
@@ -124,6 +306,11 @@ describe("Phase 4: Reference UI Parity & Multi-Page Viewport Controls", () => {
         modeConfig={{ canvasType: "paged" }}
       />
     );
+    const canvasViewport = container.querySelector(".document-canvas-scroll-area");
+    Object.defineProperty(canvasViewport, "clientWidth", { configurable: true, value: 800 });
+    Object.defineProperty(canvasViewport, "clientHeight", { configurable: true, value: 650 });
+    canvasViewport.style.padding = "16px";
+
     const fitWidthBtn = screen.getByTitle("Fit to Width");
     const fitPageBtn = screen.getByTitle("Fit to Page");
     const resetZoomBtn = screen.getByTitle("Reset Zoom (100%)");
@@ -133,13 +320,97 @@ describe("Phase 4: Reference UI Parity & Multi-Page Viewport Controls", () => {
     expect(resetZoomBtn).toBeDefined();
 
     fireEvent.click(fitWidthBtn);
-    expect(handleZoomChange).toHaveBeenCalledWith(115);
+    expect(handleZoomChange).toHaveBeenCalledWith(89);
 
+    Object.defineProperty(canvasViewport, "clientWidth", { configurable: true, value: 400 });
+    fireEvent.click(fitWidthBtn);
+    expect(handleZoomChange).toHaveBeenLastCalledWith(43);
+
+    Object.defineProperty(canvasViewport, "clientWidth", { configurable: true, value: 800 });
     fireEvent.click(fitPageBtn);
-    expect(handleZoomChange).toHaveBeenCalledWith(75);
+    expect(handleZoomChange).toHaveBeenCalledWith(51);
 
     fireEvent.click(resetZoomBtn);
     expect(handleZoomChange).toHaveBeenCalledWith(100);
+  });
+
+  it("provides consistent, keyboard-discoverable labels and spacing for canvas toolbar icons", () => {
+    const { container, unmount } = render(
+      <DocumentCanvas
+        items={[]}
+        pageSize="A4"
+        orientation="Portrait"
+        devicePreview="desktop"
+        zoom={100}
+        modeConfig={{ canvasType: "paged" }}
+      />
+    );
+
+    const desktopButton = screen.getByLabelText("Desktop preview");
+    const fitWidthButton = screen.getByLabelText("Fit to Width");
+    const rotateButton = screen.getByLabelText("Rotate Page Orientation");
+
+    expect(desktopButton.className).toContain("h-8 w-8");
+    expect(fitWidthButton.className).toContain("h-8 w-8");
+    expect(rotateButton.className).toContain("h-8 w-8");
+    expect(desktopButton.parentElement.querySelector(".gdoc-tooltip")).toHaveTextContent(
+      "Desktop view (Standard page)"
+    );
+    expect(screen.getByTitle("Document preview: A4 · Portrait")).toBeDefined();
+    expect(screen.getByTitle("Add Blank Page (A4)")).toBeDefined();
+    expect(screen.getByTitle("Add Component")).toBeDefined();
+    expect(fitWidthButton.parentElement.querySelector(".gdoc-tooltip")).toHaveTextContent(
+      "Fit to width"
+    );
+    expect(container.querySelector(".gdoc-tooltip-container")).not.toBeNull();
+
+    unmount();
+    const { container: emailContainer, unmount: unmountEmail } = render(
+      <DocumentCanvas
+        items={[]}
+        devicePreview="mobile"
+        zoom={100}
+        modeConfig={{ canvasType: "email" }}
+      />
+    );
+
+    const emailMobileButton = screen.getByLabelText("Mobile preview");
+    const emailZoomButton = screen.getByLabelText("Zoom Out");
+    const emailCanvasViewport = screen.getByTestId("template-canvas-viewport");
+    const emailScaleFrame = emailContainer.querySelector(".page-sheet-scale-frame");
+    expect(emailMobileButton.className).toContain("h-8 w-8");
+    expect(emailCanvasViewport.className).toContain("min-h-0");
+    expect(emailCanvasViewport.className).toContain("overflow-y-auto");
+    expect(emailCanvasViewport.className).toContain("overflow-x-auto");
+    expect(emailCanvasViewport.className).toContain("overscroll-contain");
+    expect(emailScaleFrame.style.width).toBe("360px");
+    expect(screen.getByTitle("Email preview: Responsive width (360px)")).toBeDefined();
+    expect(screen.getByTitle("Add Section Block")).toBeDefined();
+    expect(screen.getByTitle("Custom Layout")).toBeDefined();
+    expect(emailMobileButton.parentElement.querySelector(".gdoc-tooltip")).toHaveTextContent(
+      "Mobile preview (360px)"
+    );
+    expect(emailZoomButton.className).toContain("h-8 w-8");
+    expect(emailScaleFrame.style.width).toBe("360px");
+
+    unmountEmail();
+    const { container: smsContainer } = render(
+      <DocumentCanvas
+        items={[]}
+        smsText="Status update"
+        modeConfig={{ canvasType: "sms" }}
+      />
+    );
+    const smsCanvasViewport = screen.getByTestId("template-canvas-viewport");
+    const smsScaleFrame = smsContainer.querySelector(".page-sheet-scale-frame");
+    expect(smsCanvasViewport.className).toContain("min-h-0");
+    expect(smsCanvasViewport.className).toContain("overflow-y-auto");
+    expect(smsCanvasViewport.className).toContain("overflow-x-auto");
+    expect(smsCanvasViewport.className).toContain("overscroll-contain");
+    expect(smsScaleFrame.style.width).toBe("600px");
+    expect(screen.getByTitle("SMS Dispatch Simulator · GSM-7 & UCS-2")).toBeDefined();
+    expect(screen.getByTitle("Insert Variable")).toBeDefined();
+    expect(screen.getByTitle(/Carrier payload:/)).toBeDefined();
   });
 
   it("6. renders 1-click Rotate Page Orientation button in secondary canvas toolbar", () => {
@@ -590,4 +861,3 @@ describe("Phase 4: Reference UI Parity & Multi-Page Viewport Controls", () => {
     expect(screen.getByText(/Tablet \(560px\)/i)).toBeDefined();
   });
 });
-

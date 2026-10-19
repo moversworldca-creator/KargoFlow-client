@@ -140,7 +140,7 @@ const Settings = () => {
     { id: 'estimate-portal-templates', label: 'Estimate Portal Templates', icon: Globe, section: 'Estimates', description: 'Customize estimate portal layouts, custom HTML templates, agreement clauses, and payment setup.' },
     { id: 'customer-portals', label: 'Customer Portal Settings', icon: Globe, section: 'Estimates', description: 'Set up domain bindings, general behaviors, and security checks for your client portals.' },
     { id: 'templates', label: 'Comms Templates', icon: MessageSquare, section: 'Estimates', description: 'Manage transactional emails, text messages, automated follow-ups, and trigger alerts.' },
-    { id: 'document-templates', label: 'Documents Templates', icon: FileText, section: 'Documents', description: 'Design PDF templates for moving contracts, invoices, bills of lading, and receipts.' },
+    { id: 'document-templates', label: 'Document Templates', icon: FileText, section: 'Documents', description: 'Design PDF templates for moving contracts, invoices, bills of lading, and receipts.' },
     { id: 'integrations', label: 'Integrations', icon: Cpu, section: 'System', description: 'Connect external applications, email servers, stripe payment gates, and manage API integrations.' },
     { id: 'communications', label: 'Email & SMS Setup', icon: MessageSquare, section: 'System', description: 'Onboard Resend sending domains, branch sender identities, Telnyx SMS numbers, and reply mailboxes.' },
     { id: 'audit', label: 'Audit Logs', icon: History, section: 'System', description: 'Review security logs, user session activities, settings modifications, and records edits history.' },

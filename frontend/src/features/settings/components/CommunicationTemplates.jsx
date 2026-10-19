@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Mail, MessageSquare, Loader2, Edit2, PlusCircle, Trash2, Sparkles, AlertCircle, CheckCircle2, Settings2, X, Search, ChevronDown, Building2, Lock, GripVertical, FileText, ClipboardList } from 'lucide-react';
+import { Mail, MessageSquare, Loader2, Edit2, PlusCircle, Trash2, Sparkles, AlertCircle, CheckCircle2, Settings2, X, Search, ChevronDown, Building2, Lock, GripVertical, FileText, ClipboardList, Copy } from 'lucide-react';
 import Card from '../../../shared/ui/Card';
 import RichTextEditor from '../../../shared/ui/RichTextEditor';
 import EmailVisualBuilder from './EmailVisualBuilder';
@@ -518,6 +518,17 @@ const buildPreviewVarsFromDefinitions = (definitions = [], template = EMPTY_TEMP
   return vars;
 };
 
+export const normalizeCommunicationTokens = (text) => {
+  if (typeof text !== 'string') return text;
+  return text
+    .replace(/\{\{\s*Customer\.first_name\s*\}\}/g, '{{customer.first_name}}')
+    .replace(/\{\{\s*Company\.name\s*\}\}/g, '{{company.name}}')
+    .replace(/\{\{\s*Customer\.(?:full_name|name)\s*\}\}/gi, '{{customer.name}}')
+    .replace(/\{\{\s*Customer\.phone\s*\}\}/g, '{{customer.phone}}')
+    .replace(/\{\{\s*Customer\.email\s*\}\}/g, '{{customer.email}}')
+    .replace(/\{\{\s*Company\.phone\s*\}\}/g, '{{branch.phone}}');
+};
+
 const CommunicationTemplates = ({
   branchId = null,
   onBranchChange = null,
@@ -617,6 +628,8 @@ const CommunicationTemplates = ({
   }, [branchId]);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [showModal, setShowModal] = useState(false);
+  const [isBuilderOpen, setIsBuilderOpen] = useState(false);
+  const [activeFilter, setActiveFilter] = useState('all');
   const [unsavedDraft, setUnsavedDraft] = useState(null);
   const [restoreKey, setRestoreKey] = useState(0);
   const [editorMode, setEditorMode] = useState('visual');
@@ -644,11 +657,13 @@ const CommunicationTemplates = ({
   const [showVariableDropdown, setShowVariableDropdown] = useState(false);
   const [showBranchPicker, setShowBranchPicker] = useState(false);
   const [variableSearch, setVariableSearch] = useState('');
+  const [isEmailSettingsOpen, setIsEmailSettingsOpen] = useState(false);
   const [showTypeSelectionModal, setShowTypeSelectionModal] = useState(false);
   const [showDefaultTemplateModal, setShowDefaultTemplateModal] = useState(false);
   const [selectedDefaultTemplate, setSelectedDefaultTemplate] = useState(null);
   const [selectedThemeColor, setSelectedThemeColor] = useState('corporate');
   const [selectedLayoutStyle, setSelectedLayoutStyle] = useState('modern');
+  const [mobilePreviewTab, setMobilePreviewTab] = useState('settings');
   const [visualInsertRequest, setVisualInsertRequest] = useState(null);
   const [formErrors, setFormErrors] = useState({});
   const [draggedTemplateId, setDraggedTemplateId] = useState(null);
@@ -836,9 +851,11 @@ const CommunicationTemplates = ({
         name.includes(searchTerm.toLowerCase()) ||
         templateKey.includes(searchTerm.toLowerCase());
       const matchesChannel = channelFilter === 'all' || String(item?.channel || '') === channelFilter;
-      return matchesSearch && matchesChannel;
+      const matchesActive = activeFilter === 'all' ? true : Boolean(item?.is_active) === (activeFilter === 'active');
+      const matchesBranch = !branchFilter || String(item?.branch || '') === String(branchFilter);
+      return matchesSearch && matchesChannel && matchesActive && matchesBranch;
     });
-  }, [items, searchTerm, channelFilter]);
+  }, [items, searchTerm, channelFilter, activeFilter, branchFilter]);
 
   const filteredTemplateKeyOptions = useMemo(() => {
     if (!draft.channel) return availableTemplateKeys;
@@ -1054,7 +1071,70 @@ const CommunicationTemplates = ({
     }
   };
 
+  const openCommBuilder = async (template = null, type = 'email', shouldNavigate = true) => {
+    const defaultBranch = branchFilter || branches[0]?.id || null;
+    let fullTemplate = template;
+
+    if (template && template.id) {
+      try {
+        const detail = await queryClient.fetchQuery({
+          queryKey: ['communicationTemplate', template.id],
+          queryFn: () => getCommunicationTemplate(template.id),
+          staleTime: 5 * 60 * 1000,
+          gcTime: 10 * 60 * 1000,
+        });
+        if (detail) {
+          fullTemplate = detail.data || detail;
+        }
+      } catch (err) {
+        console.error('Failed to load full template details', err);
+      }
+    }
+
+    const nextDraft = fullTemplate
+      ? {
+          ...EMPTY_TEMPLATE,
+          ...fullTemplate,
+          body: fullTemplate.body || fullTemplate.body_text || fullTemplate.sms_body || '',
+          body_sms: fullTemplate.body_sms || fullTemplate.sms_body || fullTemplate.body_text || fullTemplate.body || '',
+          variables: fullTemplate.variables || [],
+          branch: fullTemplate.branch ? Number(fullTemplate.branch) : defaultBranch,
+          channel: fullTemplate.channel || type,
+          body_html: fullTemplate.body_html || (String(fullTemplate.channel || '').toLowerCase() === 'email' ? buildBuilderHtmlFromPlainText(fullTemplate.body || '') : ''),
+        }
+      : {
+          ...EMPTY_TEMPLATE,
+          branch: defaultBranch ? Number(defaultBranch) : null,
+          channel: type,
+          template_key: `template_${Date.now()}`,
+        };
+
+    setSelectedId(fullTemplate?.id || null);
+    setDraft(nextDraft);
+    setIsBuilderOpen(true);
+    setShowModal(false);
+
+    if (shouldNavigate && basePath && builderRouteView !== 'builder') {
+      const targetPath = fullTemplate?.id ? `${basePath}/${fullTemplate.id}/builder` : `${basePath}/new/builder`;
+      navigate(targetPath);
+    }
+  };
+
+  const closeCommBuilder = () => {
+    setIsBuilderOpen(false);
+    setSelectedId(null);
+    setDraft(EMPTY_TEMPLATE);
+    lastBuilderRouteRef.current = '';
+    if (builderRouteView === 'builder') {
+      navigate(closePath || basePath, { replace: true });
+    }
+  };
+
   const handleOpenModal = async (template = null, type = 'email') => {
+    if (!isAutomationBuilder) {
+      return openCommBuilder(template, type);
+    }
+
     const defaultBranch = branchFilter || branches[0]?.id || null;
     let fullTemplate = template;
 
@@ -1122,6 +1202,7 @@ const CommunicationTemplates = ({
     setFormErrors({});
     setShowVariableTools(true);
     setShowBranchPicker(false);
+    setIsEmailSettingsOpen(false);
     setEditorMode(
       nextDraft.channel === 'email' &&
       isFullHtmlDocument(nextDraft.body_html) &&
@@ -1135,12 +1216,51 @@ const CommunicationTemplates = ({
   useEffect(() => {
     if (builderRouteView !== 'builder') {
       lastBuilderRouteRef.current = '';
+      if (isBuilderOpen) setIsBuilderOpen(false);
       return;
     }
     if (isLoading) return;
 
     const routeKey = `${builderRouteItemId || 'new'}:builder`;
     if (lastBuilderRouteRef.current === routeKey) return;
+
+    if (!isAutomationBuilder) {
+      if (builderRouteItemId && builderRouteItemId !== 'new') {
+        let target = items.find((item) => String(item.id) === String(builderRouteItemId));
+        if (!target) {
+          lastBuilderRouteRef.current = routeKey;
+          getCommunicationTemplate(builderRouteItemId).then((response) => {
+            if (lastBuilderRouteRef.current !== routeKey) return;
+            const loadedTemplate = getTemplateResponseData(response);
+            if (loadedTemplate?.id) {
+              target = {
+                ...loadedTemplate,
+                branch: loadedTemplate.branch ?? loadedTemplate.branch_id ?? null,
+              };
+              queryClient.setQueryData(
+                ['communicationTemplate', target.id],
+                response
+              );
+              openCommBuilder(target, target.channel || 'email', false);
+              queryClient.invalidateQueries({ queryKey: ['communicationTemplates'] });
+              return;
+            }
+            flashMessage('error', 'Template not found.');
+            navigate(basePath, { replace: true });
+          }).catch((err) => {
+            if (lastBuilderRouteRef.current !== routeKey) return;
+            flashMessage('error', getApiErrorMessage(err, 'Unable to load the requested template.'));
+            navigate(basePath, { replace: true });
+          });
+          return;
+        }
+        openCommBuilder(target, target.channel || 'email', false);
+      } else {
+        openCommBuilder(null, 'email', false);
+      }
+      lastBuilderRouteRef.current = routeKey;
+      return;
+    }
 
     if (builderRouteItemId && builderRouteItemId !== 'new') {
       const target = items.find((item) => String(item.id) === String(builderRouteItemId));
@@ -1202,8 +1322,6 @@ const CommunicationTemplates = ({
           channels: routeDraft.channels || (normalizedChannel === 'email_sms' || (emailTemplate && smsTemplate) ? ['email', 'sms'] : normalizedChannel ? [normalizedChannel] : undefined),
         };
         handleOpenModal(hydratedDraft, hydratedDraft.channel || 'email');
-        // Clear state so a reload doesn't keep the draftData if we don't want it, 
-        // though react-router usually keeps state on reload. We can leave it for now.
       } else {
         handleOpenModal(null, 'email');
       }
@@ -1211,10 +1329,14 @@ const CommunicationTemplates = ({
 
     lastBuilderRouteRef.current = routeKey;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [builderRouteView, builderRouteItemId, isLoading, items, navigate, showModal]);
+  }, [builderRouteView, builderRouteItemId, isLoading, items, navigate, showModal, isBuilderOpen, isAutomationBuilder, basePath, branchFilter, branches]);
 
   const closeEditor = () => {
     setShowModal(false);
+    setIsEmailSettingsOpen(false);
+    setIsBuilderOpen(false);
+    setSelectedId(null);
+    setDraft(EMPTY_TEMPLATE);
     if (builderRouteView === 'builder') {
       navigate(closePath || basePath);
     }
@@ -1348,6 +1470,9 @@ const CommunicationTemplates = ({
     const firstError = Object.values(errors)[0];
     if (firstError) {
       flashMessage('error', firstError);
+      if (!isAutomationBuilder && (errors.name || errors.branch || errors.template_key || errors.channel || errors.subject)) {
+        setIsEmailSettingsOpen(true);
+      }
       return;
     }
 
@@ -1495,6 +1620,51 @@ const CommunicationTemplates = ({
     }
   };
 
+  const handleSaveDirect = async (savedDoc) => {
+    try {
+      setIsSaving(true);
+      const isSms = String(draft.channel || savedDoc?.channel || '').toLowerCase() === 'sms';
+      const targetId = draft.id || selectedId || savedDoc?.id;
+      const templateBranch = savedDoc?.branch || draft.branch || branchFilter || branches[0]?.id || null;
+
+      const payload = {
+        name: String(savedDoc?.name || draft.name || 'Untitled Template').trim(),
+        channel: isSms ? 'sms' : 'email',
+        template_key: String(savedDoc?.template_key || draft.template_key || `template_${Date.now()}`).trim(),
+        subject: isSms ? '' : String(savedDoc?.subject || draft.subject || '').trim(),
+        body: isSms ? String(savedDoc?.body_sms || savedDoc?.body || draft.body || '') : String(draft.body || ''),
+        body_html: isSms ? '' : String(savedDoc?.body_html || savedDoc?.html_content || draft.body_html || ''),
+        branch: templateBranch ? Number(templateBranch) : null,
+        category: savedDoc?.category ? Number(savedDoc.category) : (draft.category ? Number(draft.category) : null),
+        description: savedDoc?.description || draft.description || '',
+        is_active: draft.is_active !== undefined ? Boolean(draft.is_active) : true,
+      };
+
+      let result;
+      if (targetId) {
+        result = await updateCommunicationTemplate(targetId, payload);
+      } else {
+        result = await createCommunicationTemplate(payload);
+      }
+      const saved = getTemplateResponseData(result);
+      if (saved?.id) {
+        setDraft((prev) => ({ ...prev, ...saved }));
+        setSelectedId(saved.id);
+        if (basePath && builderRouteView === 'builder' && (!builderRouteItemId || builderRouteItemId === 'new')) {
+          navigate(`${basePath}/${saved.id}/builder`, { replace: true });
+        }
+      }
+      await invalidateCommunicationTemplateQueries();
+      flashMessage('success', targetId ? 'Template updated successfully.' : 'Template created successfully.');
+      return saved;
+    } catch (err) {
+      flashMessage('error', getApiErrorMessage(err, 'Failed to save template.'));
+      throw err;
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handlePreview = async () => {
     try {
       const res = await previewCommunicationTemplate({
@@ -1568,6 +1738,29 @@ const CommunicationTemplates = ({
     }
   };
 
+  const handleDuplicateRow = async (template) => {
+    try {
+      setIsSaving(true);
+      const payload = {
+        name: `Copy of ${template.name}`,
+        channel: template.channel || 'email',
+        template_key: `${template.template_key || 'template'}_copy_${Date.now().toString(36).slice(-4)}`,
+        subject: template.subject || '',
+        body: template.body || '',
+        body_html: template.body_html || '',
+        branch: template.branch ? Number(template.branch) : (branches[0]?.id ? Number(branches[0].id) : null),
+        is_active: true,
+      };
+      await createCommunicationTemplate(payload);
+      await invalidateCommunicationTemplateQueries();
+      flashMessage('success', `Duplicated "${template.name}".`);
+    } catch (err) {
+      flashMessage('error', getApiErrorMessage(err, 'Unable to duplicate template.'));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleDelete = async (id) => {
     setIsDeleting(true);
     try {
@@ -1598,306 +1791,316 @@ const CommunicationTemplates = ({
   if (isLoading) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-primary" /></div>;
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h3 className="text-xl font-bold text-heading tracking-tight">Communication Templates</h3>
-          <p className="text-sm text-muted">Manage Email and SMS templates for automation.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          <button
-            onClick={() => setShowCategoryModal(true)}
-            className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-border text-body rounded-xl text-xs sm:text-sm font-bold hover:bg-border/80 transition-all border border-subtle whitespace-nowrap"
-          >
-            Manage Categories
-          </button>
-          <div className="relative">
-            <button
-              onClick={() => {
-                if (onOpenChooser) {
-                  onOpenChooser('communication');
-                } else {
-                  setShowTypeSelectionModal(!showTypeSelectionModal);
-                }
-              }}
-              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-primary text-white rounded-xl text-xs sm:text-sm font-bold shadow-md hover:bg-[#003d2f] transition-all whitespace-nowrap"
-            >
-              <PlusCircle size={18} /> New Document
-            </button>
-            {!onOpenChooser && showTypeSelectionModal && (
-              <>
-                <div
-                  className="fixed inset-0 z-40"
-                  onClick={() => setShowTypeSelectionModal(false)}
-                />
-                <div className="absolute top-full right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-border z-50 overflow-hidden flex flex-col">
-                  <button
-                    onClick={() => {
-                      setShowTypeSelectionModal(false);
-                      setShowDefaultTemplateModal(true);
-                    }}
-                    className="flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors border-b border-border"
-                  >
-                    <Mail size={16} className="text-primary" />
-                    <span className="text-sm font-bold text-heading">Email</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowTypeSelectionModal(false);
-                      handleOpenModal(null, 'sms');
-                    }}
-                    className="flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors"
-                  >
-                    <MessageSquare size={16} className="text-[#166534]" />
-                    <span className="text-sm font-bold text-heading">SMS</span>
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 bg-card p-3 sm:p-4 rounded-2xl shadow-sm border border-border">
-        <div className="relative flex-1">
-          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={18} />
-          <input 
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search templates..."
-            className="w-full pl-10 pr-4 py-2 bg-subtle border-none rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/10"
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex gap-2">
-            {['all', 'email', 'sms'].map((ch) => (
-              <button
-                key={ch}
-                onClick={() => setChannelFilter(ch)}
-                className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
-                  channelFilter === ch ? 'bg-primary text-white' : 'bg-subtle text-muted hover:bg-border'
-                }`}
-              >
-                {ch}
-              </button>
-            ))}
-          </div>
-          {!branchId && (
-            <select
-              value={branchFilter}
-              onChange={(e) => handleChangeListBranch(e.target.value)}
-              className="px-3 py-2 bg-subtle border-none rounded-xl text-xs font-bold uppercase tracking-wider text-body outline-none"
-            >
-              {branches.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-      </div>
-
+    <div className="space-y-8 animate-in fade-in duration-500">
       {message.text && (
-        <div className={`fixed right-4 top-4 z-[200] flex max-w-[min(420px,calc(100vw-2rem))] items-center gap-2 rounded-xl px-4 py-3 text-sm font-bold shadow-2xl animate-in slide-in-from-top-2 ${
-          message.type === 'success' ? 'bg-primary-tint/30 text-primary' : 'bg-[#FDE8E8]/30 text-[#791F1F]'
-        }`}>
+        <div className={`fixed right-4 top-4 z-[200] flex max-w-[min(420px,calc(100vw-2rem))] items-center gap-2 rounded-xl px-4 py-3 text-sm font-bold shadow-2xl animate-in slide-in-from-top-2 ${toastCls(message.type)}`}>
           {message.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
           {message.text}
         </div>
       )}
 
-      {filteredItems.length === 0 ? (
-        <Card className="overflow-hidden border-none shadow-xl bg-card rounded-2xl p-12 text-center text-muted">
-          No templates found. Create a new one or click "Load Starter".
-        </Card>
-      ) : (
-        <div className="space-y-6">
-          {/* Category Tabs */}
-          <div className="flex flex-wrap gap-2 border-b border-border pb-4">
-            {groupedTemplates.map((group) => {
-              const tabId = String(group.category.id || 'uncategorized');
-              const isActive = activeCategoryTab === tabId;
-              return (
+      <div>
+        <Card className="p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <div>
+              <h2 className="text-xl font-bold text-slate-800">Email &amp; SMS Templates</h2>
+              <p className="text-sm text-slate-500 mt-1">
+                Manage and customize your transactional emails and SMS notifications.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <button
+                type="button"
+                onClick={() => setShowCategoryModal(true)}
+                className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-200 transition-all border border-slate-200 whitespace-nowrap cursor-pointer"
+              >
+                Manage Categories
+              </button>
+              <div className="relative">
                 <button
-                  key={tabId}
-                  onClick={() => setActiveCategoryTab(tabId)}
-                  className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
-                    isActive ? 'bg-primary text-white shadow-md' : 'bg-subtle text-muted hover:bg-border'
-                  }`}
+                  type="button"
+                  onClick={() => {
+                    if (onOpenChooser) {
+                      onOpenChooser('communication');
+                    } else {
+                      setShowTypeSelectionModal(!showTypeSelectionModal);
+                    }
+                  }}
+                  className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold shadow-sm transition text-sm shrink-0 cursor-pointer whitespace-nowrap"
                 >
-                  {group.category.name} ({group.templates.length})
+                  <PlusCircle size={18} /> + New Document
                 </button>
-              );
-            })}
+                {!onOpenChooser && showTypeSelectionModal && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setShowTypeSelectionModal(false)}
+                    />
+                    <div className="absolute top-full right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-200 z-50 overflow-hidden flex flex-col">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowTypeSelectionModal(false);
+                          setShowDefaultTemplateModal(true);
+                        }}
+                        className="flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors border-b border-slate-100 cursor-pointer"
+                      >
+                        <Mail size={16} className="text-blue-600" />
+                        <span className="text-sm font-bold text-slate-800">Email</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowTypeSelectionModal(false);
+                          handleOpenModal(null, 'sms');
+                        }}
+                        className="flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors cursor-pointer"
+                      >
+                        <MessageSquare size={16} className="text-emerald-600" />
+                        <span className="text-sm font-bold text-slate-800">SMS</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
 
-          <div className="space-y-8">
-            {groupedTemplates
-              .filter(group => String(group.category.id || 'uncategorized') === activeCategoryTab)
-              .map((group) => (
-              <div key={group.category.id || 'uncategorized'} className="space-y-3">
-                <div className="flex items-center justify-between px-2">
-                  <div className="flex items-center gap-2">
-                    <h4 className="text-xs font-black text-heading uppercase tracking-wider">
-                      {group.category.name}
-                    </h4>
-                    {group.category.description && (
-                    <span className="text-[10px] text-muted font-bold">
-                      · {group.category.description}
-                    </span>
-                  )}
-                </div>
-                <span className="text-[10px] text-muted font-black uppercase tracking-wider">
-                  {group.templates.length} {group.templates.length === 1 ? 'template' : 'templates'}
-                </span>
-              </div>
+          {/* Filter Bar */}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6">
+            <div className="relative flex-1 min-w-0">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+              <input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search templates..."
+                className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm font-medium rounded-xl pl-9 pr-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500/20"
+              />
+            </div>
+            <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 sm:gap-3">
+              <select
+                value={channelFilter}
+                onChange={(e) => setChannelFilter(e.target.value)}
+                className="bg-slate-50 border border-slate-200 text-slate-700 text-sm font-semibold rounded-xl px-3 sm:px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500/20"
+              >
+                <option value="all">All Channels</option>
+                <option value="email">Email</option>
+                <option value="sms">SMS</option>
+              </select>
+              <select
+                value={activeFilter}
+                onChange={(e) => setActiveFilter(e.target.value)}
+                className="bg-slate-50 border border-slate-200 text-slate-700 text-sm font-semibold rounded-xl px-3 sm:px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500/20"
+              >
+                <option value="all">All Status</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+              {!branchId && branches.length > 0 && (
+                <select
+                  value={branchFilter}
+                  onChange={(e) => handleChangeListBranch(e.target.value)}
+                  className="col-span-2 sm:col-span-1 bg-slate-50 border border-slate-200 text-slate-700 text-sm font-semibold rounded-xl px-3 sm:px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500/20"
+                >
+                  <option value="">All Branches</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
 
-              <Card className="overflow-hidden border-none shadow-xl shadow-border/50 bg-card rounded-2xl">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-subtle/50 border-b border-border">
-                        <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Template</th>
-                        <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Channel</th>
-                        <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Order</th>
-                        <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Status</th>
-                        <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-subtle">
-                      {group.templates.map((item) => (
-                        <tr
-                          key={item.id}
-                          onDragOver={(e) => handleTemplateDragOver(e, item)}
-                          onDrop={(e) => handleTemplateDrop(e, item)}
-                          className={`group transition-colors ${
-                            draggedTemplateId === item.id ? 'bg-primary-tint/10 opacity-70' : 'hover:bg-subtle/50'
-                          } ${dragOverTemplateId === item.id ? 'ring-2 ring-primary/20 bg-primary/5' : ''}`}
-                        >
-                          <td className="px-6 py-4">
-                            <div className="flex items-start gap-3">
-                              <button
-                                type="button"
-                                draggable={canSortTemplates && !isReordering}
-                                onDragStart={(e) => handleTemplateDragStart(e, item)}
-                                onDragEnd={handleTemplateDragEnd}
-                                className={`mt-0.5 inline-flex items-center justify-center rounded-md p-1 text-muted transition-colors ${
-                                  canSortTemplates && !isReordering ? 'cursor-grab active:cursor-grabbing hover:bg-card' : 'cursor-not-allowed opacity-50'
-                                }`}
-                                title={canSortTemplates ? 'Drag to reorder' : 'Clear search to reorder templates'}
-                                aria-label={`Drag ${item.name} to reorder`}
-                                aria-disabled={!canSortTemplates || isReordering}
-                              >
-                                <GripVertical size={14} />
-                              </button>
-                              <div className="flex flex-col">
-                                <span className="text-sm font-bold text-body">{item.name}</span>
-                                <span className="text-[0.625rem] font-mono text-muted uppercase">{item.template_key}</span>
-                              </div>
-                            </div>
-                          </td>
-	                          <td className="px-6 py-4">
-                            {(() => {
-                              const channelLabel = getChannelLabel(item.channel);
-                              const normalizedChannel = String(item.channel || '').toLowerCase();
-                              const isEmail = normalizedChannel === 'email';
-                              const isMultiChannel = normalizedChannel === 'email_sms';
-                              return (
-	                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.625rem] font-bold uppercase tracking-wider ${
-	                              isMultiChannel
-                                    ? 'bg-violet-100 text-violet-700'
-                                    : isEmail
-                                        ? 'bg-primary-tint text-primary'
-                                        : 'bg-status-booked-bg text-status-booked-text'
-	                            }`}>
-	                              {isMultiChannel ? (
-                                    <>
-                                      <Mail size={12} />
-                                      <MessageSquare size={12} />
-                                    </>
-                                  ) : isEmail ? (
-                                    <Mail size={12} />
-                                  ) : (
-                                    <MessageSquare size={12} />
-                                  )}
-	                              {channelLabel}
-	                            </span>
-                              );
-                            })()}
-	                          </td>
-                          <td className="px-6 py-4">
-                            <span className="inline-flex items-center rounded-full bg-subtle px-2.5 py-1 text-[0.625rem] font-bold uppercase tracking-wider text-body">
-                              #{Number(item.sort_order ?? 0)}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4">
+          {/* Category Tabs */}
+          {groupedTemplates.length > 1 && (
+            <div className="flex items-center gap-2 overflow-x-auto pb-3 mb-6 no-scrollbar -mx-1 px-1 sm:mx-0 sm:px-0 border-b border-slate-200">
+              {groupedTemplates.map((group) => {
+                const tabId = String(group.category.id || 'uncategorized');
+                const isActive = activeCategoryTab === tabId;
+                return (
+                  <button
+                    key={tabId}
+                    type="button"
+                    onClick={() => setActiveCategoryTab(tabId)}
+                    className={`px-4 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer shrink-0 ${
+                      isActive ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {group.category.name} ({group.templates.length})
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Table */}
+          {filteredItems.length === 0 ? (
+            <div className="border border-slate-100 rounded-2xl p-12 text-center text-slate-400">
+              No templates found. Create a new one or click "+ New Document".
+            </div>
+          ) : (
+            <div className="overflow-x-auto border border-slate-100 rounded-2xl">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-100 bg-slate-50/75 text-[11px] font-black uppercase tracking-wider text-slate-600">
+                    <th className="px-3 sm:px-6 py-3 sm:py-4">Template Name</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4">Channel</th>
+                    <th className="hidden md:table-cell px-6 py-4">Category</th>
+                    <th className="hidden lg:table-cell px-6 py-4">Branch</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4">Status</th>
+                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-sm">
+                  {(groupedTemplates.length > 1
+                    ? (groupedTemplates.find((g) => String(g.category.id || 'uncategorized') === activeCategoryTab)?.templates || [])
+                    : filteredItems
+                  ).map((item) => {
+                    const isEmail = String(item.channel || '').toLowerCase() === 'email';
+                    const categoryName = categories.find((c) => String(c.id) === String(item.category))?.name || 'Transactional';
+                    const branchName = branches.find((b) => String(b.id) === String(item.branch))?.name || (item.branch ? `Branch #${item.branch}` : 'All Branches');
+                    return (
+                      <tr
+                        key={item.id}
+                        onDragOver={(e) => handleTemplateDragOver(e, item)}
+                        onDrop={(e) => handleTemplateDrop(e, item)}
+                        className={`hover:bg-slate-50/60 transition-colors ${
+                          draggedTemplateId === item.id ? 'bg-blue-50/50 opacity-70' : ''
+                        } ${dragOverTemplateId === item.id ? 'ring-2 ring-blue-500/20 bg-blue-50/30' : ''}`}
+                      >
+                        <td className="px-3 sm:px-6 py-3 sm:py-4">
+                          <div className="flex items-center gap-2 sm:gap-3">
                             <button
                               type="button"
-                              onClick={() => handleToggleActive(item)}
-                              disabled={isSaving}
-                              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${item.is_active ? 'bg-primary' : 'bg-disabled'}`}
+                              draggable={canSortTemplates && !isReordering}
+                              onDragStart={(e) => handleTemplateDragStart(e, item)}
+                              onDragEnd={handleTemplateDragEnd}
+                              className={`p-1 text-slate-300 hover:text-slate-500 transition-colors ${
+                                canSortTemplates && !isReordering ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed opacity-40'
+                              }`}
+                              title={canSortTemplates ? 'Drag to reorder' : 'Clear search to reorder'}
+                              aria-label={`Drag ${item.name} to reorder`}
                             >
-                              <span className={`inline-block h-3 w-3 transform rounded-full bg-card transition-transform ${item.is_active ? 'translate-x-5' : 'translate-x-1'}`} />
+                              <GripVertical size={14} />
                             </button>
-                          </td>
-                          <td className="px-6 py-4 text-right relative">
+                            <div className={`p-1.5 sm:p-2 rounded-xl shrink-0 ${isEmail ? 'bg-blue-50 text-blue-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                              {isEmail ? <Mail size={16} /> : <MessageSquare size={16} />}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-800 text-xs sm:text-sm truncate max-w-[140px] xs:max-w-[180px] sm:max-w-none">{item.name}</div>
+                              <div className="text-[11px] font-normal text-slate-500 truncate max-w-[140px] xs:max-w-[180px] sm:max-w-none">{item.subject || item.template_key || 'No subject'}</div>
+                              {/* Mobile Sub-Badges for Category & Branch */}
+                              <div className="flex flex-wrap gap-1 mt-1 md:hidden">
+                                <span className="text-[10px] font-semibold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                                  {categoryName}
+                                </span>
+                                <span className="text-[10px] font-semibold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded lg:hidden">
+                                  {branchName}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-3 sm:px-6 py-3 sm:py-4">
+                          <span className={`px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-[11px] font-bold uppercase tracking-wider ${
+                            isEmail ? 'bg-blue-50 text-blue-700' : 'bg-emerald-50 text-emerald-700'
+                          }`}>
+                            {getChannelLabel(item.channel)}
+                          </span>
+                        </td>
+                        <td className="hidden md:table-cell px-6 py-4">
+                          <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 text-[11px] font-bold">
+                            {categoryName}
+                          </span>
+                        </td>
+                        <td className="hidden lg:table-cell px-6 py-4 text-xs font-semibold text-slate-600">
+                          {branchName}
+                        </td>
+                        <td className="px-3 sm:px-6 py-3 sm:py-4">
                           <button
-                              type="button"
-                              onClick={() => {
-                                if (item.channel === 'email') {
-                        navigate(`${basePath}/${item.id}/builder`);
-                                  return;
-                                }
-                                handleOpenModal(item);
-                              }}
-                              className="inline-flex items-center justify-center rounded-lg p-2 text-primary transition-all hover:bg-primary/5"
-                              title="Edit template"
-                              aria-label="Edit template"
-                              >
-                                <Edit2 size={18} />
-                              </button>
-                            {isProtectedDefaultTemplate(item) ? (
-                              <span
-                              className="ml-2 inline-flex items-center rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[0.625rem] font-black uppercase tracking-wider text-amber-700"
-                              title="Default template"
-                              aria-label="Default template locked"
-                            >
-                                <Lock size={16} />
+                            type="button"
+                            onClick={() => handleToggleActive(item)}
+                            disabled={isSaving}
+                            title={`Click to ${item.is_active ? 'deactivate' : 'activate'}`}
+                            className="focus:outline-hidden"
+                          >
+                            {item.is_active ? (
+                              <span className="inline-flex items-center gap-1.5 text-[11px] sm:text-xs font-bold text-emerald-600 bg-emerald-50 hover:bg-emerald-100 cursor-pointer px-2 sm:px-2.5 py-1 rounded-full transition-colors">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Active
                               </span>
                             ) : (
-                              <button
-                                type="button"
-                                onClick={() => handleDelete(item.id)}
-                                disabled={isDeleting}
-                                className="ml-2 inline-flex items-center justify-center rounded-lg p-2 text-rose-600 transition-all hover:bg-rose-50 disabled:opacity-50"
-                                title="Delete template"
-                                aria-label="Delete template"
-                              >
-                                <Trash2 size={18} />
-                              </button>
+                              <span className="inline-flex items-center gap-1.5 text-[11px] sm:text-xs font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 cursor-pointer px-2 sm:px-2.5 py-1 rounded-full transition-colors">
+                                <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span> Inactive
+                              </span>
                             )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </Card>
+                          </button>
+                        </td>
+                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-right space-x-1 sm:space-x-2 whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenModal(item, item.channel || 'email')}
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-indigo-600 hover:border-indigo-200 hover:bg-indigo-50 transition-colors cursor-pointer"
+                            title="Edit Template"
+                            aria-label="Edit template"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDuplicateRow(item)}
+                            disabled={isSaving}
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50 transition-colors disabled:opacity-50 cursor-pointer"
+                            title="Duplicate Template"
+                            aria-label="Duplicate template"
+                          >
+                            <Copy size={14} />
+                          </button>
+                          {isProtectedDefaultTemplate(item) ? (
+                            <span
+                              className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-amber-200 bg-amber-50 text-amber-700"
+                              title="Default template locked"
+                              aria-label="Default template locked"
+                            >
+                              <Lock size={14} />
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(item.id)}
+                              disabled={isDeleting}
+                              className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition-colors disabled:opacity-50 cursor-pointer"
+                              title="Delete Template"
+                              aria-label="Delete template"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          ))}
-        </div>
-        </div>
-      )}
+          )}
+        </Card>
+      </div>
 
-      {/* FULL PAGE EDITOR */}
-      {showModal && createPortal(
+      {/* Editor Modal for Automation */}
+      {isAutomationBuilder && showModal && createPortal(
         <div className="fixed inset-0 bg-white z-[100] flex flex-col overflow-hidden animate-in fade-in duration-300">
             {/* Header */}
             <div className="flex items-center justify-between p-5 md:px-8 border-b border-border bg-white shrink-0 z-20">
               <div>
-                <h3 className="text-2xl font-black text-heading tracking-tight">{(draft.id || isAutomationNotificationEditor) ? 'Edit Template' : 'New Template'}</h3>
-                <p className="text-sm font-medium text-muted">Configure your communication message and variables.</p>
+                <h3 className="text-2xl font-black text-heading tracking-tight">
+                  {(draft.id || isAutomationNotificationEditor) ? 'Edit Template' : 'New Template'}
+                </h3>
+                <p className="text-sm font-medium text-muted">
+                  Configure your communication message and variables.
+                </p>
               </div>
               <div className="flex items-center gap-3">
                 {isProtectedDefaultTemplate(draft) && (
@@ -1915,25 +2118,35 @@ const CommunicationTemplates = ({
                       setRestoreKey(k => k + 1);
                       flashMessage('success', 'Restored unsaved changes.');
                     }}
-                    className="px-4 py-2.5 bg-amber-100 text-amber-800 rounded-xl text-sm font-bold shadow-sm hover:bg-amber-200 transition-colors"
+                    className="px-4 py-2.5 bg-amber-100 text-amber-800 rounded-xl text-sm font-bold shadow-sm hover:bg-amber-200 transition-colors cursor-pointer"
                   >
                     Restore Unsaved Edits
                   </button>
                 )}
-                <button type="button" onClick={closeEditor} className="px-5 py-2.5 bg-subtle text-body rounded-xl text-sm font-bold hover:bg-border transition-colors">
+                <button
+                  type="button"
+                  onClick={closeEditor}
+                  className="px-5 py-2.5 bg-subtle text-body rounded-xl text-sm font-bold hover:bg-border transition-colors cursor-pointer"
+                >
                   Cancel
                 </button>
-                <button type="button" onClick={handleSave} disabled={isSaving} className="px-6 py-2.5 bg-primary text-white rounded-xl text-sm font-bold shadow-md hover:bg-[#003d2f] disabled:opacity-50 transition-all flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={isSaving}
+                  className="px-6 py-2.5 bg-primary text-white rounded-xl text-sm font-bold shadow-md hover:bg-[#003d2f] disabled:opacity-50 transition-all flex items-center gap-2 cursor-pointer"
+                >
                   {isSaving ? <Loader2 className="animate-spin" size={18} /> : null}
-                  {(draft.id || isAutomationNotificationEditor) ? 'Save Changes' : 'Create Template'}
+                  {(draft.id || isAutomationNotificationEditor) ? 'Save Changes' : 'Save Template'}
                 </button>
               </div>
             </div>
 
             {/* Body */}
             <div className="flex flex-1 overflow-hidden">
-              {/* Left Sidebar (Settings) */}
-              <div className="w-80 border-r border-border bg-slate-50/50 overflow-y-auto shrink-0 flex flex-col z-10 custom-scrollbar">
+              {/* Left Sidebar (Settings) - Preserved for Automation Builder */}
+              {isAutomationBuilder && (
+                <div className="w-80 border-r border-border bg-slate-50/50 overflow-y-auto shrink-0 flex flex-col z-10 custom-scrollbar">
                 <div className="p-6 space-y-8">
                   {/* Settings Group */}
                   <div className="space-y-4">
@@ -2141,95 +2354,120 @@ const CommunicationTemplates = ({
                   )}
                 </div>
               </div>
+              )}
 
               {/* Main Area (Editor) */}
               <div className="flex-1 flex flex-col bg-slate-100 overflow-hidden relative">
                 {/* Editor Header Toggle */}
                 <div className="flex items-center justify-between px-6 py-3 bg-white border-b border-border shrink-0 z-50 shadow-sm relative">
-                  <div className="flex items-center gap-4">
+                  {/* Left: Mode Toggle & Quick Variables */}
+                  <div className="flex items-center gap-3">
                     {(isAutomationBuilder ? automationEditorTab === 'email' : draft.channel === 'email') && (
                       <div className="flex bg-slate-100 p-1 rounded-xl border border-border">
                         <button
                           type="button"
                           onClick={() => setEditorMode('visual')}
-                          className={`px-5 py-1.5 text-xs font-black uppercase tracking-wider rounded-lg transition-all ${editorMode === 'visual' ? 'bg-white text-primary shadow-sm' : 'text-muted hover:text-body'}`}
+                          className={`px-5 py-1.5 text-xs font-black uppercase tracking-wider rounded-lg transition-all cursor-pointer ${editorMode === 'visual' ? 'bg-white text-primary shadow-sm' : 'text-muted hover:text-body'}`}
                         >
                           Visual Builder
                         </button>
                         <button
                           type="button"
                           onClick={() => setEditorMode('code')}
-                          className={`px-5 py-1.5 text-xs font-black uppercase tracking-wider rounded-lg transition-all ${editorMode === 'code' ? 'bg-white text-primary shadow-sm' : 'text-muted hover:text-body'}`}
+                          className={`px-5 py-1.5 text-xs font-black uppercase tracking-wider rounded-lg transition-all cursor-pointer ${editorMode === 'code' ? 'bg-white text-primary shadow-sm' : 'text-muted hover:text-body'}`}
                         >
                           HTML Code
                         </button>
                       </div>
                     )}
 
-                        <div className="relative">
-                          <button
-                            type="button"
-                            onMouseDown={(e) => {
-                              if (editorMode === 'visual') e.preventDefault();
-                            }}
-                            onClick={() => setShowVariableDropdown(!showVariableDropdown)}
-                            className="flex items-center gap-2 px-4 py-2 bg-white border border-border rounded-xl text-xs font-bold text-heading hover:bg-slate-50 transition-colors shadow-sm"
-                          >
-                            <Sparkles size={14} className="text-primary" /> Insert Variable <ChevronDown size={14} className="text-muted" />
-                          </button>
-
-                          {showVariableDropdown && (
-                            <div className="absolute top-full left-0 mt-2 w-64 bg-white border border-border rounded-xl shadow-xl z-50 overflow-hidden">
-                              <div className="p-2 border-b border-border">
-                                <div className="relative">
-                                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
-                                  <input
-                                    type="text"
-                                    placeholder="Search variables..."
-                                    value={variableSearch}
-                                    onChange={(e) => setVariableSearch(e.target.value)}
-                                    className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-transparent rounded-lg text-xs font-medium outline-none focus:border-primary/30 focus:bg-white transition-colors"
-                                  />
-                                </div>
-                              </div>
-                              <div className="max-h-60 overflow-y-auto custom-scrollbar p-1.5">
-                                {mergedQuickVariables
-                                  .filter(token => formatVariableName(token).toLowerCase().includes(variableSearch.toLowerCase()) || token.toLowerCase().includes(variableSearch.toLowerCase()))
-                                  .map((token) => (
-                                    <button
-                                      key={token}
-                                      type="button"
-                                      onMouseDown={(e) => e.preventDefault()}
-                                      onClick={() => {
-                                        insertVariableToken(token);
-                                        setShowVariableDropdown(false);
-                                        setVariableSearch('');
-                                      }}
-                                      className="w-full text-left px-3 py-2 text-[0.75rem] font-medium text-body hover:bg-primary/5 hover:text-primary rounded-lg transition-colors flex items-center justify-between group"
-                                      title={`Insert ${token}`}
-                                    >
-                                      <span>{formatVariableName(token)}</span>
-                                      <span className="text-[0.6rem] font-mono text-muted opacity-0 group-hover:opacity-100 transition-opacity">{token}</span>
-                                    </button>
-                                  ))}
-                                {mergedQuickVariables.filter(token => formatVariableName(token).toLowerCase().includes(variableSearch.toLowerCase()) || token.toLowerCase().includes(variableSearch.toLowerCase())).length === 0 && (
-                                  <div className="px-3 py-4 text-center text-xs text-muted">No variables found.</div>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    {(isAutomationBuilder ? automationMessageMode !== 'sms_only' : draft.channel === 'email') && (
+                    <div className="relative">
                       <button
-                          type="button"
-                          onClick={handlePreview}
-                          className="rounded-xl bg-primary/10 px-4 py-2 text-xs font-bold text-primary hover:bg-primary/20 transition-colors"
-                        >
-                          Preview Output
-                        </button>
+                        type="button"
+                        onMouseDown={(e) => {
+                          if (editorMode === 'visual') e.preventDefault();
+                        }}
+                        onClick={() => setShowVariableDropdown(!showVariableDropdown)}
+                        className="flex items-center gap-2 px-4 py-2 bg-white border border-border rounded-xl text-xs font-bold text-heading hover:bg-slate-50 transition-colors shadow-sm cursor-pointer"
+                      >
+                        <Sparkles size={14} className="text-primary" /> Insert Variable <ChevronDown size={14} className="text-muted" />
+                      </button>
+
+                      {showVariableDropdown && (
+                        <div className="absolute top-full left-0 mt-2 w-64 bg-white border border-border rounded-xl shadow-xl z-50 overflow-hidden">
+                          <div className="p-2 border-b border-border">
+                            <div className="relative">
+                              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+                              <input
+                                type="text"
+                                placeholder="Search variables..."
+                                value={variableSearch}
+                                onChange={(e) => setVariableSearch(e.target.value)}
+                                className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-transparent rounded-lg text-xs font-medium outline-none focus:border-primary/30 focus:bg-white transition-colors"
+                              />
+                            </div>
+                          </div>
+                          <div className="max-h-60 overflow-y-auto custom-scrollbar p-1.5">
+                            {mergedQuickVariables
+                              .filter(token => formatVariableName(token).toLowerCase().includes(variableSearch.toLowerCase()) || token.toLowerCase().includes(variableSearch.toLowerCase()))
+                              .map((token) => (
+                                <button
+                                  key={token}
+                                  type="button"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => {
+                                    insertVariableToken(token);
+                                    setShowVariableDropdown(false);
+                                    setVariableSearch('');
+                                  }}
+                                  className="w-full text-left px-3 py-2 text-[0.75rem] font-medium text-body hover:bg-primary/5 hover:text-primary rounded-lg transition-colors flex items-center justify-between group cursor-pointer"
+                                  title={`Insert ${token}`}
+                                >
+                                  <span>{formatVariableName(token)}</span>
+                                  <span className="text-[0.6rem] font-mono text-muted opacity-0 group-hover:opacity-100 transition-opacity">{token}</span>
+                                </button>
+                              ))}
+                            {mergedQuickVariables.filter(token => formatVariableName(token).toLowerCase().includes(variableSearch.toLowerCase()) || token.toLowerCase().includes(variableSearch.toLowerCase())).length === 0 && (
+                              <div className="px-3 py-4 text-center text-xs text-muted">No variables found.</div>
+                            )}
+                          </div>
+                        </div>
                       )}
                     </div>
+                  </div>
+
+                  {/* Right: Preview Output & Email Settings */}
+                  <div className="flex items-center gap-3">
+                    {(isAutomationBuilder ? automationMessageMode !== 'sms_only' : draft.channel === 'email') && (
+                      <button
+                        type="button"
+                        onClick={handlePreview}
+                        className="rounded-xl bg-primary/10 px-4 py-2 text-xs font-bold text-primary hover:bg-primary/20 transition-colors cursor-pointer"
+                      >
+                        Preview Output
+                      </button>
+                    )}
+                    {!isAutomationBuilder && (
+                      <button
+                        type="button"
+                        onClick={() => setIsEmailSettingsOpen((open) => !open)}
+                        className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs font-bold transition-all shadow-xs cursor-pointer ${
+                          isEmailSettingsOpen
+                            ? 'bg-primary text-white border-primary shadow-sm'
+                            : 'bg-white text-heading border-border hover:bg-slate-50 hover:border-slate-300'
+                        }`}
+                        title={draft.channel === 'sms' ? 'SMS Settings' : 'Email Settings'}
+                        aria-label={draft.channel === 'sms' ? 'SMS Settings' : 'Email Settings'}
+                      >
+                        {draft.channel === 'sms' ? <MessageSquare size={14} /> : <Settings2 size={14} className={isEmailSettingsOpen ? 'text-white' : 'text-primary'} />}
+                        <span>{draft.channel === 'sms' ? 'SMS Settings' : 'Email Settings'}</span>
+                        {(formErrors.name || formErrors.branch || formErrors.template_key || formErrors.channel || formErrors.subject) && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
 
                 {/* Editor Container */}
                 <div className="flex-1 overflow-hidden relative flex flex-col">
@@ -2248,9 +2486,20 @@ const CommunicationTemplates = ({
                             mode="email"
                             isOverlay={false}
                             draft={draft}
+                            branches={branches}
+                            onModeChange={(newMode) => patchDraftField('channel', newMode)}
+                            onSendTestEmail={handleSendTest}
+                            isSendingTest={isSendingTest}
                             onChange={(updated) => {
                               clearFieldError('body_html');
-                              setDraft((prev) => ({ ...prev, body_html: updated.body_html || updated.html_content || '' }));
+                              setDraft((prev) => ({
+                                ...prev,
+                                body_html: updated.body_html || updated.html_content || '',
+                                subject: updated.subject !== undefined ? updated.subject : prev.subject,
+                                category: updated.category !== undefined ? updated.category : prev.category,
+                                description: updated.description !== undefined ? updated.description : prev.description,
+                                name: updated.name !== undefined ? updated.name : prev.name,
+                              }));
                             }}
                           />
                         </div>
@@ -2311,45 +2560,278 @@ const CommunicationTemplates = ({
                 )}
               </div>
             </div>
+
+            {/* Email / SMS Settings Drawer (for Documents page) */}
+            {!isAutomationBuilder && isEmailSettingsOpen && (
+              <div className="fixed inset-0 z-[120] flex justify-end">
+                {/* Backdrop */}
+                <div
+                  className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity animate-in fade-in duration-200"
+                  onClick={() => setIsEmailSettingsOpen(false)}
+                />
+                {/* Slide-over panel */}
+                <div className="relative w-full max-w-md bg-white h-full shadow-2xl flex flex-col z-10 animate-in slide-in-from-right duration-300 border-l border-border">
+                  {/* Header */}
+                  <div className="flex items-center justify-between p-5 border-b border-border bg-slate-50/80 shrink-0">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2.5 rounded-xl bg-primary/10 text-primary">
+                        {draft.channel === 'sms' ? <MessageSquare size={20} /> : <Mail size={20} />}
+                      </div>
+                      <div>
+                        <h4 className="text-base font-black text-heading">
+                          {draft.channel === 'sms' ? 'SMS Settings' : 'Email Settings'}
+                        </h4>
+                        <p className="text-xs font-medium text-muted">
+                          Channel, category, subject & test sending
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsEmailSettingsOpen(false)}
+                      className="p-2 text-muted hover:text-heading hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                      aria-label="Close settings"
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
+
+                  {/* Scrollable Form Content */}
+                  <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+                    {/* Section: Email / SMS Configuration */}
+                    <div className="space-y-4">
+                      <h5 className="text-xs font-black uppercase tracking-wider text-heading pb-2 border-b border-border flex items-center gap-2">
+                        {draft.channel === 'sms' ? <MessageSquare size={14} className="text-primary" /> : <Mail size={14} className="text-primary" />}
+                        {draft.channel === 'sms' ? 'SMS Configuration' : 'Email Configuration'}
+                      </h5>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <Field label="Channel" error={formErrors.channel}>
+                          <select
+                            value={draft.channel}
+                            onChange={(e) => patchDraftField('channel', e.target.value)}
+                            className={`w-full px-4 py-2.5 bg-white border rounded-xl text-sm font-medium outline-none focus:ring-2 appearance-none ${formErrors.channel ? 'border-rose-300 focus:ring-rose-100' : 'border-border focus:ring-primary/20'}`}
+                            aria-invalid={Boolean(formErrors.channel)}
+                          >
+                            <option value="email">Email</option>
+                            <option value="sms">SMS</option>
+                          </select>
+                        </Field>
+
+                        <Field label="Category">
+                          <select
+                            value={draft.category || ''}
+                            onChange={(e) => setDraft((prev) => ({ ...prev, category: e.target.value ? Number(e.target.value) : null }))}
+                            className="w-full px-4 py-2.5 bg-white border border-border rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20 appearance-none"
+                          >
+                            <option value="">None</option>
+                            {categories.map((cat) => (
+                              <option key={cat.id} value={cat.id}>{cat.name}</option>
+                            ))}
+                          </select>
+                        </Field>
+                      </div>
+
+                      {draft.channel === 'email' && (
+                        <Field label="Email Subject" error={formErrors.subject}>
+                          <input
+                            value={draft.subject}
+                            onChange={(e) => patchDraftField('subject', e.target.value)}
+                            placeholder="Your Quote from {{branch_name}}"
+                            className={`w-full px-4 py-2.5 bg-white border rounded-xl text-sm font-medium outline-none focus:ring-2 ${formErrors.subject ? 'border-rose-300 focus:ring-rose-100' : 'border-border focus:ring-primary/20'}`}
+                            aria-invalid={Boolean(formErrors.subject)}
+                          />
+                        </Field>
+                      )}
+
+                      <Field label="Description">
+                        <input
+                          value={draft.description || ''}
+                          onChange={(e) => setDraft((prev) => ({ ...prev, description: e.target.value }))}
+                          placeholder="What this template is used for"
+                          className="w-full px-4 py-2.5 bg-white border border-border rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-primary/20"
+                        />
+                      </Field>
+                    </div>
+
+                    {/* Section: Testing (for Email) */}
+                    {draft.channel === 'email' && (
+                      <div className="pt-2 border-t border-border space-y-3">
+                        <h5 className="text-xs font-black uppercase tracking-wider text-heading flex items-center gap-1.5">
+                          <Mail size={14} className="text-primary" /> Testing
+                        </h5>
+                        <Field label="To Email" error={formErrors.testToEmail}>
+                          <input
+                            value={testToEmail}
+                            onChange={(e) => {
+                              clearFieldError('testToEmail');
+                              setTestToEmail(e.target.value);
+                            }}
+                            placeholder="customer@example.com"
+                            className={`w-full px-4 py-2.5 bg-white border rounded-xl text-sm font-medium outline-none focus:ring-2 ${formErrors.testToEmail ? 'border-rose-300 focus:ring-rose-100' : 'border-border focus:ring-primary/20'}`}
+                            aria-invalid={Boolean(formErrors.testToEmail)}
+                          />
+                        </Field>
+                        <button
+                          type="button"
+                          onClick={handleSendTest}
+                          disabled={isSendingTest}
+                          className="w-full inline-flex justify-center items-center gap-2 rounded-xl bg-subtle px-4 py-2.5 text-sm font-bold text-body hover:bg-border transition-colors disabled:opacity-60 cursor-pointer"
+                        >
+                          {isSendingTest ? <Loader2 size={16} className="animate-spin" /> : null} Send Test Email
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Section: Template Identity */}
+                    <div className="pt-2 border-t border-border space-y-4">
+                      <h5 className="text-xs font-black uppercase tracking-wider text-heading pb-2 border-b border-border flex items-center gap-2">
+                        <Settings2 size={14} className="text-primary" /> Template Information
+                      </h5>
+
+                      <Field label="Name" error={formErrors.name}>
+                        <input
+                          required
+                          value={draft.name}
+                          onChange={(e) => patchDraftField('name', e.target.value)}
+                          placeholder="Quote Sent"
+                          className={`w-full px-4 py-2.5 bg-white border rounded-xl text-sm font-medium outline-none focus:ring-2 ${formErrors.name ? 'border-rose-300 focus:ring-rose-100' : 'border-border focus:ring-primary/20'}`}
+                          aria-invalid={Boolean(formErrors.name)}
+                        />
+                      </Field>
+
+                      <Field label="Branch" error={formErrors.branch}>
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!branches.length) return;
+                              setShowBranchPicker((open) => !open);
+                            }}
+                            disabled={!branches.length}
+                            className={`flex w-full items-center justify-between gap-3 rounded-xl border bg-white px-4 py-2.5 text-left text-sm font-bold outline-none transition-all ${
+                              formErrors.branch ? 'border-rose-300 ring-2 ring-rose-100' : 'border-border hover:border-primary/30 focus:ring-2 focus:ring-primary/20'
+                            } ${!branches.length ? 'cursor-not-allowed opacity-70' : ''}`}
+                            aria-invalid={Boolean(formErrors.branch)}
+                          >
+                            <span className="flex min-w-0 items-center gap-2">
+                              <Building2 size={16} className="shrink-0 text-primary" />
+                              <span className="truncate text-heading">
+                                {selectedTemplateBranch?.name || 'Select branch'}
+                              </span>
+                            </span>
+                            <span className="flex shrink-0 items-center gap-1 text-[0.65rem] font-black uppercase tracking-wider text-primary">
+                              Change <ChevronDown size={14} className={showBranchPicker ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                            </span>
+                          </button>
+                          {showBranchPicker && branches.length > 0 && (
+                            <div className="absolute left-0 right-0 top-full z-30 mt-2 max-h-56 overflow-y-auto rounded-xl border border-border bg-white p-1.5 shadow-xl">
+                              {branches.map((branch) => {
+                                const isSelected = String(branch.id) === selectedTemplateBranchId;
+                                return (
+                                  <button
+                                    key={branch.id}
+                                    type="button"
+                                    onClick={() => handleChangeTemplateBranch(branch.id)}
+                                    className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm font-bold transition-colors ${
+                                      isSelected ? 'bg-primary/10 text-primary' : 'text-body hover:bg-slate-50'
+                                    }`}
+                                  >
+                                    <span className="truncate">{branch.name}</span>
+                                    {isSelected ? <CheckCircle2 size={14} /> : null}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </Field>
+
+                      <Field label="Template Key" error={formErrors.template_key}>
+                        <input
+                          list="communication-template-key-options"
+                          required
+                          value={draft.template_key}
+                          onChange={(e) => patchDraftField('template_key', e.target.value)}
+                          placeholder="quote_sent"
+                          className={`w-full px-4 py-2.5 bg-white border rounded-xl text-sm font-medium outline-none focus:ring-2 ${formErrors.template_key ? 'border-rose-300 focus:ring-rose-100' : 'border-border focus:ring-primary/20'}`}
+                          aria-invalid={Boolean(formErrors.template_key)}
+                        />
+                        <datalist id="communication-template-key-options">
+                          {filteredTemplateKeyOptions.map((item) => (
+                            <option key={`${item.key}-${(item.channels || []).join('-')}`} value={item.key}>
+                              {item.label}
+                            </option>
+                          ))}
+                        </datalist>
+                      </Field>
+                    </div>
+                  </div>
+
+                  {/* Footer */}
+                  <div className="p-4 border-t border-border bg-slate-50 flex items-center justify-end shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setIsEmailSettingsOpen(false)}
+                      className="px-5 py-2.5 bg-primary text-white rounded-xl text-sm font-bold shadow-md hover:bg-[#003d2f] transition-colors cursor-pointer"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
             </div>
           </div>,
         document.body
       )}
 
+      {/* Full Page Builder Overlay for Settings / Documents */}
+      {!isAutomationBuilder && isBuilderOpen ? (
+        <UnifiedTemplateBuilder
+          mode={String(draft.channel || '').toLowerCase() === 'sms' ? 'sms' : 'email'}
+          draft={draft}
+          onChange={(newDraft) => setDraft(newDraft)}
+          onSave={handleSaveDirect}
+          onBack={closeCommBuilder}
+          branches={branches}
+        />
+      ) : null}
+
       {showCategoryModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-heading/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <Card className="w-full max-w-lg p-0 overflow-hidden rounded-3xl border-0 shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="bg-primary text-white px-6 py-4 flex items-center justify-between">
-              <h3 className="font-black uppercase tracking-tight text-sm">Manage Categories</h3>
-              <button onClick={() => setShowCategoryModal(false)} className="text-white hover:opacity-85 text-lg font-bold">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <Card className="w-full max-w-lg p-0 overflow-hidden rounded-2xl sm:rounded-3xl border-0 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="bg-blue-600 text-white px-5 sm:px-6 py-3.5 sm:py-4 flex items-center justify-between">
+              <h3 className="font-black uppercase tracking-tight text-xs sm:text-sm">Manage Categories</h3>
+              <button onClick={() => setShowCategoryModal(false)} className="text-white/80 hover:text-white p-1 rounded-lg transition-colors cursor-pointer text-lg font-bold">
                 ✕
               </button>
             </div>
             
-            <div className="p-6 space-y-6">
+            <div className="p-4 sm:p-6 space-y-5 sm:space-y-6 max-h-[75vh] overflow-y-auto">
               {/* Add New Category Form */}
-              <div className="space-y-3 bg-slate-50 p-4 rounded-2xl border border-border">
-                <h4 className="text-xs font-black uppercase tracking-wider text-heading">Create New Category</h4>
-                <div className="space-y-3">
+              <div className="space-y-3 bg-slate-50 p-3.5 sm:p-4 rounded-2xl border border-slate-200">
+                <h4 className="text-xs font-black uppercase tracking-wider text-slate-800">Create New Category</h4>
+                <div className="space-y-2.5 sm:space-y-3">
                   <input
                     type="text"
                     placeholder="Category Name"
                     value={newCategoryName}
                     onChange={(e) => setNewCategoryName(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-white border border-border rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-primary/10"
+                    className="w-full px-3.5 py-2 sm:px-4 sm:py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
                   <input
                     type="text"
                     placeholder="Description (optional)"
                     value={newCategoryDesc}
                     onChange={(e) => setNewCategoryDesc(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-white border border-border rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-primary/10"
+                    className="w-full px-3.5 py-2 sm:px-4 sm:py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
                   <button
                     type="button"
                     onClick={handleCreateCategory}
                     disabled={isSavingCategory || !newCategoryName.trim()}
-                    className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-bold hover:bg-[#003d2f] disabled:opacity-50 transition-all active:scale-[0.98]"
+                    className="w-full py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 disabled:opacity-50 transition-all active:scale-[0.98] cursor-pointer"
                   >
                     {isSavingCategory ? <Loader2 size={16} className="animate-spin mx-auto" /> : 'Create Category'}
                   </button>
@@ -2358,21 +2840,21 @@ const CommunicationTemplates = ({
 
               {/* Existing Categories List */}
               <div className="space-y-3">
-                <h4 className="text-xs font-black uppercase tracking-wider text-muted">Existing Categories</h4>
+                <h4 className="text-xs font-black uppercase tracking-wider text-slate-500">Existing Categories</h4>
                 {categories.length === 0 ? (
-                  <p className="text-xs text-muted italic">No categories created yet.</p>
+                  <p className="text-xs text-slate-400 italic">No categories created yet.</p>
                 ) : (
-                  <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+                  <div className="max-h-52 overflow-y-auto space-y-2 pr-1">
                     {categories.map((cat) => (
-                      <div key={cat.id} className="flex items-center justify-between p-3 bg-card border border-border rounded-xl hover:bg-slate-50/50 transition">
-                        <div>
-                          <div className="text-sm font-bold text-heading">{cat.name}</div>
-                          {cat.description && <div className="text-xs text-muted mt-0.5">{cat.description}</div>}
+                      <div key={cat.id} className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50/50 transition">
+                        <div className="min-w-0 pr-2">
+                          <div className="text-sm font-bold text-slate-800 truncate">{cat.name}</div>
+                          {cat.description && <div className="text-xs text-slate-500 mt-0.5 truncate">{cat.description}</div>}
                         </div>
                         <button
                           type="button"
                           onClick={() => handleDeleteCategory(cat.id)}
-                          className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                          className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition shrink-0 cursor-pointer"
                           title="Delete Category"
                         >
                           <Trash2 size={16} />
@@ -2384,11 +2866,11 @@ const CommunicationTemplates = ({
               </div>
             </div>
 
-            <div className="flex justify-end bg-slate-50 px-6 py-4 border-t border-border">
+            <div className="flex justify-end bg-slate-50 px-5 sm:px-6 py-3.5 sm:py-4 border-t border-slate-200">
               <button
                 type="button"
                 onClick={() => setShowCategoryModal(false)}
-                className="px-5 py-2.5 bg-border text-body rounded-xl text-sm font-bold hover:bg-border/80 transition-all"
+                className="px-4 sm:px-5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-sm font-bold transition-all cursor-pointer"
               >
                 Close
               </button>
@@ -2398,18 +2880,18 @@ const CommunicationTemplates = ({
       )}
 
       {showDefaultTemplateModal && createPortal(
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-4xl rounded-[2rem] bg-white shadow-2xl overflow-hidden flex flex-col border border-border/50 max-h-[90vh]">
-            <div className="flex items-center justify-between p-6 border-b border-slate-100 shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 rounded-xl bg-primary/10 text-primary">
-                  <Mail size={24} />
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-2 sm:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-4xl rounded-2xl sm:rounded-[2rem] bg-white shadow-2xl overflow-hidden flex flex-col border border-border/50 max-h-[94vh] sm:max-h-[90vh]">
+            <div className="flex items-center justify-between p-4 sm:p-6 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                <div className="p-2 sm:p-2.5 rounded-xl bg-blue-50 text-blue-600 shrink-0">
+                  <Mail size={22} />
                 </div>
-                <div>
-                  <h3 className="text-xl font-black tracking-tight text-heading">
+                <div className="min-w-0">
+                  <h3 className="text-base sm:text-xl font-black tracking-tight text-slate-900 truncate">
                     {selectedDefaultTemplate ? 'Customize Template' : 'Choose a Starting Template'}
                   </h3>
-                  <p className="text-sm font-medium text-muted">
+                  <p className="text-xs sm:text-sm font-medium text-slate-500 truncate">
                     {selectedDefaultTemplate ? 'Select your preferred layout style and color theme.' : 'Select a template to customize or start from scratch.'}
                   </p>
                 </div>
@@ -2419,66 +2901,94 @@ const CommunicationTemplates = ({
                   setShowDefaultTemplateModal(false);
                   setTimeout(() => setSelectedDefaultTemplate(null), 300);
                 }}
-                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                className="p-1.5 sm:p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-colors shrink-0"
               >
                 <X size={20} />
               </button>
             </div>
+
+            {selectedDefaultTemplate && (
+              <div className="flex md:hidden border-b border-slate-200 bg-slate-50 px-4 pt-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setMobilePreviewTab('settings')}
+                  className={`flex-1 py-2 text-xs font-bold border-b-2 transition ${
+                    mobilePreviewTab === 'settings'
+                      ? 'border-blue-600 text-blue-600 bg-white rounded-t-lg shadow-xs'
+                      : 'border-transparent text-slate-500'
+                  }`}
+                >
+                  Customization
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMobilePreviewTab('preview')}
+                  className={`flex-1 py-2 text-xs font-bold border-b-2 transition ${
+                    mobilePreviewTab === 'preview'
+                      ? 'border-blue-600 text-blue-600 bg-white rounded-t-lg shadow-xs'
+                      : 'border-transparent text-slate-500'
+                  }`}
+                >
+                  Live Preview
+                </button>
+              </div>
+            )}
             
             {!selectedDefaultTemplate ? (
-              <div className="p-8 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 bg-slate-50/50 overflow-y-auto custom-scrollbar">
+              <div className="p-4 sm:p-6 md:p-8 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-6 bg-slate-50/50 overflow-y-auto custom-scrollbar">
                 {DEFAULT_EMAIL_TEMPLATES.map((tmpl) => (
                   <button
                     key={tmpl.id}
                     onClick={() => {
                       if (tmpl.id === 'blank') {
                         setShowDefaultTemplateModal(false);
-                        navigate(`${basePath}/new/builder`, { state: { draftData: { ...tmpl.draftData, body_html: '' } } });
+                        handleOpenModal({ ...tmpl.draftData, body_html: '' }, 'email');
                       } else {
                         setSelectedDefaultTemplate(tmpl);
+                        setMobilePreviewTab('settings');
                       }
                     }}
-                    className="flex flex-col text-left bg-white border border-slate-200 hover:border-primary/40 shadow-sm hover:shadow-xl hover:shadow-primary/5 p-6 rounded-2xl transition-all duration-300 group hover:-translate-y-1"
+                    className="flex flex-col text-left bg-white border border-slate-200 hover:border-blue-400 shadow-xs hover:shadow-xl hover:shadow-blue-500/5 p-4 sm:p-6 rounded-2xl transition-all duration-300 group hover:-translate-y-0.5 cursor-pointer"
                   >
-                    <div className="h-12 w-12 rounded-xl bg-slate-100 group-hover:bg-primary flex items-center justify-center mb-5 text-slate-500 group-hover:text-white transition-all duration-300">
-                      <tmpl.icon size={24} />
+                    <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-xl bg-slate-100 group-hover:bg-blue-600 flex items-center justify-center mb-3 sm:mb-5 text-slate-500 group-hover:text-white transition-all duration-300">
+                      <tmpl.icon size={22} />
                     </div>
-                    <h4 className="text-base font-black text-slate-900 mb-1.5 group-hover:text-primary transition-colors">{tmpl.name}</h4>
+                    <h4 className="text-sm sm:text-base font-black text-slate-900 mb-1 group-hover:text-blue-600 transition-colors">{tmpl.name}</h4>
                     <p className="text-xs font-medium text-slate-500 leading-relaxed">{tmpl.description}</p>
                   </button>
                 ))}
               </div>
             ) : (
               <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden bg-slate-50/50">
-                <div className="w-full md:w-1/3 p-6 border-r border-slate-200 overflow-y-auto custom-scrollbar bg-white flex flex-col">
-                  <div className="space-y-6 flex-1">
+                <div className={`w-full md:w-1/3 p-4 sm:p-6 border-r border-slate-200 overflow-y-auto custom-scrollbar bg-white flex flex-col ${mobilePreviewTab === 'preview' ? 'hidden md:flex' : 'flex'}`}>
+                  <div className="space-y-5 sm:space-y-6 flex-1">
                     <div>
-                      <label className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-3 block">Color Theme</label>
-                      <div className="grid grid-cols-2 gap-3">
+                      <label className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-2.5 sm:mb-3 block">Color Theme</label>
+                      <div className="grid grid-cols-2 gap-2 sm:gap-3">
                         {THEME_COLORS.map(color => (
                           <button
                             key={color.id}
                             onClick={() => setSelectedThemeColor(color.id)}
-                            className={'flex flex-col items-center p-3 rounded-xl border-2 transition-all ' + (selectedThemeColor === color.id ? 'border-primary bg-primary/5' : 'border-slate-100 hover:border-slate-200')}
+                            className={'flex flex-col items-center p-2.5 sm:p-3 rounded-xl border-2 transition-all cursor-pointer ' + (selectedThemeColor === color.id ? 'border-blue-600 bg-blue-50/40' : 'border-slate-100 hover:border-slate-200')}
                           >
-                            <div className={'w-8 h-8 rounded-full mb-2 ' + color.bg} />
+                            <div className={'w-7 h-7 sm:w-8 sm:h-8 rounded-full mb-1.5 sm:mb-2 ' + color.bg} />
                             <span className={'text-xs font-bold ' + (selectedThemeColor === color.id ? color.text : 'text-slate-600')}>{color.name}</span>
                           </button>
                         ))}
                       </div>
                     </div>
                     <div>
-                      <label className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-3 block">Layout Style</label>
-                      <div className="space-y-3">
+                      <label className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-2.5 sm:mb-3 block">Layout Style</label>
+                      <div className="space-y-2 sm:space-y-3">
                         {LAYOUT_STYLES.map(style => (
                           <button
                             key={style.id}
                             onClick={() => setSelectedLayoutStyle(style.id)}
-                            className={'w-full flex items-start p-4 rounded-xl border-2 transition-all text-left ' + (selectedLayoutStyle === style.id ? 'border-primary bg-primary/5' : 'border-slate-100 hover:border-slate-200')}
+                            className={'w-full flex items-start p-3 sm:p-4 rounded-xl border-2 transition-all text-left cursor-pointer ' + (selectedLayoutStyle === style.id ? 'border-blue-600 bg-blue-50/40' : 'border-slate-100 hover:border-slate-200')}
                           >
-                            <div className={'mt-0.5 w-4 h-4 rounded-full border-2 mr-3 flex-shrink-0 ' + (selectedLayoutStyle === style.id ? 'border-primary bg-primary' : 'border-slate-300')} />
+                            <div className={'mt-0.5 w-4 h-4 rounded-full border-2 mr-2.5 sm:mr-3 flex-shrink-0 ' + (selectedLayoutStyle === style.id ? 'border-blue-600 bg-blue-600' : 'border-slate-300')} />
                             <div>
-                              <div className={'text-sm font-bold ' + (selectedLayoutStyle === style.id ? 'text-primary' : 'text-slate-700')}>{style.name}</div>
+                              <div className={'text-sm font-bold ' + (selectedLayoutStyle === style.id ? 'text-blue-700' : 'text-slate-700')}>{style.name}</div>
                               <div className="text-xs text-slate-500 mt-0.5">{style.description}</div>
                             </div>
                           </button>
@@ -2487,36 +2997,36 @@ const CommunicationTemplates = ({
                     </div>
                   </div>
                   
-                  <div className="mt-8 space-y-3 pt-6 border-t border-slate-100">
+                  <div className="mt-6 sm:mt-8 space-y-2.5 sm:space-y-3 pt-4 sm:pt-6 border-t border-slate-100">
                     <button
                       onClick={() => {
                         const html = generateTemplateHtml(selectedDefaultTemplate.id, selectedThemeColor, selectedLayoutStyle);
                         setShowDefaultTemplateModal(false);
                         setTimeout(() => setSelectedDefaultTemplate(null), 300);
-                        navigate(`${basePath}/new/builder`, { state: { draftData: { ...selectedDefaultTemplate.draftData, body_html: html } } });
+                        handleOpenModal({ ...selectedDefaultTemplate.draftData, body_html: html }, 'email');
                       }}
-                      className="w-full py-3.5 bg-primary text-white rounded-xl text-sm font-bold hover:bg-[#003d2f] transition-all shadow-lg shadow-primary/20 active:scale-[0.98]"
+                      className="w-full py-3 sm:py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold transition-all shadow-md shadow-blue-600/20 active:scale-[0.98] cursor-pointer"
                     >
                       Use This Template
                     </button>
                     <button
                       onClick={() => setSelectedDefaultTemplate(null)}
-                      className="w-full py-3.5 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-50 transition-all active:scale-[0.98]"
+                      className="w-full py-2.5 sm:py-3.5 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-50 transition-all active:scale-[0.98] cursor-pointer"
                     >
                       Back to Templates
                     </button>
                   </div>
                 </div>
                 
-                <div className="hidden md:flex flex-1 p-8 items-center justify-center bg-slate-100/50 overflow-y-auto custom-scrollbar">
-                  <div className="w-full h-full max-w-2xl bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-                    <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full bg-rose-400"></div>
-                      <div className="w-3 h-3 rounded-full bg-amber-400"></div>
-                      <div className="w-3 h-3 rounded-full bg-emerald-400"></div>
+                <div className={`flex-1 p-3 sm:p-6 md:p-8 items-center justify-center bg-slate-100/50 overflow-y-auto custom-scrollbar ${mobilePreviewTab === 'settings' ? 'hidden md:flex' : 'flex'}`}>
+                  <div className="w-full h-full max-w-2xl bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden flex flex-col min-h-[300px]">
+                    <div className="bg-slate-50 px-3 sm:px-4 py-2.5 sm:py-3 border-b border-slate-200 flex items-center gap-2">
+                      <div className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-rose-400"></div>
+                      <div className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-amber-400"></div>
+                      <div className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-emerald-400"></div>
                       <span className="ml-2 text-xs font-medium text-slate-400">Live Preview</span>
                     </div>
-                    <div className="p-4 flex-1 overflow-y-auto custom-scrollbar bg-slate-50" dangerouslySetInnerHTML={{ __html: generateTemplateHtml(selectedDefaultTemplate.id, selectedThemeColor, selectedLayoutStyle) }} />
+                    <div className="p-3 sm:p-4 flex-1 overflow-y-auto overflow-x-auto custom-scrollbar bg-slate-50 [&_table]:max-w-full [&_img]:max-w-full" dangerouslySetInnerHTML={{ __html: generateTemplateHtml(selectedDefaultTemplate.id, selectedThemeColor, selectedLayoutStyle) }} />
                   </div>
                 </div>
               </div>
@@ -2530,8 +3040,8 @@ const CommunicationTemplates = ({
 };
 
 const Field = ({ label, children, error = '' }) => (
-  <div className="space-y-1.5">
-    <label className="text-[0.625rem] font-bold uppercase tracking-widest text-muted ml-1">{label}</label>
+  <label className="space-y-1.5 block">
+    <span className="text-[0.625rem] font-bold uppercase tracking-widest text-muted ml-1 block">{label}</span>
     {children}
     {error ? (
       <div className="flex items-start gap-1.5 px-1 text-[0.68rem] font-bold leading-snug text-rose-600">
@@ -2539,7 +3049,7 @@ const Field = ({ label, children, error = '' }) => (
         <span>{error}</span>
       </div>
     ) : null}
-  </div>
+  </label>
 );
 
 export default CommunicationTemplates;

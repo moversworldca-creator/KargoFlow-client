@@ -152,4 +152,67 @@ describe("Blank Page Interactive Mouse Drag & Click-to-Type Creation", () => {
       0
     );
   });
+
+  it.each(["estimate", "invoice", "cc_auth", "bol", "contract"])(
+    "adds a component from the paged canvas menu for %s templates",
+    (mode) => {
+      const handleAddWidget = vi.fn();
+
+      render(
+        <DocumentCanvas
+          mode={mode}
+          modeConfig={{ canvasType: "paged" }}
+          pages={[{ id: "p1", name: "Page 1", items: [] }]}
+          items={[]}
+          onAddWidgetClick={handleAddWidget}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Add Component Menu" }));
+      expect(screen.getByRole("button", { name: "Add Component Menu" })).toHaveAttribute(
+        "aria-expanded",
+        "true"
+      );
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Text Block Editable multiline paragraph",
+        })
+      );
+
+      expect(handleAddWidget).toHaveBeenCalledWith({
+        label: "Text Block",
+        type: "text",
+      });
+      expect(screen.getByRole("button", { name: "Add Component Menu" })).toHaveAttribute(
+        "aria-expanded",
+        "false"
+      );
+    }
+  );
+
+  it("adds the selected component from the email canvas menu", () => {
+    const handleAddWidget = vi.fn();
+
+    render(
+      <DocumentCanvas
+        mode="email"
+        modeConfig={{ canvasType: "email" }}
+        items={[]}
+        onAddWidgetClick={handleAddWidget}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Component Menu" }));
+    fireEvent.click(screen.getByRole("button", { name: /Highlight Callout/ }));
+
+    expect(handleAddWidget).toHaveBeenCalledWith({
+      label: "Callout Box",
+      type: "callout",
+    });
+    expect(screen.getByRole("button", { name: "Add Component Menu" })).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    );
+  });
+
 });

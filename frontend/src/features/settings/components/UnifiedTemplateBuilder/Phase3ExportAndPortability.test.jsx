@@ -260,5 +260,21 @@ describe("Phase 3: Schema Validation Engine", () => {
     expect(compiledHtml).toContain("color: #1e40af;");
     expect(compiledHtml).toContain("Styled Freight Cell");
   });
-});
 
+  it("keeps native print layout rules from collapsing custom HTML columns", () => {
+    const compiledHtml = compileDocumentToHtml({
+      name: "Custom HTML Print Layout",
+      items: [{
+        id: "custom-html",
+        type: "html",
+        htmlContent: '<div class="flex-layout"><div>Company name</div><div>Estimate details</div></div>',
+        cssContent: ".flex-layout { display: flex; justify-content: space-between; }",
+      }],
+    });
+
+    expect(compiledHtml).toContain('class="kargoflow-block kargoflow-html-block html-doc-custom-html"');
+    expect(compiledHtml).toContain(".kargoflow-block:not(.kargoflow-html-block)");
+    expect(compiledHtml).not.toContain("\n    table {");
+    expect(compiledHtml).not.toContain("\n    th, td {");
+  });
+});

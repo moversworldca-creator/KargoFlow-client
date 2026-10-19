@@ -491,6 +491,28 @@ export function createContentLayoutWidget(
 export function duplicateItem(item) {
   const copy = deepClone(item);
   copy.id = createId(item.type);
+  if (copy.type === "builder_block") {
+    const duplicateBackendBlock = (block) => {
+      const duplicated = { ...block, key: createId("block") };
+      if (duplicated.type === "conditional" && duplicated.props?.rule_key) {
+        duplicated.props = { ...duplicated.props, rule_key: `rule_${duplicated.key}` };
+      }
+      if (["signature", "initial", "form_field"].includes(duplicated.type) && duplicated.props?.field_key) {
+        duplicated.props = { ...duplicated.props, field_key: `field_${duplicated.key}` };
+      }
+      if (Array.isArray(duplicated.children)) {
+        duplicated.children = duplicated.children.map(duplicateBackendBlock);
+      }
+      return duplicated;
+    };
+    copy.children = (copy.children || []).map(duplicateBackendBlock);
+    if (copy.blockType === "conditional" && copy.props?.rule_key) {
+      copy.props = { ...copy.props, rule_key: `rule_${copy.id}` };
+    }
+    if (["signature", "initial", "form_field"].includes(copy.blockType) && copy.props?.field_key) {
+      copy.props = { ...copy.props, field_key: `field_${copy.id}` };
+    }
+  }
   copy.fields = (copy.fields || []).map((value) => ({
     ...value,
     id: createId("field"),
@@ -740,9 +762,19 @@ export const widgetType = (label) => {
 };
 
 export function createWidget(label, customOptions = {}) {
-  const type = widgetType(label);
+  const type =
+    typeof customOptions?.type === "string"
+      ? customOptions.type
+      : widgetType(label);
   if (type === "html") {
-    return createHtmlWidget(customOptions?.value, undefined, label);
+    const hasInitialHtml =
+      customOptions?.htmlContent !== undefined ||
+      customOptions?.value !== undefined;
+    return createHtmlWidget(
+      customOptions?.htmlContent ?? customOptions?.value,
+      customOptions?.cssContent ?? (hasInitialHtml ? "" : undefined),
+      label
+    );
   }
   if (type === "table") {
     return createTableWidget(
@@ -861,4 +893,3 @@ export function createWidget(label, customOptions = {}) {
 
   return base;
 }
-

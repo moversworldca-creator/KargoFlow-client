@@ -23,7 +23,13 @@ vi.mock('../../../services/api', () => ({
   },
   createEstimatePortalTemplate: vi.fn(),
   deactivateEstimatePortalTemplate: vi.fn(),
+  getBuilderMeta: vi.fn().mockResolvedValue({ data: { blocks: [] } }),
   getBranches: vi.fn(),
+  getBuilderVariables: vi.fn().mockResolvedValue([]),
+  getBuilderBlocks: vi.fn().mockResolvedValue([]),
+  getBuilderSettings: vi.fn().mockResolvedValue({ data: {} }),
+  getBuilderTemplateDraft: vi.fn().mockResolvedValue({ data: null }),
+  saveBuilderTemplateDraft: vi.fn().mockResolvedValue({ data: null }),
   getDocumentVariableRegistry: vi.fn(),
   getEstimatePortalTemplates: vi.fn(),
   getTemplateVariables: vi.fn(),
@@ -54,15 +60,15 @@ describe('EstimatePortalTemplates', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^settings$/i }));
     const typeSelect = screen.getByLabelText('Template Type');
-    expect(typeSelect).toHaveValue('moving');
+    expect(typeSelect).toHaveValue('binding');
 
-    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^save template$/i }));
 
     await waitFor(() => {
       expect(createEstimatePortalTemplate).toHaveBeenCalledWith(expect.objectContaining({
         name: 'Custom Estimate Portal',
         branch: 1,
-        template_type: 'moving',
+        template_type: 'binding',
         version: 1,
       }));
     });

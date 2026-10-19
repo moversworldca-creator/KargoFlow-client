@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Eye,
   X,
@@ -14,10 +14,12 @@ import {
   Monitor,
   Tablet,
   Smartphone,
+  RotateCw,
   Pencil,
   GripVertical,
 } from "lucide-react";
 import DocumentBlock from "../components/DocumentBlock";
+import RightPropertiesPanel from "../components/RightPropertiesPanel";
 import { getPageDimensions, getDocumentPages } from "../model/templateModel";
 import { compileDocumentToHtml } from "../model/htmlCompiler";
 
@@ -50,6 +52,70 @@ const resolveSmsVariables = (text, resolve) => {
   });
 };
 
+function ScaledPreviewPage({ width, minHeight, zoom, children }) {
+  const contentRef = useRef(null);
+  const [contentHeight, setContentHeight] = useState(minHeight);
+  const scale = zoom / 100;
+
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content) return undefined;
+
+    const measureContent = () => {
+      let measuredHeight = content.offsetHeight;
+      content.querySelectorAll("*").forEach((element) => {
+        const elementRect = element.getBoundingClientRect();
+        const contentRect = content.getBoundingClientRect();
+        measuredHeight = Math.max(measuredHeight, (elementRect.bottom - contentRect.top) / scale);
+      });
+      const nextHeight = Math.max(minHeight, Math.ceil(measuredHeight));
+      setContentHeight((currentHeight) => currentHeight === nextHeight ? currentHeight : nextHeight);
+    };
+
+    measureContent();
+    const resizeObserver = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(measureContent)
+      : null;
+    resizeObserver?.observe(content);
+    content.querySelectorAll("*").forEach((element) => resizeObserver?.observe(element));
+
+    const mutationObserver = typeof MutationObserver !== "undefined"
+      ? new MutationObserver(() => {
+          content.querySelectorAll("*").forEach((element) => resizeObserver?.observe(element));
+          measureContent();
+        })
+      : null;
+    mutationObserver?.observe(content, { childList: true, subtree: true, attributes: true });
+
+    return () => {
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
+    };
+  }, [width, minHeight, scale]);
+
+  return (
+    <div
+      className="preview-page-scale-frame shrink-0"
+      style={{
+        width: `${(width * zoom) / 100}px`,
+        height: `${(contentHeight * zoom) / 100}px`,
+      }}
+    >
+      <div
+        ref={contentRef}
+        className="flex flex-col items-center"
+        style={{
+          width: `${width}px`,
+          transform: `scale(${scale})`,
+          transformOrigin: "top left",
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export default function PreviewModal({
   isOpen,
   doc,
@@ -61,6 +127,7 @@ export default function PreviewModal({
   onExportJson,
   onUpdateDoc = () => {},
   onUpdateItem = () => {},
+  onOpenHtmlEditor = () => {},
   onDeleteItem = () => {},
   onDuplicateItem = () => {},
 }) {
@@ -79,6 +146,54 @@ export default function PreviewModal({
   const [dragOverTarget, setDragOverTarget] = useState(null);
   const [selectedItemId, setSelectedItemId] = useState(null);
   const [selection, setSelection] = useState(null);
+  const previewViewportRef = useRef(null);
+  const hasDocument = Boolean(doc);
+  const effectivePageSizeForFit = doc?.settings?.pageSize || pageSize || "A4";
+  const effectiveOrientationForFit = doc?.settings?.orientation || orientation || "Portrait";
+
+  useEffect(() => {
+    if (!isOpen || !hasDocument || ["email", "sms"].includes(mode)) return undefined;
+    const viewport = previewViewportRef.current;
+    if (!viewport) return undefined;
+
+    const fitToViewport = () => {
+      const styles = window.getComputedStyle(viewport);
+      const horizontalPadding =
+        (Number.parseFloat(styles.paddingLeft) || 0) +
+        (Number.parseFloat(styles.paddingRight) || 0);
+      const verticalPadding =
+        (Number.parseFloat(styles.paddingTop) || 0) +
+        (Number.parseFloat(styles.paddingBottom) || 0);
+      const availableWidth = viewport.clientWidth - horizontalPadding;
+      const availableHeight = viewport.clientHeight - verticalPadding;
+      if (availableWidth <= 0 || availableHeight <= 0) return;
+
+      const dimensions = getPageDimensions(effectivePageSizeForFit, effectiveOrientationForFit);
+      const targetWidth =
+        devicePreview === "mobile" ? 375 : devicePreview === "tablet" ? 768 : dimensions.width;
+      const fitWidth = (availableWidth / targetWidth) * 92;
+      const fitHeight = (availableHeight / dimensions.height) * 92;
+      setZoom(Math.min(100, Math.max(30, Math.round(Math.min(fitWidth, fitHeight)))));
+    };
+
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(fitToViewport) : null;
+    observer?.observe(viewport);
+    const resizeFrame = window.requestAnimationFrame(fitToViewport);
+    if (!observer) window.addEventListener("resize", fitToViewport);
+
+    return () => {
+      window.cancelAnimationFrame(resizeFrame);
+      observer?.disconnect();
+      if (!observer) window.removeEventListener("resize", fitToViewport);
+    };
+  }, [
+    isOpen,
+    hasDocument,
+    mode,
+    effectivePageSizeForFit,
+    effectiveOrientationForFit,
+    devicePreview,
+  ]);
 
   if (!isOpen || !doc) return null;
 
@@ -88,6 +203,7 @@ export default function PreviewModal({
   const pageDims = getPageDimensions(effPageSize, effOrientation);
   const docPages = getDocumentPages(doc);
   const html = compileDocumentToHtml(doc, mode, effPageSize, effOrientation);
+  const selectedPreviewItem = (doc.items || []).find((item) => item.id === selectedItemId);
 
   // Handle Drag Reorder Inside Preview
   const handleDropInPreview = (e, targetPageIndex, targetItemIndex) => {
@@ -289,6 +405,25 @@ export default function PreviewModal({
 
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {/* Device preview toggles for all document and messaging modes */}
+            {!["email", "sms"].includes(mode) && (
+              <button
+                type="button"
+                onClick={() =>
+                  onUpdateDoc({
+                    ...doc,
+                    settings: {
+                      ...(doc.settings || {}),
+                      orientation: isLandscape ? "Portrait" : "Landscape",
+                    },
+                  })
+                }
+                className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition"
+                title={`Rotate page to ${isLandscape ? "Portrait" : "Landscape"}`}
+                aria-label={`Rotate page to ${isLandscape ? "Portrait" : "Landscape"}`}
+              >
+                <RotateCw size={15} />
+              </button>
+            )}
             <div className="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200">
               <button
                 type="button"
@@ -469,17 +604,19 @@ export default function PreviewModal({
         </div>
 
         {/* Content Body Canvas */}
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+        <div className="flex flex-1 flex-col min-w-0 min-h-0 overflow-hidden">
         {mode === "sms" ? (
-          <div className="flex-1 bg-slate-200/70 p-8 overflow-y-auto flex flex-col items-center justify-start">
-            <div
-              style={{
-                width: devicePreview === "mobile" ? 340 : devicePreview === "tablet" ? 560 : 600,
-                transform: zoom !== 100 ? `scale(${zoom / 100})` : undefined,
-                transformOrigin: "top center",
-                transition: "width 0.2s ease, transform 0.15s ease",
-              }}
-              className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden mb-12 flex flex-col"
+          <div
+            className="flex-1 min-h-0 bg-slate-200/70 p-4 sm:p-8 overflow-auto overscroll-contain flex flex-col items-center justify-start"
+            data-testid="preview-canvas-viewport"
+          >
+            <ScaledPreviewPage
+              width={devicePreview === "mobile" ? 340 : devicePreview === "tablet" ? 560 : 600}
+              minHeight={0}
+              zoom={zoom}
             >
+              <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden mb-12 flex flex-col">
               {/* Clean Header Bar */}
               <div className="px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2.5">
@@ -514,19 +651,20 @@ export default function PreviewModal({
                 </div>
                 <div className="text-right text-[10px] text-slate-400 mt-1.5 pr-1">Just now</div>
               </div>
-            </div>
+              </div>
+            </ScaledPreviewPage>
           </div>
         ) : mode === "email" ? (
-          <div className="flex-1 bg-slate-200/70 p-8 overflow-y-auto overflow-x-auto flex flex-col items-center">
-            <div
-              style={{
-                width: devicePreview === "mobile" ? 360 : devicePreview === "tablet" ? 560 : 600,
-                transform: zoom !== 100 ? `scale(${zoom / 100})` : undefined,
-                transformOrigin: "top center",
-                transition: "width 0.25s ease, transform 0.15s ease",
-              }}
-              className="bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden mb-12"
+          <div
+            className="flex-1 min-h-0 bg-slate-200/70 p-4 sm:p-8 overflow-auto overscroll-contain flex flex-col items-center"
+            data-testid="preview-canvas-viewport"
+          >
+            <ScaledPreviewPage
+              width={devicePreview === "mobile" ? 360 : devicePreview === "tablet" ? 560 : 600}
+              minHeight={0}
+              zoom={zoom}
             >
+              <div className="bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden mb-12">
               {/* Simulated Email Envelope Header */}
               <div className="p-4 bg-slate-50 border-b border-slate-200 text-xs space-y-1.5">
                 <div className="flex items-center gap-2">
@@ -581,7 +719,10 @@ export default function PreviewModal({
                               item={item}
                               isSelected={isInteractivePreview && selectedItemId === item.id}
                               onSelect={() => {
-                                if (isInteractivePreview) setSelectedItemId(item.id);
+                                if (isInteractivePreview) {
+                                  setSelectedItemId(item.id);
+                                  setSelection({ itemId: item.id, part: null });
+                                }
                               }}
                               onUpdate={handleUpdateBlockInPreview}
                               onDelete={() => handleDeleteBlockInPreview(item.id)}
@@ -592,9 +733,10 @@ export default function PreviewModal({
                               isLast={itemIndex === emailItems.length - 1}
                               preview={!isInteractivePreview}
                               resolveVariables={resolveVariables}
+                              sampleData={resolveVariables}
                               selection={selection}
-                              onSelectPart={(part) => setSelection({ blockId: item.id, part })}
-                              onOpenHtmlEditor={() => {}}
+                              onSelectPart={(part) => setSelection({ itemId: item.id, part })}
+                              onOpenHtmlEditor={() => onOpenHtmlEditor(item)}
                             />
                           </div>
                         </React.Fragment>
@@ -628,59 +770,73 @@ export default function PreviewModal({
                 })()}
               </div>
             </div>
+            </ScaledPreviewPage>
           </div>
         ) : (
           /* Scaled Sheet Preview Canvas */
-          <div className="flex-1 bg-slate-200/70 p-4 sm:p-8 overflow-y-auto overflow-x-auto flex justify-center items-start">
+          <div
+            ref={previewViewportRef}
+            className="flex-1 min-w-0 min-h-0 bg-slate-200/70 p-4 sm:p-8 overflow-y-auto overflow-x-auto flex justify-center items-start"
+            data-testid="preview-canvas-viewport"
+          >
             <div
               style={{
-                transform: `scale(${zoom / 100})`,
-                transformOrigin: "top center",
-                transition: "transform 0.15s ease",
-                marginBottom: `${Math.max(0, pageDims.height * (zoom / 100 - 1) * docPages.length)}px`,
+                gap: "96px",
               }}
-              className="flex flex-col items-center gap-8 w-fit"
+              className="flex flex-col items-center w-fit"
+              data-testid="preview-page-stack"
             >
               {docPages.map((page, pageIndex) => {
                 const isMobileFrame = devicePreview === "mobile";
                 const isTabletFrame = devicePreview === "tablet";
-                const frameWidth = isMobileFrame ? 375 : isTabletFrame ? 768 : pageDims.width;
+                const pageOrientation = page.orientation || effOrientation;
+                const pageFormat = page.pageSize || effPageSize;
+                const pageDimensions = getPageDimensions(pageFormat, pageOrientation);
+                const frameWidth = isMobileFrame ? 375 : isTabletFrame ? 768 : pageDimensions.width;
 
                 return (
-                  <div
+                  <ScaledPreviewPage
                     key={page.id || `page-${pageIndex}`}
-                    style={{ width: `${frameWidth}px`, maxWidth: "100%" }}
-                    className={`flex flex-col items-center mx-auto ${
-                      isMobileFrame
-                        ? "border-[6px] border-slate-700 rounded-3xl overflow-hidden shadow-2xl bg-slate-100"
-                        : isTabletFrame
-                        ? "border-[4px] border-slate-500 rounded-2xl overflow-hidden shadow-2xl bg-slate-100"
-                        : ""
-                    }`}
-                    data-testid={`preview-page-${pageIndex + 1}`}
+                    width={frameWidth}
+                    minHeight={18 + 8 + pageDimensions.height}
+                    zoom={zoom}
                   >
+                    <div
+                      className={`flex flex-col items-center ${
+                        isMobileFrame
+                          ? "border-[6px] border-slate-700 rounded-3xl overflow-hidden shadow-2xl bg-slate-100"
+                          : isTabletFrame
+                          ? "border-[4px] border-slate-500 rounded-2xl overflow-hidden shadow-2xl bg-slate-100"
+                          : ""
+                      }`}
+                      data-testid={`preview-page-${pageIndex + 1}`}
+                    >
                     {/* Page Indicator Tag */}
                     <div className="self-start text-[11px] font-semibold text-slate-500 mb-2 px-1 flex items-center justify-between w-full no-print">
                       <span>
-                        Page {pageIndex + 1} of {docPages.length} &bull; {effPageSize} ({effOrientation})
+                        Page {pageIndex + 1} of {docPages.length} &bull; {pageFormat} ({pageOrientation})
                         {isMobileFrame ? " — Mobile 375px" : isTabletFrame ? " — Tablet 768px" : ""}
                       </span>
                       <span className="text-[10px] text-slate-400 font-mono">
-                        {frameWidth}px × {pageDims.height}px
+                        {pageDimensions.width}px × {pageDimensions.height}px
                       </span>
                     </div>
 
                     {/* Physical Printable Page Sheet */}
                     <article
                       style={{
-                        width: isMobileFrame ? "375px" : isTabletFrame ? "768px" : `${pageDims.width}px`,
-                        minHeight: `${pageDims.height}px`,
+                        width: isMobileFrame ? "375px" : isTabletFrame ? "768px" : `${pageDimensions.width}px`,
+                        minHeight: `${pageDimensions.height}px`,
                         padding: isMobileFrame ? "24px 16px 24px" : isTabletFrame ? "36px 32px 32px" : "58px 60px 42px",
                         boxSizing: "border-box",
                         backgroundColor: "#ffffff",
                         fontSize: doc.settings?.fontSize ? `${doc.settings.fontSize}px` : undefined,
                       }}
                       className="preview-modal-sheet document preview clean-preview-doc bg-white shadow-2xl rounded-xs space-y-6 transition-all box-border max-w-full border border-slate-300/80"
+                      data-page-orientation={pageOrientation}
+                      data-page-width={pageDimensions.width}
+                      data-page-height={pageDimensions.height}
+                      data-testid={`preview-sheet-${pageIndex + 1}`}
                     >
                       {(() => {
                         const pageItems = (page.items || []).filter((it) => it.visible !== false);
@@ -714,7 +870,10 @@ export default function PreviewModal({
                                     item={item}
                                     isSelected={isInteractivePreview && selectedItemId === item.id}
                                     onSelect={() => {
-                                      if (isInteractivePreview) setSelectedItemId(item.id);
+                                      if (isInteractivePreview) {
+                                        setSelectedItemId(item.id);
+                                        setSelection({ itemId: item.id, part: null });
+                                      }
                                     }}
                                     onUpdate={handleUpdateBlockInPreview}
                                     onDelete={() => handleDeleteBlockInPreview(item.id)}
@@ -725,9 +884,10 @@ export default function PreviewModal({
                                     isLast={itemIndex === pageItems.length - 1}
                                     preview={!isInteractivePreview}
                                     resolveVariables={resolveVariables}
+                                    sampleData={resolveVariables}
                                     selection={selection}
-                                    onSelectPart={(part) => setSelection({ blockId: item.id, part })}
-                                    onOpenHtmlEditor={() => {}}
+                                    onSelectPart={(part) => setSelection({ itemId: item.id, part })}
+                                    onOpenHtmlEditor={() => onOpenHtmlEditor(item)}
                                   />
                                 </div>
                               </React.Fragment>
@@ -758,6 +918,7 @@ export default function PreviewModal({
                       })()}
                     </article>
                   </div>
+                  </ScaledPreviewPage>
                 );
               })}
             </div>
@@ -773,6 +934,32 @@ export default function PreviewModal({
             />
           </div>
         )}
+        </div>
+        {isInteractivePreview && selectedPreviewItem && mode !== "sms" && (
+          <aside className="w-80 max-w-[45vw] shrink-0 overflow-y-auto border-l border-slate-200 bg-white">
+            <RightPropertiesPanel
+              selectedItem={selectedPreviewItem}
+              selection={selection}
+              onUpdateItem={onUpdateItem}
+              onDeleteItem={() => handleDeleteBlockInPreview(selectedPreviewItem.id)}
+              onDuplicateItem={() => handleDuplicateBlockInPreview(selectedPreviewItem)}
+              documentSettings={doc.settings || {}}
+              onUpdateDocumentSettings={(settings) => onUpdateDoc({ ...doc, settings })}
+              docName={doc.name}
+              onUpdateDocName={(name) => onUpdateDoc({ ...doc, name })}
+              pageSize={effPageSize}
+              orientation={effOrientation}
+              mode={mode}
+              branches={[]}
+              devicePreview={devicePreview}
+              onClosePanel={() => {
+                setSelectedItemId(null);
+                setSelection(null);
+              }}
+            />
+          </aside>
+        )}
+        </div>
       </div>
     </div>
   );

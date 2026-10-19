@@ -163,7 +163,6 @@ const SETTINGS_GROUPS = [
     icon: MessageSquare,
     tabs: [
       { id: "setup", label: "Email & SMS Setup", description: "Sending domains, branch senders, Telnyx numbers, and reply mailboxes.", icon: MessageSquare, render: (branchId) => <CommunicationSetup branchId={Number(branchId) || null} /> },
-      { id: "templates", label: "Email & SMS Templates", description: "Transactional email designs, SMS notification templates, and merge tags.", icon: Mail, render: (branchId, subView, itemId) => <CommunicationTemplates branchId={branchId} basePath="/settings/communications/templates" closePath="/settings/communications/templates" builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} /> },
     ],
   },
   {
@@ -172,8 +171,8 @@ const SETTINGS_GROUPS = [
     shortLabel: "Documents",
     icon: FileSignature,
     tabs: [
-      { id: "document-templates", label: "Document Templates", description: "Legal contracts, bills of lading, payment invoices, and authorizations.", icon: FileSignature, render: (branchId, subView, itemId, onOpenChooser, isDocs) => <DocumentTemplates branchId={Number(branchId) || null} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} onOpenChooser={onOpenChooser} /> },
-      { id: "estimate-portal-templates", label: "Estimate Templates", description: "Customer estimate portal templates, rate calculations, and charges layouts.", icon: FileText, render: (branchId, subView, itemId, onOpenChooser, isDocs) => <EstimatePortalTemplates branchId={Number(branchId) || null} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} onOpenChooser={onOpenChooser} /> },
+      { id: "document-templates", label: "Document Templates", description: "Legal contracts, bills of lading, payment invoices, and authorizations.", icon: FileSignature, render: (branchId, subView, itemId, onOpenChooser, isDocs) => <DocumentTemplates branchId={Number(branchId) || null} basePath={isDocs ? "/documents/document-templates" : "/settings/documents/document-templates"} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} onOpenChooser={onOpenChooser} /> },
+      { id: "estimate-portal-templates", label: "Estimate Templates", description: "Customer estimate portal templates, rate calculations, and charges layouts.", icon: FileText, render: (branchId, subView, itemId, onOpenChooser, isDocs) => <EstimatePortalTemplates branchId={Number(branchId) || null} basePath={isDocs ? "/documents/estimate-portal-templates" : "/settings/documents/estimate-portal-templates"} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} onOpenChooser={onOpenChooser} /> },
       { id: "communication-templates", label: "Email & SMS Templates", description: "Transactional email designs, SMS notification templates, and merge tags.", icon: Mail, render: (branchId, subView, itemId, onOpenChooser, isDocs) => <CommunicationTemplates branchId={branchId} basePath={isDocs ? "/documents/communication-templates" : "/settings/documents/communication-templates"} closePath={isDocs ? "/documents/communication-templates" : "/settings/documents/communication-templates"} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} onOpenChooser={onOpenChooser} /> },
     ],
   },
@@ -297,33 +296,46 @@ export default function SettingsHub({ initialGroup }) {
     }).filter((group) => group.tabs.length > 0);
   }, [canAny]);
 
+  const isLegacy = Boolean(legacyMap);
+
   // Handle URL normalization and legacy route mapping
-  const targetGroupId = isDocumentsGroup
-    ? "documents"
-    : legacyMap
+  const targetGroupId = isLegacy
     ? legacyMap[0]
+    : isDocumentsGroup
+    ? "documents"
     : (mainGroup || tabId);
-  const targetSubTabId = isDocumentsGroup
-    ? (subTab || "document-templates")
-    : legacyMap
+
+  const targetSubTabId = isLegacy
     ? legacyMap[1]
+    : isDocumentsGroup
+    ? (subTab && subTab !== 'builder' ? subTab : "document-templates")
     : (subTab || (subView === 'builder' ? null : subView));
   
   // Distinguish between /settings/:mainGroup/:subTab/:itemId/:subView and /settings/:mainGroup/:subTab/:subView
   let effectiveSubView = null;
   let effectiveItemId = null;
-  if (subView === 'builder') {
-    effectiveSubView = 'builder';
-    effectiveItemId = itemId || null;
-  } else if (itemId === 'builder') {
-    effectiveSubView = 'builder';
-    effectiveItemId = null;
-  } else if (subTab === 'builder') {
-    effectiveSubView = 'builder';
-    effectiveItemId = null;
-  } else if (!subTab && subView === 'builder') {
-    effectiveSubView = 'builder';
-    effectiveItemId = itemId || null;
+  if (isLegacy) {
+    if (subView === 'builder') {
+      effectiveSubView = 'builder';
+      effectiveItemId = params.subTab || itemId || null;
+    } else if (subTab === 'builder' || itemId === 'builder') {
+      effectiveSubView = 'builder';
+      effectiveItemId = null;
+    }
+  } else {
+    if (subView === 'builder') {
+      effectiveSubView = 'builder';
+      effectiveItemId = itemId || null;
+    } else if (itemId === 'builder') {
+      effectiveSubView = 'builder';
+      effectiveItemId = null;
+    } else if (subTab === 'builder') {
+      effectiveSubView = 'builder';
+      effectiveItemId = null;
+    } else if (!subTab && subView === 'builder') {
+      effectiveSubView = 'builder';
+      effectiveItemId = itemId || null;
+    }
   }
 
   const activeGroup = useMemo(() => {
@@ -356,10 +368,20 @@ export default function SettingsHub({ initialGroup }) {
       return;
     }
 
-    // Clean redirect for 1-tier legacy routes (e.g., /settings/document-templates)
-    if (legacyMap && !effectiveSubView && !effectiveItemId) {
-      navigate(`/settings/${legacyMap[0]}/${legacyMap[1]}`, { replace: true });
-      return;
+    // Clean redirect for legacy routes (e.g., /settings/document-templates, /settings/document-templates/:id/builder)
+    if (legacyMap) {
+      if (effectiveSubView === 'builder' && effectiveItemId) {
+        navigate(`/settings/${legacyMap[0]}/${legacyMap[1]}/${effectiveItemId}/builder`, { replace: true });
+        return;
+      }
+      if (effectiveSubView === 'builder' && !effectiveItemId) {
+        navigate(`/settings/${legacyMap[0]}/${legacyMap[1]}/builder`, { replace: true });
+        return;
+      }
+      if (!effectiveSubView && !effectiveItemId) {
+        navigate(`/settings/${legacyMap[0]}/${legacyMap[1]}`, { replace: true });
+        return;
+      }
     }
 
     const group = visibleGroups.find((item) => item.id === targetGroupId);

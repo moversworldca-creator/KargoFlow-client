@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { AlertCircle, CheckCircle2, Loader2, PlusCircle, Save, Trash2, Edit2, ArrowLeft, FileText, Copy, Search, Layout, X } from 'lucide-react';
 
 import Card from '../../../shared/ui/Card';
@@ -13,8 +13,11 @@ import {
   updateEstimatePortalTemplate,
   duplicateEstimatePortalTemplate,
   getBranches,
+  getBuilderTemplate,
+  getBuilderTemplateDraft,
 } from '../../../services/api';
-import api from '../../../services/api'
+import { fromBackendDocument } from './UnifiedTemplateBuilder/core/documentAdapter';
+import api from '../../../services/api';
 const DEFAULT_TEMPLATE_CSS = `
 .portal-template {
     box-sizing: border-box;
@@ -347,15 +350,22 @@ function PreviewPortal({ templateDraft }) {
 }
 
 const ESTIMATE_PORTAL_TEMPLATE_TYPES = [
-  { value: 'moving', label: 'Moving' },
-  { value: 'commercial', label: 'Commercial' },
-  { value: 'minimal', label: 'Minimal' },
+  { value: 'binding', label: 'Binding' },
+  { value: 'non_binding', label: 'Non-Binding' },
+  { value: 'hourly', label: 'Hourly' },
+  { value: 'flat_rate', label: 'Flat Rate' },
 ];
 const ESTIMATE_PORTAL_TEMPLATE_TYPE_VALUES = ESTIMATE_PORTAL_TEMPLATE_TYPES.map((type) => type.value);
-const DEFAULT_ESTIMATE_PORTAL_TEMPLATE_TYPE = 'moving';
+const DEFAULT_ESTIMATE_PORTAL_TEMPLATE_TYPE = 'binding';
 const DEFAULT_ESTIMATE_PORTAL_TEMPLATE_VERSION = 1;
+const LEGACY_ESTIMATE_TYPE_MAP = {
+  moving: 'Non-Binding',
+  commercial: 'Binding',
+  minimal: 'Flat Rate',
+  standard: 'Non-Binding',
+};
 const getTemplateTypeLabel = (value) => (
-  ESTIMATE_PORTAL_TEMPLATE_TYPES.find((type) => type.value === value)?.label || value
+  ESTIMATE_PORTAL_TEMPLATE_TYPES.find((type) => type.value === value)?.label || LEGACY_ESTIMATE_TYPE_MAP[value] || value
 );
 const toPositiveIntegerVersion = (value) => {
   const raw = String(value ?? '').trim();
@@ -423,8 +433,22 @@ const safeList = (payload) => {
   return [];
 };
 
-export default function EstimatePortalTemplates({ branchId = null, builderRouteView = '', builderRouteItemId = null, onOpenChooser = null }) {
+export default function EstimatePortalTemplates({ branchId = null, builderRouteView = '', builderRouteItemId = null, onOpenChooser = null, basePath = '' }) {
   const navigate = useNavigate();
+  let location = { pathname: '' };
+  try {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    location = useLocation();
+  } catch {
+    location = { pathname: typeof window !== 'undefined' ? window.location?.pathname || '' : '' };
+  }
+  const effectiveBasePath = basePath || (
+    location.pathname.startsWith('/documents')
+      ? '/documents/estimate-portal-templates'
+      : location.pathname.startsWith('/settings/documents')
+      ? '/settings/documents/estimate-portal-templates'
+      : '/settings/estimate-portal-templates'
+  );
   const [view, setView] = useState('list'); // 'list' | 'edit'
   const [items, setItems] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -579,58 +603,112 @@ export default function EstimatePortalTemplates({ branchId = null, builderRouteV
   }, [selectedId]);
 
   const beginNewTemplate = () => {
-    navigate('/settings/estimate-portal-templates/new/builder');
+    navigate(`${effectiveBasePath}/new/builder`);
   };
 
   useEffect(() => {
+    let isCancelled = false;
+
     if (builderRouteView !== 'builder') {
       lastBuilderRouteRef.current = '';
       if (isBuilderOpen) setIsBuilderOpen(false);
       return;
     }
-    if (isLoading) return;
 
     const routeKey = `${builderRouteItemId || 'new'}:builder`;
     if (lastBuilderRouteRef.current === routeKey && isBuilderOpen) return;
 
-    if (builderRouteItemId && builderRouteItemId !== 'new') {
-      const template = items.find((row) => String(row.id) === String(builderRouteItemId));
-      if (!template) {
-        setMessage({ type: 'error', text: 'Estimate portal template not found.' });
-        navigate('/settings/estimate-portal-templates', { replace: true });
-        return;
-      }
-      setSelectedId(template.id);
-      setDraft({ ...EMPTY_TEMPLATE, ...template });
-      loadVariables(template.id);
-      setView('edit');
-    } else {
-      setSelectedId(null);
-      setVariables([]);
-      setDraft({
-        ...EMPTY_TEMPLATE,
-        template_type: typeFilter !== 'all' && ESTIMATE_PORTAL_TEMPLATE_TYPE_VALUES.includes(typeFilter)
-          ? typeFilter
-          : DEFAULT_ESTIMATE_PORTAL_TEMPLATE_TYPE,
-        branch: branchFilter ? Number(branchFilter) : null,
-      });
-      setView('edit');
-    }
+    const loadBuilderRoute = async () => {
+      if (builderRouteItemId && builderRouteItemId !== 'new') {
+        let template = items.find((row) => String(row.id) === String(builderRouteItemId));
+        if (!template) {
+          try {
+            const res = await getBuilderTemplate(builderRouteItemId);
+            const raw = res?.data ?? res;
+            if (raw?.id && !isCancelled) {
+              template = {
+                ...raw,
+                template_type: raw.subtype || raw.template_type,
+                branch: raw.branch_id,
+                is_active: raw.state === 'active' || raw.is_active,
+              };
+              setItems((prev) => (prev.some((p) => p.id === template.id) ? prev : [template, ...prev]));
+            }
+          } catch {
+            // Template not found on server
+          }
+        }
 
-    setIsBuilderOpen(true);
-    lastBuilderRouteRef.current = routeKey;
+        if (!template) {
+          if (isLoading) return;
+          if (!isCancelled) {
+            setMessage({ type: 'error', text: 'Estimate portal template not found.' });
+            navigate(effectiveBasePath, { replace: true });
+          }
+          return;
+        }
+
+        if (isCancelled) return;
+
+        let hydratedContent = template.content || null;
+        let lockVersion = template.lock_version || 1;
+
+        try {
+          const draftRes = await getBuilderTemplateDraft(template.id);
+          const draftData = draftRes?.data ?? draftRes;
+          if (draftData?.document?.sections) {
+            hydratedContent = fromBackendDocument(draftData.document, { name: template.name, mode: 'estimate' });
+            lockVersion = draftData.revision?.lock_version || draftData.lock_version || 1;
+          }
+        } catch {
+          // Fall back to template summary content if draft cannot be fetched
+        }
+
+        if (isCancelled) return;
+
+        setSelectedId(template.id);
+        setDraft({
+          ...EMPTY_TEMPLATE,
+          ...template,
+          ...(hydratedContent ? { content: hydratedContent } : {}),
+          lock_version: lockVersion,
+        });
+        loadVariables(template.id);
+        setView('edit');
+      } else {
+        setSelectedId(null);
+        setVariables([]);
+        setDraft({
+          ...EMPTY_TEMPLATE,
+          template_type: typeFilter !== 'all' && ESTIMATE_PORTAL_TEMPLATE_TYPE_VALUES.includes(typeFilter)
+            ? typeFilter
+            : DEFAULT_ESTIMATE_PORTAL_TEMPLATE_TYPE,
+          branch: branchFilter ? Number(branchFilter) : null,
+        });
+        setView('edit');
+      }
+
+      setIsBuilderOpen(true);
+      lastBuilderRouteRef.current = routeKey;
+    };
+
+    loadBuilderRoute();
+
+    return () => {
+      isCancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [builderRouteView, builderRouteItemId, isLoading, items, navigate, isBuilderOpen]);
+  }, [builderRouteView, builderRouteItemId, isLoading, items, navigate, isBuilderOpen, effectiveBasePath]);
 
   const openEstimateBuilder = () => {
     const templateId = draft?.id || selectedId;
-    navigate(templateId ? `/settings/estimate-portal-templates/${templateId}/builder` : '/settings/estimate-portal-templates/builder');
+    navigate(templateId ? `${effectiveBasePath}/${templateId}/builder` : `${effectiveBasePath}/builder`);
   };
 
   const closeEstimateBuilder = () => {
     setIsBuilderOpen(false);
     if (builderRouteView === 'builder') {
-      navigate('/settings/estimate-portal-templates');
+      navigate(effectiveBasePath);
     }
   };
 
@@ -657,6 +735,7 @@ export default function EstimatePortalTemplates({ branchId = null, builderRouteV
   const saveTemplate = async () => {
     const payload = {
       name: String(draft.name || '').trim(),
+      subtype: String(draft.template_type || '').trim(),
       template_type: String(draft.template_type || '').trim(),
       applies_to_entity: String(draft.applies_to_entity || '').trim() || 'opportunity',
       applies_to_service_type: String(draft.applies_to_service_type || '').trim(),
@@ -667,6 +746,9 @@ export default function EstimatePortalTemplates({ branchId = null, builderRouteV
       branch: draft.branch ? Number(draft.branch) : null,
       is_active: Boolean(draft.is_active),
       html_content: String(draft.html_content || ''),
+      content: draft.content,
+      document: draft.document,
+      lock_version: draft.lock_version || 1,
     };
     if (!payload.name) {
       notify('error', 'Estimate portal template name is required.');
@@ -695,6 +777,8 @@ export default function EstimatePortalTemplates({ branchId = null, builderRouteV
       const wasExisting = Boolean(draft.id);
       const res = draft.id ? await updateEstimatePortalTemplate(draft.id, payload) : await createEstimatePortalTemplate(payload);
       const saved = res?.data ?? res;
+      const nextLock = saved?.draft?.revision?.lock_version || saved?.draft?.lock_version || (draft.lock_version ? draft.lock_version + 1 : 1);
+      setDraft((current) => ({ ...current, id: saved?.id || current.id, lock_version: nextLock }));
       await loadTemplates();
       setSelectedId(saved?.id || null);
       notify('success', wasExisting ? 'Estimate portal template updated.' : 'Estimate portal template created.');
@@ -933,7 +1017,7 @@ export default function EstimatePortalTemplates({ branchId = null, builderRouteV
                             <Copy size={14} />
                           </button>
                           <button
-                            onClick={() => navigate(`/settings/estimate-portal-templates/${t.id}/builder`)}
+                            onClick={() => navigate(`${effectiveBasePath}/${t.id}/builder`)}
                             className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-indigo-600 hover:border-indigo-200 hover:bg-indigo-50 transition-colors"
                             title="Edit Template"
                           >
@@ -966,7 +1050,7 @@ export default function EstimatePortalTemplates({ branchId = null, builderRouteV
           onSave={async () => {
             const saved = await saveTemplate();
             if (saved?.id) {
-              navigate(`/settings/estimate-portal-templates/${saved.id}/builder`, { replace: true });
+              navigate(`${effectiveBasePath}/${saved.id}/builder`, { replace: true });
             }
           }}
           onBack={closeEstimateBuilder}

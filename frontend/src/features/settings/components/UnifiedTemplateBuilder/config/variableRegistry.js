@@ -12,6 +12,10 @@ export const MERGE_VARIABLES = {
     { label: "Company Name", tag: "{{customer.company}}" },
   ],
   move: [
+    { label: "Move Date", tag: "{{move.date}}" },
+    { label: "Origin Address", tag: "{{move.origin_address}}" },
+    { label: "Destination Address", tag: "{{move.destination_address}}" },
+    { label: "Opportunity Number", tag: "{{opportunity.number}}" },
     { label: "Pickup Address", tag: "{{move.pickup_address}}" },
     { label: "Pickup City, State", tag: "{{move.pickup_city_state}}" },
     { label: "Delivery Address", tag: "{{move.delivery_address}}" },
@@ -106,4 +110,20 @@ export function getVariablesForMode(mode = "estimate") {
     default:
       return common;
   }
+}
+
+export function normalizeBuilderVariableGroups(groups) {
+  if (!Array.isArray(groups)) return [];
+
+  return groups
+    .map((group) => ({
+      group: group.label || group.key || "General",
+      items: (Array.isArray(group.variables) ? group.variables : [])
+        .filter((variable) => typeof variable.token === "string" && variable.token.trim())
+        .map((variable) => ({
+          label: variable.label || variable.token,
+          tag: `{{${variable.token.replace(/^\{\{\s*|\s*\}\}$/g, "").trim()}}}`,
+        })),
+    }))
+    .filter((group) => group.items.length > 0);
 }

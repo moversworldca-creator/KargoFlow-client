@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Trash2,
   Copy,
@@ -31,10 +31,13 @@ import {
   Monitor,
   Tablet,
   Smartphone,
+  Loader2,
+  Send,
 } from "lucide-react";
 import { createId } from "../model/templateModel";
 import { getVariablesForMode } from "../config/variableRegistry";
 import { analyzeSmsText } from "../core/smsCalculator";
+import { getBuilderBlocks, getBuilderMeta } from "../../../../../services/api";
 import {
   insertRows,
   insertCols,
@@ -44,6 +47,77 @@ import {
   clearSelectedCells,
   buildLogicalGrid,
 } from "../core/tableOperations";
+
+function SchemaField({ name, schema = {}, value, onChange }) {
+  const [jsonValue, setJsonValue] = useState(() => JSON.stringify(value ?? (schema.type === "array" ? [] : {}), null, 2));
+  const [jsonError, setJsonError] = useState("");
+
+  const inputClass = "w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs focus:bg-white focus:ring-1 focus:ring-blue-500";
+  if (schema.type === "boolean") {
+    return (
+      <label className="flex min-h-8 items-center justify-between gap-3 cursor-pointer text-[11px] font-medium text-slate-600">
+        <span className="grow capitalize">
+          {name.replace(/_/g, " ")}{schema.required ? " *" : ""}
+        </span>
+        <input
+          type="checkbox"
+          checked={Boolean(value)}
+          onChange={(event) => onChange(event.target.checked)}
+          className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-2 focus:ring-blue-500"
+        />
+      </label>
+    );
+  }
+
+  return (
+    <label className="block space-y-1">
+      <span className="text-[11px] font-medium text-slate-600">
+        {name.replace(/_/g, " ")}{schema.required ? " *" : ""}
+      </span>
+      {schema.enum ? (
+        <select className={inputClass} value={value ?? ""} onChange={(event) => onChange(event.target.value)}>
+          {schema.enum.map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+      ) : schema.type === "integer" || schema.type === "number" ? (
+        <input
+          type="number"
+          min={schema.minimum}
+          max={schema.maximum}
+          className={inputClass}
+          value={value ?? ""}
+          onChange={(event) => onChange(event.target.value === "" ? "" : Number(event.target.value))}
+        />
+      ) : schema.type === "array" || schema.type === "object" ? (
+        <>
+          <textarea
+            className={`${inputClass} min-h-20 font-mono`}
+            value={jsonValue}
+            onChange={(event) => {
+              setJsonValue(event.target.value);
+              setJsonError("");
+            }}
+            onBlur={() => {
+              try {
+                const parsed = JSON.parse(jsonValue);
+                if (schema.type === "array" ? Array.isArray(parsed) : parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                  onChange(parsed);
+                  setJsonError("");
+                } else setJsonError(`Enter a JSON ${schema.type}.`);
+              } catch {
+                setJsonError("Enter valid JSON.");
+              }
+            }}
+          />
+          {jsonError && <span role="alert" className="text-[10px] text-red-600">{jsonError}</span>}
+        </>
+      ) : schema.format === "html" || name === "html" ? (
+        <textarea className={`${inputClass} min-h-24`} value={value ?? ""} onChange={(event) => onChange(event.target.value)} />
+      ) : (
+        <input className={inputClass} type="text" value={value ?? ""} onChange={(event) => onChange(event.target.value)} />
+      )}
+    </label>
+  );
+}
 
 export const FONT_FAMILIES = [
   {
@@ -102,14 +176,117 @@ export default function RightPropertiesPanel({
   smsText = "",
   devicePreview = "desktop",
   onClosePanel = () => {},
+  onModeChange,
+  onSendTestEmail,
+  isSendingTest = false,
 }) {
   const [insertCount, setInsertCount] = useState(1);
+  const [testToEmail, setTestToEmail] = useState("");
+  const [localSendingTest, setLocalSendingTest] = useState(false);
+  const [testStatusMsg, setTestStatusMsg] = useState(null);
+  const [savedClauses, setSavedClauses] = useState([]);
+  const [clauseLoadError, setClauseLoadError] = useState("");
+  const [backendBlockMeta, setBackendBlockMeta] = useState({ kind: null, blocks: [], error: "" });
+  const activeBuilderKind = ["estimate", "estimate_portal"].includes(mode) ? "estimate_portal" : mode === "invoice" ? "invoice" : "document";
+
+  useEffect(() => {
+    if (selectedItem?.type !== "builder_block" || Object.keys(selectedItem.propsSchema?.properties || {}).length > 0) return undefined;
+    let isMounted = true;
+    getBuilderMeta(activeBuilderKind)
+      .then((res) => {
+        const data = res?.data ?? res;
+        if (!Array.isArray(data?.blocks)) throw new Error("The Builder widget palette response is invalid.");
+        if (isMounted) setBackendBlockMeta({ kind: activeBuilderKind, blocks: data.blocks, error: "" });
+      })
+      .catch((error) => {
+        if (isMounted) {
+          setBackendBlockMeta({
+            kind: activeBuilderKind,
+            blocks: [],
+            error: error?.response?.data?.detail || error.message || "Unable to load widget settings.",
+          });
+        }
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedItem?.type, selectedItem?.blockType, activeBuilderKind, selectedItem?.propsSchema]);
+
+  useEffect(() => {
+    if (selectedItem?.type !== "builder_block" || selectedItem.blockType !== "clause") return undefined;
+    let isMounted = true;
+    getBuilderBlocks()
+      .then((res) => {
+        const data = res?.data ?? res;
+        const list = Array.isArray(data) ? data : data?.results || [];
+        if (isMounted) {
+          setSavedClauses(list);
+          setClauseLoadError("");
+        }
+      })
+      .catch((error) => {
+        if (isMounted) {
+          setClauseLoadError(error?.response?.data?.detail || error.message || "Unable to load saved clauses.");
+        }
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedItem?.type, selectedItem?.blockType]);
+
+  const selectedBlockSchema = Object.keys(selectedItem?.propsSchema?.properties || {}).length > 0
+    ? selectedItem.propsSchema
+    : backendBlockMeta.kind === activeBuilderKind
+      ? backendBlockMeta.blocks.find((block) => block.type === selectedItem?.blockType)?.props_schema
+      : null;
+
+  const handleSendTestClick = async () => {
+    const trimmed = (testToEmail || "").trim();
+    if (!trimmed) {
+      setTestStatusMsg({ type: "error", text: "Please enter a test email address." });
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(trimmed)) {
+      setTestStatusMsg({ type: "error", text: "Please enter a valid email address." });
+      return;
+    }
+
+    setTestStatusMsg(null);
+    if (onSendTestEmail) {
+      try {
+        await onSendTestEmail(trimmed);
+        setTestStatusMsg({ type: "success", text: "Test email sent successfully!" });
+      } catch (err) {
+        setTestStatusMsg({ type: "error", text: err?.message || "Failed to send test email." });
+      }
+    } else {
+      setLocalSendingTest(true);
+      try {
+        const formData = new FormData();
+        formData.append("channel", "email");
+        formData.append("to_email", trimmed);
+        formData.append("subject", documentSettings?.subject || docName || "Test Email");
+        // Try importing API if available or send test request
+        const { default: API } = await import("../../../../../services/api");
+        await API.post("/integrations/communication-templates/send/", formData);
+        setTestStatusMsg({ type: "success", text: "Test email sent successfully!" });
+      } catch (err) {
+        setTestStatusMsg({
+          type: "error",
+          text: err?.response?.data?.detail || err?.message || "Failed to send test email.",
+        });
+      } finally {
+        setLocalSendingTest(false);
+      }
+    }
+  };
 
   // 1. If no item selected, display document-level settings
   if (!selectedItem) {
     if (mode === "email") {
       return (
-        <aside className="w-80 bg-white border-l border-slate-200 p-4 flex flex-col h-[calc(100vh-3.5rem)] select-none overflow-y-auto">
+        <aside className="w-80 max-w-[85vw] bg-white border-l border-slate-200 p-4 flex flex-col h-full min-h-0 select-none overflow-y-auto">
           <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
             <div className="flex items-center gap-2">
               <Mail size={16} className="text-blue-600" />
@@ -129,13 +306,31 @@ export default function RightPropertiesPanel({
           </div>
           <div className="space-y-3.5 text-xs">
             <div>
-              <label className="block text-slate-600 font-semibold mb-1">Template Name</label>
+              <label className="block text-slate-600 font-semibold mb-1">Channel</label>
+              <select
+                value={documentSettings?.channel || mode || "email"}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  onUpdateDocumentSettings({ ...documentSettings, channel: val });
+                  if (onModeChange) onModeChange(val);
+                }}
+                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-800 font-medium"
+              >
+                <option value="email">Email</option>
+                <option value="sms">SMS</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-slate-600 font-semibold mb-1">Category</label>
               <input
                 type="text"
-                value={docName}
-                onChange={(e) => onUpdateDocName(e.target.value)}
-                placeholder="e.g. Booking Confirmation Email"
-                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-800 font-medium"
+                value={documentSettings?.category || "Email"}
+                onChange={(e) =>
+                  onUpdateDocumentSettings({ ...documentSettings, category: e.target.value })
+                }
+                placeholder="e.g. Transactional, Marketing, Notifications"
+                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-700 font-medium"
               />
             </div>
 
@@ -154,6 +349,30 @@ export default function RightPropertiesPanel({
             </div>
 
             <div>
+              <label className="block text-slate-600 font-semibold mb-1">Description</label>
+              <input
+                type="text"
+                value={documentSettings?.description || ""}
+                onChange={(e) =>
+                  onUpdateDocumentSettings({ ...documentSettings, description: e.target.value })
+                }
+                placeholder="What this template is used for"
+                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-700 font-medium"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-600 font-semibold mb-1">Template Name</label>
+              <input
+                type="text"
+                value={docName}
+                onChange={(e) => onUpdateDocName(e.target.value)}
+                placeholder="e.g. Booking Confirmation Email"
+                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-800 font-medium"
+              />
+            </div>
+
+            <div>
               <label className="block text-slate-600 font-semibold mb-1">Template Key</label>
               <input
                 type="text"
@@ -163,19 +382,6 @@ export default function RightPropertiesPanel({
                 }
                 placeholder="e.g. quote_sent, job_confirmed"
                 className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-800 font-mono font-medium"
-              />
-            </div>
-
-            <div>
-              <label className="block text-slate-600 font-semibold mb-1">Category</label>
-              <input
-                type="text"
-                value={documentSettings?.category || "Email"}
-                onChange={(e) =>
-                  onUpdateDocumentSettings({ ...documentSettings, category: e.target.value })
-                }
-                placeholder="e.g. Transactional, Marketing, Notifications"
-                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-700"
               />
             </div>
 
@@ -202,35 +408,62 @@ export default function RightPropertiesPanel({
               </div>
             )}
 
+            {/* Testing Section */}
+            <div className="pt-3 border-t border-slate-200 space-y-2.5">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-700">
+                <Send size={13} className="text-blue-600" />
+                <span>Testing</span>
+              </div>
+
+              <div>
+                <label className="block text-slate-600 font-semibold mb-1">To Email</label>
+                <input
+                  type="email"
+                  value={testToEmail}
+                  onChange={(e) => {
+                    setTestToEmail(e.target.value);
+                    if (testStatusMsg) setTestStatusMsg(null);
+                  }}
+                  placeholder="customer@example.com"
+                  className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-800 font-medium"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSendTestClick}
+                disabled={isSendingTest || localSendingTest}
+                className="w-full py-2 px-3 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 disabled:opacity-60 cursor-pointer"
+              >
+                {(isSendingTest || localSendingTest) ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <Send size={13} />
+                )}
+                <span>Send Test Email</span>
+              </button>
+
+              {testStatusMsg && (
+                <div
+                  className={`p-2 rounded-lg text-[11px] font-medium flex items-center gap-1.5 ${
+                    testStatusMsg.type === "success"
+                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      : "bg-rose-50 text-rose-700 border border-rose-200"
+                  }`}
+                >
+                  {testStatusMsg.type === "success" ? (
+                    <Check size={12} className="shrink-0" />
+                  ) : (
+                    <AlertCircle size={12} className="shrink-0" />
+                  )}
+                  <span>{testStatusMsg.text}</span>
+                </div>
+              )}
+            </div>
+
             {/* Responsive Viewport Card */}
             <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-              <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                <span>Responsive Viewport</span>
-                <span className="text-blue-600 font-semibold capitalize">{devicePreview}</span>
-              </div>
-              <div className="grid grid-cols-3 gap-1.5 text-center">
-                <div className={`p-2 rounded-lg border text-xs font-semibold ${devicePreview === "desktop" ? "bg-white border-blue-300 text-blue-600 shadow-2xs" : "bg-white/60 border-slate-200 text-slate-500"}`}>
-                  <Monitor size={15} className="mx-auto mb-1 text-slate-600" />
-                  <div>600px</div>
-                  <div className="text-[9px] font-normal text-slate-400">Desktop</div>
-                </div>
-                <div className={`p-2 rounded-lg border text-xs font-semibold ${devicePreview === "tablet" ? "bg-white border-blue-300 text-blue-600 shadow-2xs" : "bg-white/60 border-slate-200 text-slate-500"}`}>
-                  <Tablet size={15} className="mx-auto mb-1 text-slate-600" />
-                  <div>560px</div>
-                  <div className="text-[9px] font-normal text-slate-400">Tablet</div>
-                </div>
-                <div className={`p-2 rounded-lg border text-xs font-semibold ${devicePreview === "mobile" ? "bg-white border-blue-300 text-blue-600 shadow-2xs" : "bg-white/60 border-slate-200 text-slate-500"}`}>
-                  <Smartphone size={15} className="mx-auto mb-1 text-slate-600" />
-                  <div>360px</div>
-                  <div className="text-[9px] font-normal text-slate-400">Mobile</div>
-                </div>
-              </div>
             </div>
-          </div>
-
-          <div className="mt-auto p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-500 leading-relaxed">
-            <p className="font-semibold text-slate-700 mb-1">Email Inspector Toolkit</p>
-            Select any section heading, paragraph, callout box, table, or button on the email canvas to inspect and customize typography, spacing, colors, and variables.
           </div>
         </aside>
       );
@@ -239,7 +472,7 @@ export default function RightPropertiesPanel({
     if (mode === "sms") {
       const smsAnalysis = analyzeSmsText(smsText || "");
       return (
-        <aside className="w-80 bg-white border-l border-slate-200 p-4 flex flex-col h-[calc(100vh-3.5rem)] select-none overflow-y-auto">
+        <aside className="w-80 max-w-[85vw] bg-white border-l border-slate-200 p-4 flex flex-col h-full min-h-0 select-none overflow-y-auto">
           <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
             <div className="flex items-center gap-2">
               <MessageSquare size={16} className="text-emerald-600" />
@@ -401,7 +634,7 @@ export default function RightPropertiesPanel({
 
     const isLandscape = String(orientation).toLowerCase() === "landscape";
     return (
-      <aside className="w-80 bg-white border-l border-slate-200 p-4 flex flex-col h-[calc(100vh-3.5rem)] select-none overflow-y-auto">
+      <aside className="w-80 max-w-[85vw] bg-white border-l border-slate-200 p-4 flex flex-col h-full min-h-0 select-none overflow-y-auto">
         <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
           <div className="flex items-center gap-2">
             <Sliders size={16} className="text-blue-600" />
@@ -443,6 +676,28 @@ export default function RightPropertiesPanel({
               className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-700"
             />
           </div>
+
+          {mode === "estimate" && (
+            <div>
+              <label htmlFor="portal-template-type-select" className="block text-slate-600 font-semibold mb-1">
+                Template Type
+              </label>
+              <select
+                id="portal-template-type-select"
+                aria-label="Template Type"
+                value={documentSettings?.template_type || "binding"}
+                onChange={(e) =>
+                  onUpdateDocumentSettings({ ...documentSettings, template_type: e.target.value, subtype: e.target.value })
+                }
+                className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-700 font-medium"
+              >
+                <option value="binding">Binding</option>
+                <option value="non_binding">Non-Binding</option>
+                <option value="hourly">Hourly</option>
+                <option value="flat_rate">Flat Rate</option>
+              </select>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-2">
             <div>
@@ -531,11 +786,6 @@ export default function RightPropertiesPanel({
               </button>
             </div>
           </div>
-        </div>
-
-        <div className="mt-auto p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-500 leading-relaxed">
-          <p className="font-semibold text-slate-700 mb-1">Inspector Toolkit</p>
-          Select any table, itemized charges list, totals summary, or text block on the canvas to inspect and customize typography, layout, borders, and variables.
         </div>
       </aside>
     );
@@ -685,7 +935,7 @@ export default function RightPropertiesPanel({
   };
 
   return (
-    <aside className="w-80 bg-white border-l border-slate-200 flex flex-col h-[calc(100vh-3.5rem)] select-none overflow-hidden">
+    <aside className="w-80 max-w-[85vw] bg-white border-l border-slate-200 flex flex-col h-full min-h-0 select-none overflow-hidden">
       {/* Inspector Header */}
       <div className="p-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
         <div className="min-w-0 pr-2">
@@ -737,6 +987,75 @@ export default function RightPropertiesPanel({
             className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs font-medium text-slate-800"
           />
         </div>
+
+        {selectedItem.type === "builder_block" && selectedItem.blockType !== "conditional" && (
+          <section className="space-y-3 border-t border-slate-100 pt-3">
+            <h4 className="font-bold uppercase tracking-wide text-[11px] text-slate-700">
+              {selectedItem.blockType?.replace(/_/g, " ")} settings
+            </h4>
+            <div className="space-y-2.5">
+              {Object.entries(selectedBlockSchema?.properties || {}).length > 0
+                ? Object.entries(selectedBlockSchema.properties)
+                  .filter(([name]) => !(selectedItem.blockType === "conditional" && name === "rule_key"))
+                  .map(([name, schema]) => (
+                  name === "block_id" && selectedItem.blockType === "clause" && savedClauses.length > 0 ? (
+                    <label key={name} className="block space-y-1">
+                      <span className="text-[11px] font-medium text-slate-600">Saved clause *</span>
+                      <select
+                        className="w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs"
+                        value={selectedItem.props?.block_id ?? ""}
+                        onChange={(event) => onUpdateItem({
+                          ...selectedItem,
+                          props: { ...(selectedItem.props || {}), block_id: Number(event.target.value) },
+                        })}
+                      >
+                        <option value="">Choose a saved clause</option>
+                        {savedClauses.map((clause) => (
+                          <option key={clause.id} value={clause.id}>
+                            {clause.name || clause.label || `Clause #${clause.id}`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <SchemaField
+                      key={`${selectedItem.id}-${selectedItem.blockType}-${name}`}
+                      name={name}
+                      schema={{ ...schema, required: schema.required || selectedBlockSchema.required?.includes(name) }}
+                      value={selectedItem.props?.[name]}
+                      onChange={(value) => onUpdateItem({
+                        ...selectedItem,
+                        props: { ...(selectedItem.props || {}), [name]: value },
+                      })}
+                    />
+                  )
+                ))
+                : (
+                  <SchemaField
+                    key={`props-${selectedItem.id}-${selectedItem.blockType}`}
+                    name="props"
+                    schema={{ type: "object" }}
+                    value={selectedItem.props || {}}
+                    onChange={(props) => onUpdateItem({ ...selectedItem, props })}
+                  />
+                )}
+                {backendBlockMeta.error && !selectedBlockSchema && (
+                  <p role="alert" className="text-[10px] text-red-600">{backendBlockMeta.error}</p>
+                )}
+            </div>
+            {selectedItem.blockType === "clause" && clauseLoadError && (
+              <p role="alert" className="text-[10px] text-red-600">
+                {clauseLoadError} Enter the ID of a saved clause manually.
+              </p>
+            )}
+            {selectedItem.blockType === "clause" && !clauseLoadError && savedClauses.length === 0 && (
+              <p className="text-[10px] text-slate-500">No saved clauses are available yet. Enter an existing clause ID or add one from the reusable blocks library.</p>
+            )}
+            {selectedItem.blockType === "image" && (
+              <p className="text-[10px] text-slate-500">Use the ID of an image already uploaded to your company files.</p>
+            )}
+          </section>
+        )}
 
         {/* ========================================================================= */}
         {/* 1. TABLE STRUCTURE & LAYOUT INSPECTOR (when selectedItem.type === "table") */}

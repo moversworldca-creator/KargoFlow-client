@@ -26,8 +26,8 @@ export const UNIVERSAL_CATEGORIES = [
     aliasId: 'legal:invoice',
     group: 'legal',
     label: 'Payment Invoice',
-    subLabel: 'Opportunity & Billing Scope',
-    scope_type: 'opportunity',
+    subLabel: 'Invoice / Billing Scope',
+    scope_type: 'invoice',
     template_type: 'invoice',
     builderMode: 'invoice',
     defaultTitle: 'Payment Invoice',
@@ -168,10 +168,10 @@ export const UNIVERSAL_CATEGORIES = [
 const TEMPLATE_KEY_RE = /^[a-zA-Z0-9_.:-]+$/;
 
 const DEFAULT_SAMPLE_HTML = `<div style="font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; color:#0f172a; padding: 24px;">
-  <h2 style="font-size: 24px; font-weight: 800; color: #1e3a8a;">{{Company.name}}</h2>
-  <p style="font-size: 14px; color: #475569; margin-top: 8px;">Hello {{Customer.full_name}},</p>
+  <h2 style="font-size: 24px; font-weight: 800; color: #1e3a8a;">{{company.name}}</h2>
+  <p style="font-size: 14px; color: #475569; margin-top: 8px;">Hello {{customer.first_name}},</p>
   <p style="font-size: 14px; color: #334155; line-height: 1.6; margin-top: 12px;">
-    Thank you for choosing {{Company.name}} for your moving needs. Please find the details for your upcoming move below.
+    Thank you for choosing {{company.name}} for your moving needs. Please find the details for your upcoming move below.
   </p>
 </div>`;
 
@@ -245,6 +245,17 @@ export default function CreateUniversalDocumentModal({
   const currentCategory = useMemo(() => {
     return resolveCategory(selectedCategoryId);
   }, [selectedCategoryId]);
+  const backendScopes = currentCategory.template_type === 'invoice'
+    ? [
+        { label: 'Invoice', source: 'invoice', stages: 'Invoice issue · Storage billing' },
+      ]
+    : currentCategory.group === 'legal'
+    ? [
+        { label: 'Opportunity / Estimate', source: 'opportunity or estimate', stages: 'Estimate send · Booking' },
+        { label: 'Job', source: 'job', stages: 'Job start · Job end' },
+        { label: 'Invoice', source: 'invoice', stages: 'Invoice issue' },
+      ]
+    : [];
 
   // Filter compatible custom templates strictly by selected category
   const compatibleCustomTemplates = useMemo(() => {
@@ -425,6 +436,7 @@ export default function CreateUniversalDocumentModal({
 
         const payload = {
           name: trimmedTitle,
+          subtype: currentCategory.estimate_type,
           template_type: currentCategory.estimate_type,
           applies_to_entity: 'opportunity',
           applies_to_service_type: '',
@@ -462,9 +474,9 @@ export default function CreateUniversalDocumentModal({
         } else if (startingTemplate === 'preset') {
           if (currentCategory.channel === 'email') {
             initialHtml = DEFAULT_SAMPLE_HTML;
-            initialBody = 'Hello {{Customer.full_name}}, thank you for choosing us.';
+            initialBody = 'Hello {{customer.first_name}}, thank you for choosing us.';
           } else {
-            initialBody = 'Hi {{Customer.first_name}}, this is {{Company.name}} regarding your upcoming move.';
+            initialBody = 'Hi {{customer.first_name}}, this is {{company.name}} regarding your upcoming move.';
           }
         } else if (startingTemplate.startsWith('template:')) {
           const sourceId = Number(startingTemplate.replace('template:', ''));
@@ -570,13 +582,15 @@ export default function CreateUniversalDocumentModal({
                 disabled={isSubmitting}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all appearance-none cursor-pointer disabled:opacity-50"
               >
-                <optgroup label="Opportunity Scope (Legal & Billing)">
+                <optgroup label="Opportunity Scope (Legal)">
                   <option value="contract">Moving Contract</option>
-                  <option value="invoice">Payment Invoice</option>
                   <option value="credit_card_authorization">Credit Card Authorization</option>
                 </optgroup>
                 <optgroup label="Job Scope (Operations & Move Day)">
                   <option value="bol">Bill of Lading — LOC</option>
+                </optgroup>
+                <optgroup label="Invoice Scope (Billing)">
+                  <option value="invoice">Payment Invoice</option>
                 </optgroup>
                 <optgroup label="Customer Estimate Portals (Sales Acceptance)">
                   <option value="estimate:moving">Residential Moving Estimate</option>
@@ -599,8 +613,30 @@ export default function CreateUniversalDocumentModal({
               </div>
             </div>
             <p className="text-[11px] text-slate-500 mt-1">
-              {currentCategory.subLabel} — determines the target builder and execution context.
+              {currentCategory.subLabel} — selects the template kind and starting document type.
             </p>
+            {currentCategory.group === 'legal' && (
+              <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50/60 p-3">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-blue-800">
+                  Backend-supported workflow scopes
+                </p>
+                <div className="mt-2 space-y-2">
+                  {backendScopes.map((scope) => (
+                    <div key={scope.label} className="flex items-start gap-2 text-[11px]">
+                      <span className="shrink-0 rounded-md bg-white px-2 py-1 font-bold text-slate-700 border border-blue-100">
+                        {scope.label}
+                      </span>
+                      <span className="text-slate-600">
+                        Source: {scope.source} <span className="text-slate-400">·</span> {scope.stages}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
+                  These are the Builder workflow contexts supported by the backend. A template’s actual applicability is configured with assignments after it is published.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Field 2: Document Title */}

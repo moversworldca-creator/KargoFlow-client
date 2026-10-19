@@ -1,15 +1,39 @@
-import React, { useState } from "react";
-import { History, X, RotateCcw, Plus, Clock, Check, Bookmark } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { History, X, RotateCcw, Plus, Clock, Check, Bookmark, Loader2 } from "lucide-react";
+import { getBuilderTemplateRevisions, restoreBuilderTemplateRevision } from "../../../../../services/api";
 
 export default function VersionHistoryModal({
   isOpen,
   snapshots = [],
+  templateId = null,
   onClose,
   onCreateSnapshot,
   onRestoreSnapshot,
 }) {
   const [snapshotName, setSnapshotName] = useState("");
   const [selectedSnapshotId, setSelectedSnapshotId] = useState(null);
+  const [remoteRevisions, setRemoteRevisions] = useState([]);
+  const [isLoadingRevisions, setIsLoadingRevisions] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen || !templateId) return;
+    setIsLoadingRevisions(true);
+    getBuilderTemplateRevisions(templateId)
+      .then((res) => {
+        const data = res?.data ?? res;
+        if (Array.isArray(data)) {
+          setRemoteRevisions(data);
+        } else if (data && Array.isArray(data.results)) {
+          setRemoteRevisions(data.results);
+        }
+      })
+      .catch(() => {
+        setRemoteRevisions([]);
+      })
+      .finally(() => {
+        setIsLoadingRevisions(false);
+      });
+  }, [isOpen, templateId]);
 
   if (!isOpen) return null;
 
@@ -77,16 +101,68 @@ export default function VersionHistoryModal({
 
         {/* Snapshot List & Detail View */}
         <div className="flex-1 overflow-y-auto p-6">
-          {snapshots.length === 0 ? (
+          {isLoadingRevisions && (
+            <div className="flex items-center justify-center py-4 text-xs text-slate-500 gap-2">
+              <Loader2 size={16} className="animate-spin text-indigo-600" />
+              <span>Checking revisions from server...</span>
+            </div>
+          )}
+          {snapshots.length === 0 && remoteRevisions.length === 0 ? (
             <div className="h-48 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
               <Clock size={28} className="text-slate-300 mb-2" />
-              <p className="text-xs font-medium">No snapshots saved yet.</p>
+              <p className="text-xs font-medium">No snapshots or past revisions found.</p>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                Create a snapshot above or one will be automatically created when publishing.
+                Create a snapshot above or publish a revision to build revision history.
               </p>
             </div>
           ) : (
             <div className="space-y-3">
+              {/* Remote Published Revisions */}
+              {remoteRevisions.map((rev) => (
+                <div
+                  key={`rev-${rev.id || rev.revision_number}`}
+                  className="p-4 rounded-xl border border-indigo-200 bg-indigo-50/30 flex items-center justify-between"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 shrink-0 mt-0.5">
+                      <Bookmark size={15} />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-800">
+                        {rev.name || `Revision v${rev.revision_number || rev.version || rev.id}`}
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-2">
+                        <span>{rev.created_at ? new Date(rev.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Published"}</span>
+                        <span>&bull;</span>
+                        <span className="font-medium text-indigo-700">Server Published</span>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (templateId && rev.id) {
+                        try {
+                          const restored = await restoreBuilderTemplateRevision(templateId, rev.id);
+                          if (restored?.data?.document) {
+                            onRestoreSnapshot(restored.data.document);
+                          }
+                        } catch {
+                          // Continue with local document if available
+                        }
+                      }
+                      if (rev.document) onRestoreSnapshot(rev.document);
+                      onClose();
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-white hover:bg-indigo-100 border border-indigo-200 rounded-lg shadow-xs transition"
+                  >
+                    <RotateCcw size={13} />
+                    <span>Restore</span>
+                  </button>
+                </div>
+              ))}
+
+              {/* Local Snapshots */}
               {snapshots.map((snap) => {
                 const isSelected = selectedSnapshotId === snap.id;
                 const dateStr = snap.timestamp

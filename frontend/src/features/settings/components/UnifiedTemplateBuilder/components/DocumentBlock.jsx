@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Trash2,
   Copy,
@@ -16,6 +16,321 @@ import InlineEdit from "./InlineEdit";
 import NotesRichTextEditor from "./NotesRichTextEditor";
 import EditableHtmlBlock from "./EditableHtmlBlock";
 import InteractiveTableBlock from "./InteractiveTableBlock";
+import { getBuilderBlock, downloadFile } from "../../../../../services/api";
+import { sanitizeHtml } from "../core/htmlSanitizer";
+
+const SAMPLE_VARIABLES = {
+  "company.name": "KargoFlow Moving",
+  "company.phone": "(800) 555-0199",
+  "company.email": "dispatch@kargoflow.example",
+  "branch.name": "Vancouver Branch",
+  "customer.full_name": "Alex Customer",
+  "customer.first_name": "Alex",
+  "customer.last_name": "Customer",
+  "customer.email": "alex.customer@example.com",
+  "customer.phone": "(555) 019-2834",
+  "opportunity.number": "OPP-0042",
+  "opportunity.service_type": "Residential move",
+  "opportunity.move_type": "Local",
+  "move.date": "June 15, 2026",
+  "move.size": "3 bedroom home",
+  "move.origin_address": "123 Main Street, Vancouver, BC",
+  "move.destination_address": "456 Oak Avenue, Burnaby, BC",
+  "move.distance_miles": "12",
+  "sales_rep.name": "Jordan Lee",
+  "sales_rep.email": "jordan.lee@kargoflow.example",
+  "estimate.number": "EST-00042",
+  "estimate.binding_type": "Non-binding",
+  "estimate.subtotal": "$1,475.00",
+  "estimate.discount": "$50.00",
+  "estimate.tax": "$77.63",
+  "estimate.grand_total": "$1,502.63",
+  "estimate.deposit_amount": "$300.00",
+  "estimate.hourly_rate": "$185.00",
+  "estimate.crew_size": "3",
+  "estimate.truck_count": "1",
+  "estimate.estimated_hours": "6",
+  "estimate.total_volume_cuft": "620",
+  "estimate.total_weight_lbs": "3,200",
+  "invoice.number": "INV-00128",
+  "invoice.issued_at": "June 15, 2026",
+  "invoice.due_at": "June 30, 2026",
+  "invoice.subtotal": "$1,475.00",
+  "invoice.discount": "$50.00",
+  "invoice.tax": "$77.63",
+  "invoice.total": "$1,502.63",
+  "invoice.amount_paid": "$300.00",
+  "invoice.balance_due": "$1,202.63",
+  "job.number": "JOB-00042",
+  "job.start_time": "June 15, 2026, 8:00 AM",
+  "links.estimate_portal": "https://example.com/estimates/EST-00042",
+  "links.pay_now": "https://example.com/pay/INV-00128",
+  "links.sign_document": "https://example.com/sign/CON-00042",
+  "system.today": "June 15, 2026",
+  "system.now": "June 15, 2026, 8:00 AM",
+};
+
+const SAMPLE_CHARGES = [
+  { name: "Moving labor", category: "Labor", description: "3 movers × 5 hours", quantity: "5", unit_price: "$185.00", total: "$925.00" },
+  { name: "Moving truck", category: "Transportation", description: "Truck and fuel", quantity: "1", unit_price: "$350.00", total: "$350.00" },
+  { name: "Packing materials", category: "Materials", description: "Boxes and wrapping", quantity: "1", unit_price: "$200.00", total: "$200.00" },
+];
+const SAMPLE_INVENTORY = [
+  { room: "Living room", item: "Sofa", quantity: "1", volume_cuft: "90", weight_lbs: "180" },
+  { room: "Bedroom", item: "Queen bed", quantity: "1", volume_cuft: "65", weight_lbs: "140" },
+];
+const SAMPLE_PAYMENTS = [
+  { date: "June 15, 2026", method: "Visa ending 4242", amount: "$300.00", reference: "PAY-0084" },
+];
+const SAMPLE_CREW = [
+  { name: "Morgan Chen", role: "Crew lead" },
+  { name: "Taylor Rivera", role: "Mover" },
+  { name: "Riley Singh", role: "Mover" },
+];
+const SAMPLE_TRUCKS = [{ name: "Truck 12", size: "26 ft" }];
+
+const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+}[char]));
+
+function resolvePreviewText(value, sampleData, scope = {}) {
+  return String(value || "").replace(/\{\{\s*([a-zA-Z0-9_.]+)(?:\|([^}]+))?\s*\}\}/g, (token, name, filter) => {
+    if (!sampleData) return token;
+    if (name.startsWith("item.")) return escapeHtml(scope[name.slice(5)] ?? token);
+    const sample = SAMPLE_VARIABLES[name];
+    if (sample === undefined) return token;
+    if (filter?.startsWith("default:") && !sample) return escapeHtml(filter.slice(8).replace(/^["']|["']$/g, ""));
+    return escapeHtml(sample);
+  });
+}
+
+function matchesPreviewCondition(condition, sampleData, scope) {
+  if (!condition) return true;
+  if (Array.isArray(condition.all)) return condition.all.every((child) => matchesPreviewCondition(child, sampleData, scope));
+  if (Array.isArray(condition.any)) return condition.any.some((child) => matchesPreviewCondition(child, sampleData, scope));
+  if (condition.not) return !matchesPreviewCondition(condition.not, sampleData, scope);
+  const raw = condition.var?.startsWith("item.")
+    ? scope[condition.var.slice(5)]
+    : SAMPLE_VARIABLES[condition.var];
+  if (!sampleData) return true;
+  if (condition.op === "empty") return raw === undefined || raw === null || raw === "";
+  if (condition.op === "not_empty") return raw !== undefined && raw !== null && raw !== "";
+  const value = condition.value;
+  if (condition.op === "eq") return String(raw).toLowerCase() === String(value).toLowerCase();
+  if (condition.op === "ne") return String(raw).toLowerCase() !== String(value).toLowerCase();
+  if (condition.op === "contains") return String(raw ?? "").toLowerCase().includes(String(value).toLowerCase());
+  const left = Number(raw);
+  const right = Number(value);
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
+  if (condition.op === "gt") return left > right;
+  if (condition.op === "gte") return left >= right;
+  if (condition.op === "lt") return left < right;
+  if (condition.op === "lte") return left <= right;
+  return true;
+}
+
+function PreviewTable({ columns, rows }) {
+  return (
+    <div className="w-full overflow-x-auto">
+      <table className="w-full border-collapse text-xs">
+        <thead className="bg-slate-50">
+          <tr>{columns.map((column) => <th key={column.key} className="border-b border-slate-300 px-2 py-1.5 text-left font-semibold text-slate-600">{column.label}</th>)}</tr>
+        </thead>
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={rowIndex}>
+              {columns.map((column) => <td key={column.key} className="border-b border-slate-200 px-2 py-1.5 text-slate-700">{row[column.key] || ""}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export function BackendWidgetPreview({ block, sampleData = true, scope = {}, customerPreview = false }) {
+  const props = block.props || {};
+  const children = Array.isArray(block.children) ? block.children : [];
+  const [imageUrl, setImageUrl] = useState("");
+  const [imageError, setImageError] = useState("");
+  const [clauseBlocks, setClauseBlocks] = useState(null);
+  const [clauseError, setClauseError] = useState("");
+  const nested = children.map((child, index) => (
+    <BackendWidgetPreview key={`${child.key || index}-${child.props?.asset_id || ""}-${child.props?.block_id || ""}`} block={child} sampleData={sampleData} scope={scope} customerPreview={customerPreview} />
+  ));
+
+  useEffect(() => {
+    const assetId = Number(props.asset_id);
+    if (block.type !== "image" || !Number.isInteger(assetId) || assetId <= 0) return undefined;
+    let isMounted = true;
+    let objectUrl = "";
+    downloadFile(assetId)
+      .then((response) => {
+        const blob = response?.data ?? response;
+        if (!(blob instanceof Blob)) throw new Error("The image download did not return a file.");
+        objectUrl = URL.createObjectURL(blob);
+        if (isMounted) setImageUrl(objectUrl);
+        else URL.revokeObjectURL(objectUrl);
+      })
+      .catch((error) => {
+        if (isMounted) setImageError(error?.response?.data?.detail || error.message || "Unable to load this image asset.");
+      });
+    return () => {
+      isMounted = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [block.type, props.asset_id]);
+
+  useEffect(() => {
+    const blockId = Number(props.block_id);
+    if (block.type !== "clause" || !Number.isInteger(blockId) || blockId <= 0) return undefined;
+    let isMounted = true;
+    getBuilderBlock(blockId)
+      .then((response) => {
+        const data = response?.data ?? response;
+        const revision = data?.published || data?.published_revision || data?.revision;
+        const saved = revision?.blocks || data?.blocks || [];
+        if (!Array.isArray(saved)) throw new Error("Saved clause content is invalid.");
+        if (isMounted) {
+          setClauseBlocks(saved);
+          setClauseError("");
+        }
+      })
+      .catch((error) => {
+        if (isMounted) setClauseError(error?.response?.data?.detail || error.message || "Unable to load this saved clause.");
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [block.type, props.block_id]);
+
+  if (block.type === "heading") {
+    const HeadingTag = `h${Math.min(4, Math.max(1, Number(props.level) || 2))}`;
+    return <HeadingTag className="font-semibold text-slate-800" style={{ textAlign: props.align || "left" }}>{resolvePreviewText(props.text || "Heading", sampleData, scope)}</HeadingTag>;
+  }
+  if (block.type === "text" || block.type === "terms") {
+    const richText = sanitizeHtml(resolvePreviewText(props.html || "", sampleData, scope)).cleanHtml;
+    return (
+      <div className="text-sm text-slate-700 [&_p]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-blue-700 [&_a]:underline"
+        dangerouslySetInnerHTML={{ __html: block.type === "terms" && props.title ? `<h3>${escapeHtml(resolvePreviewText(props.title, sampleData, scope))}</h3>${richText}` : richText }} />
+    );
+  }
+  if (block.type === "table") {
+    const columns = Array.isArray(props.columns) ? props.columns : [];
+    const rows = Array.isArray(props.rows) ? props.rows : [];
+    return (
+      <PreviewTable
+        columns={columns.map((column, index) => ({ key: String(index), label: resolvePreviewText(column, sampleData, scope) }))}
+        rows={rows.map((row) => Object.fromEntries(columns.map((_column, index) => [String(index), resolvePreviewText(row?.[index], sampleData, scope)])))}
+      />
+    );
+  }
+  if (block.type === "divider") return <hr className="my-2" style={{ borderStyle: props.style || "solid", borderColor: props.color || "#cbd5e1" }} />;
+  if (block.type === "spacer") return <div style={{ height: Math.min(Number(props.height) || 24, 100) }} />;
+  if (block.type === "page_break") return <div className="border-y border-dashed border-slate-300 py-2 text-center text-[10px] uppercase text-slate-400">PDF page break</div>;
+  if (block.type === "variable") return <span>{props.label ? `${props.label}: ` : ""}{resolvePreviewText(`{{${props.token || "variable"}${props.format ? `|${props.format}` : ""}}}`, sampleData, scope)}</span>;
+  if (block.type === "image") return imageUrl
+    ? <div className="my-2" style={{ textAlign: props.align || "left" }}><img src={imageUrl} alt={props.alt || ""} width={props.width || undefined} className="inline-block h-auto max-w-full" /></div>
+    : <div role={imageError ? "alert" : undefined} className={`rounded border border-dashed p-4 text-center text-xs ${imageError ? "border-red-300 text-red-600" : "border-slate-300 text-slate-500"}`}>{imageError || (props.asset_id ? "Loading uploaded image…" : "Select an uploaded image asset to preview it.")}</div>;
+  if (block.type === "signature" || block.type === "initial") {
+    return <div className="max-w-sm py-2 text-xs text-slate-700"><span>{props.label || block.type.replace(/_/g, " ")}{props.required ? " *" : ""}</span><div className="mt-6 border-b border-slate-400" />{props.signer_role && <small className="mt-1 block text-slate-400">Signer: {props.signer_role}</small>}</div>;
+  }
+  if (block.type === "form_field") {
+    if (props.field_type === "checkbox") {
+      return <label className="flex items-center gap-2 text-xs text-slate-700"><input type="checkbox" disabled={customerPreview} onClick={(event) => { if (!customerPreview) event.preventDefault(); }} />{props.label || "Checkbox"}{props.required ? " *" : ""}</label>;
+    }
+    if (props.field_type === "date") {
+      return <label className="block max-w-sm text-xs text-slate-600">{props.label || "Date"}{props.required ? " *" : ""}<input type="date" disabled={customerPreview} readOnly={!customerPreview} onClick={(event) => { if (!customerPreview) event.preventDefault(); }} className="mt-1 block w-full rounded border border-slate-300 px-2 py-1" /></label>;
+    }
+    return <label className="block max-w-sm text-xs text-slate-600">{props.label || "Enter a value"}{props.required ? " *" : ""}<input type="text" disabled={customerPreview} readOnly={!customerPreview} placeholder="Customer response" onClick={(event) => { if (!customerPreview) event.preventDefault(); }} className="mt-1 block w-full rounded border border-slate-300 px-2 py-1.5" /></label>;
+  }
+  if (block.type === "button") return <div className="py-2" style={{ textAlign: props.align || "left" }}><span className="inline-block rounded bg-blue-600 px-4 py-2 text-xs font-semibold text-white">{resolvePreviewText(props.label || "Continue", sampleData, scope)}</span></div>;
+  if (block.type === "columns") {
+    const count = Math.min(4, Math.max(2, Number(props.count) || 2));
+    const columns = Array.from({ length: count }, (_, index) => children.filter((child) => Number(child.column || 0) === index));
+    return (
+      <div className="grid" style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))`, gap: `${Math.max(0, Number(props.gap) || 0)}px` }}>
+        {columns.map((column, index) => <div key={index} className="min-w-0 space-y-2">{column.map((child, childIndex) => <BackendWidgetPreview key={child.key || childIndex} block={child} sampleData={sampleData} scope={scope} />)}</div>)}
+      </div>
+    );
+  }
+  if (block.type === "conditional") {
+    if (customerPreview && !matchesPreviewCondition(block.condition, sampleData, scope)) return null;
+    return <div className="space-y-2">{nested}</div>;
+  }
+  if (block.type === "repeater") {
+    const rows = props.source === "invoice.line_items" ? SAMPLE_CHARGES : props.source === "estimate.inventory" ? SAMPLE_INVENTORY : SAMPLE_CHARGES;
+    if (!rows.length) return <p className="text-xs text-slate-500">{resolvePreviewText(props.empty_text, sampleData, scope)}</p>;
+    return <div className="space-y-2">{rows.map((row, index) => <div key={index}>{children.map((child, childIndex) => <BackendWidgetPreview key={`${child.key || childIndex}-${index}`} block={child} sampleData={sampleData} scope={row} customerPreview={customerPreview} />)}</div>)}</div>;
+  }
+  if (block.type === "clause") return clauseBlocks
+    ? <div className="space-y-2">{clauseBlocks.map((child, index) => <BackendWidgetPreview key={child.key || index} block={child} sampleData={sampleData} scope={scope} customerPreview={customerPreview} />)}</div>
+    : <p role={clauseError ? "alert" : undefined} className={`text-xs ${clauseError ? "text-red-600" : "text-slate-500"}`}>{clauseError || "Loading saved clause…"}</p>;
+  if (block.type === "move_details") {
+    const rows = [
+      ...(props.show_dates !== false ? [{ label: "Move date", value: SAMPLE_VARIABLES["move.date"] }] : []),
+      ...(props.show_move_size !== false ? [{ label: "Move size", value: SAMPLE_VARIABLES["move.size"] }] : []),
+      ...(props.show_stops !== false ? [{ label: "From", value: SAMPLE_VARIABLES["move.origin_address"] }, { label: "To", value: SAMPLE_VARIABLES["move.destination_address"] }] : []),
+    ];
+    return <PreviewTable columns={[{ key: "label", label: "Move details" }, { key: "value", label: " " }]} rows={rows.map((row) => ({ ...row }))} />;
+  }
+  if (block.type === "crew_trucks") {
+    const rows = [
+      ...(props.show_names !== false ? SAMPLE_CREW.map((member) => ({ type: member.role, name: member.name })) : []),
+      ...(props.show_trucks !== false ? SAMPLE_TRUCKS.map((truck) => ({ type: "Truck", name: `${truck.name} · ${truck.size}` })) : []),
+    ];
+    return <PreviewTable columns={[{ key: "type", label: "Crew / vehicle" }, { key: "name", label: "Assignment" }]} rows={rows} />;
+  }
+  if (block.type === "charges" || block.type === "line_items") {
+    const rows = SAMPLE_CHARGES.map((row) => ({
+      description: row.name,
+      quantity: row.quantity,
+      unit_price: row.unit_price,
+      total: row.total,
+    }));
+    return (
+      <div className="space-y-1">
+        <p className="text-xs font-semibold text-slate-700">{block.type === "charges" ? "Estimate charges" : "Invoice line items"}</p>
+        <PreviewTable columns={[
+          { key: "description", label: "Description" },
+          ...(props.show_quantity !== false && block.type === "charges" ? [{ key: "quantity", label: "Qty" }] : []),
+          { key: "unit_price", label: "Rate" },
+          { key: "total", label: "Amount" },
+        ]} rows={rows} />
+      </div>
+    );
+  }
+  if (block.type === "estimate_summary" || block.type === "totals") {
+    const isEstimate = block.type === "estimate_summary";
+    const rows = [
+      { label: "Subtotal", value: isEstimate ? SAMPLE_VARIABLES["estimate.subtotal"] : SAMPLE_VARIABLES["invoice.subtotal"] },
+      ...((props.show_discount !== false) ? [{ label: "Discount", value: isEstimate ? SAMPLE_VARIABLES["estimate.discount"] : SAMPLE_VARIABLES["invoice.discount"] }] : []),
+      ...((props.show_tax !== false) ? [{ label: "Tax", value: isEstimate ? SAMPLE_VARIABLES["estimate.tax"] : SAMPLE_VARIABLES["invoice.tax"] }] : []),
+      { label: isEstimate ? "Estimate total" : "Invoice total", value: isEstimate ? SAMPLE_VARIABLES["estimate.grand_total"] : SAMPLE_VARIABLES["invoice.total"] },
+      ...(isEstimate && props.show_deposit ? [{ label: "Deposit due", value: SAMPLE_VARIABLES["estimate.deposit_amount"] }] : []),
+      ...(!isEstimate && props.show_balance !== false ? [{ label: "Balance due", value: SAMPLE_VARIABLES["invoice.balance_due"] }] : []),
+      ...(isEstimate && props.show_binding_note ? [{ label: "Estimate type", value: SAMPLE_VARIABLES["estimate.binding_type"] }] : []),
+    ];
+    return <PreviewTable columns={[{ key: "label", label: isEstimate ? "Estimate summary" : "Invoice totals" }, { key: "value", label: "Amount" }]} rows={rows} />;
+  }
+  if (block.type === "inventory") {
+    if (props.mode === "detailed") return <PreviewTable columns={[
+      { key: "room", label: "Room" }, { key: "item", label: "Item" }, { key: "quantity", label: "Qty" },
+      ...(props.show_volume !== false ? [{ key: "volume_cuft", label: "Volume (cu ft)" }] : []),
+      ...(props.show_weight !== false ? [{ key: "weight_lbs", label: "Weight (lbs)" }] : []),
+    ]} rows={SAMPLE_INVENTORY} />;
+    return <div className="grid grid-cols-3 gap-2 rounded border border-slate-200 bg-slate-50 p-3 text-xs"><span>Rooms<strong className="block">2</strong></span><span>{props.show_volume !== false ? "Volume" : "Items"}<strong className="block">{props.show_volume !== false ? "155 cu ft" : "2"}</strong></span>{props.show_weight !== false && <span>Weight<strong className="block">320 lbs</strong></span>}</div>;
+  }
+  if (block.type === "payment_history") return <PreviewTable columns={[
+    { key: "date", label: "Date" }, ...(props.show_method !== false ? [{ key: "method", label: "Method" }] : []),
+    { key: "amount", label: "Amount" }, { key: "reference", label: "Reference" },
+  ]} rows={SAMPLE_PAYMENTS} />;
+  if (block.type === "options") return <fieldset className="space-y-2 rounded border border-slate-200 p-3"><legend className="px-1 text-xs font-semibold">Choose a package</legend>{["Standard Move", "Full-Service Move"].map((name) => <label key={name} className="flex items-center gap-2 text-xs text-slate-700"><input type={props.selection === "multiple" ? "checkbox" : "radio"} disabled={customerPreview} onClick={(event) => { if (!customerPreview) event.preventDefault(); }} />{name}<span className="ml-auto">$1,502.63</span></label>)}</fieldset>;
+  if (block.type === "payment") return <div className="rounded border border-slate-200 bg-slate-50 p-3"><p className="mb-2 text-xs text-slate-600">{props.amount_source === "balance" ? `Balance due: ${SAMPLE_VARIABLES["invoice.balance_due"]}` : `Deposit due: ${SAMPLE_VARIABLES["estimate.deposit_amount"]}`}</p><button type="button" disabled={customerPreview} onClick={(event) => event.preventDefault()} className="rounded bg-blue-600 px-4 py-2 text-xs font-semibold text-white">{props.label || "Pay now"}</button></div>;
+  return (
+    <div className="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">{block.label || block.type.replace(/_/g, " ")}</div>
+  );
+}
 
 export default function DocumentBlock({
   item,
@@ -31,6 +346,7 @@ export default function DocumentBlock({
   isLast = false,
   preview = false,
   resolveVariables = false,
+  sampleData = true,
   selection = null,
   onSelectPart = () => {},
   onOpenHtmlEditor = () => {},
@@ -533,6 +849,46 @@ export default function DocumentBlock({
         );
       }
 
+      case "callout": {
+        return (
+          <div className="my-2 w-full rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+            <InlineEdit
+              value={item.content || item.label || "Important notice"}
+              part="content"
+              selection={selection}
+              preview={preview}
+              resolveVariables={resolveVariables}
+              onSelect={() => {
+                onSelect();
+                onSelectPart("content");
+              }}
+              onCommit={(val) => onUpdate({ ...item, content: val })}
+              className="block w-full break-words [overflow-wrap:anywhere]"
+            />
+          </div>
+        );
+      }
+
+      case "button": {
+        return (
+          <div className="my-2 w-full">
+            <InlineEdit
+              value={item.content || item.label || "Continue"}
+              part="content"
+              selection={selection}
+              preview={preview}
+              resolveVariables={resolveVariables}
+              onSelect={() => {
+                onSelect();
+                onSelectPart("content");
+              }}
+              onCommit={(val) => onUpdate({ ...item, content: val })}
+              className="inline-block max-w-full rounded-md bg-blue-600 px-4 py-2 text-center text-sm font-semibold text-white break-words"
+            />
+          </div>
+        );
+      }
+
       case "image": {
         const imgSrc = item.image?.src || item.content || "";
         const imgWidth = item.image?.width || 80;
@@ -604,6 +960,27 @@ export default function DocumentBlock({
         return (
           <div className="doc-divider-widget py-2 w-full">
             <hr className="border-t border-slate-200 my-1" />
+          </div>
+        );
+      }
+
+      case "builder_block": {
+        return (
+          <div
+            className="backend-widget-typography w-full py-1"
+            style={{
+              "--builder-widget-font-family": style.fontFamily || "inherit",
+              "--builder-widget-font-size": style.fontSize ? `${style.fontSize}px` : "inherit",
+              "--builder-widget-font-weight": style.bold ? 700 : style.fontWeight || "inherit",
+              "--builder-widget-text-transform": style.textTransform || "inherit",
+            }}
+          >
+            <BackendWidgetPreview
+              key={`${item.id}-${item.props?.asset_id || ""}-${item.props?.block_id || ""}`}
+              block={{ type: item.blockType, label: item.label, props: item.props, children: item.children, condition: item.condition }}
+              sampleData={sampleData}
+              customerPreview={preview}
+            />
           </div>
         );
       }
@@ -724,7 +1101,7 @@ export default function DocumentBlock({
       {/* Floating Action Bar on Hover/Select */}
       {!preview && (
         <div
-          className={`absolute -top-3.5 right-3 flex items-center gap-0.5 bg-white border border-slate-200 rounded-md shadow-md px-1 py-0.5 z-40 transition ${
+          className={`absolute ${isFirst ? "top-1.5" : "-top-3.5"} right-3 flex items-center gap-0.5 bg-white border border-slate-200 rounded-md shadow-md px-1 py-0.5 z-40 transition ${
             isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
           }`}
         >

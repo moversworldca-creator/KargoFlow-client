@@ -353,7 +353,6 @@ ROUTE_PERMISSIONS['/settings'] = {
   permissions: SETTINGS_ENTRY_PERMISSIONS,
   match: 'any',
 };
-NAV_ITEMS.push({ path: '/documents', label: 'Documents', required: DOCUMENTS_ENTRY_PERMISSIONS, match: 'any' });
 NAV_ITEMS.push({ path: '/settings', label: 'Settings', required: SETTINGS_ENTRY_PERMISSIONS, match: 'any' });
 
 const toSet = (permissions) => {

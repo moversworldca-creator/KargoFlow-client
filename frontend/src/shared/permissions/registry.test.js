@@ -75,4 +75,15 @@ describe('Permissions Registry normalization tests', () => {
     const nav = getAllowedNavItems(NAV_ITEMS, ctx).map((item) => item.path);
     expect(nav).not.toContain('/leads');
   });
+
+  it('keeps Documents accessible through Settings without a standalone sidebar item', () => {
+    const nav = getAllowedNavItems(NAV_ITEMS, {
+      permissions: [],
+      isSuperuser: true,
+      isSystemAdmin: false,
+    }).map((item) => item.path);
+
+    expect(nav).toContain('/settings');
+    expect(nav).not.toContain('/documents');
+  });
 });
