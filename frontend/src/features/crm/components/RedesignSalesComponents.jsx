@@ -2090,6 +2090,14 @@ export function SidebarSpecs({
     return String(option);
   };
 
+  const optionValue = (option) => typeof option === 'object' && option !== null
+    ? String(option.id ?? option.value ?? option.code ?? '')
+    : String(option ?? '');
+  const selectedLabel = (spec) => {
+    const match = spec.options?.find((option) => optionValue(option) === optionValue(spec.value));
+    return (match != null ? getOptionLabel(match) : '') || spec.displayValue || (spec.fetchOptions ? '—' : (getOptionLabel(spec.value) || '—'));
+  };
+
   return (
     <section className="rounded-xl border border-ink-100 bg-white shadow-sm flex flex-col overflow-visible">
       <header className="bg-[#EBF3FA] text-[#133559] flex items-center justify-between border-b border-blue-100 px-3 py-2">
@@ -2122,16 +2130,19 @@ export function SidebarSpecs({
                   />
                 ) : s.options ? (
                   <select
-                    value={s.value}
+                    value={optionValue(s.value)}
                     disabled={saving}
                     aria-label={s.label}
-                    onChange={(e) => commit(s, e.target.value)}
+                    onChange={(e) => commit(s, e.target.value, s.options.find((option) => optionValue(option) === e.target.value))}
                     autoFocus
                     className="mt-1 w-full rounded-lg border-2 border-brand/20 bg-brand-tint px-2 py-1.5 text-sm font-semibold text-ink-800 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/10"
                   >
                     <option value="">Select...</option>
+                    {optionValue(s.value) && !s.options.some((option) => optionValue(option) === optionValue(s.value)) && (
+                      <option value={optionValue(s.value)} disabled>{selectedLabel(s)}</option>
+                    )}
                     {s.options.map((o) => (
-                      <option key={o?.id ?? o} value={o?.id ?? o}>{getOptionLabel(o)}</option>
+                      <option key={optionValue(o)} value={optionValue(o)} disabled={o?.is_active === false}>{getOptionLabel(o)}</option>
                     ))}
                   </select>
                 ) : (
@@ -2162,8 +2173,8 @@ export function SidebarSpecs({
                     type="button" disabled={saving} aria-label={`Edit ${s.label}`}
                     className="max-w-full truncate rounded border-b border-dashed border-brand/30 text-brand hover:bg-blue-50 disabled:opacity-50"
                     onClick={() => { setSaveError(''); setEditingId(s.id); }}
-                  >{s.displayValue || (s.fetchOptions ? '—' : (s.value || '—'))}</button>
-                    : <span>{s.displayValue || (s.fetchOptions ? '—' : (s.value || '—'))}</span>}
+                  >{selectedLabel(s)}</button>
+                    : <span>{selectedLabel(s)}</span>}
                 </dd>
               )}
             </div>

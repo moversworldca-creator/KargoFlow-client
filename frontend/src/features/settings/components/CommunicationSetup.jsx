@@ -178,7 +178,7 @@ export default function CommunicationSetup({ branchId = null }) {
   const [selectedNumbers, setSelectedNumbers] = useState([]);
   const [quotedOrder, setQuotedOrder] = useState(null);
   const [assignmentForm, setAssignmentForm] = useState({ phone_number_id: '', branch_id: branchId || '', employee_id: '' });
-  const [mailboxProvider, setMailboxProvider] = useState('google');
+  const [mailboxProvider, setMailboxProvider] = useState('gmail');
   const [mailboxHint, setMailboxHint] = useState('');
 
   const refreshAll = async () => {
@@ -378,7 +378,10 @@ export default function CommunicationSetup({ branchId = null }) {
   const startOAuth = () => withSaving('mailbox-oauth', async () => {
     const res = await startMailboxOAuth({ provider: mailboxProvider, login_hint: mailboxHint.trim() });
     const data = getData(res);
-    if (data?.authorization_url) window.location.assign(data.authorization_url);
+    if (data?.authorization_url) {
+      sessionStorage.setItem('mailbox_oauth_pending', JSON.stringify({ provider: mailboxProvider, state: data.state }));
+      window.location.assign(data.authorization_url);
+    }
   });
 
   const copyValue = async (value) => {
@@ -748,11 +751,11 @@ export default function CommunicationSetup({ branchId = null }) {
             <div className="space-y-3">
               <div>
                 <h3 className="text-sm font-bold text-heading">Connect mailbox</h3>
-                <p className="mt-0.5 text-[11px] text-body">Connect personal or branch mailboxes for replies and inbound sync.</p>
+                <p className="mt-0.5 text-[11px] text-body">Connect your personal mailbox to send lead emails and sync replies.</p>
               </div>
               <SelectField label="Provider" value={mailboxProvider} onChange={setMailboxProvider}>
-                <option value="google">Google</option>
-                <option value="microsoft">Microsoft</option>
+                <option value="gmail">Google</option>
+                <option value="microsoft365">Microsoft</option>
               </SelectField>
               <TextInput label="Login hint" value={mailboxHint} onChange={setMailboxHint} placeholder="person@example.com" type="email" />
               <ActionButton onClick={startOAuth} icon={Inbox} size="sm" disabled={savingKey === 'mailbox-oauth'}>Start OAuth</ActionButton>
@@ -761,7 +764,7 @@ export default function CommunicationSetup({ branchId = null }) {
           <Card className="!p-4 !rounded-xl space-y-2.5">
             <h3 className="text-sm font-bold text-heading">Connected mailboxes</h3>
             {mailboxes.length === 0 ? (
-              <EmptyState title="No mailboxes connected" message="Mailbox connections are optional but useful for inbound replies." />
+              <EmptyState title="No mailboxes connected" message="Connect your personal mailbox to send lead emails and sync replies." />
             ) : mailboxes.map((mailbox) => (
               <div key={mailbox.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 p-2.5 dark:border-slate-800">
                 <div>

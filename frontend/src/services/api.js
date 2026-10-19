@@ -536,6 +536,7 @@ export const createBranchEmailIdentity = (branchId, data) =>
 export const updateBranchEmailIdentity = (branchId, identityId, data) =>
   api.patch(`/tenant/communications/branch-settings/${branchId}/email-identities/${identityId}/`, data);
 export const getCommunicationMailboxes = () => api.get("/tenant/communications/mailboxes/");
+export const completeMailboxOAuth = (data) => api.post("/tenant/communications/mailboxes/oauth/complete/", data);
 export const startMailboxOAuth = (data) => api.post("/tenant/communications/mailboxes/oauth/start/", data);
 export const syncCommunicationMailbox = (id) => api.post(`/tenant/communications/mailboxes/${id}/sync/`);
 export const updateCommunicationMailbox = (id, data) => api.patch(`/tenant/communications/mailboxes/${id}/`, data);
@@ -593,23 +594,33 @@ export const updateAutomationStep = (id, data) => api.patch(`/automations/steps/
 export const deleteAutomationStep = (id) => api.delete(`/automations/steps/${id}/`);
 export const getAutomationRuns = (params) => api.get("/automations/runs/", { params });
 
+// Tenant catalogs wrap record fields in `data`; UI consumers use flat records.
+const catalogRecord = (record) => record?.data && typeof record.data === 'object'
+  ? { ...record.data, id: record.id ?? record.data.id }
+  : record;
+const catalogResponse = (response) => {
+  if (Array.isArray(response)) return response.map(catalogRecord);
+  if (Array.isArray(response?.results)) return { ...response, results: response.results.map(catalogRecord) };
+  return catalogRecord(response);
+};
+
 // Mover Type & Size APIs
-export const getServices = (params) => api.get("/tenant/service-types/", { params });
-export const getServiceTypes = (params) => api.get("/tenant/service-types/", { params });
-export const createServiceType = (data) => api.post("/tenant/service-types/", data);
-export const updateServiceType = (id, data) => api.patch(`/tenant/service-types/${id}/`, data);
+export const getServices = async (params) => catalogResponse(await api.get("/tenant/service-types/", { params }));
+export const getServiceTypes = async (params) => catalogResponse(await api.get("/tenant/service-types/", { params }));
+export const createServiceType = async (data) => catalogResponse(await api.post("/tenant/service-types/", data));
+export const updateServiceType = async (id, data) => catalogResponse(await api.patch(`/tenant/service-types/${id}/`, data));
 export const deleteServiceType = (id) => api.delete(`/tenant/service-types/${id}/`);
 
-export const getMoverTypes = (params) => api.get("/tenant/move-types/", { params });
-export const getMoveTypeLookups = (params) => api.get("/tenant/move-types/", { params });
-export const createMoverType = (data) => api.post("/tenant/move-types/", data);
-export const updateMoverType = (id, data) => api.patch(`/tenant/move-types/${id}/`, data);
+export const getMoverTypes = async (params) => catalogResponse(await api.get("/tenant/move-types/", { params }));
+export const getMoveTypeLookups = async (params) => catalogResponse(await api.get("/tenant/move-types/", { params }));
+export const createMoverType = async (data) => catalogResponse(await api.post("/tenant/move-types/", data));
+export const updateMoverType = async (id, data) => catalogResponse(await api.patch(`/tenant/move-types/${id}/`, data));
 export const deleteMoverType = (id) => api.delete(`/tenant/move-types/${id}/`);
 
-export const getMoverSizes = (params) => api.get("/tenant/move-sizes/", { params });
-export const getMoverSizeLookups = (params) => api.get("/tenant/move-sizes/", { params });
-export const createMoverSize = (data) => api.post("/tenant/move-sizes/", data);
-export const updateMoverSize = (id, data) => api.patch(`/tenant/move-sizes/${id}/`, data);
+export const getMoverSizes = async (params) => catalogResponse(await api.get("/tenant/move-sizes/", { params }));
+export const getMoverSizeLookups = async (params) => catalogResponse(await api.get("/tenant/move-sizes/", { params }));
+export const createMoverSize = async (data) => catalogResponse(await api.post("/tenant/move-sizes/", data));
+export const updateMoverSize = async (id, data) => catalogResponse(await api.patch(`/tenant/move-sizes/${id}/`, data));
 export const deleteMoverSize = (id) => api.delete(`/tenant/move-sizes/${id}/`);
 export const seedStatusCodes = (data = {}) => api.post("/tenant/opportunity-statuses/", data);
 
@@ -856,8 +867,14 @@ export const getLookupEmployeesPage = async (search, offset, limit, branch = nul
   return { ...page, results: page.results.map((employee) => ({ ...employee, label: `${employee.first_name} ${employee.last_name}`.trim() || employee.email })), hasMore: offset + page.results.length < page.count };
 };
 
-export const getBranchLookupsPage = (search, offset, limit) =>
-  api.get('/tenant/branches/', { params: { search, offset, limit } });
+export const getBranchLookupsPage = async (search, offset, limit) => {
+  const response = catalogResponse(await api.get('/tenant/branches/', { params: { search, offset, limit } }));
+  // The branch endpoint returns the entire tenant list and ignores pagination.
+  if (!Array.isArray(response)) return response;
+  const query = String(search || '').trim().toLowerCase();
+  const rows = response.filter((branch) => branch.is_active !== false && String(branch.name || '').toLowerCase().includes(query));
+  return { count: rows.length, results: rows.slice(offset, offset + limit), hasMore: offset + limit < rows.length };
+};
 
 export const getOpportunityLossReasonLookupsPage = (search, offset, limit) =>
   api.get('/lookups/opportunity-loss-reasons/', { params: { search, offset, limit } });

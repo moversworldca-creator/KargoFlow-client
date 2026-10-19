@@ -37,3 +37,15 @@ describe('SidebarSpecs with real editing controls', () => {
     await waitFor(() => expect(save).toHaveBeenCalledWith('assigned_to', '', null));
   });
 });
+
+it('resolves saved IDs when catalog options arrive and saves value-based options', async () => {
+  const save = vi.fn().mockResolvedValue(true);
+  const spec = { id: 'service_type', label: 'Service', icon: 'user', value: 1, displayValue: '1', options: [] };
+  const { rerender } = render(<SidebarSpecs specs={[spec]} onInlineSave={save} />);
+  rerender(<SidebarSpecs specs={[{ ...spec, options: [{ value: 1, label: 'Moving' }, { value: 2, label: 'Packing' }] }]} onInlineSave={save} />);
+  expect(screen.getByRole('button', { name: 'Edit Service' })).toHaveTextContent('Moving');
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Service' }));
+  expect(screen.getByRole('combobox', { name: 'Service' })).toHaveValue('1');
+  fireEvent.change(screen.getByRole('combobox', { name: 'Service' }), { target: { value: '2' } });
+  await waitFor(() => expect(save).toHaveBeenCalledWith('service_type', '2', { value: 2, label: 'Packing' }));
+});

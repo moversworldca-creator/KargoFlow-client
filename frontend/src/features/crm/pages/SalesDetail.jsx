@@ -1,3 +1,4 @@
+import { hasSendingMailbox, getComposerTemplates, getComposerTemplate } from '../leads/communicationSetupApi';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link, useLocation } from 'react-router-dom';
 import { 
@@ -129,10 +130,10 @@ import api, {
   getTasks,
   createTask,
   updateTask as updateTaskRequest,
-  getCommunicationTemplate,
   getStatusCodeLookups,
   getOpportunityLossReasonLookups,
   getBranchLookups,
+  getMoverSizeLookups,
   getEstimates,
   createEstimate,
   getLookupUsers,
@@ -142,9 +143,6 @@ import api, {
   createCustomerContact,
   updateCustomerContact,
   deleteCustomerContact,
-	  getSendGridConfig,
-	  getResendConfig,
-	  getSMTPConfig,
 	  getLead,
 	  getLeadBySalesNumber,
 	  updateLead,
@@ -154,8 +152,6 @@ import api, {
   qualifyLead,
   markLeadLost,
   reopenLead,
-  getCommunicationTemplates,
-  getCommunicationTemplateCategories,
   previewCommunicationTemplate,
   getDocumentTemplates,
   createContract,
@@ -2622,7 +2618,6 @@ const SalesDetail = () => {
   });
   const [isPosting, setIsPosting] = useState(false);
   const [toast, setToast] = useState({ type: '', text: '' });
-  const [hasActiveEmailProvider, setHasActiveEmailProvider] = useState(false);
   const [isLoadingCommTemplates, setIsLoadingCommTemplates] = useState(false);
   const [followUps, setFollowUps] = useState([]);
   const [isLoadingFollowUps, setIsLoadingFollowUps] = useState(false);
@@ -3816,69 +3811,18 @@ const SalesDetail = () => {
       fetchSafe(() => isLeadPath ? getLookupEmployeesPage('', 0, 200) : getLookupUsersPage('', 0, 200), setUsers, 'staff'),
       // Further options are fetched on demand via AsyncSelect pagination
       fetchSafe(getReferralSourceLookups, setReferralSources, 'referral sources'),
+      fetchSafe(getMoverSizeLookups, setMoverSizes, 'move sizes'),
+      fetchSafe(getBranchLookups, setBranches, 'branches'),
     ]);
   };
 
   const loadCommunicationTemplates = async (branchId = null, channel = null) => {
     setIsLoadingCommTemplates(true);
     try {
-      const numericBranchId = Number(String(branchId || '').match(/^\s*(\d+)\s*$/)?.[1] || branchId || 0);
-      const safeBranchId = Number.isFinite(numericBranchId) && numericBranchId > 0 ? numericBranchId : null;
-      const params = { compact: 1, limit: 500 };
-      if (channel) params.channel = channel;
-      if (safeBranchId) params.branch = safeBranchId;
-      const normalizeRows = (rows, fallbackChannel) => asList(rows).map((row) => ({
-        ...row,
-        channel: String(row?.channel || fallbackChannel || '').toLowerCase(),
-        is_active: row?.is_active ?? row?.status ?? true,
-      }));
-      const fetchAllTemplatePages = async (requestParams, fallbackChannel) => {
-        const allRows = [];
-        let page = 1;
-        let safety = 0;
-        while (page && safety < 50) {
-          const response = await getCommunicationTemplates({ ...requestParams, page });
-          allRows.push(...normalizeRows(response, fallbackChannel));
-          const nextPage = getNextPageNumber(response);
-          if (!nextPage || nextPage === page) break;
-          page = nextPage;
-          safety += 1;
-        }
-        return allRows;
-      };
-      const [branchResponse, globalResponse, categoriesRes] = await Promise.all([
-        safeBranchId ? fetchAllTemplatePages({ ...params, branch: safeBranchId }, channel) : Promise.resolve([]),
-        fetchAllTemplatePages(params, channel),
-        getCommunicationTemplateCategories(safeBranchId ? { branch: safeBranchId } : params).catch(err => {
-          console.warn('Failed to load categories:', err);
-          return [];
-        })
-      ]);
-      const templates = [
-        ...normalizeRows(branchResponse, channel),
-        ...normalizeRows(globalResponse, channel),
-      ];
-      const seen = new Set();
-      const uniqueTemplates = templates.filter((template) => {
-        const templateKey = String(template?.template_key || '').trim();
-        if (template?.is_default || templateKey.startsWith('automation_notification__')) {
-          return false;
-        }
-        if (channel && String(template?.channel || '').toLowerCase() !== String(channel).toLowerCase()) {
-          return false;
-        }
-        const key = [
-          String(template?.id || ''),
-          templateKey || String(template?.name || ''),
-          String(template?.channel || ''),
-          String(template?.branch || template?.branch_id || ''),
-        ].join('::');
-        if (!key || seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-      setCommCategories(asList(categoriesRes));
-      setCommTemplates(uniqueTemplates);
+      const params = { ...(channel ? { channel } : {}), ...(branchId ? { branch_id: Number(branchId) } : {}) };
+      const response = await getComposerTemplates(params);
+      setCommTemplates(asList(response).map((row) => ({ ...row, body: row.body_text || row.body || '' })));
+      setCommCategories([]);
     } catch (err) {
       console.error('Failed to load communication templates:', err);
       setCommTemplates([]);
@@ -3933,7 +3877,7 @@ const SalesDetail = () => {
     return () => {
       cancelled = true;
     };
-  }, [statusBranchId, isLeadPath]);
+  }, [statusBranchId, isLeadPath, id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3966,7 +3910,7 @@ const SalesDetail = () => {
     return () => {
       cancelled = true;
     };
-  }, [statusBranchId, isLeadPath]);
+  }, [statusBranchId, isLeadPath, id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3998,18 +3942,9 @@ const SalesDetail = () => {
 
   const loadEmailProviderStatus = async () => {
     try {
-      const [sendgridRows, resendRows, smtpRows] = await Promise.all([
-        getSendGridConfig(),
-        getResendConfig(),
-	        getSMTPConfig(),
-	      ]);
-	      const hasProvider =
-	        asList(sendgridRows).some((row) => Boolean(row?.is_active)) ||
-	        asList(resendRows).some((row) => Boolean(row?.is_active)) ||
-	        asList(smtpRows).some((row) => Boolean(row?.is_active));
-	      setHasActiveEmailProvider(hasProvider);
-	    } catch {
-      setHasActiveEmailProvider(false);
+      return await hasSendingMailbox();
+    } catch {
+      return false;
     }
   };
 
@@ -6847,7 +6782,7 @@ const SalesDetail = () => {
       value: activeSpecs.move_size, 
       displayValue: resolveMoveSizeName(activeSpecs.move_size, [...(Array.isArray(moverSizes) ? moverSizes : []), opportunity?.mover_size_details, opportunity?.move_size_details].filter(Boolean)) || opportunity?.mover_size_details?.name || opportunity?.move_size_details?.name || activeSpecs.move_size, 
       icon: "home", 
-      options: moverSizes 
+      options: moverSizes.filter((size) => size.is_active !== false || String(size.id) === String(activeSpecs.move_size)) 
     },
     { 
       id: "move_type", 
@@ -6855,7 +6790,7 @@ const SalesDetail = () => {
       value: activeSpecs.move_type, 
       displayValue: opportunity?.move_type_name || resolveSpecLookupLabel(activeSpecs.move_type, moverTypes) || resolveSpecLookupLabel(activeSpecs.move_type, MOVE_TYPE_OPTIONS), 
       icon: "map", 
-      options: moverTypes.length ? moverTypes : MOVE_TYPE_OPTIONS 
+      options: moverTypes.length ? moverTypes : isLeadPath ? [] : MOVE_TYPE_OPTIONS 
     },
     { 
       id: "service_type", 
@@ -6863,7 +6798,7 @@ const SalesDetail = () => {
       value: activeSpecs.service_type, 
       displayValue: opportunity?.service_type_name || resolveSpecLookupLabel(activeSpecs.service_type, serviceTypes) || resolveSpecLookupLabel(activeSpecs.service_type, SERVICE_TYPE_OPTIONS), 
       icon: "package", 
-      options: serviceTypes.length ? serviceTypes : SERVICE_TYPE_OPTIONS 
+      options: serviceTypes.length ? serviceTypes : isLeadPath ? [] : SERVICE_TYPE_OPTIONS 
     },
     { 
       id: "branch", 
@@ -6935,7 +6870,7 @@ const SalesDetail = () => {
       labelField: "label",
       options: customStatusCodes,
     },
-  ], [activeSpecs, opportunity, moverSizes, branches, selectedBranch, selectedBranchName, selectedReferralSource, selectedAssignedUser, referralSources, branchScopedUsers, customStatusCodes, selectedCustomStatusCode, titleCase, specsDraftLabels, committedSpecsLabels, statusBranchId]);
+  ], [activeSpecs, opportunity, moverSizes, moverTypes, serviceTypes, isLeadPath, branches, selectedBranch, selectedBranchName, selectedReferralSource, selectedAssignedUser, referralSources, branchScopedUsers, customStatusCodes, selectedCustomStatusCode, titleCase, specsDraftLabels, committedSpecsLabels, statusBranchId]);
 
 	  const headerActions = useMemo(() => {
 	    if (opportunity?.id === 'new') return [];
@@ -7794,7 +7729,7 @@ const SalesDetail = () => {
       !String(template?.body || '').trim();
     if (missingContent) {
       try {
-        const detail = await getCommunicationTemplate(template.id);
+        const detail = await getComposerTemplate(template.id);
         resolvedTemplate = detail?.data || detail || template;
       } catch {
         resolvedTemplate = template;
@@ -7940,8 +7875,8 @@ const SalesDetail = () => {
       setToast({ type: 'error', text: 'Customer email is required before sending email.' });
       return;
     }
-    if (commTab === 'email' && !hasActiveEmailProvider) {
-      setToast({ type: 'error', text: 'No active email provider is configured for this company.' });
+    if (commTab === 'email' && !(await loadEmailProviderStatus())) {
+      setToast({ type: 'error', text: 'Connect your personal mailbox in Settings → Communications → Email & SMS Setup → Mailboxes before sending email.' });
       return;
     }
     if (commTab === 'text' && activitySmsRecipients.length === 0) {
