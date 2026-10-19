@@ -233,15 +233,69 @@ export const deleteLeadActivity = () => { throw new Error('Deleting lead activit
 
 
 
-// Customer APIs
-export const getCustomers = (params) => api.get("/leads/customers/", { params });
-export const getCustomer = (id) => api.get(`/leads/customers/${id}/`);
-export const createCustomer = (data) => api.post("/leads/customers/", data);
-export const updateCustomer = (id, data) => api.patch(`/leads/customers/${id}/`, data);
-export const deleteCustomer = (id) => api.delete(`/leads/customers/${id}/`);
-export const createCustomerContact = (data) => api.post("/leads/customer-contacts/", data);
-export const updateCustomerContact = (id, data) => api.patch(`/leads/customer-contacts/${id}/`, data);
-export const deleteCustomerContact = (id) => api.delete(`/leads/customer-contacts/${id}/`);
+// Customer profiles and contacts are separate resources in the tenant API.
+const customerPath = (id) => `/tenant/customers/${id}/`;
+const customerName = (data) => [data.first_name, data.last_name].filter(Boolean).join(' ').trim();
+const legacyCustomer = (customer, contacts = []) => {
+  const primary = contacts.find((contact) => contact.is_primary && contact.is_active !== false) || null;
+  const parts = String(customer.profile_name || '').trim().split(/\s+/);
+  return {
+    ...customer,
+    full_name: customer.profile_name,
+    first_name: parts[0] || '',
+    last_name: parts.slice(1).join(' '),
+    email: primary?.email || customer.primary_email || '',
+    primary_phone: primary?.phone || customer.primary_phone || '',
+    contacts: contacts.filter((contact) => contact.is_active !== false),
+  };
+};
+const customerProfile = async (id) => {
+  const profile = await api.get(`${customerPath(id)}profile/`);
+  return legacyCustomer(profile.customer, profile.contacts || []);
+};
+export const getCustomers = async (params) => {
+  const result = await api.get('/tenant/customers/', { params });
+  return { ...result, results: (result.results || []).map((row) => legacyCustomer(row)) };
+};
+export const getCustomer = customerProfile;
+export const createCustomer = async (data) => {
+  const name = data.profile_name || customerName(data);
+  const email = String(data.email || '').trim();
+  const phone = String(data.primary_phone || data.phone || '').trim();
+  const payload = {
+    profile_name: name,
+    customer_type: data.customer_type || 'individual',
+    notes: data.notes || '',
+    ...(email || phone ? { primary_contact: { name, email, phone, phone_type: data.primary_phone_type || '' } } : {}),
+  };
+  const created = await api.post('/tenant/customers/', payload);
+  return customerProfile(created.id);
+};
+export const updateCustomer = async (id, data) => {
+  const current = await customerProfile(id);
+  const name = data.profile_name || customerName(data);
+  if (name && name !== current.profile_name) {
+    await api.patch(customerPath(id), { profile_name: name });
+  }
+  const primary = current.contacts.find((contact) => contact.is_primary);
+  const contact = {
+    name: name || current.profile_name,
+    email: data.email ?? current.email,
+    phone: data.primary_phone ?? data.phone ?? current.primary_phone,
+  };
+  if (primary) {
+    if (contact.name !== primary.name || contact.email !== primary.email || contact.phone !== primary.phone) {
+      await api.patch(`${customerPath(id)}contacts/${primary.id}/`, contact);
+    }
+  } else if (contact.email || contact.phone) {
+    await api.post(`${customerPath(id)}contacts/`, { ...contact, is_primary: true });
+  }
+  return customerProfile(id);
+};
+export const deleteCustomer = () => { throw new Error('Customer profiles cannot be deleted.'); };
+export const createCustomerContact = ({ customer, ...data }) => api.post(`${customerPath(customer)}contacts/`, data);
+export const updateCustomerContact = (id, data, customerId) => api.patch(`${customerPath(customerId)}contacts/${id}/`, data);
+export const deleteCustomerContact = (id, customerId) => api.delete(`${customerPath(customerId)}contacts/${id}/`);
 
 // ================= SALES APIs =================
 export const getMyLeadsQueue = (params) => getPipelineQueue(params);

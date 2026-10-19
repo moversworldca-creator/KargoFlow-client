@@ -1041,7 +1041,7 @@ const createEmptyAdditionalContact = () => ({
 });
 const getAdditionalCustomerContacts = (customer) =>
   getCustomerContacts(customer)
-    .filter((contact) => !contact?.is_primary)
+    .filter((contact) => !contact?.is_primary && contact?.is_active !== false)
     .slice(0, MAX_ADDITIONAL_CONTACTS);
 const getContactLabel = (contact, index = 0) =>
   String(contact?.name || '').trim() || `Additional Contact ${index + 1}`;
@@ -5419,17 +5419,20 @@ const SalesDetail = () => {
   };
 
   const removeAdditionalContactForm = async (indexToRemove) => {
+    if (!requiresAnyPermission([PERMISSIONS.LEAD_EDIT, PERMISSIONS.SALES_CHANGE_OPPORTUNITY])) {
+      return denyAction('You do not have permission to edit contacts.');
+    }
     const formToRemove = additionalContactForms[indexToRemove];
     if (!formToRemove) return;
 
     if (formToRemove.id) {
       try {
         setIsAdditionalContactsSaving(true);
-        await deleteCustomerContact(formToRemove.id);
-        
         const customerId = resolveCustomerId(getRecordCustomerDetails(opportunity), opportunity?.customer_id, opportunity?.customer);
+        if (!customerId) throw new Error('Customer record is missing.');
+        await deleteCustomerContact(formToRemove.id, customerId);
         const currentContacts = getRecordCustomerDetails(opportunity)?.contacts || [];
-        const nextContacts = currentContacts.filter(c => c.id !== formToRemove.id);
+        const nextContacts = currentContacts.filter(c => String(c.id) !== String(formToRemove.id));
 
         const updatedCustomer = { ...getRecordCustomerDetails(opportunity), contacts: nextContacts };
         
@@ -5487,9 +5490,6 @@ const SalesDetail = () => {
     if (!requiresAnyPermission([PERMISSIONS.LEAD_EDIT, PERMISSIONS.SALES_CHANGE_OPPORTUNITY])) {
       return denyAction('You do not have permission to edit contacts.');
     }
-    if (!requiresAnyPermission([PERMISSIONS.LEAD_EDIT, PERMISSIONS.SALES_CHANGE_OPPORTUNITY])) {
-      return denyAction('You do not have permission to edit contacts.');
-    }
 
     let customerId = resolveCustomerId(getRecordCustomerDetails(opportunity), opportunity?.customer_id, opportunity?.customer);
     if (!customerId) {
@@ -5543,8 +5543,7 @@ const SalesDetail = () => {
         }
 
         const rowId = String(row.id || '').trim();
-        const existingContact =
-          currentContacts.find((contact) => String(contact?.id || '') === rowId) || currentContacts[index] || null;
+        const existingContact = currentContacts.find((contact) => String(contact?.id || '') === rowId) || null;
         const contactId = Number(rowId || existingContact?.id || 0) || null;
         const contactChanged =
           String(contactPayload.name || '') !== String(existingContact?.name || '') ||
@@ -5555,7 +5554,7 @@ const SalesDetail = () => {
 
         if (contactId) {
           if (contactChanged) {
-            const savedContact = await updateCustomerContact(contactId, contactPayload);
+            const savedContact = await updateCustomerContact(contactId, contactPayload, customerId);
             savedContacts.push(savedContact);
             syncSavedCustomerContact(savedContact, customerId);
           }
@@ -5839,7 +5838,11 @@ const SalesDetail = () => {
             customer_details: {
               ...(opportunity?.customer_details || {}),
               ...updatedCustomer,
-              primary_phone: updatedCustomer?.primary_phone || payload.phone,
+              full_name: updatedCustomer?.full_name || `${payload.first_name} ${payload.last_name}`.trim(),
+              first_name: payload.first_name,
+              last_name: payload.last_name,
+              email: updatedCustomer?.email ?? payload.email,
+              primary_phone: updatedCustomer?.primary_phone ?? payload.phone,
             },
           };
           syncSavedOpportunity(nextOpportunity);
@@ -5871,8 +5874,14 @@ const SalesDetail = () => {
 
   const handleCustomerInlineSave = async (field, value) => {
     const previousDraft = customerDraft;
+    const currentCustomer = getRecordCustomerDetails(opportunity);
+    const nameParts = String(currentCustomer?.full_name || currentCustomer?.profile_name || '').trim().split(/\s+/);
     const updatedDraft = {
       ...form,
+      first_name: currentCustomer?.first_name || nameParts[0] || form.first_name,
+      last_name: currentCustomer?.last_name || nameParts.slice(1).join(' ') || form.last_name,
+      email: currentCustomer?.email ?? form.email,
+      phone: currentCustomer?.primary_phone ?? currentCustomer?.phone ?? form.phone,
       ...(customerDraft || {}),
       [field]: value,
     };
@@ -7342,8 +7351,10 @@ const SalesDetail = () => {
             } else {
               setAdditionalContactError('');
               let savedContact = null;
-              const existingContact = customerAdditionalContacts[selectedAdditionalContactIndex] || null;
-              const contactId = Number(selectedAdditionalContactForm.id || existingContact?.id || 0) || null;
+              const existingContact = customerAdditionalContacts.find(
+                (contact) => String(contact?.id || '') === String(selectedAdditionalContactForm.id || '')
+              ) || null;
+              const contactId = Number(selectedAdditionalContactForm.id || 0) || null;
               if (contactId) {
                 const contactChanged =
                   String(contactPayload.name || '') !== String(existingContact?.name || '') ||
@@ -7352,7 +7363,7 @@ const SalesDetail = () => {
                   String(contactPayload.phone_type || '') !== String(existingContact?.phone_type || '') ||
                   String(contactPayload.relationship || '') !== String(existingContact?.relationship || '');
                 if (contactChanged) {
-                  savedContact = await updateCustomerContact(contactId, contactPayload);
+                  savedContact = await updateCustomerContact(contactId, contactPayload, finalCustomerId);
                 } else {
                   savedContact = existingContact?.id ? existingContact : null;
                 }
@@ -7993,79 +8004,30 @@ const SalesDetail = () => {
           const emailsTo = activityEmailToText.split(',').map(e => e.trim()).filter(Boolean);
           const emailsCc = activityEmailCcText.split(',').map(e => e.trim()).filter(Boolean);
           const emailsBcc = activityEmailBccText.split(',').map(e => e.trim()).filter(Boolean);
-          const providerPayload = JSON.stringify({
-            cc_email: emailsCc.join(', '),
-            bcc_email: emailsBcc.join(', '),
-            plain_reply: emailComposeMode === 'inbound_reply',
+          if (emailAttachments.length) {
+            return denyAction('Email attachments are not supported by the tenant communications API yet.');
+          }
+          await sendRecordEmail('opportunity', opportunity.id, {
+            to: emailsTo,
+            cc: emailsCc,
+            bcc: emailsBcc,
+            subject: activitySubject.trim(),
+            body_text: description,
+            body_html: emailComposeMode === 'inbound_reply'
+              ? activeBody.trim()
+              : replaceBranchPlaceholders(activeBody.trim(), {
+                  branchLogoUrl: selectedBranchLogoUrl,
+                  branchName: selectedBranchName,
+                }),
+            include_signature: true,
           });
-
-          await Promise.all(emailsTo.map(async (targetEmail) => {
-            const created = await createSalesActivity({
-              opportunity: opportunity.id,
-              activity_type: activityTypeForTab(commTab),
-              subject: activitySubject || '',
-              description,
-              direction: 'outbound',
-              status: 'completed',
-            });
-            if (created?.id) {
-              try {
-                const formData = new FormData();
-                formData.append('activity', created.id);
-                formData.append('to_email', targetEmail);
-                formData.append('subject', activitySubject.trim());
-                formData.append(
-                  'body_html',
-                  emailComposeMode === 'inbound_reply'
-                    ? activeBody.trim()
-                    : replaceBranchPlaceholders(activeBody.trim(), {
-                        branchLogoUrl: selectedBranchLogoUrl,
-                        branchName: selectedBranchName,
-                      })
-                );
-                formData.append('provider_payload', providerPayload);
-                emailAttachments.forEach((file) => formData.append('attachments', file));
-                const emailLog = await api.post('/sales/email-logs/', formData);
-                if (emailLog?.status === 'failed') {
-                  channelWarning = emailLog?.error_message || 'Email delivery failed.';
-                }
-              } catch (err) {
-                try {
-                  await api.delete(`/sales/sales-activities/${created.id}/`);
-                } catch {
-                  // Keep the original email validation failure as the primary error.
-                }
-                throw err;
-              }
-            }
-          }));
         } else if (commTab === 'text') {
           if (!canSendSms()) {
             return denyAction('You do not have permission to send SMS messages.');
           }
-          await Promise.all(activitySmsRecipients.map(async (targetPhone) => {
-            if (!targetPhone) return;
-            const created = await createSalesActivity({
-              opportunity: opportunity.id,
-              activity_type: activityTypeForTab(commTab),
-              subject: '',
-              description,
-              direction: 'outbound',
-              status: 'completed',
-            });
-            if (created?.id) {
-              try {
-                await api.post('/sales/sms-logs/', {
-                  activity: created.id,
-                  to_phone: targetPhone,
-                  message: activeBody.trim(),
-                  status: 'sent',
-                });
-              } catch (err) {
-                channelWarning = `Activity saved, but SMS log failed: ${getErrorMessage(err, 'sms log error')}`;
-              }
-            }
-          }));
+          await Promise.all(activitySmsRecipients.filter(Boolean).map((to) =>
+            sendRecordSms('opportunity', opportunity.id, { to, body: activeBody.trim() })
+          ));
         } else {
           if (commTab === 'call' && (!canManageActivityHistory() || !canLogCall())) {
             return denyAction('You do not have permission to log calls.');
@@ -8120,7 +8082,7 @@ const SalesDetail = () => {
       setToast(
         postWarning
           ? { type: 'error', text: postWarning }
-          : { type: 'success', text: 'Activity posted successfully.' }
+          : { type: 'success', text: commTab === 'email' ? 'Email queued.' : commTab === 'text' ? 'Text queued.' : 'Activity posted successfully.' }
       );
       setTimeout(() => setToast({ type: '', text: '' }), 2500);
     } catch (err) {

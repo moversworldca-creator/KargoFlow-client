@@ -67,6 +67,13 @@ it('uses tenant communication routes for lead timelines and email', async () => 
   });
 });
 
+it('sends opportunity email through the supported record communication route', async () => {
+  await sendRecordEmail('opportunity', 9, { to: ['customer@example.com'], subject: 'Estimate' });
+  expect(api.post).toHaveBeenCalledWith('/tenant/opportunities/9/communications/email/', {
+    to: ['customer@example.com'], subject: 'Estimate',
+  });
+});
+
 it('unwraps notification records for the header without dropping their fields', async () => {
   const notification = { id: 7, title: 'Update', message: 'Saved', read_at: null, created_at: '2026-10-13' };
   api.get.mockResolvedValue([{ id: 7, data: notification }]);

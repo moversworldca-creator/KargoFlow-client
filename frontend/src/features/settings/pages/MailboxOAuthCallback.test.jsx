@@ -20,7 +20,15 @@ it('rejects mismatched callback state before exchanging the code', async () => {
   expect(completeMailboxOAuth).not.toHaveBeenCalled();
 });
 it('explains authorization denial', async () => {
+  sessionStorage.setItem('mailbox_oauth_pending', JSON.stringify({ provider:'gmail', state:'issued-state' }));
   setup('?error=access_denied');
-  expect(await screen.findByRole('alert')).toHaveTextContent('declined');
+  expect(await screen.findByRole('alert')).toHaveTextContent('Google denied mailbox access (access_denied)');
+  expect(screen.getByRole('alert')).toHaveTextContent('Test users');
+  expect(sessionStorage.getItem('mailbox_oauth_pending')).toBeNull();
+  expect(completeMailboxOAuth).not.toHaveBeenCalled();
+});
+it('explains Google Workspace admin policy denial', async () => {
+  setup('?error=admin_policy_enforced');
+  expect(await screen.findByRole('alert')).toHaveTextContent('administrator blocked mailbox access');
   expect(completeMailboxOAuth).not.toHaveBeenCalled();
 });

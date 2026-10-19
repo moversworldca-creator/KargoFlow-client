@@ -337,6 +337,7 @@ vi.mock('../../../services/api', () => {
       is_primary: false,
     }),
     updateCustomerContact: vi.fn().mockResolvedValue({}),
+    deleteCustomerContact: vi.fn().mockResolvedValue({}),
     seedCommunicationTemplates: vi.fn().mockResolvedValue({}),
     getSendGridConfig: vi.fn().mockResolvedValue([]),
     getResendConfig: vi.fn().mockResolvedValue([]),
@@ -588,7 +589,7 @@ describe('SalesDetail Component Tests', () => {
 
     await waitFor(() => {
       expect(apiService.updateCustomer).toHaveBeenCalledWith(321, expect.objectContaining({
-        email: 'sandeshnirmalme28@gmail.com',
+        email: 'updated@example.com',
         primary_phone: '555-777-8888',
       }));
     });
@@ -618,7 +619,7 @@ describe('SalesDetail Component Tests', () => {
         phone_type: 'mobile',
         relationship: 'Spouse',
         is_primary: false,
-      });
+      }, 321);
     });
   });
 
@@ -654,6 +655,19 @@ describe('SalesDetail Component Tests', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('customer-card')).toHaveTextContent('Ravi Kumar');
+    });
+  });
+
+  it('deactivates an additional contact and removes it from the customer card', async () => {
+    renderComponent();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Contacts$/i }));
+    expect(await screen.findByText('Additional Contact Details')).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('Delete contact'));
+
+    await waitFor(() => {
+      expect(apiService.deleteCustomerContact).toHaveBeenCalledWith('901', 321);
+      expect(screen.getByTestId('customer-card')).not.toHaveTextContent('Asha Kumar');
     });
   });
 

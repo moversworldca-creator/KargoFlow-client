@@ -11,7 +11,17 @@ export default function MailboxOAuthCallback() {
     let active = true;
     const params = new URLSearchParams(location.search);
     const finish = async () => {
-      if (params.get('error')) throw new Error('Mailbox connection was declined. Please try connecting again.');
+      const providerError = params.get('error');
+      if (providerError) {
+        sessionStorage.removeItem('mailbox_oauth_pending');
+        if (providerError === 'access_denied') {
+          throw new Error('Google denied mailbox access (access_denied). If you approved the request, check that the selected Google account is listed under Google Auth Platform → Audience → Test users, then start a new connection.');
+        }
+        if (providerError === 'admin_policy_enforced') {
+          throw new Error('Your Google Workspace administrator blocked mailbox access (admin_policy_enforced). Ask the administrator to allow this app, then start a new connection.');
+        }
+        throw new Error(`Google could not authorize the mailbox (${providerError}). Start a new connection after checking the app settings.`);
+      }
       let pending;
       try { pending = JSON.parse(sessionStorage.getItem('mailbox_oauth_pending') || 'null'); } catch { /* Invalid state is rejected below. */ }
       if (!params.get('code') || !pending?.provider || !pending?.state || pending.state !== params.get('state')) {

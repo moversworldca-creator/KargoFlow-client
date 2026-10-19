@@ -51,7 +51,7 @@ import api, {
     addEstimateCharge,
     applyEstimatePackage,
     createContract,
-    createSalesActivity,
+    sendRecordEmail,
     createPaymentRequest,
     createEstimate,
     createRefund,
@@ -4576,34 +4576,17 @@ export default function EstimateView({
             const subject = multiSendEmailData.subject.trim();
             const toEmail = multiSendEmailData.to.trim();
             
-            const createdRes = await createSalesActivity({
-                opportunity: opportunityId,
-                activity_type: 'email',
-                subject: subject,
-                description: stripHtml(activeBody),
-                direction: 'outbound',
-                status: 'completed',
+            await sendRecordEmail('opportunity', opportunityId, {
+                to: [toEmail],
+                subject,
+                body_text: stripHtml(activeBody),
+                body_html: activeBody,
+                include_signature: true,
             });
-            const created = createdRes?.data || createdRes;
-            
-            if (!created?.id) {
-                throw new Error('Failed to log email activity.');
-            }
-
-            const formData = new FormData();
-            formData.append('activity', created.id);
-            formData.append('to_email', toEmail);
-            formData.append('subject', subject);
-            formData.append('body_html', activeBody);
-            
-            const emailLog = await api.post('/sales/email-logs/', formData);
-            if (emailLog?.status === 'failed') {
-                throw new Error(emailLog?.error_message || 'Email integration delivery failed.');
-            }
 
             setToast({
                 type: 'success',
-                text: 'Email with selected documents sent successfully.',
+                text: 'Email with selected documents queued.',
             });
             setIsMultiSendModalOpen(false);
             setSelectedDocKeys([]);

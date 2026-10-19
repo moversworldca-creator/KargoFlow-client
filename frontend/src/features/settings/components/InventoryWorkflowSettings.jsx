@@ -424,7 +424,7 @@ const InventoryWorkflowSettings = () => {
         </div>
       ) : null}
 
-      <div className="grid gap-6 xl:grid-cols-[360px,minmax(0,1fr)]">
+      <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
         <Card className="min-w-0 rounded-[2rem] border border-[#dce8f1] bg-white p-6 shadow-sm">
           <div className="min-w-0 space-y-5">
             <div>
