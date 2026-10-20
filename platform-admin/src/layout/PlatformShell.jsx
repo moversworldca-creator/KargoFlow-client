@@ -4,7 +4,7 @@ import {
   Building2, Layers, Sliders, Shield, Key, 
   History, Users, CreditCard, Activity, Radio,
   LogOut, Sun, Moon, ShieldCheck, ChevronRight, ChevronDown, User, Bell,
-  Menu, X, Sparkles, AlertCircle, CheckCircle2, CheckCheck, Trash2
+  Menu, X, Sparkles, AlertCircle, CheckCircle2, CheckCheck, Trash2, FileSignature
 } from 'lucide-react';
 import { usePlatformAuth } from '../auth/PlatformAuthContext';
 import { PLATFORM_ROLES, PLATFORM_PERMISSIONS } from '../rbac/platformRbac';
@@ -204,6 +204,12 @@ export default function PlatformShell() {
       label: 'Communication Infrastructure', 
       icon: Radio, 
       permission: PLATFORM_PERMISSIONS.COMMUNICATION_VIEW 
+    },
+    { 
+      to: '/document-templates', 
+      label: 'Document Templates', 
+      icon: FileSignature, 
+      permission: null 
     },
     { 
       to: '/admins', 

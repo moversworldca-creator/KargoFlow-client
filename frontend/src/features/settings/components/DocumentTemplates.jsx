@@ -1611,8 +1611,9 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
       />
 
       {/* Full Page Builder Overlay */}
-      {isBuilderOpen ? (
+      {isBuilderOpen ? createPortal(
         <UnifiedTemplateBuilder
+          key={draft?.id || selectedId || 'new'}
           mode={getBuilderMode()}
           draft={draft}
           onChange={(newDraft) => setDraft(newDraft)}
@@ -1631,7 +1632,8 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
           }}
           onBack={closeDocumentBuilder}
           branches={branches}
-        />
+        />,
+        document.body
       ) : null}
 
       {/* Fullscreen Overlay Preview Modal */}

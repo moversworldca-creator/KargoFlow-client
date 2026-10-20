@@ -15,6 +15,7 @@ import FeaturesPage from './pages/FeaturesPage';
 import EntitlementsPage from './pages/EntitlementsPage';
 import SupportPage from './pages/SupportPage';
 import CommunicationPage from './pages/CommunicationPage';
+import DocumentTemplatesPage from './pages/DocumentTemplatesPage';
 import AdminsPage from './pages/AdminsPage';
 import AuditPage from './pages/AuditPage';
 import ProfilePage from './pages/ProfilePage';
@@ -56,6 +57,10 @@ export default function App() {
           <Route path="/entitlements" element={<EntitlementsPage />} />
           <Route path="/support" element={<SupportPage />} />
           <Route path="/communication" element={<CommunicationPage />} />
+          <Route path="/document-templates" element={<DocumentTemplatesPage />} />
+          <Route path="/document-templates/*" element={<DocumentTemplatesPage />} />
+          <Route path="/estimate-portal-templates/*" element={<DocumentTemplatesPage />} />
+          <Route path="/communication-templates/*" element={<DocumentTemplatesPage />} />
           <Route path="/admins" element={<AdminsPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/profile" element={<ProfilePage />} />

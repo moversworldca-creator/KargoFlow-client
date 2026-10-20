@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X, FileSignature, Truck, Receipt, CreditCard, FileText, Mail, MessageSquare, Loader2, AlertCircle } from 'lucide-react';
 import {
   createDocumentTemplate,
@@ -522,7 +523,7 @@ export default function CreateUniversalDocumentModal({
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[70000] flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 animate-in fade-in duration-150"
       onClick={() => {
@@ -812,6 +813,7 @@ export default function CreateUniversalDocumentModal({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

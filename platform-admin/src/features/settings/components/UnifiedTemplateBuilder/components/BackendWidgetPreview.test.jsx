@@ -1,0 +1,62 @@
+import React from "react";
+import { describe, expect, it } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { BackendWidgetPreview } from "./DocumentBlock";
+import { compileDocumentToHtml } from "../model/htmlCompiler";
+
+describe("backend widget preview content", () => {
+  it("renders actual sample rows for estimate and invoice data widgets", () => {
+    const { rerender } = render(
+      <BackendWidgetPreview block={{ type: "charges", props: { show_quantity: true } }} />
+    );
+    expect(screen.getByText("Moving labor")).toBeInTheDocument();
+    expect(screen.getByText("$925.00")).toBeInTheDocument();
+    expect(screen.getByText("Estimate charges")).toBeInTheDocument();
+
+    rerender(<BackendWidgetPreview block={{ type: "totals", props: { show_balance: true } }} />);
+    expect(screen.getByText("Invoice total")).toBeInTheDocument();
+    expect(screen.getByText("$1,202.63")).toBeInTheDocument();
+  });
+
+  it("resolves merge fields for sample preview and preserves tokens in raw mode", () => {
+    const block = { type: "heading", props: { text: "Hello {{customer.first_name}}" } };
+    const { rerender } = render(<BackendWidgetPreview block={block} sampleData />);
+    expect(screen.getByText("Hello Alex")).toBeInTheDocument();
+
+    rerender(<BackendWidgetPreview block={block} sampleData={false} />);
+    expect(screen.getByText("Hello {{customer.first_name}}")).toBeInTheDocument();
+  });
+
+  it("renders container children and honors sample conditional rules in customer preview", () => {
+    const block = {
+      type: "conditional",
+      condition: { var: "customer.email", op: "not_empty" },
+      children: [{ type: "text", props: { html: "<p>Customer email: {{customer.email}}</p>" } }],
+    };
+    const { rerender } = render(<BackendWidgetPreview block={block} customerPreview sampleData />);
+    expect(screen.getByText("Customer email: alex.customer@example.com")).toBeInTheDocument();
+
+    rerender(<BackendWidgetPreview
+      block={{ ...block, condition: { var: "customer.email", op: "empty" } }}
+      customerPreview
+      sampleData
+    />);
+    expect(screen.queryByText("Customer email: alex.customer@example.com")).not.toBeInTheDocument();
+  });
+
+  it("includes backend widget content in compiled preview and print HTML", () => {
+    const html = compileDocumentToHtml({
+      items: [
+        { id: "charges", type: "builder_block", blockType: "charges", props: { show_quantity: true } },
+        { id: "summary", type: "builder_block", blockType: "estimate_summary", props: { show_deposit: true } },
+        { id: "heading", type: "builder_block", blockType: "heading", props: { text: "<script>alert(1)</script>", align: "left; color:red" } },
+      ],
+    });
+    expect(html).toContain("Moving labor");
+    expect(html).toContain("$925.00");
+    expect(html).toContain("Deposit due");
+    expect(html).toContain("$1,502.63");
+    expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(html).not.toContain("text-align:left; color:red");
+  });
+});
