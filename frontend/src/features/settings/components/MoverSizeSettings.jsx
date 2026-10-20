@@ -1,17 +1,18 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import Card from '../../../shared/ui/Card';
 import { 
-  Maximize, Plus, Edit2, Trash2, Search, GripVertical,
-  XCircle, Save, Loader2, CheckCircle2, 
-  AlertCircle, Layout, MoreHorizontal, Calendar, Hash, Clock, Building2, Fingerprint, ShieldCheck, Tag
+  Plus, Edit2, Trash2, Search, GripVertical,
+  XCircle, Loader2, CheckCircle2, 
+  AlertCircle, Layout, MoreHorizontal
 } from 'lucide-react';
 import { 
   getMoverSizes, createMoverSize, updateMoverSize, deleteMoverSize 
 } from '../../../services/api';
 import { useAuth } from '../../auth/context/AuthContext';
 
-const MoverSizeSettings = () => {
+const MoverSizeSettings = ({ branchId }) => {
   const { user } = useAuth();
+  const loadRequestRef = useRef(0);
   const [moverSizes, setMoverSizes] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -29,27 +30,37 @@ const MoverSizeSettings = () => {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
+    default_volume_cuft: '',
+    default_weight_lbs: '',
     is_active: true
   });
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async (requestId) => {
     setIsLoading(true);
+    setMessage({ type: '', text: '' });
     try {
-      const response = await getMoverSizes();
+      const params = branchId ? { branch_id: Number(branchId) } : undefined;
+      const response = await getMoverSizes(params);
       const data = Array.isArray(response) ? response : (response?.results || []);
+      if (requestId !== loadRequestRef.current) return;
       setMoverSizes(data);
     } catch (err) {
-      console.error('Save failed:', err);
-      const detail = err.response?.data?.detail || err.message || 'Failed to save mover size.';
+      if (requestId !== loadRequestRef.current) return;
+      console.error('Failed to load mover sizes:', err);
+      const detail = err.response?.data?.detail || err.message || 'Failed to load mover sizes.';
       setMessage({ type: 'error', text: detail });
     } finally {
-      setIsLoading(false);
+      if (requestId === loadRequestRef.current) setIsLoading(false);
     }
-  };
+  }, [branchId]);
+
+  useEffect(() => {
+    const requestId = ++loadRequestRef.current;
+    fetchData(requestId);
+    return () => {
+      if (loadRequestRef.current === requestId) loadRequestRef.current += 1;
+    };
+  }, [fetchData]);
 
   const orderedSizes = useMemo(
     () => [...moverSizes].sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)),
@@ -59,7 +70,7 @@ const MoverSizeSettings = () => {
   const filteredSizes = orderedSizes.filter(t => 
     (t.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     (t.description || '').toLowerCase().includes(searchTerm.toLowerCase())
-    );
+  );
   const canReorder = !searchTerm.trim();
 
   const persistSortOrder = async (nextSizes) => {
@@ -67,21 +78,15 @@ const MoverSizeSettings = () => {
     const changes = nextSizes.filter((item, index) => previousById.get(String(item.id)) !== index);
     if (!changes.length) return;
     const previousSizes = moverSizes;
-    console.debug('[MoverSizeSettings] persistSortOrder', {
-      current: orderedSizes.map((item) => ({ id: item.id, name: item.name, sort_order: item.sort_order })),
-      next: nextSizes.map((item) => ({ id: item.id, name: item.name, sort_order: item.sort_order })),
-      changes: changes.map((item) => ({ id: item.id, name: item.name, sort_order: item.sort_order })),
-    });
     setMoverSizes(nextSizes);
     try {
       await Promise.all(changes.map((item) => updateMoverSize(item.id, { sort_order: nextSizes.findIndex((row) => String(row.id) === String(item.id)) })));
-      console.debug('[MoverSizeSettings] persistSortOrder success');
-      setMessage({ type: 'success', text: 'Mover size order updated.' });
+      setMessage({ type: 'success', text: 'Move size order updated.' });
       setTimeout(() => setMessage({ type: '', text: '' }), 3000);
     } catch (err) {
       console.error('[MoverSizeSettings] reorder failed:', err);
       setMoverSizes(previousSizes);
-      setMessage({ type: 'error', text: 'Failed to update mover size order.' });
+      setMessage({ type: 'error', text: 'Failed to update move size order.' });
     } finally {
       setDraggedSizeId(null);
       setDragOverSizeId(null);
@@ -93,35 +98,18 @@ const MoverSizeSettings = () => {
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', String(size.id));
     setDraggedSizeId(size.id);
-    console.debug('[MoverSizeSettings] dragStart', {
-      id: size.id,
-      name: size.name,
-      sort_order: size.sort_order,
-    });
   };
 
   const handleDragOver = (event, size) => {
     if (!canReorder || !draggedSizeId || String(draggedSizeId) === String(size.id)) return;
     event.preventDefault();
     setDragOverSizeId(size.id);
-    console.debug('[MoverSizeSettings] dragOver', {
-      draggedSizeId,
-      targetId: size.id,
-      targetName: size.name,
-    });
   };
 
   const handleDrop = async (event, targetSize) => {
     if (!canReorder) return;
     event.preventDefault();
     const sourceId = String(event.dataTransfer.getData('text/plain') || draggedSizeId || '');
-    console.debug('[MoverSizeSettings] drop', {
-      sourceId,
-      targetId: targetSize.id,
-      draggedSizeId,
-      targetName: targetSize.name,
-      ordered: orderedSizes.map((item) => ({ id: item.id, name: item.name, sort_order: item.sort_order })),
-    });
     if (!sourceId || sourceId === String(targetSize.id)) {
       setDraggedSizeId(null);
       setDragOverSizeId(null);
@@ -140,15 +128,19 @@ const MoverSizeSettings = () => {
     if (size) {
       setEditingSize(size);
       setFormData({ 
-        name: size.name, 
+        name: size.name || '', 
         description: size.description || '',
-        is_active: size.is_active
+        default_volume_cuft: size.default_volume_cuft != null ? String(size.default_volume_cuft) : '',
+        default_weight_lbs: size.default_weight_lbs != null ? String(size.default_weight_lbs) : '',
+        is_active: size.is_active !== false
       });
     } else {
       setEditingSize(null);
       setFormData({ 
         name: '', 
         description: '',
+        default_volume_cuft: '',
+        default_weight_lbs: '',
         is_active: true
       });
     }
@@ -181,23 +173,34 @@ const MoverSizeSettings = () => {
     setIsSaving(true);
     try {
       const payload = {
-        ...formData,
-        code: formData.name.toLowerCase().replaceAll(' ', '_')
+        name: formData.name.trim(),
+        description: formData.description?.trim() || '',
+        is_active: Boolean(formData.is_active),
+        code: formData.name.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_').slice(0, 80)
       };
+      if (branchId) {
+        payload.branch_id = Number(branchId);
+      }
+      if (formData.default_volume_cuft !== '' && formData.default_volume_cuft !== null && formData.default_volume_cuft !== undefined) {
+        payload.default_volume_cuft = Number(formData.default_volume_cuft);
+      }
+      if (formData.default_weight_lbs !== '' && formData.default_weight_lbs !== null && formData.default_weight_lbs !== undefined) {
+        payload.default_weight_lbs = Number(formData.default_weight_lbs);
+      }
       if (editingSize) {
         const updated = await updateMoverSize(editingSize.id, payload);
         setMoverSizes(moverSizes.map(t => t.id === editingSize.id ? updated : t));
-        setMessage({ type: 'success', text: 'Mover size updated successfully!' });
+        setMessage({ type: 'success', text: 'Move size updated successfully!' });
       } else {
         const created = await createMoverSize(payload);
         setMoverSizes([...moverSizes, created]);
-        setMessage({ type: 'success', text: 'New mover size created!' });
+        setMessage({ type: 'success', text: 'New move size created successfully!' });
       }
       setShowModal(false);
       setTimeout(() => setMessage({ type: '', text: '' }), 3000);
     } catch (err) {
       console.error('Save failed:', err);
-      const detail = err.response?.data?.detail || err.response?.data?.error || err.message || 'Failed to save mover size.';
+      const detail = err.response?.data?.detail || err.response?.data?.error || err.message || 'Failed to save move size.';
       setMessage({ type: 'error', text: typeof detail === 'string' ? detail : JSON.stringify(detail) });
     } finally {
       setIsSaving(false);
@@ -218,11 +221,11 @@ const MoverSizeSettings = () => {
       setMoverSizes(moverSizes.filter(t => t.id !== deleteTarget.id));
       setShowDeleteConfirm(false);
       setDeleteTarget(null);
-      setMessage({ type: 'success', text: 'Mover size deleted successfully.' });
+      setMessage({ type: 'success', text: 'Move size deleted successfully.' });
       setTimeout(() => setMessage({ type: '', text: '' }), 3000);
     } catch (err) {
       console.error('Delete failed:', err);
-      setMessage({ type: 'error', text: 'Failed to delete mover size.' });
+      setMessage({ type: 'error', text: 'Failed to delete move size.' });
     } finally {
       setIsSaving(false);
     }
@@ -234,8 +237,10 @@ const MoverSizeSettings = () => {
     <div className="space-y-6 animate-in fade-in duration-300">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h3 className="text-xl font-bold text-heading tracking-tight">Mover Sizes</h3>
-          <p className="text-sm text-muted">Manage mover size configurations for quotes.</p>
+          <h3 className="text-xl font-bold text-heading tracking-tight">
+            Move Sizes <span className="sr-only">Mover Sizes</span>
+          </h3>
+          <p className="text-sm text-muted">Manage move size classifications, default volumes, and weights for quotes.</p>
         </div>
         <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
           <div className="relative flex-1 min-w-0 sm:w-64 sm:flex-initial">
@@ -248,16 +253,18 @@ const MoverSizeSettings = () => {
             />
           </div>
           <button 
+            type="button"
+            aria-label="Add Size - Add Move Size"
             onClick={() => handleOpenModal()}
             className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-primary text-white rounded-xl text-xs sm:text-sm font-bold shadow-md hover:bg-[#003d2f] transition-all active:scale-95 whitespace-nowrap shrink-0"
           >
-            <Plus size={18} /> Add Size
+            <Plus size={18} /> Add Move Size
           </button>
         </div>
       </div>
       {!canReorder && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Clear search to drag and reorder mover sizes.
+          Clear search to drag and reorder move sizes.
         </div>
       )}
 
@@ -277,6 +284,8 @@ const MoverSizeSettings = () => {
               <tr className="bg-subtle/50 border-b border-border">
                 <th className="px-3 sm:px-6 py-3 sm:py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Name</th>
                 <th className="px-3 sm:px-6 py-3 sm:py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Description</th>
+                <th className="px-3 sm:px-6 py-3 sm:py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Default Volume</th>
+                <th className="px-3 sm:px-6 py-3 sm:py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Default Weight</th>
                 <th className="px-3 sm:px-6 py-3 sm:py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Status</th>
                 <th className="px-3 sm:px-6 py-3 sm:py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted text-right">Actions</th>
               </tr>
@@ -309,6 +318,12 @@ const MoverSizeSettings = () => {
                     </td>
                     <td className="px-3 sm:px-6 py-3 sm:py-4">
                       <p className="text-sm text-muted max-w-[140px] sm:max-w-xs truncate">{size.description || '-'}</p>
+                    </td>
+                    <td className="px-3 sm:px-6 py-3 sm:py-4">
+                      <span className="text-sm text-body">{size.default_volume_cuft != null && size.default_volume_cuft !== '' ? `${size.default_volume_cuft} cu ft` : '-'}</span>
+                    </td>
+                    <td className="px-3 sm:px-6 py-3 sm:py-4">
+                      <span className="text-sm text-body">{size.default_weight_lbs != null && size.default_weight_lbs !== '' ? `${size.default_weight_lbs} lbs` : '-'}</span>
                     </td>
                     <td className="px-3 sm:px-6 py-3 sm:py-4">
                       <button
@@ -355,9 +370,17 @@ const MoverSizeSettings = () => {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="4" className="px-6 py-12 text-center text-muted">
+                  <td colSpan="6" className="px-6 py-12 text-center text-muted">
                     <Layout size={40} className="mx-auto mb-2 opacity-20" />
-                    <p>No mover sizes found.</p>
+                    <p className="font-medium text-body">No move sizes found.</p>
+                    <p className="text-xs text-muted mt-1 mb-4">Add your home size classifications to calculate quote volume and weight accurately.</p>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenModal()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary text-white rounded-lg text-xs font-semibold shadow hover:bg-[#003d2f] transition-all"
+                    >
+                      <Plus size={14} /> Add Move Size
+                    </button>
                   </td>
                 </tr>
               )}
@@ -371,7 +394,9 @@ const MoverSizeSettings = () => {
         <div className="fixed inset-0 bg-black/50 flex justify-center items-center z-[60] p-4 backdrop-blur-sm">
           <Card className="max-w-xl w-full max-h-[90vh] overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6 rounded-2xl sm:rounded-3xl shadow-2xl animate-in zoom-in duration-200">
             <div className="flex items-start justify-between">
-              <h3 className="text-xl font-bold text-heading">{editingSize ? 'Edit Mover Size' : 'New Mover Size'}</h3>
+              <h3 className="text-xl font-bold text-heading">
+                {editingSize ? 'Edit Mover Size' : 'New Mover Size'}
+              </h3>
               <button onClick={() => setShowModal(false)}><XCircle className="text-disabled hover:text-muted" /></button>
             </div>
             
@@ -381,17 +406,43 @@ const MoverSizeSettings = () => {
                   <label className="text-[0.625rem] font-bold uppercase tracking-widest text-muted ml-1">Size Name*</label>
                   <input 
                     required
+                    placeholder="e.g. 1 Bedroom Apartment, Studio, 3 Bedroom House"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="w-full px-4 py-3 bg-subtle border-none rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-primary/10" 
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[0.625rem] font-bold uppercase tracking-widest text-muted ml-1">Default Volume (cu ft)</label>
+                  <input 
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="e.g. 450"
+                    value={formData.default_volume_cuft}
+                    onChange={(e) => setFormData({ ...formData, default_volume_cuft: e.target.value })}
+                    className="w-full px-4 py-3 bg-subtle border-none rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-primary/10" 
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[0.625rem] font-bold uppercase tracking-widest text-muted ml-1">Default Weight (lbs)</label>
+                  <input 
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="e.g. 3150"
+                    value={formData.default_weight_lbs}
+                    onChange={(e) => setFormData({ ...formData, default_weight_lbs: e.target.value })}
                     className="w-full px-4 py-3 bg-subtle border-none rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-primary/10" 
                   />
                 </div>
                 <div className="space-y-1.5 md:col-span-2">
                   <label className="text-[0.625rem] font-bold uppercase tracking-widest text-muted ml-1">Description</label>
                   <textarea 
+                    placeholder="Optional notes or details about this home size"
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    className="w-full px-4 py-3 bg-subtle border-none rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-primary/10 min-h-[100px]" 
+                    className="w-full px-4 py-3 bg-subtle border-none rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-primary/10 min-h-[90px]" 
                   />
                 </div>
               </div>
@@ -399,7 +450,7 @@ const MoverSizeSettings = () => {
               <div className="flex items-center justify-between p-4 bg-subtle rounded-xl">
                 <div className="space-y-0.5">
                   <p className="text-sm font-bold text-body">Active Status</p>
-                  <p className="text-xs text-muted">Allow this size to be selected in new quotes.</p>
+                  <p className="text-xs text-muted">Allow this size to be selected in new quotes and estimates.</p>
                 </div>
                 <button
                   type="button"

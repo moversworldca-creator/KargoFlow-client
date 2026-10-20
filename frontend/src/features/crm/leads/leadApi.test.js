@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import api from '../../../services/axios';
-import { leadApi, leadPayload } from './leadApi';
+import { leadApi, leadPayload, leadRecord } from './leadApi';
 import { getPipelineQueue } from './pipelineApi';
 
 vi.mock('../../../services/axios', () => ({
@@ -28,6 +28,13 @@ describe('lead API contract', () => {
     expect(() => leadPayload({ branch: 3, move_size_id: 'Studio' }, { create: true })).toThrow(/move_size_id/);
   });
 
+  it('normalizes a full name and ISO date for the lead detail page', () => {
+    expect(leadRecord({ id: 7, full_name: 'Ada Lovelace', first_name: '', last_name: '', move_date: '2026-07-10T00:00:00Z' }))
+      .toMatchObject({ first_name: 'Ada', last_name: 'Lovelace', full_name: 'Ada Lovelace', move_date: '2026-07-10' });
+    expect(leadRecord({ id: 8, customer_name: 'Grace Hopper' }))
+      .toMatchObject({ first_name: 'Grace', last_name: 'Hopper', full_name: 'Grace Hopper' });
+  });
+
   it('uses nested assignment and activity endpoints', async () => {
     api.post.mockResolvedValue({ id: 7, system_state: 'new' });
     await leadApi.assign(7, { user_id: 12 });
@@ -41,9 +48,9 @@ describe('lead API contract', () => {
       total: 1,
       items: [{ kind: 'lead', id: 7, system_state: 'new', sales_number: 900, customer_name: 'Ada' }],
     });
-    const page = await getPipelineQueue({ row_type: 'lead', branch: '3', page: 2, page_size: 25 });
+    const page = await getPipelineQueue({ row_type: 'lead', branch: '3', page: 1, page_size: 25 });
     expect(api.get).toHaveBeenCalledWith('/tenant/pipeline/', {
-      params: { kind: 'lead', limit: 25, offset: 25, branch_id: 3 },
+      params: { kind: 'lead', limit: 200, offset: 0, branch_id: 3 },
     });
     expect(page.results[0]).toMatchObject({ row_type: 'lead', lead_id: 7, name: 'Ada', workflow_stage: 'new_lead' });
   });

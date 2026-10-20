@@ -25,8 +25,10 @@ import {
   getBranchCommunicationSettings,
   getCommunicationEmailDomains,
   getCommunicationMailboxes,
+  getEmployees,
   getSmsNumberOrders,
   getSmsNumbers,
+  importSmsNumber,
   purchaseSmsNumberOrder,
   quoteSmsNumberOrder,
   refreshCommunicationEmailDomain,
@@ -152,6 +154,7 @@ export default function CommunicationSetup({ branchId = null }) {
   const [numbers, setNumbers] = useState([]);
   const [orders, setOrders] = useState([]);
   const [mailboxes, setMailboxes] = useState([]);
+  const [employees, setEmployees] = useState([]);
   const [branchSettings, setBranchSettings] = useState(null);
   const refreshSequence = useRef(0);
 
@@ -177,8 +180,10 @@ export default function CommunicationSetup({ branchId = null }) {
   const [availableNumbers, setAvailableNumbers] = useState([]);
   const [selectedNumbers, setSelectedNumbers] = useState([]);
   const [quotedOrder, setQuotedOrder] = useState(null);
+  const [existingNumber, setExistingNumber] = useState('');
   const [assignmentForm, setAssignmentForm] = useState({ phone_number_id: '', branch_id: branchId || '', employee_id: '' });
-  const [mailboxProvider, setMailboxProvider] = useState('google');
+  // Must match the backend's mailbox providers (enums.OAUTH_MAILBOX_PROVIDERS): gmail | microsoft365.
+  const [mailboxProvider, setMailboxProvider] = useState('gmail');
   const [mailboxHint, setMailboxHint] = useState('');
 
   const refreshAll = async () => {
@@ -186,11 +191,12 @@ export default function CommunicationSetup({ branchId = null }) {
     setLoading(true);
     setBranchSettings(null);
     try {
-      const [domainRes, numberRes, orderRes, mailboxRes, branchRes] = await Promise.all([
+      const [domainRes, numberRes, orderRes, mailboxRes, employeeRes, branchRes] = await Promise.all([
         getCommunicationEmailDomains().catch(() => []),
         getSmsNumbers(branchId ? { branch_id: branchId } : undefined).catch(() => []),
         getSmsNumberOrders().catch(() => []),
         getCommunicationMailboxes().catch(() => []),
+        getEmployees({ active: true, limit: 200 }).catch(() => []),
         branchId ? getBranchCommunicationSettings(branchId).catch(() => null) : Promise.resolve(null),
       ]);
       if (requestId !== refreshSequence.current) return;
@@ -198,6 +204,7 @@ export default function CommunicationSetup({ branchId = null }) {
       setNumbers(asList(numberRes));
       setOrders(asList(orderRes));
       setMailboxes(asList(mailboxRes));
+      setEmployees(asList(employeeRes));
       setBranchSettings(getData(branchRes));
     } catch (err) {
       if (requestId === refreshSequence.current) showToast(errorMessage(err, 'Failed to load communication setup.'), 'error');
@@ -364,11 +371,24 @@ export default function CommunicationSetup({ branchId = null }) {
     }, 'Number purchase submitted.');
   };
 
+  const importExistingNumber = (e) => {
+    e.preventDefault();
+    if (!existingNumber.trim()) return showToast('Enter the existing Telnyx number in E.164 format.', 'warning');
+    return withSaving('import-number', async () => {
+      await importSmsNumber({ phone_number: existingNumber.trim() });
+      setExistingNumber('');
+      await refreshAll();
+    }, 'Existing Telnyx number imported.');
+  };
+
   const refreshOrder = (orderId) => withSaving(`order-${orderId}`, () => refreshSmsNumberOrder(orderId), 'Order status refreshed.');
 
   const assignNumber = (e) => {
     e.preventDefault();
     if (!assignmentForm.phone_number_id) return showToast('Select a phone number to assign.', 'warning');
+    if (!!assignmentForm.branch_id === !!assignmentForm.employee_id) {
+      return showToast('Choose exactly one branch or employee for this number.', 'warning');
+    }
     return withSaving('assign-number', () => assignSmsNumber(assignmentForm.phone_number_id, {
       branch_id: assignmentForm.branch_id ? Number(assignmentForm.branch_id) : null,
       employee_id: assignmentForm.employee_id ? Number(assignmentForm.employee_id) : null,
@@ -378,7 +398,10 @@ export default function CommunicationSetup({ branchId = null }) {
   const startOAuth = () => withSaving('mailbox-oauth', async () => {
     const res = await startMailboxOAuth({ provider: mailboxProvider, login_hint: mailboxHint.trim() });
     const data = getData(res);
-    if (data?.authorization_url) window.location.assign(data.authorization_url);
+    if (data?.authorization_url) {
+      sessionStorage.setItem('mailbox_oauth_pending', JSON.stringify({ provider: mailboxProvider, state: data.state }));
+      window.location.assign(data.authorization_url);
+    }
   });
 
   const copyValue = async (value) => {
@@ -655,6 +678,14 @@ export default function CommunicationSetup({ branchId = null }) {
             </form>
           </Card>
 
+          <Card className="!p-3.5 !rounded-xl">
+            <form onSubmit={importExistingNumber} className="flex flex-wrap items-end gap-2.5">
+              <div className="min-w-[260px] flex-1"><TextInput label="Import existing Telnyx number" value={existingNumber} onChange={setExistingNumber} placeholder="+14155550123" /></div>
+              <ActionButton type="submit" icon={Plus} size="sm" disabled={savingKey === 'import-number'}>Import number</ActionButton>
+            </form>
+            <p className="mt-1.5 text-[11px] text-body">The number must already belong to the configured Telnyx account.</p>
+          </Card>
+
           {availableNumbers.length > 0 && (
             <Card className="!p-3.5 !rounded-xl space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -719,8 +750,14 @@ export default function CommunicationSetup({ branchId = null }) {
                     {numbers.map((number) => <option key={number.id} value={number.id}>{number.phone_e164}</option>)}
                   </SelectField>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <TextInput label="Branch ID" value={assignmentForm.branch_id} onChange={(v) => setAssignmentForm({ ...assignmentForm, branch_id: v })} placeholder={branchId ? String(branchId) : 'Optional'} />
-                    <TextInput label="Employee ID" value={assignmentForm.employee_id} onChange={(v) => setAssignmentForm({ ...assignmentForm, employee_id: v })} placeholder="Optional" />
+                    <TextInput label="Branch ID" value={assignmentForm.branch_id} onChange={(v) => setAssignmentForm({ ...assignmentForm, branch_id: v, employee_id: '' })} placeholder={branchId ? String(branchId) : 'Optional'} />
+                    <SelectField label="Employee" value={assignmentForm.employee_id} onChange={(v) => setAssignmentForm({ ...assignmentForm, employee_id: v, branch_id: '' })}>
+                      <option value="">Select employee</option>
+                      {employees.map((employee) => {
+                        const name = employee.name || [employee.first_name, employee.last_name].filter(Boolean).join(' ') || employee.email || `Employee ${employee.id}`;
+                        return <option key={employee.id} value={employee.id}>{name}</option>;
+                      })}
+                    </SelectField>
                   </div>
                   <ActionButton type="submit" icon={Save} size="sm" disabled={savingKey === 'assign-number'}>Save Assignment</ActionButton>
                 </form>
@@ -748,11 +785,11 @@ export default function CommunicationSetup({ branchId = null }) {
             <div className="space-y-3">
               <div>
                 <h3 className="text-sm font-bold text-heading">Connect mailbox</h3>
-                <p className="mt-0.5 text-[11px] text-body">Connect personal or branch mailboxes for replies and inbound sync.</p>
+                <p className="mt-0.5 text-[11px] text-body">Connect your personal mailbox to send lead emails and sync replies.</p>
               </div>
               <SelectField label="Provider" value={mailboxProvider} onChange={setMailboxProvider}>
-                <option value="google">Google</option>
-                <option value="microsoft">Microsoft</option>
+                <option value="gmail">Google (Gmail / Workspace)</option>
+                <option value="microsoft365">Microsoft 365 / Outlook</option>
               </SelectField>
               <TextInput label="Login hint" value={mailboxHint} onChange={setMailboxHint} placeholder="person@example.com" type="email" />
               <ActionButton onClick={startOAuth} icon={Inbox} size="sm" disabled={savingKey === 'mailbox-oauth'}>Start OAuth</ActionButton>
@@ -761,7 +798,7 @@ export default function CommunicationSetup({ branchId = null }) {
           <Card className="!p-4 !rounded-xl space-y-2.5">
             <h3 className="text-sm font-bold text-heading">Connected mailboxes</h3>
             {mailboxes.length === 0 ? (
-              <EmptyState title="No mailboxes connected" message="Mailbox connections are optional but useful for inbound replies." />
+              <EmptyState title="No mailboxes connected" message="Connect your personal mailbox to send lead emails and sync replies." />
             ) : mailboxes.map((mailbox) => (
               <div key={mailbox.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 p-2.5 dark:border-slate-800">
                 <div>
