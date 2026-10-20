@@ -4424,6 +4424,9 @@ const SalesDetail = () => {
     }).map((event) => ({
       id: `inbound-email-${event.id}`, activity_type: 'email', direction: 'inbound',
       timeline_source: 'inbound_email', inbound_message_id: event.payload?.inbound_message_id || event.id,
+      communication_message_id: event.channel === 'email' ? event.id : undefined,
+      conversation_id: event.conversation_id,
+      attachments: event.attachments || [],
       subject: event.payload?.subject || event.subject || event.title || 'Inbound email',
       description: event.payload?.body_text || event.body_text || event.summary || '',
       content: event.payload?.body_text || event.body_text || event.summary || '',

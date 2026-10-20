@@ -1,4 +1,5 @@
 import React, { useRef, useState, useMemo, useEffect } from 'react';
+import MessageAttachments from './MessageAttachments';
 import { Icon, Pill, StatusDot, IconButton, PrimaryBtn, GhostBtn } from '../../../shared/ui/RedesignAtoms';
 import InlineEdit from '../../../shared/ui/InlineEdit';
 import RichTextEditor from '../../../shared/ui/RichTextEditor';
@@ -1997,6 +1998,8 @@ export function Timeline({
                           ) : null}
                         </div>
                       )}
+                      {(e.thread_messages || [e]).map(message => <MessageAttachments
+                        key={message.id} messageId={message.communication_message_id} attachments={message.attachments} />)}
                       {isInboundEmail && emailAttachments.length ? (
                         <div className="border-t border-sky-100 bg-white px-4 py-3">
                           <div className="mb-2 text-[10px] font-black uppercase tracking-[0.18em] text-sky-700">
