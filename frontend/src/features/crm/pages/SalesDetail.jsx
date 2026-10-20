@@ -1595,9 +1595,10 @@ const getActivityLogBody = (activity) => {
         activity?.description ||
         activity?.content ||
         summary ||
+        activity?.body_text ||
         activity?.email_log_details?.body_text ||
         activity?.email_log_details?.text_body ||
-        stripHtml(activity?.email_log_details?.body_html || activity?.body_html || '')
+        stripHtml(activity?.email_log_details?.body_html || activity?.body_html || activity?.payload?.body_html || '')
       );
     }
     return activity?.email_log_details?.preview_html || activity?.email_log_details?.body_html || activity?.body_html || activity?.description || activity?.content || summary || '';
@@ -1616,7 +1617,13 @@ const getActivityLogBody = (activity) => {
 
 const getActivityLogEmailHtml = (activity, branchContext = '') =>
   activity?.inbound_message_id
-    ? ''
+    ? normalizePreviewHtml(
+        activity?.body_html ||
+        activity?.email_log_details?.body_html ||
+        activity?.payload?.body_html ||
+        '',
+        branchContext
+      )
     : normalizePreviewHtml(
         activity?.email_log_details?.preview_html ||
         activity?.email_log_details?.body_html ||
@@ -4409,14 +4416,21 @@ const SalesDetail = () => {
 
     const inboundEmailActivities = (timelineEvents || []).filter((event) => {
       const source = String(event.source || '').toLowerCase();
-      return source.includes('inbound_email') || Boolean(event.payload?.from_email && event.payload?.inbound_message_id);
+      const direction = String(event.direction || '').toLowerCase();
+      const channel = String(event.channel || event.activity_type || '').toLowerCase();
+      return source.includes('inbound_email') ||
+        Boolean(event.payload?.from_email && event.payload?.inbound_message_id) ||
+        (direction === 'inbound' && channel === 'email');
     }).map((event) => ({
       id: `inbound-email-${event.id}`, activity_type: 'email', direction: 'inbound',
       timeline_source: 'inbound_email', inbound_message_id: event.payload?.inbound_message_id || event.id,
-      subject: event.payload?.subject || event.title || 'Inbound email',
-      description: event.payload?.body_text || event.summary || '', content: event.payload?.body_text || event.summary || '',
+      subject: event.payload?.subject || event.subject || event.title || 'Inbound email',
+      description: event.payload?.body_text || event.body_text || event.summary || '',
+      content: event.payload?.body_text || event.body_text || event.summary || '',
+      body_text: event.payload?.body_text || event.body_text || '',
+      body_html: event.payload?.body_html || event.body_html || '',
       payload: event.payload || {}, created_at: event.created_at,
-      user_details: { email: event.payload?.from_email || 'Inbound' },
+      user_details: { email: event.payload?.from_email || event.sender_address || 'Inbound' },
     }));
     const emailActivities = [...(activities || []), ...inboundEmailActivities]
       .filter((item) => String(item?.activity_type || '').toLowerCase() === 'email')
