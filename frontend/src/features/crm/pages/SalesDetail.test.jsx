@@ -312,7 +312,9 @@ vi.mock('../../../services/api', () => {
     markOpportunityLost: vi.fn().mockResolvedValue({}),
     reopenOpportunity: vi.fn().mockResolvedValue({}),
     createOpportunityStop: vi.fn().mockResolvedValue({}),
+    createOpportunityJobStop: vi.fn().mockResolvedValue({}),
     updateOpportunityStop: vi.fn().mockResolvedValue({}),
+    updateOpportunityJobStop: vi.fn().mockResolvedValue({}),
     deleteOpportunityStop: vi.fn().mockResolvedValue({}),
     createSalesActivity: vi.fn().mockResolvedValue({}),
     updateSalesActivity: vi.fn().mockResolvedValue({}),
@@ -510,6 +512,10 @@ describe('SalesDetail Component Tests', () => {
     });
     expect(await screen.findByText(/25 Job Origin Road/)).toBeInTheDocument();
     expect(screen.getByText(/90 Job Destination Avenue/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit route logistics' }));
+    expect(screen.getByPlaceholderText('Enter origin address')).toHaveValue('25 Job Origin Road');
+    expect(screen.getByPlaceholderText('Enter destination address')).toHaveValue('90 Job Destination Avenue');
   });
 
   it('loads estimate context for the sales route so inventory can request data after refresh', async () => {
@@ -585,7 +591,14 @@ describe('SalesDetail Component Tests', () => {
       destination_state: 'AB',
       destination_zip: 'T5J 0N3',
     });
-    apiService.updateLead.mockResolvedValue({ id: 123, system_state: 'new' });
+    apiService.updateLead.mockResolvedValue({
+      id: 123,
+      system_state: 'new',
+      origin_street: '10 Existing Origin Street',
+      destination_street: '20 Existing Destination Road',
+      origin_address_details: { address_line1: '10 Existing Origin Street', city: 'Calgary', state: 'AB' },
+      destination_address_details: { address_line1: '20 Existing Destination Road', city: 'Edmonton', state: 'AB' },
+    });
 
     renderComponent({
       initialEntry: '/leads/123',
@@ -613,6 +626,8 @@ describe('SalesDetail Component Tests', () => {
     });
     expect(apiService.updateLead.mock.calls[0][1]).not.toHaveProperty('origin_address_line1');
     expect(apiService.updateLead.mock.calls[0][1]).not.toHaveProperty('destination_address_line1');
+    expect(screen.getByText(/30 Updated Origin Avenue/)).toBeInTheDocument();
+    expect(screen.getByText(/40 Updated Destination Boulevard/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit route logistics' }));
     fireEvent.click(screen.getByRole('button', { name: 'Clear origin' }));

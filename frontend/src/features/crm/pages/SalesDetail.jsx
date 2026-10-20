@@ -38,9 +38,9 @@ import EstimatesWorkspace from '../../estimates/components/EstimatesWorkspace';
 import PaymentsPanel from '../components/PaymentsPanel';
 import StorageView from '../components/StorageView';
 import LeadSpecs from '../components/LeadSpecs';
-import RingCentralEmbeddablePanel from '../components/RingCentralEmbeddablePanel';
+const RingCentralEmbeddablePanel = React.lazy(() => import('../components/RingCentralEmbeddablePanel'));
 import MovablePanel from '../components/MovablePanel';
-import CategorizedFilesPanel from '../../files/components/CategorizedFilesPanel';
+const CategorizedFilesPanel = React.lazy(() => import('../../files/components/CategorizedFilesPanel'));
 
 const resolveSpecLookupLabel = (value, options = []) => {
   const normalizedValue = String(value ?? '').trim();
@@ -122,7 +122,9 @@ import api, {
   markOpportunityLost,
   reopenOpportunity,
   createOpportunityStop,
+  createOpportunityJobStop,
   updateOpportunityStop,
+  updateOpportunityJobStop,
   deleteOpportunityStop,
   createSalesActivity,
   updateSalesActivity as updateActivityRequest,
@@ -6077,10 +6079,105 @@ const SalesDetail = () => {
     setIsRouteSaving(true);
     setToast({ type: '', text: '' });
     try {
-      const updated = isLeadPath
-        ? await updateLead(opportunity.id, payload)
-        : await updateOpportunity(opportunity.id, payload);
-      syncSavedOpportunity({ ...payload, ...(updated || {}) });
+      let updated;
+      if (isLeadPath) {
+        updated = await updateLead(opportunity.id, payload);
+      } else {
+        const selectedJob = opportunityJobs.find((job) => String(job.id) === String(selectedEstimateJobId))
+          || opportunityJobs.find((job) => job?.is_primary)
+          || opportunityJobs[0];
+        if (!selectedJob?.id) {
+          throw new Error('A planned job is required before route addresses can be saved.');
+        }
+
+        const saveEndpoint = async (type, fields) => {
+          const existingStop = routePoints.find((stop) => stop?.type === type);
+          const stopPayload = {
+            stop_type: type,
+            address_line1: fields.address_line1,
+            city: fields.city,
+            state: fields.state,
+            zip_code: fields.zip_code,
+            unit_number: fields.unit_number,
+            property_type: fields.property_type,
+            parking_type: fields.parking_type,
+            flights_of_stairs: fields.flights_of_stairs,
+            has_elevator: fields.has_elevator,
+            walk_distance_ft: fields.walk_distance_ft,
+            sort_order: type === 'origin' ? 0 : Math.max(routePoints.length - 1, 1),
+          };
+          if (isDatabaseRouteStopId(existingStop?.id)) {
+            return updateOpportunityJobStop(opportunity.id, selectedJob.id, existingStop.id, stopPayload);
+          }
+          return createOpportunityJobStop(opportunity.id, selectedJob.id, stopPayload);
+        };
+
+        const [savedOrigin, savedDestination] = await Promise.all([
+          saveEndpoint('origin', {
+            address_line1: payload.origin_address_line1,
+            city: payload.origin_city,
+            state: payload.origin_state,
+            zip_code: payload.origin_postal_code,
+            unit_number: payload.origin_unit_number || '',
+            property_type: payload.origin_property_type || '',
+            parking_type: payload.origin_parking_type || '',
+            flights_of_stairs: payload.origin_flights_of_stairs,
+            has_elevator: payload.origin_has_elevator,
+            walk_distance_ft: payload.origin_walk_distance_ft,
+          }),
+          saveEndpoint('destination', {
+            address_line1: payload.destination_address_line1,
+            city: payload.destination_city,
+            state: payload.destination_state,
+            zip_code: payload.destination_postal_code,
+            unit_number: payload.destination_unit_number || '',
+            property_type: payload.destination_property_type || '',
+            parking_type: payload.destination_parking_type || '',
+            flights_of_stairs: payload.destination_flights_of_stairs,
+            has_elevator: payload.destination_has_elevator,
+            walk_distance_ft: payload.destination_walk_distance_ft,
+          }),
+        ]);
+        const normalizedSavedStops = [savedOrigin, savedDestination].map((response) => response?.data || response);
+        setOpportunityJobs((prev) => prev.map((job) => String(job.id) === String(selectedJob.id)
+          ? {
+              ...job,
+              stops: [
+                ...(Array.isArray(job.stops) ? job.stops : []).filter((stop) => !['origin', 'destination'].includes(stop?.stop_type || stop?.type)),
+                ...normalizedSavedStops,
+              ],
+            }
+          : job));
+        updated = {};
+      }
+      const savedOriginStreet = payload.origin_street ?? payload.origin_address_line1 ?? '';
+      const savedOriginZip = payload.origin_zip ?? payload.origin_postal_code ?? '';
+      const savedDestinationStreet = payload.destination_street ?? payload.destination_address_line1 ?? '';
+      const savedDestinationZip = payload.destination_zip ?? payload.destination_postal_code ?? '';
+      // Some update responses contain a stale serialized address relation. Keep
+      // the values the user just saved authoritative until the next full fetch.
+      syncSavedOpportunity({
+        ...(updated || {}),
+        ...payload,
+        origin_address_details: {
+          ...(opportunity?.origin_address_details || {}),
+          ...(updated?.origin_address_details || {}),
+          address_line1: savedOriginStreet,
+          city: payload.origin_city || '',
+          state: payload.origin_state || '',
+          zip_code: savedOriginZip,
+          postal_code: savedOriginZip,
+        },
+        destination_address_details: {
+          ...(opportunity?.destination_address_details || {}),
+          ...(updated?.destination_address_details || {}),
+          address_line1: savedDestinationStreet,
+          city: payload.destination_city || '',
+          state: payload.destination_state || '',
+          zip_code: savedDestinationZip,
+          postal_code: savedDestinationZip,
+        },
+      });
       setForm((prev) => ({
         ...prev,
         origin_street: payload.origin_street ?? payload.origin_address_line1 ?? '',
@@ -6223,7 +6320,25 @@ const SalesDetail = () => {
   };
 
   const startRouteEdit = () => {
-    setRouteDraft(buildRouteFieldsFromRecord(opportunity, isLeadPath));
+    const draft = buildRouteFieldsFromRecord(opportunity, isLeadPath);
+    const applyStop = (type, prefix) => {
+      const stop = routePoints.find((item) => item?.type === type);
+      if (!stop) return;
+      const details = stop.details || {};
+      draft[`${prefix}_street`] = details.address_line1 || stop.address || draft[`${prefix}_street`] || '';
+      draft[`${prefix}_city`] = details.city || draft[`${prefix}_city`] || '';
+      draft[`${prefix}_state`] = details.state || draft[`${prefix}_state`] || '';
+      draft[`${prefix}_zip`] = details.zip_code || details.postal_code || draft[`${prefix}_zip`] || '';
+      draft[`${prefix}_unit_number`] = details.unit_number || draft[`${prefix}_unit_number`] || '';
+      draft[`${prefix}_property_type`] = details.property_type || draft[`${prefix}_property_type`] || '';
+      draft[`${prefix}_parking_type`] = details.parking_type || draft[`${prefix}_parking_type`] || '';
+      draft[`${prefix}_flights_of_stairs`] = details.flights_of_stairs ?? draft[`${prefix}_flights_of_stairs`] ?? 0;
+      draft[`${prefix}_has_elevator`] = details.has_elevator ?? draft[`${prefix}_has_elevator`] ?? false;
+      draft[`${prefix}_walk_distance_ft`] = details.walk_distance_ft ?? draft[`${prefix}_walk_distance_ft`] ?? 0;
+    };
+    applyStop('origin', 'origin');
+    applyStop('destination', 'destination');
+    setRouteDraft(draft);
     setIsRouteEditing(true);
   };
 
@@ -11188,9 +11303,15 @@ const SalesDetail = () => {
         isOpen={showRingCentral}
         onClose={() => setShowRingCentral(false)}
       >
-        <RingCentralEmbeddablePanel />
+        {showRingCentral && <RingCentralEmbeddablePanel />}
       </MovablePanel>
     </div>
   );
 }
-export default SalesDetail;
+export default function SalesDetailWithSuspense() {
+  return (
+    <React.Suspense fallback={<div role="status" className="p-6 text-slate-500">Loading details...</div>}>
+      <SalesDetail />
+    </React.Suspense>
+  );
+}
