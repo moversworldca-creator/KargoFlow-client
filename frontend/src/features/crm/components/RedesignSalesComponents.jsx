@@ -1080,6 +1080,8 @@ export function CommsHub({
   setActivityCallRecipient,
   activitySmsRecipients,
   setActivitySmsRecipients,
+  isLeadPath = false,
+  onRecordSmsConsent,
 }) {
   const attachmentInputRef = useRef(null);
   const imageInputRef = useRef(null);
@@ -1088,6 +1090,7 @@ export function CommsHub({
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
   const [showCategoryPopup, setShowCategoryPopup] = useState(false);
   const [showTemplatePopup, setShowTemplatePopup] = useState(false);
+  const [smsConsentConfirmed, setSmsConsentConfirmed] = useState(false);
   const [toolsByChannel, setToolsByChannel] = useState({});
   const showEmailTools = toolsByChannel[currentChannel] ?? false;
   const toggleMessageTools = () => setToolsByChannel(previous => ({
@@ -1409,6 +1412,18 @@ export function CommsHub({
               className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-bold text-slate-900 outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/10"
               placeholder="Enter phone number..."
             />
+            <label className="mt-2 flex items-start gap-2 text-xs text-body">
+              <input type="checkbox" checked={smsConsentConfirmed} onChange={async (e) => {
+                const checked = e.target.checked;
+                if (checked && onRecordSmsConsent) {
+                  const destination = activitySmsRecipients?.[0];
+                  if (!destination) { setSmsConsentConfirmed(false); return; }
+                  try { await onRecordSmsConsent(destination); } catch { setSmsConsentConfirmed(false); return; }
+                }
+                setSmsConsentConfirmed(checked);
+              }} />
+              <span>I have recorded the recipient&apos;s permission to receive SMS messages.</span>
+            </label>
           </div>
         )}
 
@@ -1426,7 +1441,6 @@ export function CommsHub({
                 placeholder="Enter phone number..."
               />
             </div>
-
             <div className="relative group">
               <div className="absolute -inset-0.5 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-2xl blur opacity-10 group-hover:opacity-20 transition duration-500"></div>
               <div className="relative flex items-center justify-between rounded-xl border border-emerald-100 bg-white p-4 shadow-sm">

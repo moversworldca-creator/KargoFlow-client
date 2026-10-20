@@ -113,6 +113,7 @@ import api, {
   getTimelineEvents,
   sendRecordEmail,
   sendRecordSms,
+  recordRecordSmsConsent,
   markOpportunityEstimateCreated,
   bookOpportunityJob,
   unbookOpportunityJob,
@@ -2635,6 +2636,7 @@ const SalesDetail = () => {
   const [activityEmailBccText, setActivityEmailBccText] = useState('');
   const [showCcBcc, setShowCcBcc] = useState(false);
   const [activitySmsRecipients, setActivitySmsRecipients] = useState([]);
+  const [smsConsentConfirmed, setSmsConsentConfirmed] = useState(false);
   const [activityCallRecipient, setActivityCallRecipient] = useState('');
   const [editingActivity, setEditingActivity] = useState(null);
   const [expandedActivityKeys, setExpandedActivityKeys] = useState(() => new Set());
@@ -8179,7 +8181,8 @@ const SalesDetail = () => {
           if (!canSendSms()) {
             return denyAction('You do not have permission to send SMS messages.');
           }
-          await Promise.all(activitySmsRecipients.filter(Boolean).map((to) => sendRecordSms('lead', opportunity.id, { to, body: activeBody.trim() })));
+          if (!smsConsentConfirmed) throw new Error('Record SMS consent using the checkbox before sending.');
+          await Promise.all(activitySmsRecipients.filter(Boolean).map(async (to) => { await recordRecordSmsConsent('lead', opportunity.id, to); return sendRecordSms('lead', opportunity.id, { to, body: activeBody.trim() }); }));
         } else {
           if (commTab === 'call' && (!canManageActivityHistory() || !canLogCall())) {
             return denyAction('You do not have permission to log calls.');
@@ -8226,9 +8229,8 @@ const SalesDetail = () => {
           if (!canSendSms()) {
             return denyAction('You do not have permission to send SMS messages.');
           }
-          await Promise.all(activitySmsRecipients.filter(Boolean).map((to) =>
-            sendRecordSms('opportunity', opportunity.id, { to, body: activeBody.trim() })
-          ));
+          if (!smsConsentConfirmed) throw new Error('Record SMS consent using the checkbox before sending.');
+          await Promise.all(activitySmsRecipients.filter(Boolean).map(async (to) => { await recordRecordSmsConsent('opportunity', opportunity.id, to); return sendRecordSms('opportunity', opportunity.id, { to, body: activeBody.trim() }); }));
         } else {
           if (commTab === 'call' && (!canManageActivityHistory() || !canLogCall())) {
             return denyAction('You do not have permission to log calls.');
@@ -8287,7 +8289,14 @@ const SalesDetail = () => {
       );
       setTimeout(() => setToast({ type: '', text: '' }), 2500);
     } catch (err) {
-      setToast({ type: 'error', text: getErrorMessage(err, 'Failed to post activity.') });
+      const message = getErrorMessage(err, 'Failed to post activity.');
+      const consentRequired = /no text-message consent is on record/i.test(message);
+      setToast({
+        type: 'error',
+        text: consentRequired
+          ? 'SMS was not sent. Record the recipient’s text-message consent on the lead or customer first, then try again.'
+          : message,
+      });
     } finally {
       setIsPosting(false);
     }
@@ -8553,6 +8562,12 @@ const SalesDetail = () => {
                     setActivityCallRecipient={setActivityCallRecipient}
                     activitySmsRecipients={activitySmsRecipients}
                     setActivitySmsRecipients={setActivitySmsRecipients}
+                  isLeadPath={isLeadPath}
+                  onRecordSmsConsent={async (destination) => {
+                    await recordRecordSmsConsent(isLeadPath ? 'lead' : 'opportunity', opportunity.id, destination);
+                    setSmsConsentConfirmed(true);
+                    return true;
+                  }}
 	                />
                 {(() => {
                   const timelineProps = {

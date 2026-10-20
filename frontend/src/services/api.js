@@ -322,6 +322,10 @@ export const sendRecordEmail = (entityType, entityId, data) => {
   return api.post(`/tenant/${kind}/${entityId}/communications/email/`, data);
 };
 export const sendRecordSms = (entityType, entityId, data) => api.post(`/tenant/${entityType === 'opportunity' ? 'opportunities' : 'leads'}/${entityId}/communications/sms/`, data);
+export const recordLeadSmsConsent = (leadId, destination) => api.post(`/tenant/leads/${leadId}/consent/`, {
+  channel: 'sms', destination, consent_state: 'opted_in', source: 'crm', policy_version: 'v1',
+});
+export const recordRecordSmsConsent = (entityType, entityId, destination) => api.post(`/tenant/${entityType === 'opportunity' ? 'opportunities' : 'leads'}/${entityId}/communications/sms-consent/`, { destination });
 export const getOpportunity = (id) => readOpportunity(id);
 export const getOpportunityBySalesNumber = async (salesNumber) => {
   const detail = await api.get(`/tenant/pipeline/${salesNumber}/`);
