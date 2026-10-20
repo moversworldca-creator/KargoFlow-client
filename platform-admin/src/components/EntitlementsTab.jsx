@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Sliders, Building2, Plus, Trash2, CheckCircle2, 
   AlertTriangle, Shield, Clock, Loader2, Sparkles, 
-  Zap, PackagePlus, ArrowRight 
+  Zap, PackagePlus, ArrowRight, ChevronDown 
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import platformApi from '../api/platformApi';
@@ -53,7 +53,8 @@ export default function EntitlementsTab({
   initialTenantId = null,
   addons = [],
   features = [],
-  limits = []
+  limits = [],
+  onRefresh
 }) {
   const { showToast } = useToast();
   const [selectedTenantId, setSelectedTenantId] = useState(initialTenantId || (tenants[0]?.id ? String(tenants[0].id) : '1'));
@@ -259,33 +260,30 @@ export default function EntitlementsTab({
   };
 
   return (
-    <div className="space-y-3.5 animate-in fade-in duration-150">
-      {/* Top Tenant Selector & Action Header */}
-      <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-purple-600 flex items-center justify-center">
-            <Sliders size={18} />
-          </div>
-          <div>
-            <h2 className="text-sm font-bold text-slate-900 dark:text-white">Effective Entitlements & Overrides</h2>
-            <p className="text-[11px] text-slate-500">Live computed capacity: Base Plan + Add-ons + Administrative Overrides</p>
+    <div className="space-y-3 animate-in fade-in duration-150">
+      {/* High-Density Control Bar: Tenant Scope & Primary Actions */}
+      <div className="p-2.5 sm:p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1.5 shrink-0">
+            <Building2 size={15} /> Tenant Scope:
+          </span>
+          <div className="relative">
+            <select
+              value={selectedTenantId}
+              onChange={(e) => setSelectedTenantId(e.target.value)}
+              className="appearance-none px-3 pr-8 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-xs font-semibold text-slate-900 dark:text-slate-100 outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer transition-colors"
+            >
+              {tenants.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} ({t.subdomain || `ID #${t.id}`})
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400" />
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Tenant Selector */}
-          <select
-            value={selectedTenantId}
-            onChange={(e) => setSelectedTenantId(e.target.value)}
-            className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950 text-xs font-bold focus:ring-2 focus:ring-blue-500/20 outline-none cursor-pointer"
-          >
-            {tenants.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name} ({t.subdomain})
-              </option>
-            ))}
-          </select>
-
+        <div className="flex items-center gap-2 self-start sm:self-auto">
           <button
             onClick={() => {
               if (displayAddons.length > 0 && !selectedAddonId) {
@@ -295,7 +293,7 @@ export default function EntitlementsTab({
               setAddonReason('Administrative add-on allocation');
               setShowAddonModal(true);
             }}
-            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200/60 dark:border-slate-700/60 shadow-2xs"
           >
             <PackagePlus size={14} />
             <span>Add-on</span>
@@ -303,7 +301,7 @@ export default function EntitlementsTab({
 
           <button
             onClick={() => setShowOverrideModal(true)}
-            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
           >
             <Plus size={14} />
             <span>Grant Override</span>
@@ -312,64 +310,86 @@ export default function EntitlementsTab({
       </div>
 
       {isLoading ? (
-        <div className="p-8 text-center text-slate-400 flex items-center justify-center gap-2">
+        <div className="p-10 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-center text-slate-400 flex items-center justify-center gap-2.5">
           <Loader2 size={18} className="animate-spin text-blue-600" />
-          <span>Computing effective entitlements...</span>
+          <span className="text-xs font-medium">Computing effective tenant entitlements...</span>
         </div>
       ) : entitlementsData ? (
-        <div className="space-y-3.5">
-          {/* Summary Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-1">
-              <span className="text-[10px] uppercase font-bold text-slate-400">Assigned Base Tier</span>
-              <div className="text-base font-bold text-slate-900 dark:text-white">
-                {entitlementsData.plan?.name}
+        <div className="space-y-3">
+          {/* Integrated Horizontal KPI Ribbon */}
+          <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-100 dark:divide-slate-800 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden">
+            <div className="p-3 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                <Sliders size={18} />
               </div>
-              <p className="text-[11px] text-slate-500">
-                Code: <span className="font-mono font-bold text-blue-600">{entitlementsData.plan?.code}</span> • ${(entitlementsData.plan?.base_price_cents / 100).toFixed(0)}/{entitlementsData.plan?.billing_interval}
-              </p>
+              <div className="min-w-0">
+                <span className="text-[10px] uppercase font-semibold text-slate-400 dark:text-slate-500 block tracking-wider">Assigned Base Tier</span>
+                <div className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+                  {entitlementsData.plan?.name || 'Custom Plan'}
+                </div>
+                <p className="text-[11px] text-slate-500 truncate">
+                  <span className="font-mono text-blue-600 dark:text-blue-400 font-medium">{entitlementsData.plan?.code}</span>
+                  {entitlementsData.plan?.base_price_cents != null && ` • $${(entitlementsData.plan.base_price_cents / 100).toFixed(0)}/${entitlementsData.plan?.billing_interval || 'mo'}`}
+                </p>
+              </div>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-1">
-              <span className="text-[10px] uppercase font-bold text-slate-400">Effective Access Status</span>
-              <div className="text-base font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-                <CheckCircle2 size={16} />
-                <span>{entitlementsData.access_behavior?.access}</span>
+            <div className="p-3 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                <CheckCircle2 size={18} />
               </div>
-              <p className="text-[11px] text-slate-500">
-                Derived: {entitlementsData.access_behavior?.label}
-              </p>
+              <div className="min-w-0">
+                <span className="text-[10px] uppercase font-semibold text-slate-400 dark:text-slate-500 block tracking-wider">Effective Access Status</span>
+                <div className="text-sm font-semibold text-emerald-600 dark:text-emerald-400 truncate">
+                  {entitlementsData.access_behavior?.access || 'Active'}
+                </div>
+                <p className="text-[11px] text-slate-500 truncate">
+                  {entitlementsData.access_behavior?.label || 'Operational read & write'}
+                </p>
+              </div>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-1">
-              <span className="text-[10px] uppercase font-bold text-slate-400">Modifications Active</span>
-              <div className="text-base font-bold text-slate-900 dark:text-white">
-                {entitlementsData.active_addons?.length || 0} Add-ons • {entitlementsData.active_overrides?.length || 0} Overrides
+            <div className="p-3 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+                <Sparkles size={18} />
               </div>
-              <p className="text-[11px] text-slate-500">
-                Calculated live per Section 1.7 specification
-              </p>
+              <div className="min-w-0">
+                <span className="text-[10px] uppercase font-semibold text-slate-400 dark:text-slate-500 block tracking-wider">Active Modifications</span>
+                <div className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+                  {entitlementsData.active_addons?.length || 0} Add-on{(entitlementsData.active_addons?.length || 0) === 1 ? '' : 's'} • {entitlementsData.active_overrides?.length || 0} Override{(entitlementsData.active_overrides?.length || 0) === 1 ? '' : 's'}
+                </div>
+                <p className="text-[11px] text-slate-500 truncate">
+                  Live calculated database policies
+                </p>
+              </div>
             </div>
           </div>
 
-          {/* Quotas & Limits Progress */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-3">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">Effective Usage & Quota Caps</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {/* Quotas & Limits Progress Section */}
+          <div className="p-3.5 sm:p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-2.5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-semibold text-slate-900 dark:text-white uppercase tracking-wider">Effective Usage & Quota Caps</h3>
+              <span className="text-[11px] text-slate-400 font-normal">Base capacity + Add-ons + Overrides</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
               {Object.entries(entitlementsData.effective_limits || {}).map(([key, limit]) => {
                 const usage = entitlementsData.current_usage?.[key] || 0;
                 const pct = limit ? Math.min(Math.round((usage / limit) * 100), 100) : 0;
                 return (
-                  <div key={key} className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 space-y-1.5 text-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-slate-700 dark:text-slate-300 capitalize text-[11px]">{key.replace(/[._]/g, ' ')}</span>
-                      <span className="font-mono font-bold text-blue-600 text-[11px]">
+                  <div key={key} className="p-2.5 rounded-lg bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800 space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="font-semibold text-slate-700 dark:text-slate-300 capitalize text-[11px] truncate">
+                        {key.replace(/[._]/g, ' ')}
+                      </span>
+                      <span className="font-mono font-medium text-blue-600 dark:text-blue-400 text-[11px] shrink-0">
                         {formatQuota(key, usage)} / {formatQuota(key, limit)}
                       </span>
                     </div>
                     <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
                       <div
-                        className={`h-full rounded-full ${pct > 90 ? 'bg-rose-500' : pct > 75 ? 'bg-amber-500' : 'bg-blue-600'}`}
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          pct > 90 ? 'bg-rose-500' : pct > 75 ? 'bg-amber-500' : 'bg-blue-600'
+                        }`}
                         style={{ width: `${Math.max(pct, 3)}%` }}
                       />
                     </div>
@@ -379,59 +399,73 @@ export default function EntitlementsTab({
             </div>
           </div>
 
-          {/* Active Overrides Table */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs space-y-3">
-            <div className="flex items-center justify-between">
+          {/* Active Overrides Table Section */}
+          <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden">
+            <div className="px-3.5 py-2.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white">Active Administrative Overrides</h3>
+                <h3 className="text-xs font-semibold text-slate-900 dark:text-white uppercase tracking-wider">Active Administrative Overrides</h3>
                 <p className="text-[11px] text-slate-500">Targeted adjustments bypassing base tier limits</p>
               </div>
               <button
                 onClick={() => setShowOverrideModal(true)}
-                className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                className="text-xs font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 flex items-center gap-1 cursor-pointer"
               >
-                <Plus size={14} />
+                <Plus size={13} />
                 <span>Add Override</span>
               </button>
             </div>
 
             {(entitlementsData.active_overrides || []).length === 0 ? (
-              <p className="text-xs text-slate-400 py-6 text-center">No active overrides applied to this tenant.</p>
+              <div className="py-8 text-center text-slate-400 dark:text-slate-500 text-xs font-normal">
+                No active overrides applied to this tenant.
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
-                    <tr className="border-b border-slate-100 dark:border-slate-800 text-[10px] font-black uppercase text-slate-400">
-                      <th className="py-2.5 px-3">Type</th>
-                      <th className="py-2.5 px-3">Target Key</th>
-                      <th className="py-2.5 px-3">Adjustment</th>
-                      <th className="py-2.5 px-3">Reason</th>
-                      <th className="py-2.5 px-3">Expires</th>
-                      <th className="py-2.5 px-3 text-right">Action</th>
+                    <tr className="border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 text-[11px] font-semibold uppercase text-slate-500 dark:text-slate-400 tracking-wider">
+                      <th className="py-2 px-3">Type</th>
+                      <th className="py-2 px-3">Target Key</th>
+                      <th className="py-2 px-3">Adjustment</th>
+                      <th className="py-2 px-3">Reason</th>
+                      <th className="py-2 px-3">Expires</th>
+                      <th className="py-2 px-3 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {entitlementsData.active_overrides.map((ovr) => (
-                      <tr key={ovr.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
-                        <td className="py-2.5 px-3 font-bold uppercase text-[10px] text-purple-600">
-                          {ovr.type}
+                      <tr key={ovr.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
+                        <td className="py-2 px-3">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wider border ${
+                            ovr.type === 'feature'
+                              ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 border-indigo-200/60 dark:border-indigo-900/50'
+                              : 'bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border-purple-200/60 dark:border-purple-900/50'
+                          }`}>
+                            {ovr.type}
+                          </span>
                         </td>
-                        <td className="py-2.5 px-3 font-mono font-bold text-slate-800 dark:text-slate-200">
+                        <td className="py-2 px-3 font-mono text-xs font-medium text-slate-800 dark:text-slate-200">
                           {ovr.type === 'feature' ? ovr.feature_key : ovr.limit_key}
                         </td>
-                        <td className="py-2.5 px-3 font-bold text-blue-600">
+                        <td className="py-2 px-3 font-semibold text-xs text-blue-600 dark:text-blue-400">
                           {ovr.type === 'feature' ? `Mode: ${ovr.access_mode}` : `${ovr.override_type} ${ovr.value}`}
                         </td>
-                        <td className="py-2.5 px-3 text-slate-600 dark:text-slate-400">
+                        <td className="py-2 px-3 text-xs text-slate-600 dark:text-slate-300 font-normal">
                           {ovr.reason}
                         </td>
-                        <td className="py-2.5 px-3 text-slate-500 text-[11px]">
-                          {ovr.expires_at ? new Date(ovr.expires_at).toLocaleDateString() : 'Never (Indefinite)'}
+                        <td className="py-2 px-3 text-[11px] text-slate-500 dark:text-slate-400">
+                          {ovr.expires_at ? (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200/60 dark:border-amber-900/50">
+                              {new Date(ovr.expires_at).toLocaleDateString()}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">Never (Indefinite)</span>
+                          )}
                         </td>
-                        <td className="py-2.5 px-3 text-right">
+                        <td className="py-2 px-3 text-right">
                           <button
                             onClick={() => handleDeleteOverride(ovr.id)}
-                            className="p-1 rounded text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                            className="p-1 rounded text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
                             title="Remove override"
                           >
                             <Trash2 size={14} />
@@ -450,29 +484,37 @@ export default function EntitlementsTab({
       {/* Grant Administrative Override Modal */}
       {showOverrideModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">Grant Entitlement Override</h3>
-              <button onClick={() => setShowOverrideModal(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden p-5 space-y-3.5 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Grant Entitlement Override</h3>
+              <button onClick={() => setShowOverrideModal(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 text-sm cursor-pointer">✕</button>
             </div>
 
-            <form onSubmit={handleCreateOverride} className="space-y-4 text-xs">
+            <form onSubmit={handleCreateOverride} className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-700 dark:text-slate-300 font-bold uppercase tracking-wider mb-1.5">
+                <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">
                   Override Category
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setOverrideType('feature')}
-                    className={`py-2 rounded-xl font-bold transition-colors ${overrideType === 'feature' ? 'bg-blue-600 text-white shadow-2xs' : 'bg-slate-100 dark:bg-slate-800 text-slate-600'}`}
+                    className={`py-1.5 rounded-xl font-semibold transition-colors cursor-pointer text-xs ${
+                      overrideType === 'feature'
+                        ? 'bg-blue-600 text-white shadow-2xs'
+                        : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                    }`}
                   >
                     Feature Flag
                   </button>
                   <button
                     type="button"
                     onClick={() => setOverrideType('limit')}
-                    className={`py-2 rounded-xl font-bold transition-colors ${overrideType === 'limit' ? 'bg-blue-600 text-white shadow-2xs' : 'bg-slate-100 dark:bg-slate-800 text-slate-600'}`}
+                    className={`py-1.5 rounded-xl font-semibold transition-colors cursor-pointer text-xs ${
+                      overrideType === 'limit'
+                        ? 'bg-blue-600 text-white shadow-2xs'
+                        : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                    }`}
                   >
                     Quota / Limit
                   </button>
@@ -482,13 +524,13 @@ export default function EntitlementsTab({
               {overrideType === 'feature' ? (
                 <>
                   <div>
-                    <label className="block text-slate-700 dark:text-slate-300 font-bold uppercase tracking-wider mb-1.5">
+                    <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">
                       Target Feature Key
                     </label>
                     <select
                       value={featureKey}
                       onChange={(e) => setFeatureKey(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-mono font-bold"
+                      className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-mono text-xs font-medium outline-none cursor-pointer"
                     >
                       {displayFeatures.map((f) => {
                         const key = f.feature_key || f.key;
@@ -501,13 +543,13 @@ export default function EntitlementsTab({
                     </select>
                   </div>
                   <div>
-                    <label className="block text-slate-700 dark:text-slate-300 font-bold uppercase tracking-wider mb-1.5">
+                    <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">
                       Grant Access Level
                     </label>
                     <select
                       value={featureMode}
                       onChange={(e) => setFeatureMode(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
+                      className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-medium text-xs outline-none cursor-pointer"
                     >
                       <option value="write">Full Access (Write)</option>
                       <option value="read">Read-only</option>
@@ -518,13 +560,13 @@ export default function EntitlementsTab({
               ) : (
                 <>
                   <div>
-                    <label className="block text-slate-700 dark:text-slate-300 font-bold uppercase tracking-wider mb-1.5">
+                    <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">
                       Target Quota Limit
                     </label>
                     <select
                       value={limitKey}
                       onChange={(e) => setLimitKey(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-mono font-bold"
+                      className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-mono text-xs font-medium outline-none cursor-pointer"
                     >
                       {displayLimits.map((l) => {
                         const key = l.limit_key || l.key;
@@ -538,27 +580,27 @@ export default function EntitlementsTab({
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="block text-slate-700 dark:text-slate-300 font-bold uppercase tracking-wider mb-1.5">
+                      <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">
                         Action Type
                       </label>
                       <select
                         value={limitAction}
                         onChange={(e) => setLimitAction(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
+                        className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-medium text-xs outline-none cursor-pointer"
                       >
                         <option value="replace">Set Absolute Limit</option>
                         <option value="add">Add Increment</option>
                       </select>
                     </div>
                     <div>
-                      <label className="block text-slate-700 dark:text-slate-300 font-bold uppercase tracking-wider mb-1.5">
+                      <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">
                         Value
                       </label>
                       <input
                         type="number"
                         value={limitVal}
                         onChange={(e) => setLimitVal(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold font-mono"
+                        className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-mono text-xs font-medium outline-none"
                       />
                     </div>
                   </div>
@@ -566,28 +608,28 @@ export default function EntitlementsTab({
               )}
 
               <div>
-                <label className="block text-slate-700 dark:text-slate-300 font-bold uppercase tracking-wider mb-1.5">
-                  Audit Justification (Required) *
+                <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">
+                  Audit Justification (Required) <span className="text-rose-500">*</span>
                 </label>
                 <textarea
                   required
                   rows={2}
                   value={overrideReason}
                   onChange={(e) => setOverrideReason(e.target.value)}
-                  placeholder="e.g. VIP contract concession or customer beta preview approval..."
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-medium"
+                  placeholder="e.g. Contract concession or customer expansion preview approval..."
+                  className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-normal text-xs outline-none focus:ring-2 focus:ring-blue-500/20"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-700 dark:text-slate-300 font-bold uppercase tracking-wider mb-1.5">
+                <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">
                   Expiration Date (Optional)
                 </label>
                 <input
                   type="date"
                   value={overrideExpiresAt}
                   onChange={(e) => setOverrideExpiresAt(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
+                  className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-medium text-xs outline-none"
                 />
               </div>
 
@@ -595,16 +637,16 @@ export default function EntitlementsTab({
                 <button
                   type="button"
                   onClick={() => setShowOverrideModal(false)}
-                  className="px-4 py-2 font-bold text-slate-500 hover:text-slate-700"
+                  className="px-3.5 py-1.5 font-medium text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-xs cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmittingOverride}
-                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center gap-1.5 shadow-sm"
+                  className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
                 >
-                  {isSubmittingOverride ? <Loader2 size={14} className="animate-spin" /> : null}
+                  {isSubmittingOverride ? <Loader2 size={13} className="animate-spin" /> : null}
                   <span>Apply Override</span>
                 </button>
               </div>
@@ -616,21 +658,21 @@ export default function EntitlementsTab({
       {/* Assign Addon Modal */}
       {showAddonModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">Assign Metered Add-on Pack</h3>
-              <button onClick={() => setShowAddonModal(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden p-5 space-y-3.5 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Assign Metered Add-on Pack</h3>
+              <button onClick={() => setShowAddonModal(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 text-sm cursor-pointer">✕</button>
             </div>
 
-            <form onSubmit={handleAssignAddon} className="space-y-4 text-xs">
+            <form onSubmit={handleAssignAddon} className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-700 dark:text-slate-300 font-bold uppercase tracking-wider mb-1.5">
+                <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">
                   Select Add-on
                 </label>
                 <select
                   value={selectedAddonId}
                   onChange={(e) => setSelectedAddonId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
+                  className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-medium text-xs outline-none cursor-pointer"
                 >
                   {displayAddons.length === 0 ? (
                     <option value="">No add-on packages available</option>
@@ -649,7 +691,7 @@ export default function EntitlementsTab({
               </div>
 
               <div>
-                <label className="block text-slate-700 dark:text-slate-300 font-bold uppercase tracking-wider mb-1.5">
+                <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">
                   Quantity
                 </label>
                 <input
@@ -658,12 +700,12 @@ export default function EntitlementsTab({
                   max={50}
                   value={addonQuantity}
                   onChange={(e) => setAddonQuantity(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold"
+                  className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-medium text-xs outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-700 dark:text-slate-300 font-bold uppercase tracking-wider mb-1.5">
+                <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">
                   Administrative Reason <span className="text-rose-500">*</span>
                 </label>
                 <input
@@ -672,7 +714,7 @@ export default function EntitlementsTab({
                   value={addonReason}
                   onChange={(e) => setAddonReason(e.target.value)}
                   placeholder="e.g. Approved capacity expansion"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-medium"
+                  className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-normal text-xs outline-none focus:ring-2 focus:ring-blue-500/20"
                 />
               </div>
 
@@ -680,16 +722,16 @@ export default function EntitlementsTab({
                 <button
                   type="button"
                   onClick={() => setShowAddonModal(false)}
-                  className="px-4 py-2 font-bold text-slate-500 hover:text-slate-700"
+                  className="px-3.5 py-1.5 font-medium text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-xs cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmittingAddon || !selectedAddonId || displayAddons.length === 0}
-                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isSubmittingAddon ? <Loader2 size={14} className="animate-spin" /> : null}
+                  {isSubmittingAddon ? <Loader2 size={13} className="animate-spin" /> : null}
                   <span>Assign Add-on</span>
                 </button>
               </div>
