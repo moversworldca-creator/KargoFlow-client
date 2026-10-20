@@ -88,6 +88,12 @@ describe('Permissions Registry normalization tests', () => {
     expect(canAll([PERMISSIONS.COMMUNICATIONS_SMS_SEND], ctx)).toBe(true);
   });
 
+  it('shows status creation only with the backend opportunity settings permission', () => {
+    expect(canAll([PERMISSIONS.SALES_ADD_STATUS_CODE], { permissions: ['opportunity_settings.manage'] })).toBe(true);
+    expect(canAll([PERMISSIONS.SALES_ADD_STATUS_CODE], { permissions: ['opportunities.view'] })).toBe(false);
+    expect(canAll([PERMISSIONS.SALES_VIEW_STATUS_CODE], { permissions: ['opportunities.view'] })).toBe(true);
+  });
+
   it('should not show the Leads nav item when the user only has lead actions', () => {
     const ctx = {
       permissions: ['crm_leads.create', 'crm_leads.edit', 'crm_leads.assign'],

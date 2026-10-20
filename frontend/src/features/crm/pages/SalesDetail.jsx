@@ -176,6 +176,11 @@ import {
 } from '../utils/recordRoutes';
 import { getWorkflowStageLabel } from '../utils/statusWorkflow';
 import { getPortalBaseUrl } from '../../../shared/utils/portalBaseUrl';
+import {
+  buildDefaultDraftEstimate,
+  getStoredDraftEstimate,
+  setStoredDraftEstimate,
+} from '../utils/estimateDraftUtils';
 
 const CANADIAN_PROVINCES = [
   { code: 'AB', name: 'Alberta' },
@@ -668,14 +673,33 @@ const formatAddressText = (parts, fallback) => {
 
 const createRouteDraftStopId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-const normalizeRouteStopForSales = (stop) => ({
-  id: stop?.id,
-  type: stop?.stop_type || stop?.type || 'stop',
-  address: formatAddressText(stop?.address_details, stop?.address_details?.address_line1 || ''),
-  details: stop?.address_details || {},
-  notes: stop?.notes || '',
-  sort_order: stop?.sort_order ?? 0,
-});
+const normalizeRouteStopForSales = (stop) => {
+  const details = stop?.address_details || {
+    address_line1: stop?.address_line1 || '',
+    unit_number: stop?.unit_number || '',
+    city: stop?.city || '',
+    state: stop?.state || '',
+    postal_code: stop?.postal_code || stop?.zip_code || '',
+    zip_code: stop?.zip_code || stop?.postal_code || '',
+    country: stop?.country || '',
+    county: stop?.county || '',
+    property_type: stop?.property_type || '',
+    parking_type: stop?.parking_type || '',
+    flights_of_stairs: stop?.flights_of_stairs ?? 0,
+    has_elevator: Boolean(stop?.has_elevator),
+    walk_distance_ft: stop?.walk_distance_ft ?? 0,
+    latitude: stop?.latitude ?? null,
+    longitude: stop?.longitude ?? null,
+  };
+  return {
+    id: stop?.id,
+    type: stop?.stop_type || stop?.type || 'intermediate',
+    address: formatAddressText(details, details.address_line1 || ''),
+    details,
+    notes: stop?.notes || '',
+    sort_order: stop?.sort_order ?? 0,
+  };
+};
 
 const buildSalesRouteStops = (record, isLead, view = {}) => {
   if (!record) return [];
@@ -724,13 +748,15 @@ const buildSalesRouteStops = (record, isLead, view = {}) => {
   const originDetails = getDetails('origin');
   const destinationDetails = getDetails('destination');
   const routeStops = Array.isArray(record?.stops) ? record.stops.map(normalizeRouteStopForSales) : [];
+  const originStop = routeStops.find((stop) => stop.type === 'origin');
+  const destinationStop = routeStops.find((stop) => stop.type === 'destination');
   const preStops = sortStops(routeStops.filter((stop) => stop.type === 'pre_stop'));
-  const middleStops = sortStops(routeStops.filter((stop) => stop.type !== 'pre_stop' && stop.type !== 'post_stop'));
+  const middleStops = sortStops(routeStops.filter((stop) => ['stop', 'intermediate'].includes(stop.type)));
   const postStops = sortStops(routeStops.filter((stop) => stop.type === 'post_stop'));
 
   return [
     ...preStops,
-    {
+    originStop || {
       id: 'origin',
       type: 'origin',
       label: 'PICK-UP - ORIGIN',
@@ -739,7 +765,7 @@ const buildSalesRouteStops = (record, isLead, view = {}) => {
       details: originDetails,
     },
     ...middleStops,
-    {
+    destinationStop || {
       id: 'destination',
       type: 'destination',
       label: 'DROP-OFF - DESTINATION',
@@ -1042,7 +1068,7 @@ const createEmptyAdditionalContact = () => ({
 });
 const getAdditionalCustomerContacts = (customer) =>
   getCustomerContacts(customer)
-    .filter((contact) => !contact?.is_primary)
+    .filter((contact) => !contact?.is_primary && contact?.is_active !== false)
     .slice(0, MAX_ADDITIONAL_CONTACTS);
 const getContactLabel = (contact, index = 0) =>
   String(contact?.name || '').trim() || `Additional Contact ${index + 1}`;
@@ -1306,9 +1332,13 @@ const oppView = (opportunity, isLeadRecord = null) => {
   
   // Lead and opportunity share this UI, but the route/API context is the reliable entity signal.
   const isLead = isLeadRecord ?? (opportunity.id === 'new' ? !opportunity.isOpportunity : !opportunity.customer_details);
+  const leadFullName = String(
+    opportunity?.full_name || opportunity?.customer_name || opportunity?.lead_name ||
+    opportunity?.name || opportunity?.contact_name || opportunity?.customer?.full_name || ''
+  ).trim();
   
   const customerName = isLead 
-    ? `${opportunity.first_name || ''} ${opportunity.last_name || ''}`.trim() || (opportunity.id === 'new' ? 'New Lead' : `Lead #${String(opportunity.sales_number || opportunity.id).padStart(5, '0')}`)
+    ? `${opportunity.first_name || ''} ${opportunity.last_name || ''}`.trim() || leadFullName || (opportunity.id === 'new' ? 'New Lead' : `Lead #${String(opportunity.sales_number || opportunity.id).padStart(5, '0')}`)
     : (opportunity?.customer_details?.full_name ||
       (opportunity?.customer_details?.first_name || opportunity?.customer_details?.last_name
         ? `${opportunity.customer_details.first_name || ''} ${opportunity.customer_details.last_name || ''}`.trim()
@@ -2464,13 +2494,16 @@ const SalesDetail = () => {
   const [gatewayPayments, setGatewayPayments] = useState([]);
 
   const loadOpportunityJobs = useCallback(async () => {
-    if (!opportunity?.id || isCreation) {
+    const targetOpportunityId = isLeadPath
+      ? (estimateOpportunity?.id || opportunity?.opportunity_id)
+      : opportunity?.id;
+    if (!targetOpportunityId || isCreation) {
       setOpportunityJobs([]);
       setSelectedEstimateJobId('');
       return [];
     }
     try {
-      const jobs = await api.sales.getOpportunityPlannedSubJobs(opportunity.id);
+      const jobs = await api.sales.getOpportunityPlannedSubJobs(targetOpportunityId);
       const rows = Array.isArray(jobs?.results) ? jobs.results : Array.isArray(jobs) ? jobs : [];
       setOpportunityJobs(rows);
       setSelectedEstimateJobId((prev) => {
@@ -2487,7 +2520,7 @@ const SalesDetail = () => {
       setSelectedEstimateJobId('');
       return [];
     }
-  }, [isCreation, opportunity?.id]);
+  }, [estimateOpportunity?.id, isCreation, isLeadPath, opportunity?.id, opportunity?.opportunity_id]);
 
 
   const allPayments = useMemo(() => {
@@ -2684,14 +2717,49 @@ const SalesDetail = () => {
     setActivityBodies((prev) => ({ ...prev, [commTab]: value }));
   };
   const buildCurrentOpportunityFormSnapshot = useCallback(
-    () => ({
-      ...form,
-      ...(customerDraft || {}),
-      ...(routeDraft || {}),
-      ...(specsDraft || {}),
-      ...(moveDateDraft || {}),
-    }),
-    [customerDraft, form, moveDateDraft, routeDraft, specsDraft]
+    () => {
+      const customer = getRecordCustomerDetails(opportunity) || {};
+      const nameParts = String(
+        customer.full_name || customer.profile_name || customer.name ||
+        opportunity?.customer_name || opportunity?.full_name || opportunity?.name || ''
+      ).trim().split(/\s+/).filter(Boolean);
+      const route = buildRouteFieldsFromRecord(opportunity, isLeadPath);
+      const hydratedFallback = {
+        ...route,
+        first_name: customer.first_name || opportunity?.first_name || nameParts[0] || '',
+        last_name: customer.last_name || opportunity?.last_name || nameParts.slice(1).join(' '),
+        email: customer.email || opportunity?.email || '',
+        phone: customer.primary_phone || customer.phone || opportunity?.phone || '',
+        move_date: opportunity?.move_date || '',
+        branch: normalizeLookupValue(opportunity?.branch_id || opportunity?.branch_details || opportunity?.branch),
+        service_type: normalizeLookupValue(opportunity?.service_type_id || opportunity?.service_type),
+        move_type: normalizeLookupValue(opportunity?.move_type_id || opportunity?.move_type),
+        move_size: normalizeLookupValue(
+          opportunity?.mover_size_details || opportunity?.move_size_details ||
+          opportunity?.mover_size || opportunity?.move_size
+        ),
+        assigned_to: normalizeLookupValue(
+          opportunity?.assigned_to_id || opportunity?.assigned_user_details ||
+          opportunity?.assigned_to_details || opportunity?.assigned_user || opportunity?.assigned_to
+        ),
+        referral_source: normalizeLookupValue(opportunity?.referral_source_id || opportunity?.referral_source),
+        notes: opportunity?.notes_internal || opportunity?.notes || '',
+      };
+      const snapshot = Object.keys({ ...hydratedFallback, ...form }).reduce((result, key) => ({
+        ...result,
+        [key]: form[key] !== undefined && form[key] !== null && form[key] !== ''
+          ? form[key]
+          : hydratedFallback[key],
+      }), {});
+      return {
+        ...snapshot,
+        ...(customerDraft || {}),
+        ...(routeDraft || {}),
+        ...(specsDraft || {}),
+        ...(moveDateDraft || {}),
+      };
+    },
+    [customerDraft, form, isLeadPath, moveDateDraft, opportunity, routeDraft, specsDraft]
   );
 
   const splitLocalDateTime = (isoString) => {
@@ -2722,9 +2790,7 @@ const SalesDetail = () => {
       }
       setIsLoadingEstimateOpportunity(true);
       try {
-        const linkedOpportunity = await api.get(`/sales/opportunities/${record.opportunity_id}/`, {
-          params: { include_portal_inventory: 1 },
-        });
+        const linkedOpportunity = await getOpportunity(record.opportunity_id);
         const linkedOpportunityData = linkedOpportunity?.data || linkedOpportunity || null;
         setEstimateOpportunity(linkedOpportunityData);
         const linkedEstimates = await getEstimates({ opportunity: linkedOpportunityData.id });
@@ -2750,16 +2816,24 @@ const SalesDetail = () => {
     try {
       const estimates = await getEstimates({ opportunity: record.id });
       const rows = Array.isArray(estimates?.results) ? estimates.results : Array.isArray(estimates) ? estimates : [];
-      const activeEstimate = rows.find((row) => row?.method === 'manual') || rows[0] || null;
-      if (activeEstimate?.id) {
-        const detail = await api.get(`/estimates/${activeEstimate.id}/`);
-        setEstimateSummary(detail || activeEstimate);
+      let activeEstimate = rows.find((row) => row?.method === 'manual') || rows[0] || null;
+      if (!activeEstimate) {
+        activeEstimate = getStoredDraftEstimate(record.id);
+      }
+      if (activeEstimate?.id && !String(activeEstimate.id).startsWith('draft-')) {
+        try {
+          const detail = await api.get(`/estimates/${activeEstimate.id}/`);
+          setEstimateSummary(detail?.data || detail || activeEstimate);
+        } catch {
+          setEstimateSummary(activeEstimate);
+        }
       } else {
         setEstimateSummary(activeEstimate);
       }
     } catch (err) {
       console.warn('Failed to load estimate summary:', err);
-      setEstimateSummary(null);
+      const draft = getStoredDraftEstimate(record.id);
+      setEstimateSummary(draft || null);
     }
   }, [isCreation, isLeadPath]);
 
@@ -3080,7 +3154,7 @@ const SalesDetail = () => {
       setGatewayPayments(asList(paymentsRes).filter(p => p.status === 'pending' || p.status === 'succeeded' || p.status === 'partially_refunded' || p.status === 'refunded'));
       if (job?.id) {
         const [summaryRes, crewRes] = await Promise.all([
-          api.jobs.getJobAccountingSummary(job.id),
+          api.jobs.getJobAccountingSummary(job.id).catch(() => null),
           api.crew.getCrewMembers({ is_active: true }),
         ]);
         summary = summaryRes;
@@ -3170,9 +3244,8 @@ const SalesDetail = () => {
 
   useEffect(() => {
     if (!opportunity?.id || isCreation) return;
-    if (!['Estimate', 'Accounting', 'Documents', 'Payments'].includes(activeTab)) return;
     loadOpportunityJobs();
-  }, [activeTab, isCreation, loadOpportunityJobs, opportunity?.id]);
+  }, [isCreation, loadOpportunityJobs, opportunity?.id]);
 
   useEffect(() => {
     if (!selectedEstimateJobId) return;
@@ -4840,8 +4913,15 @@ const SalesDetail = () => {
   }, [communicationRecipients.phones]);
   
   const routePoints = useMemo(() => {
-    return buildSalesRouteStops(opportunity, isLeadPath, view);
-  }, [opportunity, view, isLeadPath]);
+    const routeRecord = opportunity;
+    const selectedJob = opportunityJobs.find((job) => String(job.id) === String(selectedEstimateJobId))
+      || opportunityJobs.find((job) => job?.is_primary)
+      || opportunityJobs[0];
+    const recordWithJobStops = selectedJob && Array.isArray(selectedJob.stops)
+      ? { ...routeRecord, stops: selectedJob.stops }
+      : routeRecord;
+    return buildSalesRouteStops(recordWithJobStops, isLeadPath, view);
+  }, [estimateOpportunity, isLeadPath, opportunity, opportunityJobs, selectedEstimateJobId, view]);
 
   const isSalesRouteEditable = !isLeadPath && !isCreation && opportunity?.id && opportunity.id !== 'new';
 
@@ -5420,17 +5500,20 @@ const SalesDetail = () => {
   };
 
   const removeAdditionalContactForm = async (indexToRemove) => {
+    if (!requiresAnyPermission([PERMISSIONS.LEAD_EDIT, PERMISSIONS.SALES_CHANGE_OPPORTUNITY])) {
+      return denyAction('You do not have permission to edit contacts.');
+    }
     const formToRemove = additionalContactForms[indexToRemove];
     if (!formToRemove) return;
 
     if (formToRemove.id) {
       try {
         setIsAdditionalContactsSaving(true);
-        await deleteCustomerContact(formToRemove.id);
-        
         const customerId = resolveCustomerId(getRecordCustomerDetails(opportunity), opportunity?.customer_id, opportunity?.customer);
+        if (!customerId) throw new Error('Customer record is missing.');
+        await deleteCustomerContact(formToRemove.id, customerId);
         const currentContacts = getRecordCustomerDetails(opportunity)?.contacts || [];
-        const nextContacts = currentContacts.filter(c => c.id !== formToRemove.id);
+        const nextContacts = currentContacts.filter(c => String(c.id) !== String(formToRemove.id));
 
         const updatedCustomer = { ...getRecordCustomerDetails(opportunity), contacts: nextContacts };
         
@@ -5488,9 +5571,6 @@ const SalesDetail = () => {
     if (!requiresAnyPermission([PERMISSIONS.LEAD_EDIT, PERMISSIONS.SALES_CHANGE_OPPORTUNITY])) {
       return denyAction('You do not have permission to edit contacts.');
     }
-    if (!requiresAnyPermission([PERMISSIONS.LEAD_EDIT, PERMISSIONS.SALES_CHANGE_OPPORTUNITY])) {
-      return denyAction('You do not have permission to edit contacts.');
-    }
 
     let customerId = resolveCustomerId(getRecordCustomerDetails(opportunity), opportunity?.customer_id, opportunity?.customer);
     if (!customerId) {
@@ -5544,8 +5624,7 @@ const SalesDetail = () => {
         }
 
         const rowId = String(row.id || '').trim();
-        const existingContact =
-          currentContacts.find((contact) => String(contact?.id || '') === rowId) || currentContacts[index] || null;
+        const existingContact = currentContacts.find((contact) => String(contact?.id || '') === rowId) || null;
         const contactId = Number(rowId || existingContact?.id || 0) || null;
         const contactChanged =
           String(contactPayload.name || '') !== String(existingContact?.name || '') ||
@@ -5556,7 +5635,7 @@ const SalesDetail = () => {
 
         if (contactId) {
           if (contactChanged) {
-            const savedContact = await updateCustomerContact(contactId, contactPayload);
+            const savedContact = await updateCustomerContact(contactId, contactPayload, customerId);
             savedContacts.push(savedContact);
             syncSavedCustomerContact(savedContact, customerId);
           }
@@ -5600,9 +5679,13 @@ const SalesDetail = () => {
     };
 
     if (isLeadPath) {
+      const leadNameParts = String(
+        record.full_name || record.customer_name || record.lead_name || record.name ||
+        record.contact_name || record.customer?.full_name || ''
+      ).trim().split(/\s+/).filter(Boolean);
       setForm({
-        first_name: record.first_name || '',
-        last_name: record.last_name || '',
+        first_name: record.first_name || leadNameParts[0] || '',
+        last_name: record.last_name || leadNameParts.slice(1).join(' '),
         email: record.email || '',
         phone: record.phone || '',
         status: record.status || 'new',
@@ -5729,8 +5812,6 @@ const SalesDetail = () => {
     if (!String(target.branch || '').trim()) gaps.push('Branch');
     if (!String(target.service_type || '').trim()) gaps.push('Service type');
     if (!String(target.move_type || '').trim()) gaps.push('Move type');
-    if (!String(target.origin_street || '').trim()) gaps.push('Origin address');
-    if (!String(target.destination_street || '').trim()) gaps.push('Destination address');
     return gaps;
   }
 
@@ -5741,8 +5822,6 @@ const SalesDetail = () => {
     if (!String(target.branch || '').trim()) return 'Please select a branch.';
     if (!String(target.service_type || '').trim()) return 'Please select a service type.';
     if (!String(target.move_type || '').trim()) return 'Please select a move type.';
-    if (!String(target.origin_street || '').trim()) return 'Origin address is required.';
-    if (!String(target.destination_street || '').trim()) return 'Destination address is required.';
     return null;
   }
 
@@ -5840,7 +5919,11 @@ const SalesDetail = () => {
             customer_details: {
               ...(opportunity?.customer_details || {}),
               ...updatedCustomer,
-              primary_phone: updatedCustomer?.primary_phone || payload.phone,
+              full_name: updatedCustomer?.full_name || `${payload.first_name} ${payload.last_name}`.trim(),
+              first_name: payload.first_name,
+              last_name: payload.last_name,
+              email: updatedCustomer?.email ?? payload.email,
+              primary_phone: updatedCustomer?.primary_phone ?? payload.phone,
             },
           };
           syncSavedOpportunity(nextOpportunity);
@@ -5872,8 +5955,14 @@ const SalesDetail = () => {
 
   const handleCustomerInlineSave = async (field, value) => {
     const previousDraft = customerDraft;
+    const currentCustomer = getRecordCustomerDetails(opportunity);
+    const nameParts = String(currentCustomer?.full_name || currentCustomer?.profile_name || '').trim().split(/\s+/);
     const updatedDraft = {
       ...form,
+      first_name: currentCustomer?.first_name || nameParts[0] || form.first_name,
+      last_name: currentCustomer?.last_name || nameParts.slice(1).join(' ') || form.last_name,
+      email: currentCustomer?.email ?? form.email,
+      phone: currentCustomer?.primary_phone ?? currentCustomer?.phone ?? form.phone,
       ...(customerDraft || {}),
       [field]: value,
     };
@@ -5924,7 +6013,7 @@ const SalesDetail = () => {
 
     const payload = isLeadPath
       ? {
-          origin_address_line1: String(routeDraft?.origin_street || '').trim(),
+          origin_street: String(routeDraft?.origin_street || '').trim(),
           origin_city: originCity,
           origin_state: originState,
           origin_zip: originZip,
@@ -5934,7 +6023,7 @@ const SalesDetail = () => {
           origin_flights_of_stairs: Number(routeDraft?.origin_flights_of_stairs || 0),
           origin_has_elevator: Boolean(routeDraft?.origin_has_elevator),
           origin_walk_distance_ft: Number(routeDraft?.origin_walk_distance_ft || 0),
-          destination_address_line1: String(routeDraft?.destination_street || '').trim(),
+          destination_street: String(routeDraft?.destination_street || '').trim(),
           destination_city: destCity,
           destination_state: destState,
           destination_zip: destZip,
@@ -5974,7 +6063,30 @@ const SalesDetail = () => {
       const updated = isLeadPath
         ? await updateLead(opportunity.id, payload)
         : await updateOpportunity(opportunity.id, payload);
-      syncSavedOpportunity(updated);
+      syncSavedOpportunity({ ...payload, ...(updated || {}) });
+      setForm((prev) => ({
+        ...prev,
+        origin_street: payload.origin_street ?? payload.origin_address_line1 ?? '',
+        origin_city: payload.origin_city || '',
+        origin_state: payload.origin_state || '',
+        origin_zip: payload.origin_zip ?? payload.origin_postal_code ?? '',
+        origin_unit_number: payload.origin_unit_number || '',
+        origin_property_type: payload.origin_property_type || '',
+        origin_parking_type: payload.origin_parking_type || '',
+        origin_flights_of_stairs: payload.origin_flights_of_stairs || 0,
+        origin_has_elevator: Boolean(payload.origin_has_elevator),
+        origin_walk_distance_ft: payload.origin_walk_distance_ft || 0,
+        destination_street: payload.destination_street ?? payload.destination_address_line1 ?? '',
+        destination_city: payload.destination_city || '',
+        destination_state: payload.destination_state || '',
+        destination_zip: payload.destination_zip ?? payload.destination_postal_code ?? '',
+        destination_unit_number: payload.destination_unit_number || '',
+        destination_property_type: payload.destination_property_type || '',
+        destination_parking_type: payload.destination_parking_type || '',
+        destination_flights_of_stairs: payload.destination_flights_of_stairs || 0,
+        destination_has_elevator: Boolean(payload.destination_has_elevator),
+        destination_walk_distance_ft: payload.destination_walk_distance_ft || 0,
+      }));
       setIsRouteEditing(false);
       setRouteDraft(null);
       setToast({ type: 'success', text: 'Route details saved successfully.' });
@@ -6555,62 +6667,21 @@ const SalesDetail = () => {
       }
     }
 
-    let originCity = String(target.origin_city || '').trim();
-    let originState = String(target.origin_state || '').trim();
-    let originZip = String(target.origin_zip || '').trim();
-    if (!originCity || !originState || !originZip) {
-      const parsed = parseAddressString(target.origin_street);
-      if (!originCity) originCity = parsed.city;
-      if (!originState) originState = parsed.state;
-      if (!originZip) originZip = parsed.postal_code;
-    }
-
-    let destCity = String(target.destination_city || '').trim();
-    let destState = String(target.destination_state || '').trim();
-    let destZip = String(target.destination_zip || '').trim();
-    if (!destCity || !destState || !destZip) {
-      const parsed = parseAddressString(target.destination_street);
-      if (!destCity) destCity = parsed.city;
-      if (!destState) destState = parsed.state;
-      if (!destZip) destZip = parsed.postal_code;
-    }
-
     const resolvedServiceTypeId = normalizeLookupValue(target.service_type);
     const resolvedMoveTypeId = normalizeLookupValue(target.move_type);
 
     await updateOpportunity(opportunity.id, omitBlankStrings({
-      customer: finalCustomerId ? Number(finalCustomerId) : null,
       service_type: resolvedServiceTypeId || null,
       move_date: target.move_date || null,
       arrival_window_start: target.arrival_window_start || null,
       arrival_window_end: target.arrival_window_end || null,
       mover_size: target.move_size ? Number(target.move_size) : null,
       move_type: resolvedMoveTypeId || null,
-      branch: target.branch ? Number(target.branch) : null,
-      assigned_user: target.assigned_to ? Number(target.assigned_to) : null,
+      ...(String(target.branch || '') !== String(form.branch || '') ? { branch: target.branch ? Number(target.branch) : null } : {}),
+      ...(String(target.assigned_to || '') !== String(form.assigned_to || '') ? { assigned_user: target.assigned_to ? Number(target.assigned_to) : null } : {}),
       referral_source: target.referral_source ? Number(target.referral_source) : null,
       utm_source: target.utm_source,
       notes_internal: target.notes,
-      origin_address_line1: String(target.origin_street || '').trim(),
-      origin_city: originCity,
-      origin_state: originState,
-      origin_postal_code: originZip,
-      destination_address_line1: String(target.destination_street || '').trim(),
-      destination_city: destCity,
-      destination_state: destState,
-      destination_postal_code: destZip,
-      origin_unit_number: target.origin_unit_number,
-      origin_property_type: target.origin_property_type,
-      origin_parking_type: target.origin_parking_type,
-      origin_flights_of_stairs: target.origin_flights_of_stairs,
-      origin_has_elevator: target.origin_has_elevator,
-      origin_walk_distance_ft: target.origin_walk_distance_ft,
-      destination_unit_number: target.destination_unit_number,
-      destination_property_type: target.destination_property_type,
-      destination_parking_type: target.destination_parking_type,
-      destination_flights_of_stairs: target.destination_flights_of_stairs,
-      destination_has_elevator: target.destination_has_elevator,
-      destination_walk_distance_ft: target.destination_walk_distance_ft,
     }));
 
     setForm((prev) => ({ ...prev, ...target }));
@@ -6618,10 +6689,20 @@ const SalesDetail = () => {
   }, [fetchOpportunity, isLeadPath, opportunity]);
 
   const createOpportunityEstimateRecord = useCallback(async () => {
-    const res = await createEstimate({
-      opportunity: opportunity.id,
-      method: 'manual',
-    });
+    let res;
+    try {
+      res = await createEstimate({
+        opportunity: opportunity.id,
+        method: 'manual',
+      });
+    } catch (err) {
+      if (err?.code === 'MODULE_NOT_AVAILABLE' || err?.response?.status === 404 || err?.response?.status === 501) {
+        res = buildDefaultDraftEstimate(opportunity.id);
+        setStoredDraftEstimate(opportunity.id, res);
+      } else {
+        throw err;
+      }
+    }
     setEstimateSummary(res);
     setToast({ type: 'success', text: 'Estimate created successfully!' });
     navigateToEstimateSubTab('charges');
@@ -7343,8 +7424,10 @@ const SalesDetail = () => {
             } else {
               setAdditionalContactError('');
               let savedContact = null;
-              const existingContact = customerAdditionalContacts[selectedAdditionalContactIndex] || null;
-              const contactId = Number(selectedAdditionalContactForm.id || existingContact?.id || 0) || null;
+              const existingContact = customerAdditionalContacts.find(
+                (contact) => String(contact?.id || '') === String(selectedAdditionalContactForm.id || '')
+              ) || null;
+              const contactId = Number(selectedAdditionalContactForm.id || 0) || null;
               if (contactId) {
                 const contactChanged =
                   String(contactPayload.name || '') !== String(existingContact?.name || '') ||
@@ -7353,7 +7436,7 @@ const SalesDetail = () => {
                   String(contactPayload.phone_type || '') !== String(existingContact?.phone_type || '') ||
                   String(contactPayload.relationship || '') !== String(existingContact?.relationship || '');
                 if (contactChanged) {
-                  savedContact = await updateCustomerContact(contactId, contactPayload);
+                  savedContact = await updateCustomerContact(contactId, contactPayload, finalCustomerId);
                 } else {
                   savedContact = existingContact?.id ? existingContact : null;
                 }
@@ -7994,79 +8077,30 @@ const SalesDetail = () => {
           const emailsTo = activityEmailToText.split(',').map(e => e.trim()).filter(Boolean);
           const emailsCc = activityEmailCcText.split(',').map(e => e.trim()).filter(Boolean);
           const emailsBcc = activityEmailBccText.split(',').map(e => e.trim()).filter(Boolean);
-          const providerPayload = JSON.stringify({
-            cc_email: emailsCc.join(', '),
-            bcc_email: emailsBcc.join(', '),
-            plain_reply: emailComposeMode === 'inbound_reply',
+          if (emailAttachments.length) {
+            return denyAction('Email attachments are not supported by the tenant communications API yet.');
+          }
+          await sendRecordEmail('opportunity', opportunity.id, {
+            to: emailsTo,
+            cc: emailsCc,
+            bcc: emailsBcc,
+            subject: activitySubject.trim(),
+            body_text: description,
+            body_html: emailComposeMode === 'inbound_reply'
+              ? activeBody.trim()
+              : replaceBranchPlaceholders(activeBody.trim(), {
+                  branchLogoUrl: selectedBranchLogoUrl,
+                  branchName: selectedBranchName,
+                }),
+            include_signature: true,
           });
-
-          await Promise.all(emailsTo.map(async (targetEmail) => {
-            const created = await createSalesActivity({
-              opportunity: opportunity.id,
-              activity_type: activityTypeForTab(commTab),
-              subject: activitySubject || '',
-              description,
-              direction: 'outbound',
-              status: 'completed',
-            });
-            if (created?.id) {
-              try {
-                const formData = new FormData();
-                formData.append('activity', created.id);
-                formData.append('to_email', targetEmail);
-                formData.append('subject', activitySubject.trim());
-                formData.append(
-                  'body_html',
-                  emailComposeMode === 'inbound_reply'
-                    ? activeBody.trim()
-                    : replaceBranchPlaceholders(activeBody.trim(), {
-                        branchLogoUrl: selectedBranchLogoUrl,
-                        branchName: selectedBranchName,
-                      })
-                );
-                formData.append('provider_payload', providerPayload);
-                emailAttachments.forEach((file) => formData.append('attachments', file));
-                const emailLog = await api.post('/sales/email-logs/', formData);
-                if (emailLog?.status === 'failed') {
-                  channelWarning = emailLog?.error_message || 'Email delivery failed.';
-                }
-              } catch (err) {
-                try {
-                  await api.delete(`/sales/sales-activities/${created.id}/`);
-                } catch {
-                  // Keep the original email validation failure as the primary error.
-                }
-                throw err;
-              }
-            }
-          }));
         } else if (commTab === 'text') {
           if (!canSendSms()) {
             return denyAction('You do not have permission to send SMS messages.');
           }
-          await Promise.all(activitySmsRecipients.map(async (targetPhone) => {
-            if (!targetPhone) return;
-            const created = await createSalesActivity({
-              opportunity: opportunity.id,
-              activity_type: activityTypeForTab(commTab),
-              subject: '',
-              description,
-              direction: 'outbound',
-              status: 'completed',
-            });
-            if (created?.id) {
-              try {
-                await api.post('/sales/sms-logs/', {
-                  activity: created.id,
-                  to_phone: targetPhone,
-                  message: activeBody.trim(),
-                  status: 'sent',
-                });
-              } catch (err) {
-                channelWarning = `Activity saved, but SMS log failed: ${getErrorMessage(err, 'sms log error')}`;
-              }
-            }
-          }));
+          await Promise.all(activitySmsRecipients.filter(Boolean).map((to) =>
+            sendRecordSms('opportunity', opportunity.id, { to, body: activeBody.trim() })
+          ));
         } else {
           if (commTab === 'call' && (!canManageActivityHistory() || !canLogCall())) {
             return denyAction('You do not have permission to log calls.');
@@ -8121,7 +8155,7 @@ const SalesDetail = () => {
       setToast(
         postWarning
           ? { type: 'error', text: postWarning }
-          : { type: 'success', text: 'Activity posted successfully.' }
+          : { type: 'success', text: commTab === 'email' ? 'Email queued.' : commTab === 'text' ? 'Text queued.' : 'Activity posted successfully.' }
       );
       setTimeout(() => setToast({ type: '', text: '' }), 2500);
     } catch (err) {
@@ -8236,11 +8270,11 @@ const SalesDetail = () => {
               )}
               {['Estimate', 'Files & Photos', 'Accounting', 'Documents', 'Payments'].includes(activeTab) && (
               <RouteLogisticsCard
-                stops={(isLeadPath ? estimateOpportunity : opportunity)?.stops || []}
-                origin={(isLeadPath ? estimateOpportunity?.origin_address_details : opportunity?.origin_address_details) || {
+                stops={opportunity?.stops || []}
+                origin={opportunity?.origin_address_details || {
                   address_line1: form.origin_street,
                 }}
-                destination={(isLeadPath ? estimateOpportunity?.destination_address_details : opportunity?.destination_address_details) || {
+                destination={opportunity?.destination_address_details || {
                   address_line1: form.destination_street,
                 }}
                   routeStops={routePoints}
@@ -9718,14 +9752,14 @@ const SalesDetail = () => {
                 onInlineSave={canEditOpportunity() ? handleSpecsInlineSave : undefined}
               />
               <RouteLogisticsCard
-                stops={(isLeadPath ? estimateOpportunity : opportunity)?.stops || []}
-                origin={(isLeadPath ? estimateOpportunity?.origin_address_details : opportunity?.origin_address_details) || {
+                stops={opportunity?.stops || []}
+                origin={opportunity?.origin_address_details || {
                   address_line1: form.origin_street,
                   // city: form.origin_city,
                   // state: form.origin_state,
                   // postal_code: form.origin_zip,
                 }}
-                destination={(isLeadPath ? estimateOpportunity?.destination_address_details : opportunity?.destination_address_details) || {
+                destination={opportunity?.destination_address_details || {
                   address_line1: form.destination_street,
                   // city: form.destination_city,
                   // state: form.destination_state,
@@ -9852,7 +9886,7 @@ const SalesDetail = () => {
                 <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
                   <div className="text-xs font-black uppercase tracking-[0.18em] text-amber-700">Before Estimate Creation</div>
                   <div className="mt-2 text-sm font-semibold text-amber-900">
-                    Estimates require complete customer, move, and route data. Fill the missing fields below and the estimate will be created immediately after save.
+                    Estimates require complete customer and move data. Fill the missing fields below and the estimate will be created immediately after save.
                   </div>
                   {getEstimateRequirementGaps(estimateRequirementsDraft).length ? (
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -9985,58 +10019,6 @@ const SalesDetail = () => {
                           ))}
                         </select>
                       </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="text-sm font-black uppercase tracking-widest text-slate-400">Route</div>
-                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                    <div>
-                      <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-slate-500">
-                        Origin Address
-                      </label>
-                      <AddressAutocomplete
-                        country="ca,us"
-                        value={estimateRequirementsDraft.origin_street || ''}
-                        onChange={(e) =>
-                          setEstimateRequirementsDraft((prev) => ({ ...prev, origin_street: e.target.value }))
-                        }
-                        onPick={(parts) =>
-                          setEstimateRequirementsDraft((prev) => ({
-                            ...prev,
-                            origin_street: parts.formattedAddress || parts.street || prev.origin_street,
-                            origin_city: parts.city || prev.origin_city,
-                            origin_state: parts.province || prev.origin_state,
-                            origin_zip: parts.postalCode || prev.origin_zip,
-                          }))
-                        }
-                        className={workspaceInputCls}
-                        placeholder="123 Main St, City, State ZIP"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-slate-500">
-                        Destination Address
-                      </label>
-                      <AddressAutocomplete
-                        country="ca,us"
-                        value={estimateRequirementsDraft.destination_street || ''}
-                        onChange={(e) =>
-                          setEstimateRequirementsDraft((prev) => ({ ...prev, destination_street: e.target.value }))
-                        }
-                        onPick={(parts) =>
-                          setEstimateRequirementsDraft((prev) => ({
-                            ...prev,
-                            destination_street: parts.formattedAddress || parts.street || prev.destination_street,
-                            destination_city: parts.city || prev.destination_city,
-                            destination_state: parts.province || prev.destination_state,
-                            destination_zip: parts.postalCode || prev.destination_zip,
-                          }))
-                        }
-                        className={workspaceInputCls}
-                        placeholder="456 Destination Ave, City, State ZIP"
-                      />
                     </div>
                   </div>
                 </div>
@@ -10948,6 +10930,21 @@ const SalesDetail = () => {
               onSave={saveRouteSection}
               saving={isRouteSaving}
               onChange={(field, value) => setRouteDraft((prev) => ({ ...(prev || {}), [field]: value }))}
+              onClearAddress={(type) => setRouteDraft((prev) => {
+                const next = { ...(prev || buildRouteFieldsFromRecord(opportunity, isLeadPath)) };
+                const prefix = type === 'origin' ? 'origin' : 'destination';
+                next[`${prefix}_street`] = '';
+                next[`${prefix}_city`] = '';
+                next[`${prefix}_state`] = '';
+                next[`${prefix}_zip`] = '';
+                next[`${prefix}_unit_number`] = '';
+                next[`${prefix}_property_type`] = '';
+                next[`${prefix}_parking_type`] = '';
+                next[`${prefix}_flights_of_stairs`] = 0;
+                next[`${prefix}_has_elevator`] = false;
+                next[`${prefix}_walk_distance_ft`] = 0;
+                return next;
+              })}
               onAddressPick={(type, parts) =>
                 setRouteDraft((prev) => {
                   const next = { ...(prev || buildRouteFieldsFromRecord(opportunity, isLeadPath)) };

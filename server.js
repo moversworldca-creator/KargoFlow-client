@@ -17,7 +17,7 @@ const PORT = Number(process.env.PORT) || 3000;
 app.use(cors());
 // Tenant APIs must reach the real backend before any mock routes or body parsers.
 app.use('/api', (req, res, next) => {
-  if (req.path.startsWith('/platform/')) return next();
+  if (req.path.startsWith('/platform/') || req.path.startsWith('/jobs/')) return next();
   const target = new URL(process.env.BACKEND_URL || 'http://127.0.0.1:8000');
   const transport = target.protocol === 'https:' ? https : http;
   const upstream = transport.request({

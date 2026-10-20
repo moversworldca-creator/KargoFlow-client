@@ -233,15 +233,69 @@ export const deleteLeadActivity = () => { throw new Error('Deleting lead activit
 
 
 
-// Customer APIs
-export const getCustomers = (params) => api.get("/leads/customers/", { params });
-export const getCustomer = (id) => api.get(`/leads/customers/${id}/`);
-export const createCustomer = (data) => api.post("/leads/customers/", data);
-export const updateCustomer = (id, data) => api.patch(`/leads/customers/${id}/`, data);
-export const deleteCustomer = (id) => api.delete(`/leads/customers/${id}/`);
-export const createCustomerContact = (data) => api.post("/leads/customer-contacts/", data);
-export const updateCustomerContact = (id, data) => api.patch(`/leads/customer-contacts/${id}/`, data);
-export const deleteCustomerContact = (id) => api.delete(`/leads/customer-contacts/${id}/`);
+// Customer profiles and contacts are separate resources in the tenant API.
+const customerPath = (id) => `/tenant/customers/${id}/`;
+const customerName = (data) => [data.first_name, data.last_name].filter(Boolean).join(' ').trim();
+const legacyCustomer = (customer, contacts = []) => {
+  const primary = contacts.find((contact) => contact.is_primary && contact.is_active !== false) || null;
+  const parts = String(customer.profile_name || '').trim().split(/\s+/);
+  return {
+    ...customer,
+    full_name: customer.profile_name,
+    first_name: parts[0] || '',
+    last_name: parts.slice(1).join(' '),
+    email: primary?.email || customer.primary_email || '',
+    primary_phone: primary?.phone || customer.primary_phone || '',
+    contacts: contacts.filter((contact) => contact.is_active !== false),
+  };
+};
+const customerProfile = async (id) => {
+  const profile = await api.get(`${customerPath(id)}profile/`);
+  return legacyCustomer(profile.customer, profile.contacts || []);
+};
+export const getCustomers = async (params) => {
+  const result = await api.get('/tenant/customers/', { params });
+  return { ...result, results: (result.results || []).map((row) => legacyCustomer(row)) };
+};
+export const getCustomer = customerProfile;
+export const createCustomer = async (data) => {
+  const name = data.profile_name || customerName(data);
+  const email = String(data.email || '').trim();
+  const phone = String(data.primary_phone || data.phone || '').trim();
+  const payload = {
+    profile_name: name,
+    customer_type: data.customer_type || 'individual',
+    notes: data.notes || '',
+    ...(email || phone ? { primary_contact: { name, email, phone, phone_type: data.primary_phone_type || '' } } : {}),
+  };
+  const created = await api.post('/tenant/customers/', payload);
+  return customerProfile(created.id);
+};
+export const updateCustomer = async (id, data) => {
+  const current = await customerProfile(id);
+  const name = data.profile_name || customerName(data);
+  if (name && name !== current.profile_name) {
+    await api.patch(customerPath(id), { profile_name: name });
+  }
+  const primary = current.contacts.find((contact) => contact.is_primary);
+  const contact = {
+    name: name || current.profile_name,
+    email: data.email ?? current.email,
+    phone: data.primary_phone ?? data.phone ?? current.primary_phone,
+  };
+  if (primary) {
+    if (contact.name !== primary.name || contact.email !== primary.email || contact.phone !== primary.phone) {
+      await api.patch(`${customerPath(id)}contacts/${primary.id}/`, contact);
+    }
+  } else if (contact.email || contact.phone) {
+    await api.post(`${customerPath(id)}contacts/`, { ...contact, is_primary: true });
+  }
+  return customerProfile(id);
+};
+export const deleteCustomer = () => { throw new Error('Customer profiles cannot be deleted.'); };
+export const createCustomerContact = ({ customer, ...data }) => api.post(`${customerPath(customer)}contacts/`, data);
+export const updateCustomerContact = (id, data, customerId) => api.patch(`${customerPath(customerId)}contacts/${id}/`, data);
+export const deleteCustomerContact = (id, customerId) => api.delete(`${customerPath(customerId)}contacts/${id}/`);
 
 // ================= SALES APIs =================
 export const getMyLeadsQueue = (params) => getPipelineQueue(params);
@@ -266,10 +320,64 @@ export const getOpportunityBySalesNumber = async (salesNumber) => {
   return readOpportunity(detail.item.id);
 };
 export const duplicateOpportunity = (id) => api.post(`/sales/opportunities/${id}/duplicate/`);
-export const createOpportunity = (data) =>
-  api.post("/sales/opportunities/", data);
-export const updateOpportunity = (id, data) =>
-  api.patch(`/sales/opportunities/${id}/`, data);
+const opportunityFieldAliases = {
+  branch: 'branch_id', customer: 'customer_id', assigned_user: 'assigned_employee_id',
+  custom_status_code: 'custom_status_code_id', service_type: 'service_type_id',
+  move_type: 'move_type_id', mover_size: 'move_size_id', move_size: 'move_size_id',
+  referral_source: 'referral_source_id',
+};
+const opportunityEditableFields = new Set([
+  'move_date', 'preferred_start_time', 'arrival_window_start', 'arrival_window_end', 'bedrooms',
+  'notes_internal', 'opportunity_type_id', 'move_type_id', 'move_size_id', 'service_type_id',
+  'referral_source_id', 'volume_weight_method', 'estimated_volume_cuft', 'estimated_weight_lbs',
+  'lead_cost', 'utm_source', 'utm_medium', 'utm_campaign',
+]);
+const opportunityPayload = (data, { create = false } = {}) => {
+  const result = {};
+  for (const [key, value] of Object.entries(data || {})) {
+    const field = opportunityFieldAliases[key] || key;
+    if (opportunityEditableFields.has(field) || (create && ['branch_id', 'customer_id', 'assigned_employee_id', 'custom_status_code_id'].includes(field))) {
+      result[field] = value === '' && field.endsWith('_id') ? null : value;
+    }
+  }
+  return result;
+};
+const normalizeOpportunityUpdate = (row) => ({
+  ...row,
+  status: row?.system_state,
+  branch: row?.branch_id,
+  customer: row?.customer_id,
+  assigned_user: row?.assigned_employee_id,
+  custom_status_code: row?.custom_status_code_id,
+  service_type: row?.service_type_id,
+  move_type: row?.move_type_id,
+  mover_size: row?.move_size_id,
+  referral_source: row?.referral_source_id,
+});
+export const createOpportunity = async (data) => normalizeOpportunityUpdate(
+  await api.post('/tenant/opportunities/', opportunityPayload(data, { create: true }))
+);
+export const updateOpportunity = async (id, data = {}) => {
+  const path = `/tenant/opportunities/${id}/`;
+  const generic = opportunityPayload(data);
+  let updated = Object.keys(generic).length ? await api.patch(path, generic) : null;
+
+  const statusValue = data.custom_status_code_id ?? data.custom_status_code;
+  if (statusValue !== undefined) {
+    updated = await api.put(`${path}custom-status/`, { status_code_id: statusValue ? Number(statusValue) : null });
+  }
+  const assigneeValue = data.assigned_employee_id ?? data.assigned_user;
+  if (assigneeValue !== undefined) {
+    updated = assigneeValue
+      ? await api.post(`${path}assign/`, { employee_id: Number(assigneeValue) })
+      : await api.delete(`${path}assignment/`);
+  }
+  const branchValue = data.branch_id ?? data.branch;
+  if (branchValue !== undefined && branchValue !== null && branchValue !== '') {
+    updated = await api.post(`${path}change-branch/`, { branch_id: Number(branchValue), reason: 'Updated from sales details' });
+  }
+  return normalizeOpportunityUpdate(updated || await api.get(path));
+};
 export const getOpportunityAvailability = (id, date = "") =>
   api.get(`/sales/opportunities/${id}/availability/`, { params: { date } });
 export const getOpportunityAccountingSummary = (id) => api.get(`/sales/opportunities/${id}/accounting-summary/`);
@@ -282,10 +390,10 @@ export const updateOpportunityInvoiceLineItem = (opportunityId, invoiceId, lineI
 export const deleteOpportunityInvoiceLineItem = (opportunityId, invoiceId, lineItemId) => api.delete(`/sales/opportunities/${opportunityId}/accounting-invoice/${invoiceId}/line-items/${lineItemId}/`);
 export const createOpportunityInvoiceLineItem = (opportunityId, invoiceId, data) => api.post(`/sales/opportunities/${opportunityId}/accounting-invoice/${invoiceId}/line-items/`, data);
 export const sendOpportunityInvoice = (id, data = {}) => api.post(`/sales/opportunities/${id}/accounting-invoice-send/`, data);
-export const getOpportunityPlannedSubJobs = (id) => api.get(`/sales/opportunities/${id}/planned-sub-jobs/`);
-export const createOpportunityPlannedSubJob = (id, data) => api.post(`/sales/opportunities/${id}/planned-sub-jobs/`, data);
-export const updateOpportunityPlannedSubJob = (opportunityId, subJobId, data) => api.patch(`/sales/opportunities/${opportunityId}/planned-sub-jobs/${subJobId}/`, data);
-export const deleteOpportunityPlannedSubJob = (opportunityId, subJobId) => api.delete(`/sales/opportunities/${opportunityId}/planned-sub-jobs/${subJobId}/`);
+export const getOpportunityPlannedSubJobs = (id) => api.get(`/tenant/opportunities/${id}/jobs/`);
+export const createOpportunityPlannedSubJob = (id, data) => api.post(`/tenant/opportunities/${id}/jobs/`, data);
+export const updateOpportunityPlannedSubJob = (opportunityId, subJobId, data) => api.patch(`/tenant/opportunities/${opportunityId}/jobs/${subJobId}/`, data);
+export const deleteOpportunityPlannedSubJob = (opportunityId, subJobId) => api.delete(`/tenant/opportunities/${opportunityId}/jobs/${subJobId}/`);
 export const deleteOpportunity = (id) => api.delete(`/sales/opportunities/${id}/`);
 export const startOpportunityWorking = (id) => api.post(`/sales/opportunities/${id}/start-working/`);
 export const markOpportunityEstimateCreated = (id) => api.post(`/sales/opportunities/${id}/mark-estimate-created/`);
@@ -350,12 +458,23 @@ export const bulkSalesMarkLost = (data) => bulkSalesAction({ ...data, action: "l
 export const bulkSalesAssign = (data) => bulkSalesAction({ ...data, action: "assign" });
 export const bulkSalesDelete = (data) => bulkSalesAction({ ...data, action: "delete" });
 
+// The current tenant backend has not exposed the legacy estimate, payment, or
+// file modules yet. Keep their requests disabled by default so opening an
+// opportunity does not generate a wall of expected 404 responses. Older
+// deployments that still mount those modules can opt in explicitly.
+export const legacyOperationsApiEnabled = import.meta.env.VITE_ENABLE_LEGACY_OPERATIONS_API === "true";
+const unavailableLegacyOperation = (name) => {
+  const error = new Error(`${name} is not available in the current backend.`);
+  error.code = "MODULE_NOT_AVAILABLE";
+  return Promise.reject(error);
+};
+
 // ================= PAYMENTS APIs (v1) =================
-export const getPaymentRequests = (params = {}) => api.get("/payments/payment-requests/", { params });
+export const getPaymentRequests = (params = {}) => legacyOperationsApiEnabled ? api.get("/payments/payment-requests/", { params }) : Promise.resolve([]);
 export const createPaymentRequest = (data) => api.post("/payments/payment-requests/create/", data);
 export const createPaymentRequestAndSend = (data) => api.post("/payments/payment-requests/create-and-send/", data);
 export const getPaymentRequestCheckoutConfig = (id) => api.get(`/payments/payment-requests/${id}/checkout-config/`);
-export const getPayments = (params = {}) => api.get("/payments/payments/", { params });
+export const getPayments = (params = {}) => legacyOperationsApiEnabled ? api.get("/payments/payments/", { params }) : Promise.resolve([]);
 export const getPaymentInOutReport = (params = {}) => api.get("/payments/reports/payment-in-out/", { params });
 export const getOutstandingBalancesReport = (params = {}) => api.get("/payments/reports/outstanding-balances/", { params });
 export const createPayment = (data) => api.post("/payments/payments/create/", data);
@@ -364,11 +483,16 @@ export const sendEstimateManualPaymentReceipt = (paymentId, payload) => api.post
 export const updateEstimateManualPayment = (paymentId, data) => api.patch(`/payments/estimate-manual-payments/${paymentId}/`, data);
 export const deleteEstimateManualPayment = (paymentId) => api.delete(`/payments/estimate-manual-payments/${paymentId}/`);
 export const createRefund = (data) => api.post("/payments/refunds/create/", data);
-export const getRefunds = (params = {}) => api.get("/payments/refunds/", { params });
+export const getRefunds = (params = {}) => legacyOperationsApiEnabled ? api.get("/payments/refunds/", { params }) : Promise.resolve([]);
 export const getPaymentsHealth = () => api.get("/payments/health/");
 
 // ================= JOBS APIs (v1) =================
-export const getJobs = (params = {}) => api.get("/jobs/", { params });
+export const getJobs = (params = {}) => {
+  if (params?.opportunity) {
+    return api.get(`/tenant/opportunities/${params.opportunity}/jobs/`);
+  }
+  return legacyOperationsApiEnabled ? api.get("/jobs/", { params }) : Promise.resolve([]);
+};
 export const getJobsByServiceDateReport = (params = {}) => api.get("/jobs/reports/service-date/", { params });
 export const createJob = (data) => api.post("/jobs/", data);
 export const getJob = (id) => api.get(`/jobs/${id}/`);
@@ -384,7 +508,9 @@ export const assignJobTruck = (jobId, data) => api.post(`/jobs/${jobId}/assign-t
 export const unassignJobTruck = (jobId, data) => api.delete(`/jobs/${jobId}/assign-truck/`, { data });
 
 // ================= JOB ACCOUNTING APIs (v1) =================
-export const getJobAccountingSummary = (jobId) => api.get(`/jobs/${jobId}/accounting/summary/`);
+export const getJobAccountingSummary = (jobId) => legacyOperationsApiEnabled
+  ? api.get(`/jobs/${jobId}/accounting/summary/`).catch(() => null)
+  : Promise.resolve(null);
 export const upsertJobPayrollEntries = (jobId, rows) => api.post(`/jobs/${jobId}/accounting/payroll-entries/`, rows);
 export const createJobCost = (jobId, data) => api.post(`/jobs/${jobId}/accounting/costs/`, data);
 export const dispatchAutomationNotification = (data) => api.post("/automations/workflows/dispatch-notification/", data);
@@ -403,8 +529,8 @@ export const deleteCrewMember = (id) => api.delete(`/crew/${id}/`);
 
 // ================= ESTIMATE APIs =================
 export const syncInternalInventory = (id, data) => api.post(`/estimates/${id}/sync-internal-inventory/`, data);
-export const getEstimates = (params) => api.get("/estimates/", { params });
-export const createEstimate = (data) => api.post("/estimates/", data);
+export const getEstimates = (params) => legacyOperationsApiEnabled ? api.get("/estimates/", { params }) : Promise.resolve([]);
+export const createEstimate = (data) => legacyOperationsApiEnabled ? api.post("/estimates/", data) : unavailableLegacyOperation("Estimate creation");
 export const updateEstimate = (id, data) => api.patch(`/estimates/${id}/`, data);
 export const recalculateEstimate = (id) => api.post(`/estimates/${id}/recalculate/`);
 export const updateEstimateManualDetails = (id, data) => api.patch(`/estimates/${id}/manual-details/`, data);
@@ -412,16 +538,22 @@ export const addEstimateCharge = (id, data) => api.post(`/estimates/${id}/charge
 export const addEstimateChargeFromCatalog = (id, data) => api.post(`/estimates/${id}/charges/from-catalog/`, data);
 export const updateEstimateCharge = (id, data) => api.patch(`/estimate-charges/${id}/`, data);
 export const deleteEstimateCharge = (id) => api.delete(`/estimate-charges/${id}/`);
-export const getEstimatePortalInventory = (id) => api.get(`/estimates/${id}/portal-inventory/`);
-export const updateEstimatePortalInventory = (id, data) => api.post(`/estimates/${id}/portal-inventory/`, data);
+export const getEstimatePortalInventory = (id) => legacyOperationsApiEnabled
+  ? api.get(`/estimates/${id}/portal-inventory/`)
+  : Promise.resolve([]);
+export const updateEstimatePortalInventory = (id, data) => legacyOperationsApiEnabled
+  ? api.post(`/estimates/${id}/portal-inventory/`, data)
+  : unavailableLegacyOperation("Estimate portal inventory");
 
 // ================= FILES APIs =================
 export const listFiles = (params = {}) => {
+  if (!legacyOperationsApiEnabled) return Promise.resolve([]);
   const nextParams = { ...params };
   if (nextParams.target_type) nextParams.target_type = normalizeFileTargetType(nextParams.target_type);
   return api.get("/files/", { params: nextParams });
 };
 export const uploadFile = ({ target_type, target_id, branch_id = null, notes = "", category = "", file }) => {
+  if (!legacyOperationsApiEnabled) return unavailableLegacyOperation("File uploads");
   const form = new FormData();
   form.append("target_type", normalizeFileTargetType(target_type));
   form.append("target_id", String(target_id));
@@ -437,13 +569,15 @@ export const listFileShareLinks = (id) => api.get(`/files/${id}/share-links/`);
 export const createFileShareLink = (id, payload) => api.post(`/files/${id}/share-links/`, payload);
 export const revokeFileShareLink = (linkId) => api.delete(`/files/share-links/${linkId}/`);
 export const requestEstimateInventory = (id, data = {}) => api.post(`/estimates/${id}/request-inventory/`, data);
-export const requestEstimatePortal = (id, data = {}) => api.post(`/estimates/${id}/request-portal/`, data);
+export const requestEstimatePortal = (id, data = {}) => legacyOperationsApiEnabled
+  ? api.post(`/estimates/${id}/request-portal/`, data)
+  : unavailableLegacyOperation("Estimate portal");
 export const markEstimateInventoryReviewed = (id) => api.post(`/estimates/${id}/mark-inventory-reviewed/`);
 export const sendEstimate = (id, data = {}) => api.post(`/estimates/${id}/send/`, data);
 export const getCustomerPortalSettings = (params) => api.get("/customer-portal-settings/", { params });
 export const createCustomerPortalSettings = (data) => api.post("/customer-portal-settings/", data);
 export const updateCustomerPortalSettings = (id, data) => api.patch(`/customer-portal-settings/${id}/`, data);
-export const getEstimateDiscountPresets = (params) => api.get("/estimate-discount-presets/", { params });
+export const getEstimateDiscountPresets = (params) => legacyOperationsApiEnabled ? api.get("/estimate-discount-presets/", { params }) : Promise.resolve([]);
 export const createEstimateDiscountPreset = (data) => api.post("/estimate-discount-presets/", data);
 export const updateEstimateDiscountPreset = (id, data) => api.patch(`/estimate-discount-presets/${id}/`, data);
 export const deleteEstimateDiscountPreset = (id) => api.delete(`/estimate-discount-presets/${id}/`);
@@ -456,8 +590,8 @@ export const getInventoryItemTemplates = (params) => api.get("/inventory-item-te
 export const createInventoryItemTemplate = (data) => api.post("/inventory-item-templates/", data);
 export const updateInventoryItemTemplate = (id, data) => api.patch(`/inventory-item-templates/${id}/`, data);
 export const deleteInventoryItemTemplate = (id) => api.delete(`/inventory-item-templates/${id}/`);
-export const getEstimateCatalogItems = (params) => api.get("/catalog-items/", { params });
-export const getEstimatePortalTemplates = (params) => api.get("/portal-templates/", { params });
+export const getEstimateCatalogItems = (params) => legacyOperationsApiEnabled ? api.get("/catalog-items/", { params }) : Promise.resolve([]);
+export const getEstimatePortalTemplates = (params) => legacyOperationsApiEnabled ? api.get("/portal-templates/", { params }) : Promise.resolve([]);
 export const createEstimatePortalTemplate = (data) => api.post("/portal-templates/", data);
 export const updateEstimatePortalTemplate = (id, data) => api.patch(`/portal-templates/${id}/`, data);
 export const deactivateEstimatePortalTemplate = (id) => api.delete(`/portal-templates/${id}/`);
@@ -466,11 +600,11 @@ export const createEstimateCatalogItem = (data) => api.post("/catalog-items/", d
 export const updateEstimateCatalogItem = (id, data) => api.patch(`/catalog-items/${id}/`, data);
 export const deactivateEstimateCatalogItem = (id) => api.delete(`/catalog-items/${id}/`);
 // Catalog packages (branch required)
-export const getEstimatePackages = (params) => api.get("/packages/", { params });
+export const getEstimatePackages = (params) => legacyOperationsApiEnabled ? api.get("/packages/", { params }) : Promise.resolve([]);
 export const createEstimatePackage = (data) => api.post("/packages/", data);
 export const updateEstimatePackage = (id, data) => api.patch(`/packages/${id}/`, data);
 export const deleteEstimatePackage = (id) => api.delete(`/packages/${id}/`);
-export const getEstimatePackageItems = (params) => api.get("/package-items/", { params });
+export const getEstimatePackageItems = (params) => legacyOperationsApiEnabled ? api.get("/package-items/", { params }) : Promise.resolve([]);
 export const createEstimatePackageItem = (data) => api.post("/package-items/", data);
 export const updateEstimatePackageItem = (id, data) => api.patch(`/package-items/${id}/`, data);
 export const deleteEstimatePackageItem = (id) => api.delete(`/package-items/${id}/`);
@@ -496,7 +630,7 @@ export const getPublicSquareOrder = (token, orderId) =>
 export const getPublicContractPortal = (token) => api.get("/public/contracts/portal/", { params: { token } });
 export const signPublicContractPortal = (data) => api.post("/public/contracts/portal/sign/", data);
 
-export const getDocumentTemplates = (params) => api.get("/documents/templates/", { params });
+export const getDocumentTemplates = (params) => legacyOperationsApiEnabled ? api.get("/documents/templates/", { params }) : Promise.resolve([]);
 export const createDocumentTemplate = (data) => api.post("/documents/templates/", data);
 export const updateDocumentTemplate = (id, data) => api.patch(`/documents/templates/${id}/`, data);
 export const deleteDocumentTemplate = (id) => api.delete(`/documents/templates/${id}/`);
@@ -510,7 +644,7 @@ export const updateTemplateVariable = (id, data) => api.patch(`/documents/templa
 export const deleteTemplateVariable = (id) => api.delete(`/documents/template-variables/${id}/`);
 
 export const createContract = (data) => api.post("/documents/contracts/", data);
-export const getContracts = (params) => api.get("/documents/contracts/", { params });
+export const getContracts = (params) => legacyOperationsApiEnabled ? api.get("/documents/contracts/", { params }) : Promise.resolve([]);
 export const clearContractSignature = (id) => api.post(`/documents/contracts/${id}/clear-signature/`, {});
 export const sendContractForSignature = (id, data = {}) =>
   api.post(`/documents/contracts/${id}/send_for_signature/`, data);
@@ -566,7 +700,7 @@ export const assignSmsNumber = (id, data) => api.post(`/tenant/communications/sm
 export const unassignSmsNumber = (id) => api.post(`/tenant/communications/sms-numbers/${id}/unassign/`);
 export const releaseSmsNumber = (id) => api.post(`/tenant/communications/sms-numbers/${id}/release/`);
 
-export const getPaymentGateways = (params) => api.get("/integrations/payment-gateways/", { params });
+export const getPaymentGateways = (params) => legacyOperationsApiEnabled ? api.get("/integrations/payment-gateways/", { params }) : Promise.resolve([]);
 export const createPaymentGateway = (data) => api.post("/integrations/payment-gateways/", data);
 export const updatePaymentGateway = (id, data) => api.patch(`/integrations/payment-gateways/${id}/`, data);
 export const verifyPaymentGateway = (id) => api.post(`/integrations/payment-gateways/${id}/verify/`);

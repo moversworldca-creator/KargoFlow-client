@@ -57,7 +57,7 @@ describe('lead detail API contracts', () => {
       ? { id: 42, system_state: 'open', branch_id: 3, customer_id: 321, lead_id: 7 }
       : { item: { customer_name: 'Ada', email: 'ada@example.com', phone: '555', branch_name: 'Main' }, details: {}, customer: { id: 321, profile_name: 'Ada' } });
     const record = await getOpportunity(42);
-    expect(record).toMatchObject({ id: 42, lead: 7, branch: 3, customer_details: { full_name: 'Ada', email: 'ada@example.com' } });
+    expect(record).toMatchObject({ id: 42, lead: 7, branch: 3, customer_details: { full_name: 'Ada', first_name: 'Ada', email: 'ada@example.com' } });
     expect(api.get).toHaveBeenCalledWith('/tenant/opportunities/42/');
     expect(api.get).toHaveBeenCalledWith('/tenant/pipeline/opportunity/42/');
   });

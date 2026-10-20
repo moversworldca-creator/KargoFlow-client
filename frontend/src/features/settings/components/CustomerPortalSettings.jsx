@@ -127,7 +127,7 @@ const CustomerPortalSettings = ({ branchId = null, view = null }) => {
         </div>
       ) : null}
 
-      <div className="grid gap-6 xl:grid-cols-[1.05fr,0.95fr]">
+      <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
         <Card className="rounded-[2rem] border border-[#dce8f1] bg-white p-6 shadow-sm">
           <div className="grid gap-5">
             <label className="space-y-2">
