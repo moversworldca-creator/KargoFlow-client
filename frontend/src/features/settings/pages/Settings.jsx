@@ -250,7 +250,7 @@ const Settings = () => {
       case 'move-sizes': return <MoverSizeSettings branchId={branchIdProp} />;
       case 'estimate-catalog': return <EstimateCatalogManager branchId={branchIdProp} />;
       case 'catalog-packages': return <CatalogPackageBuilder branchId={branchIdProp} />;
-      case 'inventory': return <InventoryWorkflowSettings />;
+      case 'inventory': return <InventoryWorkflowSettings branchId={branchIdProp} />;
       case 'estimate-discount-presets': return <EstimateDiscountPresetSettings />;
       case 'estimate-portal-templates': return (
         <EstimatePortalTemplates

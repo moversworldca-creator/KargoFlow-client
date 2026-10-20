@@ -237,59 +237,64 @@ const MoverTypeSettings = ({ branchId }) => {
   if (isLoading) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-primary" /></div>;
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="space-y-3.5 animate-in fade-in duration-300">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
         <div>
-          <h3 className="text-xl font-bold text-heading tracking-tight">Move Types</h3>
-          <p className="text-sm text-muted">Manage move type configurations for quotes.</p>
+          <div className="flex items-center gap-2">
+            <h3 className="text-base sm:text-lg font-bold text-heading tracking-tight">Move Types</h3>
+            <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-bold text-slate-500">
+              {filteredTypes.length} {filteredTypes.length === 1 ? 'type' : 'types'}
+            </span>
+          </div>
+          <p className="text-xs text-muted">Manage move type configurations for quotes.</p>
         </div>
-        <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
-          <div className="relative flex-1 min-w-0 sm:w-64 sm:flex-initial">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={18} />
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="relative w-44 sm:w-56">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" size={14} />
             <input 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search types..."
-              className="w-full pl-10 pr-4 py-2 bg-card border border-border rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/10 sm:w-64"
+              className="w-full pl-8 pr-3 h-8 bg-card border border-border rounded-lg text-xs outline-none focus:ring-1 focus:ring-primary/20"
             />
           </div>
           <button 
             onClick={() => handleOpenModal()}
-            className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-primary text-white rounded-xl text-xs sm:text-sm font-bold shadow-md hover:bg-[#003d2f] transition-all active:scale-95 whitespace-nowrap shrink-0"
+            className="flex items-center justify-center gap-1.5 h-8 px-3.5 bg-primary text-white rounded-lg text-xs font-bold shadow-xs hover:bg-[#003d2f] transition-all active:scale-95 whitespace-nowrap shrink-0"
           >
-            <Plus size={18} /> Add Type
+            <Plus size={14} /> Add Type
           </button>
         </div>
       </div>
       {!canReorder && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-900">
           Clear search to drag and reorder mover types.
         </div>
       )}
 
       {message.text && (
-        <div className={`mb-3 flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm animate-in slide-in-from-top-2 ${
+        <div className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold shadow-xs animate-in slide-in-from-top-1 ${
           message.type === 'success'
             ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
             : 'border-rose-200 bg-rose-50 text-rose-900'
         }`}>
-          {message.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
-          {message.text}
+          {message.type === 'success' ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
+          <span>{message.text}</span>
         </div>
       )}
 
-      <Card className="overflow-hidden border-none shadow-xl shadow-border/50 bg-card rounded-2xl">
+      <Card className="overflow-hidden border border-border/80 shadow-xs bg-card rounded-xl !p-0">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full text-left border-collapse table-fixed">
             <thead>
-              <tr className="bg-subtle/50 border-b border-border">
-                <th className="px-3 sm:px-6 py-3 sm:py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Name</th>
-                <th className="px-3 sm:px-6 py-3 sm:py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Description</th>
-                <th className="px-3 sm:px-6 py-3 sm:py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Status</th>
-                <th className="px-3 sm:px-6 py-3 sm:py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted text-right">Actions</th>
+              <tr className="bg-subtle/60 border-b border-border">
+                <th className="w-[30%] min-w-[130px] px-3 sm:px-6 py-2 sm:py-2.5 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Name</th>
+                <th className="w-[48%] px-3 sm:px-6 py-2 sm:py-2.5 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Description</th>
+                <th className="w-24 px-3 sm:px-6 py-2 sm:py-2.5 text-[0.625rem] font-bold uppercase tracking-widest text-muted text-center">Status</th>
+                <th className="w-20 px-3 sm:px-6 py-2 sm:py-2.5 text-[0.625rem] font-bold uppercase tracking-widest text-muted text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-subtle">
+            <tbody className="divide-y divide-subtle/70">
               {filteredTypes.length > 0 ? (
                 filteredTypes.map((type) => (
                   <tr
@@ -298,46 +303,46 @@ const MoverTypeSettings = ({ branchId }) => {
                     onDragOver={(e) => handleDragOver(e, type)}
                     onDrop={(e) => handleDrop(e, type)}
                   >
-                    <td className="px-3 sm:px-6 py-3 sm:py-4">
-                      <div className="flex items-center gap-2 sm:gap-3">
+                    <td className="px-3 sm:px-6 py-2 sm:py-2.5">
+                      <div className="flex items-center gap-2">
                         <button
                           type="button"
                           draggable={canReorder}
                           onDragStart={(e) => handleDragStart(e, type)}
                           onDragEnd={() => { setDraggedTypeId(null); setDragOverTypeId(null); }}
                           onMouseDown={(e) => e.stopPropagation()}
-                          className={`inline-flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted transition-all ${canReorder ? 'cursor-grab active:cursor-grabbing hover:text-body hover:border-primary/40' : 'cursor-not-allowed opacity-40'}`}
+                          className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border bg-card text-muted transition-all ${canReorder ? 'cursor-grab active:cursor-grabbing hover:text-body hover:border-primary/40' : 'cursor-not-allowed opacity-40'}`}
                           aria-label={`Drag ${type.name} to reorder`}
                           title={canReorder ? 'Drag to reorder' : 'Clear search to reorder'}
                         >
-                          <GripVertical size={16} />
+                          <GripVertical size={13} />
                         </button>
                         <div className="flex flex-col min-w-0">
-                          <span className="text-sm font-bold text-body truncate">{type.name}</span>
+                          <span className="text-xs font-semibold text-heading truncate">{type.name}</span>
                         </div>
                       </div>
                     </td>
-                    <td className="px-3 sm:px-6 py-3 sm:py-4">
-                      <p className="text-sm text-muted max-w-[140px] sm:max-w-xs truncate">{type.description || '-'}</p>
+                    <td className="px-3 sm:px-6 py-2 sm:py-2.5">
+                      <p className="text-xs text-muted truncate max-w-sm">{type.description || '-'}</p>
                     </td>
-                    <td className="px-3 sm:px-6 py-3 sm:py-4">
+                    <td className="px-3 sm:px-6 py-2 sm:py-2.5 text-center">
                       <button
                         type="button"
                         onClick={() => handleToggleActive(type)}
                         disabled={isSaving}
                         aria-label={`${type.is_active ? 'Deactivate' : 'Activate'} ${type.name}`}
-                        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${type.is_active ? 'bg-primary' : 'bg-disabled'} ${isSaving ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        className={`relative inline-flex h-4.5 w-8 shrink-0 items-center rounded-full transition-colors ${type.is_active ? 'bg-primary' : 'bg-disabled'} ${isSaving ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
-                        <span className={`inline-block h-3 w-3 transform rounded-full bg-card transition-transform ${type.is_active ? 'translate-x-5' : 'translate-x-1'}`} />
+                        <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-card shadow-xs transition-transform ${type.is_active ? 'translate-x-4' : 'translate-x-0.5'}`} />
                       </button>
                     </td>
-                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-right relative whitespace-nowrap">
+                    <td className="px-3 sm:px-6 py-2 sm:py-2.5 text-right relative whitespace-nowrap">
                       <button 
                         onClick={() => setOpenMenuId(openMenuId === type.id ? null : type.id)}
                         aria-label={`Actions for ${type.name}`}
-                        className="p-1.5 sm:p-2 text-muted hover:text-body hover:bg-border rounded-lg transition-all"
+                        className="p-1 text-muted hover:text-body hover:bg-border/60 rounded-md transition-all"
                       >
-                        <MoreHorizontal size={18} />
+                        <MoreHorizontal size={15} />
                       </button>
 
                       {openMenuId === type.id && (
@@ -346,18 +351,18 @@ const MoverTypeSettings = ({ branchId }) => {
                             className="fixed inset-0 z-10" 
                             onClick={() => setOpenMenuId(null)}
                           />
-                          <div className="absolute right-2 sm:right-6 mt-2 w-32 bg-card rounded-xl shadow-xl border border-border z-20 py-1 overflow-hidden animate-in fade-in zoom-in duration-100">
+                          <div className="absolute right-2 sm:right-6 mt-1 w-32 bg-card rounded-lg shadow-lg border border-border z-20 py-1 overflow-hidden animate-in fade-in zoom-in-95 duration-100">
                             <button 
                               onClick={() => handleOpenModal(type)}
-                              className="w-full flex items-center gap-2 px-4 py-2 text-sm text-body hover:bg-subtle transition-colors"
+                              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-body hover:bg-subtle transition-colors"
                             >
-                              <Edit2 size={14} /> Edit
+                              <Edit2 size={12} /> Edit
                             </button>
                             <button 
                               onClick={() => confirmDelete(type)}
-                              className="w-full flex items-center gap-2 px-4 py-2 text-sm text-status-lost-text hover:bg-status-lost-bg transition-colors"
+                              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-status-lost-text hover:bg-status-lost-bg transition-colors"
                             >
-                              <Trash2 size={14} /> Delete
+                              <Trash2 size={12} /> Delete
                             </button>
                           </div>
                         </>
@@ -367,15 +372,21 @@ const MoverTypeSettings = ({ branchId }) => {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="4" className="px-6 py-12 text-center text-muted">
-                    <Layout size={40} className="mx-auto mb-2 opacity-20" />
-                    <p>No mover types found.</p>
+                  <td colSpan="4" className="px-6 py-8 text-center text-muted">
+                    <Layout size={32} className="mx-auto mb-2 opacity-20" />
+                    <p className="text-xs">No mover types found.</p>
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
+        {filteredTypes.length > 0 && (
+          <div className="flex items-center justify-between px-3 sm:px-6 py-2 bg-subtle/30 border-t border-border text-[11px] text-muted">
+            <span>{filteredTypes.length} {filteredTypes.length === 1 ? 'type' : 'types'} configured</span>
+            <span className="hidden sm:inline">Drag handle to reorder quotes priority</span>
+          </div>
+        )}
       </Card>
 
       {/* EDIT/CREATE MODAL */}
