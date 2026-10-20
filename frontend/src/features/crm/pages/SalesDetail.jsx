@@ -8445,6 +8445,7 @@ const SalesDetail = () => {
                   <EstimatesWorkspace
                     opportunityId={ownerId}
                     customerEmail={estimateOwner?.customer_details?.email || estimateOwner?.email || ''}
+                    recipients={availableEmails}
                   />
                 );
               })()}

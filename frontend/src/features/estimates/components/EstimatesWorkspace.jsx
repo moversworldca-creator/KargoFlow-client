@@ -6,10 +6,11 @@ import React, { useState } from 'react';
 import { Layers, Lock, Plus } from 'lucide-react';
 import useCan from '../../../shared/auth/useCan';
 import { ESTIMATE_STATE_TONE, formatDateOnly, formatMoney, humanize } from '../../pricing/format';
-import { ESTIMATES, OPPORTUNITY } from '../../pricing/permissions';
+import { ENTITLEMENTS_VIEW, ESTIMATES, OPPORTUNITY } from '../../pricing/permissions';
 import {
-  Badge, Button, Callout, ConfirmDialog, LoadingState, QueryState, Section, StateBadge, TextAreaField, useAction,
+  Badge, Button, Callout, ConfirmDialog, LoadingState, PlanGate, QueryState, Section, StateBadge, TextAreaField, useAction,
 } from '../../pricing/components/ui';
+import { useEstimatesFeature } from '../../pricing/queries';
 import { estimatesApi } from '../api';
 import { useBookingReadiness, useInvalidateEstimates, useWorkspace } from '../queries';
 import ChangeOrdersPanel from './ChangeOrdersPanel';
@@ -19,8 +20,9 @@ import FinalRatingPanel from './FinalRatingPanel';
 
 const CLOSED = ['superseded', 'cancelled', 'expired'];
 
-export default function EstimatesWorkspace({ opportunityId, customerEmail }) {
+export default function EstimatesWorkspace({ opportunityId, customerEmail, recipients = [] }) {
   const { can } = useCan();
+  const feature = useEstimatesFeature(can(ENTITLEMENTS_VIEW));
   const query = useWorkspace(opportunityId);
   const invalidate = useInvalidateEstimates();
   const [openId, setOpenId] = useState(null);
@@ -31,12 +33,13 @@ export default function EstimatesWorkspace({ opportunityId, customerEmail }) {
     success: 'Option selected. The other options were superseded; nothing was booked.', invalidate: () => invalidate(), onSuccess: () => setDialog(null),
   });
 
+  if (feature && !['write', 'read'].includes(feature.mode)) return <PlanGate feature={feature} />;
   if (!can(ESTIMATES.VIEW)) return <Callout>You do not have access to Estimates.</Callout>;
   if (query.isLoading) return <LoadingState label="Loading Estimates…" />;
   if (!workspace) return <QueryState query={query}>{null}</QueryState>;
 
   if (openId) {
-    return <EstimateDetail estimateId={openId} opportunity={{ ...workspace, customer_email: customerEmail }} onBack={() => { setOpenId(null); invalidate(); }} />;
+    return <EstimateDetail estimateId={openId} opportunity={{ ...workspace, customer_email: customerEmail, recipients }} onBack={() => { setOpenId(null); invalidate(); }} />;
   }
 
   const opportunity = workspace.opportunity;
@@ -111,7 +114,7 @@ export default function EstimatesWorkspace({ opportunityId, customerEmail }) {
       </Section>
 
       <BookingPanel workspace={workspace} onBooked={() => invalidate()} />
-      <ChangeOrdersPanel workspace={workspace} customerEmail={customerEmail} />
+      <ChangeOrdersPanel workspace={workspace} customerEmail={customerEmail || recipients[0]?.value} />
       <FinalRatingPanel workspace={workspace} />
 
       {dialog === 'create' && <CreateEstimateDialog opportunityId={opportunityId} workspace={workspace} onClose={() => setDialog(null)} onCreated={(created) => { setDialog(null); invalidate(); setOpenId(created.id); }} />}

@@ -6,7 +6,7 @@ import { Copy } from 'lucide-react';
 import useCan from '../../../shared/auth/useCan';
 import { pricingApi } from '../../pricing/api';
 import { OVERRIDE_TYPES, RECALCULATION_POLICIES } from '../../pricing/constants';
-import { formatDateTime, humanize, isoToLocalInput, localInputToIso } from '../../pricing/format';
+import { formatDateTime, formatMoney, humanize, isoToLocalInput, localInputToIso } from '../../pricing/format';
 import { OPPORTUNITY } from '../../pricing/permissions';
 import {
   Button, Callout, CheckboxField, DecimalField, Dialog, ErrorBanner, SelectField, TextAreaField, TextField, useAction,
@@ -72,11 +72,15 @@ export function CreateEstimateDialog({ opportunityId, workspace, onClose, onCrea
 
 const linkFor = (portal) => portal?.url || (typeof window !== 'undefined' ? `${window.location.origin}${portal?.path || ''}` : portal?.path);
 
-export function SendEstimateDialog({ estimate, opportunityId, customerEmail, customerName, onClose, onSent, reissue = false }) {
+export function SendEstimateDialog({ estimate, opportunityId, customerEmail, customerName, recipients = [], onClose, onSent, reissue = false }) {
   const { can } = useCan();
   const [expiresAt, setExpiresAt] = useState(isoToLocalInput(estimate.expires_at));
   const [portal, setPortal] = useState(null);
-  const [email, setEmail] = useState({ to: customerEmail || '', subject: `Your estimate ${estimate.estimate_number}`, body: '' });
+  const options = recipients.length ? recipients : (customerEmail ? [{ label: customerEmail, value: customerEmail }] : []);
+  const [selected, setSelected] = useState(() => (options[0] ? [options[0].value] : []));
+  const [extra, setExtra] = useState('');
+  const [email, setEmail] = useState({ subject: `Your estimate ${estimate.estimate_number}`, body: '' });
+  const to = [...selected, ...extra.split(',').map((v) => v.trim()).filter(Boolean)];
   const [copied, setCopied] = useState(false);
   const send = useAction(() => (reissue
     ? estimatesApi.reissueLink(estimate.id)
@@ -91,7 +95,7 @@ export function SendEstimateDialog({ estimate, opportunityId, customerEmail, cus
     silent: true,
   });
   const mail = useAction(() => estimatesApi.sendEmail(opportunityId, {
-    to: [email.to], subject: email.subject, body_text: email.body,
+    to, subject: email.subject, body_text: email.body,
     body_html: email.body.split('\n').map((line) => line.replace(/&/g, '&amp;').replace(/</g, '&lt;')).join('<br>'),
   }), { success: 'Email queued.', onSuccess: onClose, silent: true });
   const copy = async () => {
@@ -118,10 +122,18 @@ export function SendEstimateDialog({ estimate, opportunityId, customerEmail, cus
           {can(OPPORTUNITY.SEND_EMAIL) ? (
             <div className="space-y-2 rounded-lg border border-slate-200 p-3">
               <p className="text-xs font-semibold">Email the customer</p>
-              <TextField label="To" type="email" value={email.to} onChange={(v) => setEmail({ ...email, to: v })} />
+              <fieldset>
+                <legend className="text-xs font-semibold text-slate-700">Recipients (Opportunity contacts)</legend>
+                {!options.length && <p className="text-[11px] text-amber-800">This Opportunity has no contact email. Add one, or type an address below.</p>}
+                {options.map((option) => (
+                  <CheckboxField key={option.value} label={option.label} checked={selected.includes(option.value)}
+                    onChange={(on) => setSelected(on ? [...selected, option.value] : selected.filter((v) => v !== option.value))} />
+                ))}
+              </fieldset>
+              <TextField label="Other recipients" value={extra} onChange={setExtra} placeholder="name@example.com, other@example.com" />
               <TextField label="Subject" value={email.subject} onChange={(v) => setEmail({ ...email, subject: v })} />
               <TextAreaField label="Message" value={email.body} onChange={(v) => setEmail({ ...email, body: v })} rows={6} />
-              <div className="flex justify-end"><Button onClick={() => mail.run()} busy={mail.busy} disabled={!email.to}>Send email</Button></div>
+              <div className="flex justify-end"><Button onClick={() => mail.run()} busy={mail.busy} disabled={!to.length}>Send email</Button></div>
               <ErrorBanner message={mail.error?.message} />
             </div>
           ) : <Callout>You cannot send emails. Copy the link and share it with the customer.</Callout>}
@@ -197,6 +209,8 @@ export function OverrideDialog({ estimate, charges, onClose, onDone }) {
   const [form, setForm] = useState({ target_key: charges[0]?.charge_key || '', override_type: 'line_total_override', value: '', reason: '', recalculation_behavior: 'preserve' });
   const set = (patch) => setForm({ ...form, ...patch });
   const valueField = { rate_override: 'unit_rate', quantity_override: 'quantity', line_total_override: 'amount', fixed_charge_override: 'amount' }[form.override_type];
+  const target = charges.find((c) => c.charge_key === form.target_key);
+  const current = target ? { unit_rate: formatMoney(target.unit_rate), quantity: `${target.quantity ?? '—'} ${target.unit || ''}`, amount: formatMoney(target.amount) }[valueField || 'amount'] : '—';
   const save = useAction(() => pricingApi.createOverride(estimate.id, {
     target_key: form.target_key, override_type: form.override_type, reason: form.reason,
     recalculation_behavior: form.recalculation_behavior, value: valueField ? { [valueField]: form.value } : {},
@@ -207,10 +221,12 @@ export function OverrideDialog({ estimate, charges, onClose, onDone }) {
       <div className="grid gap-3 sm:grid-cols-2">
         <SelectField label="Charge" value={form.target_key} onChange={(v) => set({ target_key: v })} options={charges.map((c) => [c.charge_key, `${c.name} (${c.amount})`])} />
         <SelectField label="Override" value={form.override_type} onChange={(v) => set({ override_type: v })} options={OVERRIDE_TYPES.filter((t) => t !== 'fixed_charge_override')} />
-        {valueField && <DecimalField label={humanize(valueField)} value={form.value} onChange={(v) => set({ value: v })} />}
+        <p className="text-xs sm:col-span-2"><span className="font-semibold">Current value:</span> {current}</p>
+        {valueField && <DecimalField label={`New ${humanize(valueField).toLowerCase()}`} value={form.value} onChange={(v) => set({ value: v })} required />}
         <SelectField label="On recalculation" value={form.recalculation_behavior} onChange={(v) => set({ recalculation_behavior: v })} options={RECALCULATION_POLICIES} />
       </div>
-      <div className="mt-3"><TextAreaField label="Reason" value={form.reason} onChange={(v) => set({ reason: v })} required /></div>
+      <div className="mt-3"><TextAreaField label="Reason (required)" value={form.reason} onChange={(v) => set({ reason: v })} required /></div>
+      <p className="mt-2 text-[11px] text-slate-500">If the override needs approval, the price shows “Approval required” until an approver decides. Overrides are kept on recalculation according to the option above.</p>
       <ErrorBanner message={save.error && `${save.error.message}${save.error.detail ? ` (${save.error.detail})` : ''}`} />
     </Dialog>
   );

@@ -38,6 +38,6 @@ export const estimatesApi = {
 };
 
 export const portalApi = {
-  view: (token) => api.post('/public/estimate-portal/view/', { token }, { skipAuth: true }),
+  view: (token, optionKey) => api.post('/public/estimate-portal/view/', { token, ...(optionKey ? { option_key: optionKey } : {}) }, { skipAuth: true }),
   accept: (token, data) => api.post('/public/estimate-portal/accept/', { token, ...data }, { skipAuth: true }),
 };

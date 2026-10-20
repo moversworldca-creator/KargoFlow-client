@@ -113,9 +113,12 @@ function ChangeOrderView({ id, order, workspace, customerEmail, onClose }) {
       <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <StateBadge state={order.lifecycle_state} tones={CHANGE_ORDER_STATE_TONE} />
-          <span>Booked Estimate {order.booked_estimate.estimate_number}: {formatMoney(order.booked_estimate.grand_total)}</span>
-          {order.pricing_run_id && <span className="font-semibold">Change: {decimalSign(order.delta_total) > 0 ? '+' : ''}{formatMoney(order.delta_total)}</span>}
         </div>
+        <dl className="grid max-w-md grid-cols-2 gap-1 text-xs" aria-label="Change Order totals">
+          <dt>Original booked total ({order.booked_estimate.estimate_number})</dt><dd className="text-right tabular-nums">{formatMoney(order.booked_estimate.grand_total)}</dd>
+          <dt>This change</dt><dd className={`text-right font-semibold tabular-nums ${decimalSign(order.delta_total) < 0 ? 'text-emerald-700' : ''}`}>{order.pricing_run_id ? `${decimalSign(order.delta_total) > 0 ? '+' : ''}${formatMoney(order.delta_total)}` : 'Not priced'}</dd>
+          {order.current_run && <><dt className="font-bold">Total with this change</dt><dd className="text-right font-bold tabular-nums">{formatMoney(order.current_run.totals?.grand_total)}</dd></>}
+        </dl>
         {(order.scope_jobs || []).length > 0 && <p className="text-xs text-slate-600">{order.scope_jobs.map((s) => `${s.title}: ${humanize(s.change_type)}`).join(' · ')}</p>}
         {actions.has('calculate') && can(CHANGE_ORDERS.UPDATE_DRAFT) && (
           <div className="space-y-3">

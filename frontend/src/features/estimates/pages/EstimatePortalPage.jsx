@@ -92,7 +92,7 @@ function PricingTable({ pricing, currency }) {
   );
 }
 
-function AcceptForm({ consentText, label, onAccepted, token }) {
+function AcceptForm({ consentText, label, onAccepted, token, optionKey }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [consent, setConsent] = useState(false);
@@ -104,7 +104,7 @@ function AcceptForm({ consentText, label, onAccepted, token }) {
     setBusy(true);
     setError('');
     try {
-      onAccepted(await portalApi.accept(token, { signer_name: name.trim(), signer_email: email.trim(), consent: true }));
+      onAccepted(await portalApi.accept(token, { signer_name: name.trim(), signer_email: email.trim(), consent: true, ...(optionKey ? { option_key: optionKey } : {}) }));
     } catch (err) {
       setError(err?.response?.data?.detail || 'Your acceptance could not be recorded. Please try again or contact us.');
     } finally {
@@ -138,8 +138,9 @@ export default function EstimatePortalPage() {
   const [params] = useSearchParams();
   const token = params.get('token') || '';
   const client = useQueryClient();
+  const [optionKey, setOptionKey] = useState('');
   const query = useQuery({
-    queryKey: ['estimate-portal', token], queryFn: () => portalApi.view(token), enabled: Boolean(token),
+    queryKey: ['estimate-portal', token, optionKey], queryFn: () => portalApi.view(token, optionKey), enabled: Boolean(token),
     retry: false, staleTime: Infinity, refetchOnWindowFocus: false,
   });
   const data = query.data;
@@ -158,7 +159,7 @@ export default function EstimatePortalPage() {
     return <Shell><div role="status" className="flex items-center gap-2 text-sm text-slate-600"><Loader2 size={16} className="animate-spin" aria-hidden="true" /> Loading…</div></Shell>;
   }
 
-  const onAccepted = (next) => client.setQueryData(['estimate-portal', token], next);
+  const onAccepted = (next) => { setOptionKey(''); client.setQueryData(['estimate-portal', token, ''], next); };
   const currency = data.company?.currency;
 
   if (data.kind === 'change_order') {
@@ -196,6 +197,24 @@ export default function EstimatePortalPage() {
         )}
       </section>
 
+      {data.options?.length > 1 && (
+        <section aria-label="Your options" className="rounded-2xl border border-slate-200 bg-white p-4">
+          <h2 className="mb-2 text-sm font-bold">Your options</h2>
+          <p className="mb-3 text-xs text-slate-600">Choose the option that fits. Accepting one replaces the others.</p>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {data.options.map((option) => (
+              <button key={option.option_key} type="button" aria-pressed={option.selected}
+                onClick={() => setOptionKey(option.selected ? optionKey : option.option_key)}
+                className={`rounded-xl border p-3 text-left ${option.selected ? 'border-slate-900 ring-2 ring-slate-900' : 'border-slate-200 hover:border-slate-400'}`}>
+                <span className="block text-sm font-bold">{option.label}</span>
+                {option.description && <span className="block text-xs text-slate-600">{option.description}</span>}
+                <span className="mt-1 block text-base font-bold tabular-nums">{option.pricing_current ? formatMoney(option.grand_total, currency) : 'Being updated'}</span>
+                {option.state === 'accepted' && <span className="text-xs font-semibold text-emerald-700">Accepted</span>}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
       {estimate.state === 'expired' && <Notice icon={Clock} title="This estimate has expired" tone="amber">Contact us for an updated estimate.</Notice>}
       {['superseded', 'cancelled'].includes(estimate.state) && <Notice icon={ShieldAlert} title="This estimate is no longer active" tone="amber">A newer version may have been sent to you.</Notice>}
       {!data.pricing_current && !['expired', 'superseded', 'cancelled', 'accepted'].includes(estimate.state) && (
@@ -209,7 +228,7 @@ export default function EstimatePortalPage() {
           Accepted by {data.acceptance.signer_name} on {formatDateTime(data.acceptance.accepted_at)}. {estimate.is_booked ? 'Your move is booked.' : 'We will contact you to confirm your booking.'}
         </Notice>
       )}
-      {data.can_accept && <AcceptForm token={token} label="this estimate" consentText={data.consent_text} onAccepted={onAccepted} />}
+      {data.can_accept && <AcceptForm token={token} optionKey={optionKey} label={data.options?.length ? `“${estimate.label}”` : 'this estimate'} consentText={data.consent_text} onAccepted={onAccepted} />}
     </Shell>
   );
 }

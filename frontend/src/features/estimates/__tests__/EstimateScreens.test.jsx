@@ -56,7 +56,7 @@ describe('EstimateDetail', () => {
     grant('estimates.view', 'estimates.update_draft', 'estimates.send');
     openEstimate(estimate({ pricing_stale: true, pricing_stale_reason: 'Estimate scope (Planned Jobs) changed', available_actions: ['calculate', 'edit', 'edit_scope', 'cancel'] }));
     expect(await screen.findByText('Pricing is out of date')).toBeInTheDocument();
-    expect(screen.getByText(/scope \(Planned Jobs\) changed/)).toBeInTheDocument();
+    expect(screen.getAllByText(/scope \(Planned Jobs\) changed/).length).toBeGreaterThan(0);
     expect(await screen.findByText('Out of date')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument();
   });

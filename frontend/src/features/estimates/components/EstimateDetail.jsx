@@ -10,13 +10,13 @@ import { newIdempotencyKey, pricingApi } from '../../pricing/api';
 import { CONSTRAINT_TYPES } from '../../pricing/constants';
 import { ESTIMATE_STATE_TONE, formatDateTime, formatMoney, humanize } from '../../pricing/format';
 import { CONSTRAINT_PERMISSION, ESTIMATES, PRICING } from '../../pricing/permissions';
-import { useCommitments, useOverrides, useRun, useSkills } from '../../pricing/queries';
+import { useCommitments, useOverrides, usePolicy, useRun, useSkills, useTariffs } from '../../pricing/queries';
 import { ApprovalList } from '../../pricing/components/ApprovalsQueue';
 import JobInputsForm, { EMPTY_JOB_INPUTS, cleanJobInputs, jobInputsToForm } from '../../pricing/components/JobInputsForm';
-import RunViewer from '../../pricing/components/RunViewer';
+import RunViewer, { MarginBadge } from '../../pricing/components/RunViewer';
 import {
-  Badge, Button, Callout, CheckboxField, DecimalField, ErrorBanner, KeyValue, LoadingState, Money, QueryState, Section,
-  SelectField, StateBadge, Tabs, TextField, useAction,
+  Badge, Button, Callout, CheckboxField, ConfirmDialog, DecimalField, Dialog, ErrorBanner, KeyValue, LoadingState, Money, QueryState, Section,
+  SelectField, StateBadge, Tabs, TextField, useAction, useUnsavedChanges,
 } from '../../pricing/components/ui';
 import { estimatesApi } from '../api';
 import { useEstimate, useInvalidateEstimates } from '../queries';
@@ -76,6 +76,8 @@ function EstimateView({ estimate, estimateId, opportunity, onBack }) {
 
   // Values reach these actions as arguments, never through the closure: the
   // React Compiler evaluates closure reads during render, before data loads.
+  useUnsavedChanges(Boolean(draftInputs));
+  const leave = () => (draftInputs ? setDialog('leave') : onBack());
   const saveInputs = useAction(({ next, lock }) => estimatesApi.savePricingInputs(estimateId, next, lock), {
     invalidate: refresh, onSuccess: () => setDraftInputs(null), silent: true,
   });
@@ -106,6 +108,12 @@ function EstimateView({ estimate, estimateId, opportunity, onBack }) {
   const shownRun = unadopted ? lastResult.run : run.data;
   const currency = shownRun?.currency;
 
+  const pricingStatus = calculate.busy ? 'calculating'
+    : calculate.error && calculate.error.kind === 'validation' ? 'error'
+      : !estimate.current_pricing_run_id ? 'not_priced'
+        : estimate.pricing_stale ? 'stale'
+          : estimate.pending_approvals > 0 ? 'approval_required' : 'current';
+
   const tabs = [
     { id: 'price', label: 'Pricing' },
     { id: 'scope', label: 'Jobs in scope', count: estimate.scope_jobs.length },
@@ -115,7 +123,7 @@ function EstimateView({ estimate, estimateId, opportunity, onBack }) {
 
   return (
     <div className="space-y-3">
-      <button type="button" onClick={onBack} className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600 hover:text-slate-900">
+      <button type="button" onClick={leave} className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600 hover:text-slate-900">
         <ArrowLeft size={14} aria-hidden="true" /> All Estimates
       </button>
       <Section
@@ -138,7 +146,21 @@ function EstimateView({ estimate, estimateId, opportunity, onBack }) {
       >
         <div className="space-y-3">
           {locked && <Callout tone="info" title="Booked and locked">This Estimate was booked. Its scope and price never change; use a Change Order for changes and Final Rating for actuals.</Callout>}
-          {estimate.lifecycle_state === 'reapproval_required' && <Callout tone="warning" title="Customer reapproval needed">The accepted scope or price changed. Send the updated Estimate for the customer to accept again.</Callout>}
+          {estimate.lifecycle_state === 'reapproval_required' && (
+            <Callout tone="warning" title="Reapproval required"
+              actions={(
+                <>
+                  <Button variant="ghost" onClick={() => setTab('history')}>Review changes</Button>
+                  {canEditInputs && <Button variant="ghost" onClick={runCalculation} busy={calculate.busy}>Recalculate</Button>}
+                  {actions.has('send') && can(ESTIMATES.SEND) && <Button onClick={() => setDialog('send')}>Resend</Button>}
+                </>
+              )}>
+              Customer acceptance is no longer valid for the current commercial scope. Review the changes, recalculate if needed, and resend it for acceptance.
+            </Callout>
+          )}
+          {['draft', 'ready'].includes(estimate.lifecycle_state) && !locked && (
+            <ReadinessChecklist estimate={estimate} hasContact={(opportunity?.recipients || []).length > 0 || Boolean(opportunity?.customer_email)} />
+          )}
           {estimate.lifecycle_state === 'accepted' && !locked && (
             <Callout tone="success" title="Accepted, not booked">The customer accepted this Estimate. Booking is a separate step on the Opportunity.</Callout>
           )}
@@ -167,7 +189,8 @@ function EstimateView({ estimate, estimateId, opportunity, onBack }) {
           <Tabs tabs={tabs} active={tab} onChange={setTab} label="Estimate sections" />
 
           {tab === 'price' && (
-            <div className="space-y-4">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+            <div className="min-w-0 space-y-4">
               {estimate.scope_jobs.map((job) => (
                 <fieldset key={job.job_id} className="rounded-xl border border-slate-200 p-3" disabled={!canEditInputs}>
                   <legend className="px-1 text-xs font-bold">{job.title}{job.service_type_name && ` · ${job.service_type_name}`}{job.is_primary && ' (primary)'}</legend>
@@ -202,6 +225,10 @@ function EstimateView({ estimate, estimateId, opportunity, onBack }) {
                 </Section>
               )}
             </div>
+            <EstimateSummary estimate={estimate} run={shownRun} status={pricingStatus} error={calculate.error}
+              onRecalculate={canEditInputs ? runCalculation : null} calculating={calculate.busy}
+              onSimulate={can(PRICING.SIMULATE) && !locked ? () => setDialog('simulate') : null} />
+            </div>
           )}
           {tab === 'scope' && <ScopeEditor estimate={estimate} planned={opportunity?.planned_jobs || []} editable={!locked && actions.has('edit_scope') && can(ESTIMATES.UPDATE_DRAFT)} onSaved={refresh} />}
           {tab === 'history' && <HistoryBlock estimate={estimate} />}
@@ -209,10 +236,18 @@ function EstimateView({ estimate, estimateId, opportunity, onBack }) {
         </div>
       </Section>
 
+      {dialog === 'leave' && (
+        <ConfirmDialog title="Discard unsaved pricing inputs?" confirmLabel="Discard" onCancel={() => setDialog(null)} onConfirm={() => { setDraftInputs(null); onBack(); }}>
+          <p>Your changes to the pricing inputs have not been saved or calculated.</p>
+        </ConfirmDialog>
+      )}
+      {dialog === 'simulate' && (
+        <SimulateDialog estimate={estimate} inputs={inputs} jobsById={jobsById} onClose={() => setDialog(null)} />
+      )}
       {dialog === 'edit' && <EditEstimateDialog estimate={estimate} onClose={() => setDialog(null)} onDone={() => { setDialog(null); refresh(); }} />}
       {['send', 'resend', 'reissue'].includes(dialog) && (
         <SendEstimateDialog estimate={estimate} opportunityId={estimate.opportunity_id} reissue={dialog === 'reissue'}
-          customerEmail={opportunity?.customer_email} customerName={opportunity?.opportunity?.customer_name}
+          customerEmail={opportunity?.customer_email} customerName={opportunity?.opportunity?.customer_name} recipients={opportunity?.recipients || []}
           onClose={() => setDialog(null)} onSent={refresh} />
       )}
       {dialog === 'accept' && (
@@ -235,6 +270,8 @@ function EstimateView({ estimate, estimateId, opportunity, onBack }) {
 
 function EstimateLevelInputs({ value, onChange, disabled }) {
   const { can } = useCan();
+  const policy = usePolicy(can(PRICING.VIEW));
+  const threshold = policy.data?.discount_approval_threshold_pct;
   const canDiscount = can(PRICING.APPLY_DISCOUNT);
   const constraintTypes = CONSTRAINT_TYPES.filter((t) => can(CONSTRAINT_PERMISSION[t]));
   const list = (key, blank) => ({
@@ -263,6 +300,7 @@ function EstimateLevelInputs({ value, onChange, disabled }) {
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1">
             <p className="text-xs font-semibold">Promotions (%)</p>
+            {threshold != null && <p className="text-[11px] text-slate-600">Discounts above {threshold}% need manager approval; the calculation shows when approval is required.</p>}
             {value.promotions.map((p, i) => (
               // Promotion rows have no identity of their own.
               <div key={`promo-${i}`} className="grid grid-cols-[1.4fr_1fr_auto] items-end gap-2">
@@ -294,7 +332,8 @@ function EstimateLevelInputs({ value, onChange, disabled }) {
 
 function OverridesBlock({ estimate, overrides, charges, onAdd, onRevoke, locked }) {
   const { can } = useCan();
-  const rows = (overrides.data || []).filter((o) => o.state === 'active');
+  // Every override still in force or waiting for a decision stays visible.
+  const rows = (overrides.data || []).filter((o) => !['revoked', 'removed', 'superseded', 'expired'].includes(o.state));
   const canOverride = !locked && can(ESTIMATES.UPDATE_DRAFT) && (can(PRICING.OVERRIDE_RATE) || can(PRICING.OVERRIDE_MINIMUM));
   if (!rows.length && !canOverride) return null;
   return (
@@ -305,6 +344,7 @@ function OverridesBlock({ estimate, overrides, charges, onAdd, onRevoke, locked 
           {rows.map((o) => (
             <li key={o.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5">
               <span className="font-semibold">{o.target_key}</span><span>{humanize(o.override_type)}: {Object.values(o.override_value || {}).join(', ')}</span>
+              {o.state !== 'active' && <Badge tone="amber">{humanize(o.state)}</Badge>}
               <span className="flex-1 text-slate-500">{o.reason}</span>
               {canOverride && <Button variant="ghost" onClick={() => onRevoke(o.id)}>Remove</Button>}
             </li>
@@ -339,9 +379,54 @@ function ScopeEditor({ estimate, planned, editable, onSaved }) {
   );
 }
 
+function VersionCompare({ versions, currency }) {
+  const [left, setLeft] = useState(String(versions[1]?.pricing_run_id || ''));
+  const [right, setRight] = useState(String(versions[0]?.pricing_run_id || ''));
+  const a = useRun(Number(left) || null);
+  const b = useRun(Number(right) || null);
+  const keys = [...new Set([...(a.data?.charges || []), ...(b.data?.charges || [])].map((c) => c.charge_key))];
+  const find = (run, key) => (run.data?.charges || []).find((c) => c.charge_key === key);
+  const label = (v) => `Version ${v.version_number} · ${humanize(v.version_reason)}`;
+  return (
+    <div className="space-y-2">
+      <div className="grid gap-2 sm:grid-cols-2">
+        <SelectField label="Compare" value={left} onChange={setLeft} options={versions.map((v) => [String(v.pricing_run_id), label(v)])} />
+        <SelectField label="With" value={right} onChange={setRight} options={versions.map((v) => [String(v.pricing_run_id), label(v)])} />
+      </div>
+      {a.data && b.data && (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[420px] text-left text-xs">
+            <caption className="sr-only">Version comparison</caption>
+            <thead className="text-[11px] uppercase text-slate-500"><tr><th scope="col">Charge</th><th scope="col" className="text-right">Before</th><th scope="col" className="text-right">After</th></tr></thead>
+            <tbody>
+              {keys.map((key) => {
+                const before = find(a, key);
+                const after = find(b, key);
+                const changed = before?.amount !== after?.amount;
+                return (
+                  <tr key={key} className={`border-t border-slate-100 ${changed ? 'bg-amber-50/60' : ''}`}>
+                    <td className="py-1">{(after || before).name}{!before && <Badge tone="green">Added</Badge>}{!after && <Badge tone="red">Removed</Badge>}</td>
+                    <td className="text-right">{before ? formatMoney(before.amount, currency) : '—'}</td>
+                    <td className="text-right">{after ? formatMoney(after.amount, currency) : '—'}</td>
+                  </tr>
+                );
+              })}
+              <tr className="border-t border-slate-300 font-bold"><td className="py-1">Total</td>
+                <td className="text-right">{formatMoney(a.data.totals?.grand_total, currency)}</td>
+                <td className="text-right">{formatMoney(b.data.totals?.grand_total, currency)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HistoryBlock({ estimate }) {
+  const priced = estimate.versions.filter((v) => v.pricing_run_id);
   return (
     <div className="space-y-3 text-xs">
+      {priced.length > 1 && <Section title="Compare versions" description="Stored prices of two customer versions, side by side."><VersionCompare versions={priced} /></Section>}
       <Section title="Customer versions" description="Every version the customer was sent or accepted is kept unchanged.">
         {!estimate.versions.length ? <p className="text-slate-500">Not sent yet.</p> : (
           <ul className="space-y-1">
@@ -372,5 +457,129 @@ function HistoryBlock({ estimate }) {
         )}
       </Section>
     </div>
+  );
+}
+
+
+const STATUS = {
+  current: ['Current', 'green', 'This price reflects the Estimate as it is now.'],
+  stale: ['Stale', 'amber', 'Pricing needs recalculation because pricing inputs changed.'],
+  not_priced: ['Not priced', 'amber', 'Calculate to price this Estimate.'],
+  calculating: ['Calculating…', 'blue', 'The Pricing Engine is calculating.'],
+  error: ['Pricing error', 'red', 'The last calculation failed. Fix the inputs or the Tariff and try again.'],
+  approval_required: ['Approval required', 'amber', 'A discount, override or margin needs approval before sending.'],
+};
+
+/** Right-hand summary: the stored totals of the current pricing and its status. */
+function EstimateSummary({ estimate, run, status, error, onRecalculate, calculating, onSimulate }) {
+  const [label, tone, help] = STATUS[status];
+  const totals = run ? run.totals || {} : {};
+  const currency = run ? run.currency : undefined;
+  const constraint = run ? run.constraint || {} : {};
+  return (
+    <aside className="space-y-3 lg:sticky lg:top-2 lg:self-start" aria-label="Estimate summary">
+      <section className={`rounded-xl border p-3 ${status === 'current' ? 'border-slate-200' : 'border-amber-300 bg-amber-50/40'}`}>
+        <div className="flex items-center justify-between gap-2">
+          <h4 className="text-xs font-bold">Pricing</h4>
+          <Badge tone={tone}>{label}</Badge>
+        </div>
+        <p className="mt-1 text-[11px] text-slate-600">{help}</p>
+        {status === 'stale' && estimate.pricing_stale_reason && <p className="mt-1 text-[11px] text-amber-800">{estimate.pricing_stale_reason}</p>}
+        {status === 'error' && error && <p className="mt-1 text-[11px] text-rose-800">{error.message}{error.detail ? ` (${error.detail})` : ''}</p>}
+        {onRecalculate && status !== 'current' && <Button className="mt-2 w-full" onClick={onRecalculate} busy={calculating}><Calculator size={13} aria-hidden="true" /> Recalculate</Button>}
+      </section>
+      {run && (
+        <section className={`rounded-xl border border-slate-200 p-3 ${status === 'stale' ? 'opacity-70' : ''}`}>
+          {status === 'stale' && <p className="mb-1 text-[11px] font-semibold text-amber-800">Out of date — not the current price</p>}
+          <dl className="space-y-1 text-xs">
+            <div className="flex justify-between"><dt>Subtotal</dt><dd><Money value={totals.subtotal} currency={currency} /></dd></div>
+            <div className="flex justify-between"><dt>Adjustments</dt><dd><Money value={totals.adjustment_total} currency={currency} /></dd></div>
+            {constraint.type && constraint.type !== 'none' && (
+              <div className="flex justify-between"><dt>{humanize(constraint.type)} effect</dt><dd><Money value={totals.constraint_adjustment} currency={currency} /></dd></div>
+            )}
+            <div className="flex justify-between"><dt>Tax</dt><dd><Money value={totals.tax_total} currency={currency} /></dd></div>
+            <div className="flex justify-between border-t border-slate-200 pt-1 text-sm font-bold"><dt>Total</dt><dd><Money value={totals.grand_total} currency={currency} strong /></dd></div>
+            <div className="flex justify-between"><dt>Deposit required</dt><dd><Money value={totals.deposit_amount} currency={currency} /></dd></div>
+          </dl>
+          {constraint.type === 'not_to_exceed' && (
+            <p className="mt-2 rounded bg-slate-50 p-2 text-[11px]">Not-to-exceed {formatMoney(constraint.amount, currency)}: the most the customer pays for the accepted scope, subject to approved changes. Separate from {humanize(estimate.binding_type)}.</p>
+          )}
+          <p className="mt-2 text-[11px] text-slate-500">A deposit amount does not book the move.</p>
+        </section>
+      )}
+      {run && run.cost && (
+        <section className="rounded-xl border border-slate-200 p-3" aria-label="Internal margin">
+          <h4 className="mb-1 text-xs font-bold">Internal margin <span className="font-normal text-slate-500">(never shown to customers)</span></h4>
+          <dl className="space-y-1 text-xs">
+            <div className="flex justify-between"><dt>Revenue</dt><dd><Money value={totals.grand_total} currency={currency} /></dd></div>
+            <div className="flex justify-between"><dt>Estimated cost</dt><dd><Money value={run.cost.internal_cost_total} currency={currency} /></dd></div>
+            <div className="flex justify-between"><dt>Gross profit</dt><dd><Money value={run.cost.gross_profit} currency={currency} /></dd></div>
+            <div className="flex justify-between"><dt>Margin</dt><dd>{run.cost.gross_margin_pct != null ? `${run.cost.gross_margin_pct}%` : '—'}</dd></div>
+          </dl>
+          <div className="mt-2"><MarginBadge status={run.cost.margin_status} /></div>
+        </section>
+      )}
+      {onSimulate && <Button variant="ghost" className="w-full" onClick={onSimulate}>Simulate pricing</Button>}
+    </aside>
+  );
+}
+
+/** What-if for this Opportunity: never changes the Estimate. */
+function SimulateDialog({ estimate, inputs, jobsById, onClose }) {
+  const tariffs = useTariffs({ limit: 200 });
+  const [jobs, setJobs] = useState(() => Object.fromEntries(estimate.scope_jobs.map((j) => [j.job_id, jobInputsToForm(inputs.jobs?.[j.job_id] || EMPTY_JOB_INPUTS)])));
+  const [revisionId, setRevisionId] = useState('');
+  const [result, setResult] = useState(null);
+  const simulate = useAction(({ body }) => pricingApi.simulate(body), { onSuccess: setResult, silent: true });
+  const run = () => simulate.run({ body: {
+    opportunity_id: estimate.opportunity_id,
+    revision_id: revisionId ? Number(revisionId) : undefined,
+    jobs: estimate.scope_jobs.map((j) => ({ job_id: j.job_id, inputs: { ...cleanJobInputs(jobs[j.job_id]), ...(revisionId ? { revision_id: Number(revisionId) } : {}) } })),
+    estimate: buildCalculationBody(estimate.scope_jobs, inputs).estimate,
+  } });
+  return (
+    <Dialog title="Simulate pricing" description="Try other inputs or a Tariff. The Estimate and the Opportunity are not changed." onClose={onClose} size="lg" busy={simulate.busy}
+      footer={(<><Button variant="ghost" onClick={onClose}>Close</Button><Button onClick={run} busy={simulate.busy}>Simulate</Button></>)}>
+      <div className="space-y-3">
+        <SelectField label="Tariff" value={revisionId} onChange={setRevisionId}
+          options={[['', 'Whichever Tariff applies'], ...(tariffs.data?.results || []).filter((t) => t.current_published_revision_id).map((t) => [String(t.current_published_revision_id), `${t.name} (rev ${t.current_revision_number})`])]}
+          hint="Choosing a Tariff needs the rate-override permission." />
+        {estimate.scope_jobs.map((job) => (
+          <fieldset key={job.job_id} className="rounded-xl border border-slate-200 p-3">
+            <legend className="px-1 text-xs font-bold">{job.title}</legend>
+            <JobInputsForm value={jobs[job.job_id]} onChange={(v) => setJobs({ ...jobs, [job.job_id]: v })} showValuation={false} />
+          </fieldset>
+        ))}
+        <ErrorBanner message={simulate.error && `${simulate.error.message}${simulate.error.detail ? ` (${simulate.error.detail})` : ''}`} />
+        {result && (
+          <div className="rounded-xl border-2 border-dashed border-violet-400 p-3">
+            <p className="mb-2 text-center text-xs font-bold uppercase tracking-wide text-violet-800" role="status">Simulation — not customer price</p>
+            <RunViewer run={result.run} jobsById={jobsById} />
+          </div>
+        )}
+      </div>
+    </Dialog>
+  );
+}
+
+
+/** What Ready / Send will check. Informational: the backend decides and its refusal is shown. */
+function ReadinessChecklist({ estimate, hasContact }) {
+  const items = [
+    ['Pricing is current', Boolean(estimate.current_pricing_run_id) && !estimate.pricing_stale],
+    ['At least one Planned Job is in scope', estimate.scope_jobs.some((j) => j.is_included !== false)],
+    ['No pricing approval is pending', !estimate.pending_approvals],
+    ['The customer has an email address', hasContact],
+  ];
+  if (items.every(([, ok]) => ok)) return null;
+  return (
+    <section aria-label="Before sending" className="rounded-lg border border-slate-200 px-3 py-2 text-xs">
+      <p className="mb-1 font-semibold">Before this Estimate can be sent</p>
+      <ul className="space-y-0.5">
+        {items.map(([label, ok]) => (
+          <li key={label} className={ok ? 'text-emerald-800' : 'text-amber-800'}>{ok ? '✓' : '•'} {label}{ok ? '' : ' — needed'}</li>
+        ))}
+      </ul>
+    </section>
   );
 }

@@ -29,7 +29,7 @@ describe('Customer portal', () => {
     portalApi.view.mockResolvedValue(view());
     open();
     expect(await screen.findByRole('heading', { name: 'Standard move' })).toBeInTheDocument();
-    expect(portalApi.view).toHaveBeenCalledWith(TOKEN);
+    expect(portalApi.view).toHaveBeenCalledWith(TOKEN, '');
     expect(screen.getByText(/Oct 21, 2026/)).toBeInTheDocument();
     expect(screen.getAllByText('$1,418.75').length).toBeGreaterThan(0);
     expect(screen.getByText(/Not-to-exceed: you will not pay more than \$1,600.00/)).toBeInTheDocument();
