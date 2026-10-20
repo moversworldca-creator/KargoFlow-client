@@ -121,6 +121,36 @@ export const FEATURE_PERMISSION_CATALOG = {
     allowedScopes: ['own', 'branch', 'company'],
     legacyAliases: ['crm.communications.email.send', 'crm.communications.sms.send'],
   },
+  'communications.automations.view': {
+    label: 'View Custom Automations',
+    module: 'Communications',
+    allowedScopes: ['own', 'branch', 'company'],
+    legacyAliases: ['crm.settings.automations.view'],
+  },
+  'communications.automations.manage': {
+    label: 'Manage Custom Automations',
+    module: 'Communications',
+    allowedScopes: ['branch', 'company'],
+    legacyAliases: ['crm.settings.automations.manage'],
+  },
+  'communications.branch_settings.update': {
+    label: 'Configure Branch Notifications',
+    module: 'Communications',
+    allowedScopes: ['branch', 'company'],
+    legacyAliases: [],
+  },
+  'communications.notification_templates.update': {
+    label: 'Manage Notification Templates',
+    module: 'Communications',
+    allowedScopes: ['branch', 'company'],
+    legacyAliases: [],
+  },
+  'communications.general_templates.update': {
+    label: 'Manage General Templates',
+    module: 'Communications',
+    allowedScopes: ['branch', 'company'],
+    legacyAliases: [],
+  },
 };
 
 export const FEATURE_PERMISSIONS = {
@@ -243,8 +273,11 @@ export const PERMISSIONS = {
   INTEGRATIONS_CHANGE_TELNYX: FEATURE_PERMISSIONS.INTEGRATIONS.TELNYX_EDIT,
   INTEGRATIONS_ADD_TELNYX: FEATURE_PERMISSIONS.INTEGRATIONS.TELNYX_ADD,
 
-  AUTOMATIONS_VIEW: 'crm.settings.automations.view',
-  AUTOMATIONS_MANAGE: 'crm.settings.automations.manage',
+  AUTOMATIONS_VIEW: 'communications.automations.view',
+  AUTOMATIONS_MANAGE: 'communications.automations.manage',
+  BRANCH_SETTINGS_UPDATE: 'communications.branch_settings.update',
+  NOTIFICATION_TEMPLATES_UPDATE: 'communications.notification_templates.update',
+  GENERAL_TEMPLATES_UPDATE: 'communications.general_templates.update',
   COMMUNICATIONS_EMAIL_SEND: 'communications.conversations.send',
   COMMUNICATIONS_SMS_SEND: 'communications.conversations.send',
   COMMUNICATIONS_CALL_LOG: 'communications.conversations.send',
@@ -378,6 +411,10 @@ const PERMISSION_ALIASES = {
   'crm.opportunities.create': ['opportunities.create'],
   'crm.opportunities.edit': ['opportunities.edit'],
   'crm.opportunities.book': ['opportunities.book'],
+  'communications.automations.view': ['crm.settings.automations.view'],
+  'crm.settings.automations.view': ['communications.automations.view'],
+  'communications.automations.manage': ['crm.settings.automations.manage'],
+  'crm.settings.automations.manage': ['communications.automations.manage'],
 };
 
 // Legacy frontend names (crm.*) only: a backend key is matched exactly, because

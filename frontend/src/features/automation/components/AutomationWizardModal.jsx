@@ -1,260 +1,1107 @@
-import React, { useEffect, useMemo, useReducer, useState } from 'react';
-import { X } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X, Plus, Trash2, ArrowUp, ArrowDown, Zap, Mail, MessageSquare, Clock, Filter, AlertCircle, CheckCircle2, ChevronRight, HelpCircle } from 'lucide-react';
 import {
-  createAutomationStep,
-  createAutomationWorkflow,
-  deleteAutomationStep,
-  getAutomationSteps,
-  uploadFile,
-  updateAutomationWorkflow,
+  createCustomAutomation,
+  updateCustomAutomation,
+  getCustomAutomationEvents,
+  getGeneralTemplates,
 } from '../../../services/api';
-import { initialDraft, reducer, stepLabels } from './wizard/state';
-import TriggerStep from './wizard/TriggerStep';
-import ActionStep from './wizard/ActionStep';
-import TargetStep from './wizard/TargetStep';
-import FiltersStep from './wizard/FiltersStep';
-import LivePreviewPane from './wizard/LivePreviewPane';
 
-const steps = [TriggerStep, ActionStep, TargetStep, FiltersStep];
+const OPERATORS = [
+  { value: 'eq', label: 'Equals (==)' },
+  { value: 'ne', label: 'Does not equal (!=)' },
+  { value: 'in', label: 'Is in list (comma-separated)' },
+  { value: 'not_in', label: 'Is not in list' },
+  { value: 'gt', label: 'Greater than (>)' },
+  { value: 'gte', label: 'Greater than or equal (>=)' },
+  { value: 'lt', label: 'Less than (<)' },
+  { value: 'lte', label: 'Less than or equal (<=)' },
+  { value: 'is_set', label: 'Is set (not empty)' },
+  { value: 'is_empty', label: 'Is empty / not set' },
+  { value: 'contains', label: 'Contains (case-insensitive)' },
+];
 
-export default function AutomationWizardModal({ open, onClose, onSaved, initialValue, branches = [] }) {
+const COMMON_FIELDS = {
+  lead: [
+    { field: 'lead.system_state', label: 'System State (e.g. new)' },
+    { field: 'lead.status', label: 'Status' },
+    { field: 'lead.source', label: 'Lead Source' },
+    { field: 'lead.email', label: 'Customer Email' },
+    { field: 'lead.phone', label: 'Customer Phone' },
+    { field: 'lead.move_type', label: 'Move Type' },
+  ],
+  opportunity: [
+    { field: 'opportunity.stage', label: 'Stage' },
+    { field: 'opportunity.status', label: 'Status' },
+    { field: 'opportunity.source', label: 'Source' },
+    { field: 'opportunity.branch_id', label: 'Branch ID' },
+  ],
+};
+
+const initialAutomationState = () => ({
+  id: null,
+  name: '',
+  description: '',
+  event: 'lead.created',
+  branch_id: null,
+  is_active: true,
+  conditions: {
+    all: [],
+    any: [],
+  },
+  steps: [
+    {
+      channel: 'email',
+      template_id: '',
+      delay_minutes: 0,
+      delay_value: 0,
+      delay_unit: 'minutes',
+      is_active: true,
+    },
+  ],
+});
+
+export default function AutomationWizardModal({
+  open,
+  onClose,
+  onSaved,
+  initialValue,
+  branches = [],
+}) {
   const [activeStep, setActiveStep] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState(null);
-  const [draft, dispatch] = useReducer(reducer, null, () => (initialValue ? initialValue : initialDraft()));
 
-  const StepCmp = steps[activeStep];
+  const [events, setEvents] = useState([]);
+  const [generalEmailTemplates, setGeneralEmailTemplates] = useState([]);
+  const [generalSmsTemplates, setGeneralSmsTemplates] = useState([]);
+  const [loadingMeta, setLoadingMeta] = useState(false);
+
+  const [formData, setFormData] = useState(initialAutomationState);
+
+  // Load events and general templates on modal open
   useEffect(() => {
     if (!open) return;
-    dispatch({ type: 'load', value: initialValue ? initialValue : initialDraft() });
+
+    setError(null);
     setActiveStep(0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    const loadMetadata = async () => {
+      setLoadingMeta(true);
+      try {
+        const [eventsRes, emailTemplatesRes, smsTemplatesRes] = await Promise.all([
+          getCustomAutomationEvents(),
+          getGeneralTemplates({ channel: 'email' }),
+          getGeneralTemplates({ channel: 'sms' }),
+        ]);
+
+        const eventList = eventsRes?.results || eventsRes || [];
+        setEvents(eventList);
+
+        const filterActiveTemplates = (list) => {
+          return (list || []).filter((t) => {
+            if (t.state && t.state !== 'active') return false;
+            if (t.is_active === false) return false;
+            return true;
+          });
+        };
+
+        const emailList = filterActiveTemplates(emailTemplatesRes?.results || emailTemplatesRes || []);
+        const smsList = filterActiveTemplates(smsTemplatesRes?.results || smsTemplatesRes || []);
+        setGeneralEmailTemplates(emailList);
+        setGeneralSmsTemplates(smsList);
+      } catch (err) {
+        console.error('Failed to load automation metadata:', err);
+      } finally {
+        setLoadingMeta(false);
+      }
+    };
+
+    loadMetadata();
+
+    if (initialValue) {
+      // Normalize incoming automation
+      const condAll = Array.isArray(initialValue.conditions?.all) ? initialValue.conditions.all : [];
+      const condAny = Array.isArray(initialValue.conditions?.any) ? initialValue.conditions.any : [];
+
+      const mappedSteps = (initialValue.steps || []).map((s) => {
+        const totalMinutes = Number(s.delay_minutes || 0);
+        let delay_unit = 'minutes';
+        let delay_value = totalMinutes;
+
+        if (totalMinutes > 0 && totalMinutes % 1440 === 0) {
+          delay_unit = 'days';
+          delay_value = totalMinutes / 1440;
+        } else if (totalMinutes > 0 && totalMinutes % 60 === 0) {
+          delay_unit = 'hours';
+          delay_value = totalMinutes / 60;
+        }
+
+        return {
+          id: s.id,
+          channel: s.channel || 'email',
+          template_id: s.template_id ? String(s.template_id) : '',
+          template_name: s.template_name || s.template?.name || '',
+          delay_minutes: totalMinutes,
+          delay_value,
+          delay_unit,
+          is_active: s.is_active !== false,
+        };
+      });
+
+      setFormData({
+        id: initialValue.id || null,
+        name: initialValue.name || '',
+        description: initialValue.description || '',
+        event: initialValue.event || 'lead.created',
+        branch_id: initialValue.branch_id ?? null,
+        is_active: initialValue.is_active !== false,
+        conditions: {
+          all: condAll,
+          any: condAny,
+        },
+        steps: mappedSteps.length ? mappedSteps : [
+          {
+            channel: 'email',
+            template_id: '',
+            delay_minutes: 0,
+            delay_value: 0,
+            delay_unit: 'minutes',
+            is_active: true,
+          },
+        ],
+      });
+    } else {
+      setFormData(initialAutomationState());
+    }
   }, [open, initialValue]);
 
-  const canNext = activeStep < steps.length - 1;
-  const canPrev = activeStep > 0;
+  if (!open) return null;
 
-  const stepper = useMemo(
-    () =>
-      stepLabels.map((label, idx) => ({
-        label,
-        idx,
-        status: idx < activeStep ? 'done' : idx === activeStep ? 'active' : 'todo',
-      })),
-    [activeStep]
-  );
+  const currentEventMeta = events.find((e) => e.event === formData.event);
+  const targetType = currentEventMeta?.target || (formData.event.startsWith('lead.') ? 'lead' : 'opportunity');
 
-  const close = () => {
-    setError(null);
-    onClose?.();
+  // Steps for the stepper
+  const stepLabels = ['Trigger & Scope', 'Conditions', 'Communication Steps', 'Review & Save'];
+
+  // Add condition rule
+  const addConditionRule = (group) => {
+    const defaultField = targetType === 'lead' ? 'lead.system_state' : 'opportunity.stage';
+    setFormData((prev) => ({
+      ...prev,
+      conditions: {
+        ...prev.conditions,
+        [group]: [...(prev.conditions[group] || []), { field: defaultField, op: 'eq', value: '' }],
+      },
+    }));
   };
 
-  const save = async () => {
+  const updateConditionRule = (group, index, patch) => {
+    setFormData((prev) => {
+      const updatedGroup = [...(prev.conditions[group] || [])];
+      updatedGroup[index] = { ...updatedGroup[index], ...patch };
+      return {
+        ...prev,
+        conditions: {
+          ...prev.conditions,
+          [group]: updatedGroup,
+        },
+      };
+    });
+  };
+
+  const removeConditionRule = (group, index) => {
+    setFormData((prev) => ({
+      ...prev,
+      conditions: {
+        ...prev.conditions,
+        [group]: prev.conditions[group].filter((_, i) => i !== index),
+      },
+    }));
+  };
+
+  // Add communication step
+  const addCommunicationStep = () => {
+    setFormData((prev) => ({
+      ...prev,
+      steps: [
+        ...prev.steps,
+        {
+          channel: 'email',
+          template_id: '',
+          delay_minutes: 0,
+          delay_value: 0,
+          delay_unit: 'minutes',
+          is_active: true,
+        },
+      ],
+    }));
+  };
+
+  const updateCommunicationStep = (index, patch) => {
+    setFormData((prev) => {
+      const nextSteps = [...prev.steps];
+      const cur = { ...nextSteps[index], ...patch };
+
+      // Recompute delay_minutes if delay_value or delay_unit changes
+      if ('delay_value' in patch || 'delay_unit' in patch) {
+        const val = Math.max(0, parseInt(cur.delay_value || 0, 10));
+        let mins = val;
+        if (cur.delay_unit === 'hours') mins = val * 60;
+        if (cur.delay_unit === 'days') mins = val * 1440;
+        cur.delay_minutes = Math.min(525600, mins); // Cap at 365 days
+      }
+
+      nextSteps[index] = cur;
+      return { ...prev, steps: nextSteps };
+    });
+  };
+
+  const removeCommunicationStep = (index) => {
+    setFormData((prev) => ({
+      ...prev,
+      steps: prev.steps.filter((_, i) => i !== index),
+    }));
+  };
+
+  const moveCommunicationStep = (fromIndex, toIndex) => {
+    if (toIndex < 0 || toIndex >= formData.steps.length) return;
+    setFormData((prev) => {
+      const copy = [...prev.steps];
+      const [item] = copy.splice(fromIndex, 1);
+      copy.splice(toIndex, 0, item);
+      return { ...prev, steps: copy };
+    });
+  };
+
+  // Validation
+  const validateForm = () => {
+    const trimmedName = String(formData.name || '').trim();
+    if (!trimmedName) {
+      return 'Automation name is required.';
+    }
+    if (trimmedName.length > 160) {
+      return 'Automation name must not exceed 160 characters.';
+    }
+    if (trimmedName.toLowerCase().startsWith('notification:')) {
+      return 'Names starting with "notification:" are reserved for system notifications.';
+    }
+    if (formData.description && formData.description.length > 2000) {
+      return 'Description must not exceed 2000 characters.';
+    }
+    if (!formData.event) {
+      return 'Please select a trigger event.';
+    }
+
+    // Validate condition fields (must have single dot: entity.field)
+    const allConds = [...(formData.conditions.all || []), ...(formData.conditions.any || [])];
+    for (const c of allConds) {
+      const f = String(c.field || '').trim();
+      if (!f) {
+        return 'Condition field name cannot be empty.';
+      }
+      const parts = f.split('.');
+      if (parts.length !== 2 || !parts[0] || !parts[1]) {
+        return `Invalid condition field "${f}". Field names must use single-dot notation (e.g. "lead.status" or "opportunity.stage").`;
+      }
+    }
+
+    if (!formData.steps || formData.steps.length === 0) {
+      return 'At least one communication step is required.';
+    }
+    for (let i = 0; i < formData.steps.length; i++) {
+      const s = formData.steps[i];
+      if (!s.template_id) {
+        return `Step ${i + 1} (${s.channel.toUpperCase()}) requires a template.`;
+      }
+      const pool = s.channel === 'sms' ? generalSmsTemplates : generalEmailTemplates;
+      if (pool.length > 0) {
+        const activeMatch = pool.find((t) => String(t.id) === String(s.template_id));
+        if (!activeMatch) {
+          return `Step ${i + 1} (${s.channel.toUpperCase()}) must use an active, usable General template.`;
+        }
+      }
+      if (s.delay_minutes < 0 || s.delay_minutes > 525600) {
+        return `Step ${i + 1} delay must be between 0 and 525,600 minutes (365 days).`;
+      }
+    }
+    return null;
+  };
+
+  const handleSave = async () => {
+    const validationError = validateForm();
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
     setIsSaving(true);
     setError(null);
+
+    // Format clean conditions
+    const cleanConditions = {};
+    if (formData.conditions.all && formData.conditions.all.length > 0) {
+      cleanConditions.all = formData.conditions.all.map((c) => ({
+        field: c.field.trim(),
+        op: c.op,
+        ...(c.op === 'is_set' || c.op === 'is_empty'
+          ? {}
+          : {
+              value:
+                c.op === 'in' || c.op === 'not_in'
+                  ? String(c.value || '')
+                      .split(',')
+                      .map((x) => x.trim())
+                      .filter(Boolean)
+                  : c.value,
+            }),
+      }));
+    }
+    if (formData.conditions.any && formData.conditions.any.length > 0) {
+      cleanConditions.any = formData.conditions.any.map((c) => ({
+        field: c.field.trim(),
+        op: c.op,
+        ...(c.op === 'is_set' || c.op === 'is_empty'
+          ? {}
+          : {
+              value:
+                c.op === 'in' || c.op === 'not_in'
+                  ? String(c.value || '')
+                      .split(',')
+                      .map((x) => x.trim())
+                      .filter(Boolean)
+                  : c.value,
+            }),
+      }));
+    }
+
+    const payload = {
+      name: formData.name.trim(),
+      description: formData.description?.trim() || '',
+      event: formData.event,
+      branch_id: formData.branch_id ? Number(formData.branch_id) : null,
+      is_active: Boolean(formData.is_active),
+      conditions: cleanConditions,
+      steps: formData.steps.map((s) => ({
+        channel: s.channel,
+        template_id: Number(s.template_id),
+        delay_minutes: Number(s.delay_minutes || 0),
+        is_active: Boolean(s.is_active),
+      })),
+    };
+
     try {
-      const wfPayload = {
-        definition_version: 1,
-        name: draft.meta.name,
-        description: draft.meta.description || '',
-        target_type: draft.meta.target_type,
-        is_active: !!draft.meta.is_active,
-        trigger: draft.trigger,
-        recipients: draft.recipients,
-        conditions: draft.filters,
-        branch: draft.meta.branch,
-      };
-
-      let wfId = draft.meta.id;
-      if (!wfId) {
-        const created = await createAutomationWorkflow(wfPayload);
-        wfId = created.id;
+      if (formData.id) {
+        await updateCustomAutomation(formData.id, payload);
       } else {
-        await updateAutomationWorkflow(wfId, wfPayload);
+        await createCustomAutomation(payload);
       }
-
-      const pendingFiles = (draft.steps || []).map((step, index) => ({
-        index,
-        file: step?.config?._attachment_file,
-      })).filter((item) => item.file);
-      const stepsToSave = (draft.steps || []).filter((s) => s && s.step_type);
-      const savedConfigs = stepsToSave.map((step) => ({ ...(step.config || {}) }));
-      for (const { index, file } of pendingFiles) {
-        const stepIndex = (draft.steps || []).slice(0, index).filter((s) => s && s.step_type).length;
-        const uploaded = await uploadFile({
-          target_type: 'automationworkflow',
-          target_id: wfId,
-          branch_id: draft.meta.branch || null,
-          category: 'automation_attachment',
-          file,
-        });
-        const assetId = uploaded?.id;
-        if (!assetId) throw new Error('PDF upload did not return a file asset.');
-        const config = savedConfigs[stepIndex];
-        config.attachments = (config.attachments || []).map((key) => key === 'custom_pdf' ? `file_asset:${assetId}` : key);
-        delete config._attachment_file;
-      }
-      savedConfigs.forEach((config) => { delete config._attachment_file; });
-
-      // Replace steps with the single action step (v1 video-style).
-      const existingStepsRes = await getAutomationSteps({ workflow: wfId });
-      const existingSteps = existingStepsRes?.results || existingStepsRes || [];
-      for (const s of existingSteps) {
-        await deleteAutomationStep(s.id);
-      }
-
-      for (let i = 0; i < stepsToSave.length; i++) {
-        const s = stepsToSave[i];
-        await createAutomationStep({
-          workflow: wfId,
-          sort_order: i,
-          step_type: s.step_type,
-          config: savedConfigs[i] || {},
-          run_once: !!s.run_once,
-          is_active: s.is_active !== false,
-        });
-      }
-
       onSaved?.();
-      close();
-    } catch (e) {
-      setError('Failed to save automation.');
+      onClose();
+    } catch (err) {
+      console.error('Failed to save custom automation:', err);
+      const data = err?.response?.data;
+      let detail = 'Failed to save custom automation.';
+      if (typeof data === 'string') {
+        detail = data;
+      } else if (data?.detail) {
+        detail = data.detail;
+      } else if (data?.error) {
+        detail = data.error;
+      } else if (data && typeof data === 'object') {
+        const parts = [];
+        for (const [k, v] of Object.entries(data)) {
+          if (Array.isArray(v)) {
+            parts.push(`${k}: ${v.join(' ')}`);
+          } else if (typeof v === 'object' && v !== null) {
+            for (const [subK, subV] of Object.entries(v)) {
+              parts.push(`${k}.${subK}: ${Array.isArray(subV) ? subV.join(' ') : subV}`);
+            }
+          } else {
+            parts.push(`${k}: ${v}`);
+          }
+        }
+        if (parts.length > 0) detail = parts.join('; ');
+      } else if (err?.message) {
+        detail = err.message;
+      }
+      setError(detail);
     } finally {
       setIsSaving(false);
     }
   };
 
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-6">
-      <div className="bg-card rounded-2xl w-full max-w-6xl max-h-[95vh] border border-border overflow-hidden flex flex-col">
-        <div className="p-4 border-b border-border flex items-center justify-between shrink-0">
-          <div className="font-bold text-heading">{draft.meta.id ? 'Edit Automation' : 'Create Automation'}</div>
-          <button type="button" onClick={close} className="p-2 rounded-lg hover:bg-border/50">
-            <X size={18} />
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[92vh] border border-brand-border shadow-2xl overflow-hidden flex flex-col">
+        {/* Modal Header */}
+        <div className="p-4 px-6 border-b border-brand-border flex items-center justify-between shrink-0 bg-slate-50/70">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-primary/10 text-primary rounded-xl">
+              <Zap size={20} />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-heading">
+                {formData.id ? 'Edit Custom Automation' : 'Create Custom Automation'}
+              </h2>
+              <p className="text-xs text-muted">
+                Define automated multi-channel sequences triggered by business events
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+          >
+            <X size={20} />
           </button>
         </div>
 
-        <div className="p-4 border-b border-border shrink-0">
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="flex-1 min-w-[240px]">
-                <label className="text-xs font-bold uppercase tracking-widest text-muted">Name</label>
-                <input
-                  className="w-full mt-1 px-3 py-2 bg-subtle rounded-xl text-sm outline-none"
-                  value={draft.meta.name}
-                  onChange={(e) => dispatch({ type: 'meta', patch: { name: e.target.value } })}
-                  placeholder="e.g. New Lead Welcome"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold uppercase tracking-widest text-muted">Target</label>
-                <select
-                  className="mt-1 px-3 py-2 bg-subtle rounded-xl text-sm outline-none"
-                  value={draft.meta.target_type}
-                  onChange={(e) => dispatch({ type: 'meta', patch: { target_type: e.target.value } })}
-                >
-                  <option value="lead">Lead</option>
-                  <option value="estimate">Estimate</option>
-                  <option value="job">Job</option>
-                  <option value="opportunity">Opportunity</option>
-                </select>
-              </div>
-              {branches.length > 0 && (
-                <div>
-                  <label className="text-xs font-bold uppercase tracking-widest text-muted">Branch</label>
-                  <select
-                    className="mt-1 px-3 py-2 bg-subtle rounded-xl text-sm outline-none"
-                    value={draft.meta.branch || ''}
-                    onChange={(e) => dispatch({ type: 'meta', patch: { branch: e.target.value ? Number(e.target.value) : null } })}
+        {/* Stepper Header */}
+        <div className="px-6 py-3 border-b border-brand-border bg-subtle/30 shrink-0">
+          <div className="flex items-center justify-between max-w-3xl mx-auto">
+            {stepLabels.map((label, idx) => {
+              const isActive = activeStep === idx;
+              const isPast = activeStep > idx;
+              return (
+                <React.Fragment key={label}>
+                  <button
+                    type="button"
+                    onClick={() => setActiveStep(idx)}
+                    className="flex items-center gap-2 group cursor-pointer focus:outline-none"
                   >
-                    <option value="">Global / All Branches</option>
-                    {branches.map(b => (
-                      <option key={b.id} value={b.id}>{b.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              <label className="flex items-center gap-2 text-sm text-body pb-2">
-                <input
-                  type="checkbox"
-                  checked={!!draft.meta.is_active}
-                  onChange={(e) => dispatch({ type: 'meta', patch: { is_active: e.target.checked } })}
-                />
-                Enabled
-              </label>
-            </div>
-            <div>
-              <label className="text-xs font-bold uppercase tracking-widest text-muted">Description (Optional)</label>
-              <textarea
-                className="w-full mt-1 px-3 py-2 bg-subtle rounded-xl text-sm outline-none resize-y min-h-[40px] max-h-[120px]"
-                value={draft.meta.description || ''}
-                onChange={(e) => dispatch({ type: 'meta', patch: { description: e.target.value } })}
-                placeholder="What does this automation do?"
-                rows={1}
-              />
-            </div>
+                    <div
+                      className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                        isActive
+                          ? 'bg-primary text-white ring-4 ring-primary/20'
+                          : isPast
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-slate-200 text-slate-600 group-hover:bg-slate-300'
+                      }`}
+                    >
+                      {isPast ? <CheckCircle2 size={15} /> : idx + 1}
+                    </div>
+                    <span
+                      className={`text-xs font-bold tracking-tight ${
+                        isActive ? 'text-primary' : isPast ? 'text-slate-700' : 'text-slate-400'
+                      }`}
+                    >
+                      {label}
+                    </span>
+                  </button>
+                  {idx < stepLabels.length - 1 && (
+                    <div className="flex-1 mx-4 h-0.5 bg-slate-200">
+                      <div
+                        className={`h-full transition-all duration-300 ${
+                          activeStep > idx ? 'bg-emerald-600 w-full' : 'w-0'
+                        }`}
+                      />
+                    </div>
+                  )}
+                </React.Fragment>
+              );
+            })}
           </div>
         </div>
 
-        <div className="px-6 pt-4 shrink-0">
-          <div className="flex items-center gap-4">
-            {stepper.map((s) => (
-              <div key={s.label} className="flex items-center gap-2">
-                <div
-                  className={`h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold ${
-                    s.status === 'done'
-                      ? 'bg-primary text-white'
-                      : s.status === 'active'
-                      ? 'bg-primary/10 text-primary border border-primary'
-                      : 'bg-border text-muted'
-                  }`}
-                >
-                  {s.idx + 1}
-                </div>
-                <div className={`text-sm ${s.status === 'active' ? 'font-bold text-heading' : 'text-muted'}`}>{s.label}</div>
+        {/* Error notification */}
+        {error && (
+          <div className="m-6 mb-0 p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-700 text-sm shrink-0">
+            <AlertCircle size={18} className="shrink-0 mt-0.5" />
+            <div className="flex-1 leading-snug">{error}</div>
+          </div>
+        )}
+
+        {/* Step Content */}
+        <div className="flex-1 overflow-y-auto p-6 min-h-0">
+          {/* STEP 0: Trigger & Scope */}
+          {activeStep === 0 && (
+            <div className="space-y-6 max-w-3xl mx-auto">
+              <div>
+                <h3 className="text-base font-bold text-heading">1. General Information & Trigger</h3>
+                <p className="text-xs text-muted mt-0.5">
+                  Name your automation and select the event that triggers it.
+                </p>
               </div>
-            ))}
-          </div>
+
+              <div className="space-y-4 bg-slate-50/50 p-5 rounded-2xl border border-brand-border">
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-xs font-bold uppercase tracking-wider text-muted">
+                      Automation Name <span className="text-rose-500">*</span>
+                    </label>
+                    <span className="text-[11px] text-muted">{formData.name.length}/160</span>
+                  </div>
+                  <input
+                    type="text"
+                    maxLength={160}
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    placeholder="e.g. Lead Follow-Up Sequence"
+                    className="w-full px-3.5 py-2.5 bg-white rounded-xl text-sm border border-brand-border outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                  />
+                  <p className="text-[11px] text-muted mt-1">
+                    Names beginning with <code className="bg-slate-200 px-1 py-0.5 rounded">notification:</code> are reserved.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-1">
+                    Description (Optional)
+                  </label>
+                  <textarea
+                    rows={2}
+                    maxLength={2000}
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    placeholder="Describe what this automation sequence is intended to do..."
+                    className="w-full px-3.5 py-2 bg-white rounded-xl text-sm border border-brand-border outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-1">
+                      Trigger Event <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      value={formData.event}
+                      onChange={(e) => setFormData({ ...formData, event: e.target.value })}
+                      className="w-full px-3.5 py-2.5 bg-white rounded-xl text-sm border border-brand-border outline-none focus:border-primary focus:ring-1 focus:ring-primary font-medium"
+                    >
+                      {events.length > 0 ? (
+                        events.map((ev) => (
+                          <option key={ev.event} value={ev.event}>
+                            {ev.event} ({ev.target}) {!ev.emitted ? '— [Not emitted yet]' : ''}
+                          </option>
+                        ))
+                      ) : (
+                        <>
+                          <option value="lead.created">lead.created (lead)</option>
+                          <option value="lead.converted">lead.converted (opportunity)</option>
+                          <option value="opportunity.booked">opportunity.booked (opportunity)</option>
+                          <option value="estimate.sent">estimate.sent (opportunity)</option>
+                          <option value="job.moving_day_reminder">job.moving_day_reminder (opportunity)</option>
+                        </>
+                      )}
+                    </select>
+
+                    {currentEventMeta && !currentEventMeta.emitted && (
+                      <div className="mt-2 text-xs bg-amber-50 text-amber-800 border border-amber-200 rounded-lg p-2 flex items-center gap-2">
+                        <AlertCircle size={14} className="shrink-0 text-amber-600" />
+                        <span>This event is accepted but not currently emitted by the application.</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-1">
+                      Branch Scope
+                    </label>
+                    <select
+                      value={formData.branch_id || ''}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          branch_id: e.target.value ? Number(e.target.value) : null,
+                        })
+                      }
+                      className="w-full px-3.5 py-2.5 bg-white rounded-xl text-sm border border-brand-border outline-none focus:border-primary focus:ring-1 focus:ring-primary font-medium"
+                    >
+                      <option value="">Company-Wide (All Branches)</option>
+                      {branches.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          Branch: {b.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-muted mt-1">
+                      {formData.branch_id
+                        ? 'Rule will only apply to the selected branch.'
+                        : 'Rule will apply across all branches in the company.'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <label className="flex items-center gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.is_active}
+                      onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+                      className="rounded border-slate-300 text-primary focus:ring-primary h-4 w-4"
+                    />
+                    <span className="text-sm font-semibold text-heading">Enable automation upon saving</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 1: Conditions */}
+          {activeStep === 1 && (
+            <div className="space-y-6 max-w-3xl mx-auto">
+              <div>
+                <h3 className="text-base font-bold text-heading">2. Conditions (Optional)</h3>
+                <p className="text-xs text-muted mt-0.5">
+                  Define matching rules to filter when this automation should execute. If left empty, it runs for every record of target <strong>{targetType}</strong>.
+                </p>
+              </div>
+
+              {/* ALL Group */}
+              <div className="p-5 bg-slate-50/60 rounded-2xl border border-brand-border space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wider text-heading flex items-center gap-1.5">
+                      <span className="px-2 py-0.5 bg-primary/10 text-primary rounded font-mono text-[11px]">ALL</span>
+                      <span>Must Match All Conditions (AND)</span>
+                    </div>
+                    <p className="text-xs text-muted mt-0.5">Every condition in this group must be satisfied.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => addConditionRule('all')}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-brand-border rounded-xl text-xs font-bold text-heading hover:bg-slate-100 transition-colors shadow-xs"
+                  >
+                    <Plus size={14} /> Add Rule
+                  </button>
+                </div>
+
+                {formData.conditions.all.length === 0 ? (
+                  <div className="text-xs text-muted py-2 text-center bg-white/60 rounded-xl border border-dashed border-slate-200">
+                    No "ALL" conditions defined.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {formData.conditions.all.map((rule, idx) => (
+                      <div key={idx} className="flex flex-wrap items-center gap-2 p-2.5 bg-white rounded-xl border border-brand-border">
+                        <input
+                          type="text"
+                          value={rule.field}
+                          onChange={(e) => updateConditionRule('all', idx, { field: e.target.value })}
+                          placeholder="e.g. lead.system_state"
+                          className="px-3 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border font-mono w-48"
+                        />
+                        <select
+                          value={rule.op}
+                          onChange={(e) => updateConditionRule('all', idx, { op: e.target.value })}
+                          className="px-2.5 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border"
+                        >
+                          {OPERATORS.map((op) => (
+                            <option key={op.value} value={op.value}>{op.label}</option>
+                          ))}
+                        </select>
+                        {rule.op !== 'is_set' && rule.op !== 'is_empty' && (
+                          <input
+                            type="text"
+                            value={Array.isArray(rule.value) ? rule.value.join(', ') : rule.value ?? ''}
+                            onChange={(e) => updateConditionRule('all', idx, { value: e.target.value })}
+                            placeholder={rule.op === 'in' || rule.op === 'not_in' ? 'item1, item2' : 'value'}
+                            className="px-3 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border flex-1 min-w-[120px]"
+                          />
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => removeConditionRule('all', idx)}
+                          className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* ANY Group */}
+              <div className="p-5 bg-slate-50/60 rounded-2xl border border-brand-border space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wider text-heading flex items-center gap-1.5">
+                      <span className="px-2 py-0.5 bg-amber-500/10 text-amber-700 rounded font-mono text-[11px]">ANY</span>
+                      <span>Match At Least One Condition (OR)</span>
+                    </div>
+                    <p className="text-xs text-muted mt-0.5">At least one condition in this group must be satisfied.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => addConditionRule('any')}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-brand-border rounded-xl text-xs font-bold text-heading hover:bg-slate-100 transition-colors shadow-xs"
+                  >
+                    <Plus size={14} /> Add Rule
+                  </button>
+                </div>
+
+                {formData.conditions.any.length === 0 ? (
+                  <div className="text-xs text-muted py-2 text-center bg-white/60 rounded-xl border border-dashed border-slate-200">
+                    No "ANY" conditions defined.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {formData.conditions.any.map((rule, idx) => (
+                      <div key={idx} className="flex flex-wrap items-center gap-2 p-2.5 bg-white rounded-xl border border-brand-border">
+                        <input
+                          type="text"
+                          value={rule.field}
+                          onChange={(e) => updateConditionRule('any', idx, { field: e.target.value })}
+                          placeholder="e.g. lead.source"
+                          className="px-3 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border font-mono w-48"
+                        />
+                        <select
+                          value={rule.op}
+                          onChange={(e) => updateConditionRule('any', idx, { op: e.target.value })}
+                          className="px-2.5 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border"
+                        >
+                          {OPERATORS.map((op) => (
+                            <option key={op.value} value={op.value}>{op.label}</option>
+                          ))}
+                        </select>
+                        {rule.op !== 'is_set' && rule.op !== 'is_empty' && (
+                          <input
+                            type="text"
+                            value={Array.isArray(rule.value) ? rule.value.join(', ') : rule.value ?? ''}
+                            onChange={(e) => updateConditionRule('any', idx, { value: e.target.value })}
+                            placeholder={rule.op === 'in' || rule.op === 'not_in' ? 'item1, item2' : 'value'}
+                            className="px-3 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border flex-1 min-w-[120px]"
+                          />
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => removeConditionRule('any', idx)}
+                          className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* STEP 2: Communication Steps */}
+          {activeStep === 2 && (
+            <div className="space-y-6 max-w-3xl mx-auto">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-heading">3. Communication Steps</h3>
+                  <p className="text-xs text-muted mt-0.5">
+                    Configure the message steps to send. Each step uses an active General template.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={addCommunicationStep}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-primary text-white rounded-xl text-xs font-bold hover:bg-[#003d2f] transition-all shadow-sm"
+                >
+                  <Plus size={15} /> Add Step
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {formData.steps.map((step, idx) => {
+                  const availableTemplates =
+                    step.channel === 'sms' ? generalSmsTemplates : generalEmailTemplates;
+
+                  return (
+                    <div
+                      key={idx}
+                      className="p-5 bg-slate-50/70 rounded-2xl border border-brand-border space-y-4 relative transition-all"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center">
+                            {idx + 1}
+                          </span>
+                          <span className="text-sm font-bold text-heading">
+                            Step {idx + 1}: Send {step.channel.toUpperCase()}
+                          </span>
+                          {step.delay_minutes === 0 ? (
+                            <span className="text-[11px] px-2 py-0.5 bg-emerald-50 text-emerald-700 font-semibold rounded-full border border-emerald-200">
+                              Immediate
+                            </span>
+                          ) : (
+                            <span className="text-[11px] px-2 py-0.5 bg-blue-50 text-blue-700 font-semibold rounded-full border border-blue-200">
+                              Wait {step.delay_value} {step.delay_unit}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            disabled={idx === 0}
+                            onClick={() => moveCommunicationStep(idx, idx - 1)}
+                            className="p-1.5 text-slate-400 hover:text-slate-600 disabled:opacity-30 rounded"
+                            title="Move Up"
+                          >
+                            <ArrowUp size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={idx === formData.steps.length - 1}
+                            onClick={() => moveCommunicationStep(idx, idx + 1)}
+                            className="p-1.5 text-slate-400 hover:text-slate-600 disabled:opacity-30 rounded"
+                            title="Move Down"
+                          >
+                            <ArrowDown size={15} />
+                          </button>
+                          {formData.steps.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => removeCommunicationStep(idx)}
+                              className="p-1.5 text-rose-500 hover:bg-rose-50 rounded"
+                              title="Delete Step"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-1">
+                        {/* Channel selector */}
+                        <div className="md:col-span-3">
+                          <label className="block text-[11px] font-bold uppercase tracking-wider text-muted mb-1">
+                            Channel
+                          </label>
+                          <select
+                            value={step.channel}
+                            onChange={(e) =>
+                              updateCommunicationStep(idx, {
+                                channel: e.target.value,
+                                template_id: '',
+                              })
+                            }
+                            className="w-full px-3 py-2 bg-white rounded-xl text-xs font-semibold border border-brand-border outline-none focus:border-primary"
+                          >
+                            <option value="email">Email</option>
+                            <option value="sms">SMS</option>
+                          </select>
+                        </div>
+
+                        {/* General Template selector */}
+                        <div className="md:col-span-5">
+                          <label className="block text-[11px] font-bold uppercase tracking-wider text-muted mb-1">
+                            General Template <span className="text-rose-500">*</span>
+                          </label>
+                          <select
+                            value={step.template_id}
+                            onChange={(e) => updateCommunicationStep(idx, { template_id: e.target.value })}
+                            className="w-full px-3 py-2 bg-white rounded-xl text-xs font-semibold border border-brand-border outline-none focus:border-primary"
+                          >
+                            <option value="">Select General Template...</option>
+                            {step.template_id && !availableTemplates.some((t) => String(t.id) === String(step.template_id)) && (
+                              <option value={step.template_id} disabled>
+                                {step.template_name || `Template #${step.template_id}`} (Inactive / Unavailable — Please change)
+                              </option>
+                            )}
+                            {availableTemplates.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Delay Timing */}
+                        <div className="md:col-span-4">
+                          <label className="block text-[11px] font-bold uppercase tracking-wider text-muted mb-1">
+                            Execution Delay
+                          </label>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="number"
+                              min={0}
+                              max={525600}
+                              value={step.delay_value}
+                              onChange={(e) =>
+                                updateCommunicationStep(idx, { delay_value: e.target.value })
+                              }
+                              className="w-20 px-2.5 py-2 bg-white rounded-xl text-xs font-semibold border border-brand-border outline-none focus:border-primary text-center"
+                            />
+                            <select
+                              value={step.delay_unit}
+                              onChange={(e) =>
+                                updateCommunicationStep(idx, { delay_unit: e.target.value })
+                              }
+                              className="px-2.5 py-2 bg-white rounded-xl text-xs font-semibold border border-brand-border outline-none focus:border-primary"
+                            >
+                              <option value="minutes">Minutes</option>
+                              <option value="hours">Hours</option>
+                              <option value="days">Days</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-200 text-xs text-muted">
+                        <span>
+                          Total delay: <strong>{step.delay_minutes} minutes</strong> ({Math.round(step.delay_minutes / 60 * 10) / 10} hours)
+                        </span>
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={step.is_active}
+                            onChange={(e) =>
+                              updateCommunicationStep(idx, { is_active: e.target.checked })
+                            }
+                            className="rounded border-slate-300 text-primary h-3.5 w-3.5"
+                          />
+                          <span>Step Active</span>
+                        </label>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* STEP 3: Review & Summary */}
+          {activeStep === 3 && (
+            <div className="space-y-6 max-w-3xl mx-auto">
+              <div>
+                <h3 className="text-base font-bold text-heading">4. Review Automation Configuration</h3>
+                <p className="text-xs text-muted mt-0.5">
+                  Confirm your settings before saving the custom automation.
+                </p>
+              </div>
+
+              <div className="bg-slate-50 p-5 rounded-2xl border border-brand-border space-y-5">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <span className="text-xs font-mono uppercase bg-primary/10 text-primary px-2 py-0.5 rounded font-bold">
+                      {formData.event}
+                    </span>
+                    <h4 className="text-lg font-bold text-heading mt-2">{formData.name || 'Untitled Automation'}</h4>
+                    {formData.description && (
+                      <p className="text-xs text-muted mt-1">{formData.description}</p>
+                    )}
+                  </div>
+                  <div className="text-right">
+                    <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${formData.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
+                      {formData.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                    <div className="text-xs text-muted mt-1">
+                      {formData.branch_id
+                        ? `Branch #${formData.branch_id}`
+                        : 'Company-Wide'}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-brand-border pt-4">
+                  <div className="text-xs font-bold uppercase tracking-wider text-muted mb-2">Conditions</div>
+                  {formData.conditions.all?.length === 0 && formData.conditions.any?.length === 0 ? (
+                    <p className="text-xs text-slate-500 italic">No conditions configured (executes on every event match).</p>
+                  ) : (
+                    <div className="space-y-2 text-xs">
+                      {formData.conditions.all?.length > 0 && (
+                        <div className="flex items-start gap-2">
+                          <span className="font-mono font-bold bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[10px]">ALL</span>
+                          <div className="space-y-1">
+                            {formData.conditions.all.map((c, i) => (
+                              <div key={i} className="font-mono text-slate-700">
+                                {c.field} {c.op} {c.value !== undefined ? String(c.value) : ''}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {formData.conditions.any?.length > 0 && (
+                        <div className="flex items-start gap-2">
+                          <span className="font-mono font-bold bg-amber-500/10 text-amber-700 px-1.5 py-0.5 rounded text-[10px]">ANY</span>
+                          <div className="space-y-1">
+                            {formData.conditions.any.map((c, i) => (
+                              <div key={i} className="font-mono text-slate-700">
+                                {c.field} {c.op} {c.value !== undefined ? String(c.value) : ''}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t border-brand-border pt-4">
+                  <div className="text-xs font-bold uppercase tracking-wider text-muted mb-3">Sequence Steps ({formData.steps.length})</div>
+                  <div className="relative pl-6 space-y-4 before:content-[''] before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
+                    {formData.steps.map((s, i) => {
+                      const tmpl = (s.channel === 'sms' ? generalSmsTemplates : generalEmailTemplates).find(
+                        (t) => String(t.id) === String(s.template_id)
+                      );
+
+                      return (
+                        <div key={i} className="relative flex items-center justify-between bg-white p-3 rounded-xl border border-brand-border text-xs">
+                          <div className="absolute -left-[27px] w-5 h-5 rounded-full bg-primary text-white text-[10px] font-bold flex items-center justify-center">
+                            {i + 1}
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="font-bold uppercase tracking-wider text-heading px-2 py-0.5 bg-slate-100 rounded">
+                              {s.channel}
+                            </span>
+                            <span className="font-semibold text-body">
+                              Template: <span className="text-heading font-bold">{tmpl?.name || `#${s.template_id}`}</span>
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-muted">
+                              {s.delay_minutes === 0 ? 'Immediately' : `+${s.delay_minutes} min delay`}
+                            </span>
+                            <span className={`w-2 h-2 rounded-full ${s.is_active ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
-        {error && <div className="px-6 pt-4 text-sm text-red-700 shrink-0">{error}</div>}
+        {/* Modal Footer */}
+        <div className="p-4 px-6 border-t border-brand-border flex items-center justify-between shrink-0 bg-slate-50/70">
+          <button
+            type="button"
+            disabled={activeStep === 0 || isSaving}
+            onClick={() => setActiveStep((s) => Math.max(0, s - 1))}
+            className="px-4 py-2 bg-white border border-brand-border text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-100 disabled:opacity-40 transition-colors shadow-xs"
+          >
+            Previous
+          </button>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-0 overflow-y-auto min-h-0 flex-1">
-          <div className="lg:col-span-8 p-6 flex flex-col min-h-0">
-            <StepCmp draft={draft} dispatch={dispatch} />
-            <div className="mt-6 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isSaving}
+              className="px-4 py-2 text-slate-600 hover:text-slate-800 rounded-xl text-sm font-semibold transition-colors"
+            >
+              Cancel
+            </button>
+            {activeStep < stepLabels.length - 1 ? (
               <button
                 type="button"
-                disabled={!canPrev || isSaving}
-                onClick={() => setActiveStep((s) => Math.max(0, s - 1))}
-                className="px-4 py-2 bg-border rounded-xl text-sm font-bold disabled:opacity-60"
+                onClick={() => setActiveStep((s) => Math.min(stepLabels.length - 1, s + 1))}
+                className="px-5 py-2 bg-primary text-white rounded-xl text-sm font-bold shadow-md hover:bg-[#003d2f] transition-all flex items-center gap-1.5"
               >
-                Previous
+                Next <ChevronRight size={16} />
               </button>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={save}
-                  disabled={isSaving || !String(draft.meta.name || '').trim()}
-                  className="px-4 py-2 bg-primary text-white rounded-xl text-sm font-bold disabled:opacity-60"
-                >
-                  {isSaving ? 'Saving…' : 'Save'}
-                </button>
-                <button
-                  type="button"
-                  disabled={!canNext || isSaving}
-                  onClick={() => setActiveStep((s) => Math.min(steps.length - 1, s + 1))}
-                  className="px-4 py-2 bg-border rounded-xl text-sm font-bold disabled:opacity-60"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          </div>
-          <div className="lg:col-span-4 p-6 border-l border-border bg-page lg:overflow-y-auto">
-            <LivePreviewPane draft={draft} />
+            ) : (
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={isSaving}
+                className="px-6 py-2 bg-primary text-white rounded-xl text-sm font-bold shadow-md hover:bg-[#003d2f] transition-all disabled:opacity-50"
+              >
+                {isSaving ? 'Saving...' : formData.id ? 'Update Automation' : 'Create Automation'}
+              </button>
+            )}
           </div>
         </div>
       </div>

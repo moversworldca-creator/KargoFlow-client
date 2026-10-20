@@ -741,7 +741,32 @@ export const createCommunicationTemplateCategory = (data) => api.post("/integrat
 export const updateCommunicationTemplateCategory = (id, data) => api.patch(`/integrations/communication-template-categories/${id}/`, data);
 export const deleteCommunicationTemplateCategory = (id) => api.delete(`/integrations/communication-template-categories/${id}/`);
 
-// Automations APIs
+// Tenant Communications Automations & Notifications APIs
+export const getBranchNotifications = (branchId) => api.get(`/tenant/communications/branch-settings/${branchId}/notifications/`);
+export const updateBranchNotification = (branchId, key, data) => api.put(`/tenant/communications/branch-settings/${branchId}/notifications/${key}/`, data);
+
+export const getNotificationTemplates = (params) => api.get("/tenant/communications/notification-templates/", { params });
+export const getNotificationTemplate = (id) => api.get(`/tenant/communications/notification-templates/${id}/`);
+export const createNotificationTemplate = (data) => api.post("/tenant/communications/notification-templates/", data);
+export const updateNotificationTemplate = (id, data) => api.patch(`/tenant/communications/notification-templates/${id}/`, data);
+export const deleteNotificationTemplate = (id) => api.delete(`/tenant/communications/notification-templates/${id}/`);
+
+export const getCustomAutomations = (params) => api.get("/tenant/communications/automations/", { params });
+export const getCustomAutomation = (id) => api.get(`/tenant/communications/automations/${id}/`);
+export const createCustomAutomation = (data) => api.post("/tenant/communications/automations/", data);
+export const updateCustomAutomation = (id, data) => api.patch(`/tenant/communications/automations/${id}/`, data);
+export const deactivateCustomAutomation = (id) => api.delete(`/tenant/communications/automations/${id}/`);
+export const getCustomAutomationEvents = () => api.get("/tenant/communications/automations/events/");
+export const getCustomAutomationRuns = (id) => api.get(`/tenant/communications/automations/${id}/runs/`);
+
+export const getGeneralTemplates = (params) => api.get("/tenant/communications/templates/", { params });
+export const getGeneralTemplate = (id) => api.get(`/tenant/communications/templates/${id}/`);
+export const getGeneralTemplateVariables = () => api.get("/tenant/communications/templates/variables/");
+export const createGeneralTemplate = (data) => api.post("/tenant/communications/templates/", data);
+export const updateGeneralTemplate = (id, data) => api.patch(`/tenant/communications/templates/${id}/`, data);
+export const deleteGeneralTemplate = (id) => api.delete(`/tenant/communications/templates/${id}/`);
+
+// Automations APIs (Legacy / Compatibility)
 export const getAutomationWorkflows = (params) => api.get("/automations/workflows/", { params });
 export const createAutomationWorkflow = (data) => api.post("/automations/workflows/", data);
 export const updateAutomationWorkflow = (id, data) => api.patch(`/automations/workflows/${id}/`, data);
