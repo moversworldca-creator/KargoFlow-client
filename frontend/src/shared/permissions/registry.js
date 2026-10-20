@@ -342,6 +342,8 @@ export const SETTINGS_TAB_PERMISSIONS = {
   // Pricing & Tariffs (backend keys; each action inside checks its own key).
   tariffs: ['pricing.view'],
   'pricing-skills': ['pricing.view'],
+  'pricing-calendars': ['pricing.view'],
+  'pricing-tests': ['pricing.view'],
   'contract-pricing': ['pricing.view'],
   'pricing-taxes': ['pricing.view'],
   'pricing-policy': ['pricing.view'],
