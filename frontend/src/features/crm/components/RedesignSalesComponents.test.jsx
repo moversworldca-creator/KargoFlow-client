@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { beforeAll, describe, it, expect, vi } from 'vitest';
-import { Timeline, CommsHub, CustomerCard, PlannedMoveCard } from './RedesignSalesComponents';
+import { Timeline, CommsHub, CustomerCard, PlannedMoveCard, RouteLogisticsCard } from './RedesignSalesComponents';
 
 beforeAll(() => {
   if (!globalThis.IntersectionObserver) {
@@ -18,6 +18,57 @@ describe('CustomerCard lead name', () => {
     render(<CustomerCard customerName="Grace Hopper" firstName="" lastName="" onInlineSave={vi.fn()} />);
     expect(screen.getByText('Grace')).toBeInTheDocument();
     expect(screen.getByText('Hopper')).toBeInTheDocument();
+  });
+});
+
+describe('RouteLogisticsCard addresses', () => {
+  it('renders partial addresses and updates origin and destination when props change', () => {
+    const { rerender } = render(
+      <RouteLogisticsCard
+        origin={{ city: 'Calgary', state: 'AB' }}
+        destination={{ address_line1: '20 Existing Road', city: 'Edmonton', state: 'AB' }}
+        routeStops={[
+          { id: 'origin', type: 'origin', address: '10 Cached Origin Street' },
+          { id: 'destination', type: 'destination', address: '20 Cached Destination Road' },
+        ]}
+      />
+    );
+
+    expect(screen.getByText('Calgary, AB')).toBeInTheDocument();
+    expect(screen.getByText('20 Existing Road')).toBeInTheDocument();
+
+    rerender(
+      <RouteLogisticsCard
+        origin={{ address_line1: '30 Updated Avenue', city: 'Calgary', state: 'AB' }}
+        destination={{ address_line1: '40 Updated Boulevard', city: 'Edmonton', state: 'AB' }}
+        routeStops={[
+          { id: 'origin', type: 'origin', address: '10 Cached Origin Street' },
+          { id: 'destination', type: 'destination', address: '20 Cached Destination Road' },
+        ]}
+      />
+    );
+
+    expect(screen.getByText('30 Updated Avenue')).toBeInTheDocument();
+    expect(screen.getByText('40 Updated Boulevard')).toBeInTheDocument();
+    expect(screen.queryByText('20 Existing Road')).not.toBeInTheDocument();
+    expect(screen.queryByText('10 Cached Origin Street')).not.toBeInTheDocument();
+    expect(screen.queryByText('20 Cached Destination Road')).not.toBeInTheDocument();
+  });
+
+  it('uses route-stop endpoints when the record addresses are empty', () => {
+    render(
+      <RouteLogisticsCard
+        origin={{}}
+        destination={{}}
+        routeStops={[
+          { id: 'origin', type: 'origin', address: '10 Route Stop Origin' },
+          { id: 'destination', type: 'destination', address: '20 Route Stop Destination' },
+        ]}
+      />
+    );
+
+    expect(screen.getByText('10 Route Stop Origin')).toBeInTheDocument();
+    expect(screen.getByText('20 Route Stop Destination')).toBeInTheDocument();
   });
 });
 

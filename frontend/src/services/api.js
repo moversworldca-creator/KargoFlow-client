@@ -394,6 +394,10 @@ export const getOpportunityPlannedSubJobs = (id) => api.get(`/tenant/opportuniti
 export const createOpportunityPlannedSubJob = (id, data) => api.post(`/tenant/opportunities/${id}/jobs/`, data);
 export const updateOpportunityPlannedSubJob = (opportunityId, subJobId, data) => api.patch(`/tenant/opportunities/${opportunityId}/jobs/${subJobId}/`, data);
 export const deleteOpportunityPlannedSubJob = (opportunityId, subJobId) => api.delete(`/tenant/opportunities/${opportunityId}/jobs/${subJobId}/`);
+export const createOpportunityJobStop = (opportunityId, jobId, data) =>
+  api.post(`/tenant/opportunities/${opportunityId}/jobs/${jobId}/stops/`, data);
+export const updateOpportunityJobStop = (opportunityId, jobId, stopId, data) =>
+  api.patch(`/tenant/opportunities/${opportunityId}/jobs/${jobId}/stops/${stopId}/`, data);
 export const deleteOpportunity = (id) => api.delete(`/sales/opportunities/${id}/`);
 export const startOpportunityWorking = (id) => api.post(`/sales/opportunities/${id}/start-working/`);
 export const markOpportunityEstimateCreated = (id) => api.post(`/sales/opportunities/${id}/mark-estimate-created/`);

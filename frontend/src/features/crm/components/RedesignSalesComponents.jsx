@@ -70,11 +70,11 @@ const stripTrailingUS = (str) => String(str || '').replace(/(?:,\s*(?:US|USA|Uni
 
 const formatAddressBlock = (address) => {
   const line1 = stripTrailingUS(normalizeDisplayText(address?.address_line1 || address?.street));
-  // const city = normalizeDisplayText(address?.city);
-  // const state = normalizeDisplayText(address?.state);
-  // const country = normalizeDisplayText(address?.country);
-  // const cleanCity = city.toLowerCase() === state.toLowerCase() ? '' : city;
-  // const locality = [cleanCity, state].filter(Boolean).join(', ');
+  const city = normalizeDisplayText(address?.city);
+  const state = normalizeDisplayText(address?.state);
+  const country = normalizeDisplayText(address?.country);
+  const cleanCity = city.toLowerCase() === state.toLowerCase() ? '' : city;
+  const locality = [cleanCity, state].filter(Boolean).join(', ');
 
   if (!line1) {
     return {
@@ -2299,12 +2299,21 @@ export function RouteLogisticsCard({
     .map((stop, index) => ({ stop, index }))
     .filter(({ stop }) => stop?.type !== 'origin' && stop?.type !== 'destination');
 
-  const originBlock = originStop
-    ? { line1: originStop.address || 'Origin not set', line2: originStop.subAddress || '' }
-    : formatAddressBlock(origin);
-  const destinationBlock = destinationStop
-    ? { line1: destinationStop.address || 'Destination not set', line2: destinationStop.subAddress || '' }
-    : formatAddressBlock(destination);
+  const originFromRecord = formatAddressBlock(origin);
+  const destinationFromRecord = formatAddressBlock(destination);
+  // The main record is updated by the route editor before a planned job's
+  // cached endpoint stops are refreshed. Prefer those current values so the
+  // card does not continue displaying the old origin and destination.
+  const originBlock = originFromRecord.line1
+    ? originFromRecord
+    : originStop
+      ? { line1: originStop.address || 'Origin not set', line2: originStop.subAddress || '' }
+      : { line1: 'Origin not set', line2: '' };
+  const destinationBlock = destinationFromRecord.line1
+    ? destinationFromRecord
+    : destinationStop
+      ? { line1: destinationStop.address || 'Destination not set', line2: destinationStop.subAddress || '' }
+      : { line1: 'Destination not set', line2: '' };
   const originAddress = [originBlock.line1, originBlock.line2].filter(Boolean).join(', ');
   const destinationAddress = [destinationBlock.line1, destinationBlock.line2].filter(Boolean).join(', ');
   const stopsCount = extraStops.length || (Array.isArray(stops) ? stops.length : 0);
