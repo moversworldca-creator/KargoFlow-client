@@ -310,6 +310,15 @@ export const getTimelineEvents = ({ entity_type, entity_id, limit = 20, before_i
 };
 export const sendRecordEmail = (entityType, entityId, data) => {
   const kind = entityType === 'opportunity' ? 'opportunities' : 'leads';
+  if (data.attachments?.length) {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(data)) {
+      if (value === undefined || value === null) continue;
+      if (Array.isArray(value)) value.forEach(item => form.append(key, item));
+      else form.append(key, value);
+    }
+    return api.post(`/tenant/${kind}/${entityId}/communications/email/`, form);
+  }
   return api.post(`/tenant/${kind}/${entityId}/communications/email/`, data);
 };
 export const sendRecordSms = (entityType, entityId, data) => api.post(`/tenant/${entityType === 'opportunity' ? 'opportunities' : 'leads'}/${entityId}/communications/sms/`, data);

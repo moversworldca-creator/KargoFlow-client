@@ -8160,10 +8160,8 @@ const SalesDetail = () => {
           const emailsTo = activityEmailToText.split(',').map(e => e.trim()).filter(Boolean);
           const emailsCc = activityEmailCcText.split(',').map(e => e.trim()).filter(Boolean);
           const emailsBcc = activityEmailBccText.split(',').map(e => e.trim()).filter(Boolean);
-          if (emailAttachments.length) {
-            return denyAction('Email attachments are not supported by the tenant communications API yet.');
-          }
           await sendRecordEmail('lead', opportunity.id, {
+            attachments: emailAttachments,
             to: emailsTo,
             cc: emailsCc,
             bcc: emailsBcc,
@@ -8209,10 +8207,8 @@ const SalesDetail = () => {
           const emailsTo = activityEmailToText.split(',').map(e => e.trim()).filter(Boolean);
           const emailsCc = activityEmailCcText.split(',').map(e => e.trim()).filter(Boolean);
           const emailsBcc = activityEmailBccText.split(',').map(e => e.trim()).filter(Boolean);
-          if (emailAttachments.length) {
-            return denyAction('Email attachments are not supported by the tenant communications API yet.');
-          }
           await sendRecordEmail('opportunity', opportunity.id, {
+            attachments: emailAttachments,
             to: emailsTo,
             cc: emailsCc,
             bcc: emailsBcc,

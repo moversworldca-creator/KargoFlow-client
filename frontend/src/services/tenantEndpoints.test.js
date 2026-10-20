@@ -74,6 +74,20 @@ it('sends opportunity email through the supported record communication route', a
   });
 });
 
+it('uploads attachments and recipient lists together as multipart email', async () => {
+  const file = new File(['pdf'], 'quote.pdf', { type: 'application/pdf' });
+  await sendRecordEmail('lead', 4, {
+    to: ['one@example.com', 'two@example.com'], cc: [], subject: 'Quote', include_signature: true,
+    attachments: [file],
+  });
+  const [url, form] = api.post.mock.calls[0];
+  expect(url).toBe('/tenant/leads/4/communications/email/');
+  expect(form).toBeInstanceOf(FormData);
+  expect(form.getAll('to')).toEqual(['one@example.com', 'two@example.com']);
+  expect(form.get('attachments')).toBe(file);
+  expect(form.get('include_signature')).toBe('true');
+});
+
 it('unwraps notification records for the header without dropping their fields', async () => {
   const notification = { id: 7, title: 'Update', message: 'Saved', read_at: null, created_at: '2026-10-13' };
   api.get.mockResolvedValue([{ id: 7, data: notification }]);
