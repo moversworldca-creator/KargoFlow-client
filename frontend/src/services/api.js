@@ -705,6 +705,7 @@ export const deleteCommunicationMailbox = (id) => api.delete(`/tenant/communicat
 export const getSmsNumbers = (params) => api.get("/tenant/communications/sms-numbers/", { params });
 export const getSmsNumberOrders = () => api.get("/tenant/communications/sms-numbers/orders/");
 export const searchSmsNumbers = (params) => api.get("/tenant/communications/sms-numbers/search/", { params });
+export const importSmsNumber = (data) => api.post("/tenant/communications/sms-numbers/import/", data);
 export const quoteSmsNumberOrder = (data) => api.post("/tenant/communications/sms-numbers/orders/", data);
 export const purchaseSmsNumberOrder = (orderId, data) =>
   api.post(`/tenant/communications/sms-numbers/orders/${orderId}/purchase/`, data);
