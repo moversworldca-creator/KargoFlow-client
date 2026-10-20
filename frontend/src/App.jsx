@@ -6,7 +6,7 @@ const Dashboard = React.lazy(() => import('./features/crm/pages/Dashboard'));
 const Sales = React.lazy(() => import('./features/crm/pages/Sales'));
 const SalesDetail = React.lazy(() => import('./features/crm/pages/SalesDetail'));
 const NewLeadPage = React.lazy(() => import('./features/crm/pages/NewLeadPage'));
-const EstimatePortalPage = React.lazy(() => import('./features/estimates/pages/EstimatePortalPage'));
+const EstimatePortalPage = React.lazy(() => import('./features/crm/pages/CustomerEstimatePortal'));
 const CustomerInventoryPortal = React.lazy(() => import('./features/crm/pages/CustomerInventoryPortal'));
 const CustomerContractPortal = React.lazy(() => import('./features/crm/pages/CustomerContractPortal'));
 const PublicLeadIntakePage = React.lazy(() => import('./features/crm/pages/PublicLeadIntakePage'));
@@ -40,7 +40,6 @@ import LoginPage from './features/auth/pages/LoginPage';
 import Profile from './features/auth/pages/Profile';
 const EstimateViewPlaywrightHarness = React.lazy(() => import('./features/crm/pages/EstimateViewPlaywrightHarness'));
 const DocumentTemplatesPlaywrightHarness = React.lazy(() => import('./features/settings/pages/DocumentTemplatesPlaywrightHarness'));
-const EstimatesPlaywrightHarness = React.lazy(() => import('./features/estimates/pages/EstimatesPlaywrightHarness'));
 import { useAuth } from './features/auth/context/AuthContext';
 import { ToastProvider } from './shared/context/ToastContext';
 import { Toaster } from 'sonner';
@@ -233,10 +232,6 @@ function App() {
           <Route
             path="/__playwright__/estimate-view"
             element={isPlaywrightHarnessEnabled ? <EstimateViewPlaywrightHarness /> : <Navigate to="/" replace />}
-          />
-          <Route
-            path="/__playwright__/estimates"
-            element={isPlaywrightHarnessEnabled ? <EstimatesPlaywrightHarness /> : <Navigate to="/" replace />}
           />
           <Route
             path="/__playwright__/document-templates"
