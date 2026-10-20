@@ -10,7 +10,10 @@ vi.mock('../../../shared/auth/useCan', async () => {
   const { canMock } = await import('./harness');
   return { default: () => canMock() };
 });
-vi.mock('../../../services/api', () => ({ getBranches: vi.fn(() => Promise.resolve([{ id: 11, name: 'Main' }])) }));
+vi.mock('../../../services/api', () => ({
+  getBranches: vi.fn(() => Promise.resolve([{ id: 11, name: 'Main' }])),
+  getEntitlementSnapshot: vi.fn(() => Promise.resolve({ features: {} })),
+}));
 vi.mock('../api', () => ({
   pricingApi: { listTariffs: vi.fn(), createTariff: vi.fn(), getTariff: vi.fn(), explainRun: vi.fn() },
   newIdempotencyKey: () => 'k',

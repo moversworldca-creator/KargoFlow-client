@@ -44,6 +44,7 @@ describe('RevisionWorkspace', () => {
     grant('pricing.view', 'pricing.update_draft', 'pricing.retire', 'pricing.rollback');
     show('published');
     expect(await screen.findByText('This revision is read-only')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: /All rules/ }));
     expect(screen.queryByRole('button', { name: /Add rule/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Edit rule/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Delete draft' })).not.toBeInTheDocument();
@@ -54,6 +55,7 @@ describe('RevisionWorkspace', () => {
   it('offers only the transitions the user holds', async () => {
     grant('pricing.view', 'pricing.update_draft');
     show('draft');
+    fireEvent.click(await screen.findByRole('tab', { name: /All rules/ }));
     expect(await screen.findByRole('button', { name: /Add rule/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Validate' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Submit for approval' })).not.toBeInTheDocument();
@@ -82,6 +84,7 @@ describe('RevisionWorkspace', () => {
   it('adds a rule to a draft with the revision lock version', async () => {
     grant('pricing.view', 'pricing.update_draft');
     show('draft');
+    fireEvent.click(await screen.findByRole('tab', { name: /All rules/ }));
     fireEvent.click(await screen.findByRole('button', { name: /Add rule/ }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText(/^Key/), { target: { value: 'fuel' } });

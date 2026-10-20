@@ -6,7 +6,7 @@
 // (pricing.view_cost).
 import React, { useState } from 'react';
 import { useExplain } from '../queries';
-import { decimalSign, formatDateOnly, formatMoney, humanize } from '../format';
+import { decimalSign, formatDateOnly, formatDateTime, formatMoney, humanize } from '../format';
 import { Badge, Button, Callout, LoadingState, Money, Tabs } from './ui';
 
 export function TotalsTable({ totals = {}, currency, constraint }) {
@@ -31,8 +31,31 @@ export function TotalsTable({ totals = {}, currency, constraint }) {
   );
 }
 
+// Customer-recognizable groups, in the order an estimate reads.
+const CATEGORY_GROUP = {
+  labor: 'Moving', transportation: 'Moving', storage: 'Moving', travel: 'Travel', fuel: 'Travel',
+  packing: 'Packing', material: 'Materials', accessorial: 'Accessorials', valuation: 'Valuation',
+  surcharge: 'Surcharges', minimum: 'Minimum charge', custom: 'Other',
+};
+const GROUP_ORDER = ['Moving', 'Travel', 'Packing', 'Materials', 'Accessorials', 'Valuation', 'Surcharges', 'Minimum charge', 'Other'];
+const groupOf = (charge) => CATEGORY_GROUP[charge.category] || 'Other';
+
+/** Charges -> [{key, title, rows}]: by job (plus shared Estimate charges) when there are several jobs, then by category. */
+export function groupCharges(charges = [], jobsById = {}) {
+  const jobIds = [...new Set(charges.filter((c) => c.scope !== 'estimate').map((c) => c.job_id))];
+  const sections = jobIds.length > 1
+    ? [...jobIds.map((id) => ({ key: `job-${id}`, title: jobsById[id] || `Job ${id}`, rows: charges.filter((c) => c.scope !== 'estimate' && c.job_id === id) })),
+      { key: 'shared', title: 'Shared (whole Estimate)', rows: charges.filter((c) => c.scope === 'estimate') }]
+    : [{ key: 'all', title: '', rows: charges }];
+  return sections.filter((s) => s.rows.length).map((section) => ({
+    ...section,
+    groups: GROUP_ORDER.map((title) => ({ title, rows: section.rows.filter((c) => groupOf(c) === title) })).filter((g) => g.rows.length),
+  }));
+}
+
 export function ChargesTable({ charges = [], currency, jobsById = {}, showCost = false, onExplainLine }) {
   if (!charges.length) return <p className="text-xs text-slate-500">No charges.</p>;
+  const columns = showCost ? 7 : 6;
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[640px] text-left text-xs">
@@ -48,8 +71,13 @@ export function ChargesTable({ charges = [], currency, jobsById = {}, showCost =
             <th scope="col" className="py-1.5">Source</th>
           </tr>
         </thead>
-        <tbody>
-          {charges.map((charge) => (
+        {groupCharges(charges, jobsById).map((section) => (
+        <tbody key={section.key}>
+          {section.title && <tr><th scope="rowgroup" colSpan={columns} className="bg-slate-100 px-2 py-1 text-left text-[11px] font-bold uppercase tracking-wide dark:bg-slate-800">{section.title}</th></tr>}
+          {section.groups.map((group) => (
+          <React.Fragment key={group.title}>
+          <tr><th scope="rowgroup" colSpan={columns} className="pt-2 text-left text-[11px] font-semibold text-slate-500">{group.title}</th></tr>
+          {group.rows.map((charge) => (
             <tr key={`${charge.charge_key}-${charge.job_id}`} className={`border-b border-slate-100 last:border-0 ${charge.excluded ? 'text-slate-400 line-through' : ''}`}>
               <td className="py-1.5 pr-2">
                 <span className="font-semibold">{charge.name}</span>
@@ -72,7 +100,10 @@ export function ChargesTable({ charges = [], currency, jobsById = {}, showCost =
               </td>
             </tr>
           ))}
+          </React.Fragment>
+          ))}
         </tbody>
+        ))}
       </table>
     </div>
   );
@@ -138,10 +169,67 @@ export function ExplainView({ explanation, focusKey, jobsById = {} }) {
   );
 }
 
+const MARGIN_LABEL = {
+  ok: ['Healthy', 'green'], below_target: ['Below target', 'amber'], below_minimum: ['Approval required', 'amber'],
+  below_hard_floor: ['Hard floor violation', 'red'], not_evaluated: ['Not evaluated', 'slate'],
+};
+
+export function MarginBadge({ status }) {
+  const [label, tone] = MARGIN_LABEL[status] || [humanize(status), 'slate'];
+  return <Badge tone={tone}>{label}</Badge>;
+}
+
+/** Run header: identity of the immutable calculation evidence. */
+export function RunMeta({ run }) {
+  if (!run || run.persisted === false) return null;
+  return (
+    <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-600 sm:grid-cols-4">
+      <div><dt className="font-semibold">Calculation run</dt><dd>#{run.id}{run.is_finalized ? ' (final)' : ''}</dd></div>
+      <div><dt className="font-semibold">Calculated</dt><dd>{formatDateTime(run.calculated_at)}{run.calculated_by_id ? ` by user #${run.calculated_by_id}` : ''}</dd></div>
+      <div><dt className="font-semibold">Context</dt><dd>{humanize(run.context)}</dd></div>
+      <div><dt className="font-semibold">Effective date</dt><dd>{formatDateOnly(run.pricing_effective_date)} ({humanize(run.effective_date_basis)})</dd></div>
+      <div className="col-span-2"><dt className="font-semibold">Input hash</dt><dd className="truncate font-mono">{run.input_hash}</dd></div>
+      <div><dt className="font-semibold">Engine</dt><dd>{run.pricing_engine_version}</dd></div>
+      <div><dt className="font-semibold">Formula language</dt><dd>{run.pricing_dsl_version}</dd></div>
+    </dl>
+  );
+}
+
+function EvidenceBlock({ title, data }) {
+  const empty = data == null || (Array.isArray(data) ? !data.length : typeof data === 'object' && !Object.keys(data).length);
+  return (
+    <details className="rounded-lg border border-slate-200 px-3 py-2">
+      <summary className="cursor-pointer text-xs font-semibold">{title}{empty && <span className="font-normal text-slate-500"> (none)</span>}</summary>
+      {!empty && <pre className="mt-2 max-h-72 overflow-auto rounded bg-slate-50 p-2 text-[11px] dark:bg-slate-800">{JSON.stringify(data, null, 2)}</pre>}
+    </details>
+  );
+}
+
+/** Read-only evidence of an immutable run, for authorized staff. */
+function RunEvidence({ run, explanation }) {
+  const trace = explanation || {};
+  return (
+    <div className="space-y-1.5" aria-label="Calculation evidence">
+      <p className="text-[11px] text-slate-500">Stored exactly as calculated. A calculation run cannot be changed.</p>
+      <EvidenceBlock title="Inputs" data={run.inputs} />
+      <EvidenceBlock title="Resources (crew, trucks, hours)" data={run.resources} />
+      <EvidenceBlock title="Rules evaluated" data={trace.rule_evaluation} />
+      <EvidenceBlock title="Rate cells used" data={(run.charges || []).filter((c) => c.source?.rate_cell_key).map((c) => ({ charge: c.name, table: c.source.rate_table_key, cell: c.source.rate_cell_key }))} />
+      <EvidenceBlock title="Charges" data={run.charges} />
+      <EvidenceBlock title="Adjustments" data={run.adjustments} />
+      <EvidenceBlock title="Tax" data={run.taxes} />
+      <EvidenceBlock title="Deposit" data={run.deposit} />
+      <EvidenceBlock title="External inputs" data={run.external_inputs || trace.external_inputs} />
+      <EvidenceBlock title="Tariff resolution trace" data={trace.why_this_tariff} />
+      <EvidenceBlock title="Order of authority" data={run.authority_trace} />
+    </div>
+  );
+}
+
 export default function RunViewer({ run, explanation: inlineExplanation, jobsById = {}, compact = false }) {
   const [tab, setTab] = useState('charges');
   const [focus, setFocus] = useState(null);
-  const explain = useExplain((run ? run.persisted : undefined) === false ? null : (run ? run.id : undefined), tab === 'why');
+  const explain = useExplain(run && run.persisted !== false ? run.id : null, tab === 'why' || tab === 'evidence');
   if (!run) return null;
   const explanation = inlineExplanation || explain.data;
   const currency = run.currency;
@@ -153,14 +241,17 @@ export default function RunViewer({ run, explanation: inlineExplanation, jobsByI
     ...(run.adjustments?.length ? [{ id: 'adjustments', label: 'Adjustments', count: run.adjustments.length }] : []),
     ...(run.taxes?.length ? [{ id: 'taxes', label: 'Taxes', count: run.taxes.length }] : []),
     ...(run.cost ? [{ id: 'margin', label: 'Cost & margin' }] : []),
+    ...(run.inputs || run.persisted === false ? [{ id: 'evidence', label: 'Evidence' }] : []),
   ];
 
   return (
     <div className="space-y-3">
+      {!compact && <RunMeta run={run} />}
       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
         {jobs.map((job) => (
           <span key={job.job_id ?? 'job'} className="rounded-full bg-slate-100 px-2 py-0.5">
             {jobsById[job.job_id] || `Job ${job.job_id ?? ''}`}: {job.catalog_key} r{job.revision_number} · {humanize(job.pricing_method)} · {formatDateOnly(job.effective_date)}
+            {job.overlay && <Badge tone="blue">Contract pricing: {typeof job.overlay === 'string' ? job.overlay : job.overlay.overlay_key || job.overlay.name}</Badge>}
           </span>
         ))}
         {run.id && run.persisted !== false && <span>Run #{run.id}</span>}
@@ -203,12 +294,13 @@ export default function RunViewer({ run, explanation: inlineExplanation, jobsByI
           ))}
         </ul>
       )}
+      {tab === 'evidence' && <RunEvidence run={run} explanation={explanation} />}
       {tab === 'margin' && run.cost && (
         <dl className="grid max-w-md grid-cols-2 gap-2 text-xs">
           <dt className="text-slate-600">Internal cost</dt><dd><Money value={run.cost.internal_cost_total} currency={currency} /></dd>
           <dt className="text-slate-600">Gross profit</dt><dd><Money value={run.cost.gross_profit} currency={currency} /></dd>
           <dt className="text-slate-600">Gross margin</dt><dd>{run.cost.gross_margin_pct != null ? `${run.cost.gross_margin_pct}%` : '—'}</dd>
-          <dt className="text-slate-600">Margin status</dt><dd>{humanize(run.cost.margin_status)}</dd>
+          <dt className="text-slate-600">Margin status</dt><dd><MarginBadge status={run.cost.margin_status} /></dd>
         </dl>
       )}
       <TotalsTable totals={run.totals} currency={currency} constraint={run.constraint} />

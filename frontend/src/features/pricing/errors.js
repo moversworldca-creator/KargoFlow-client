@@ -26,6 +26,20 @@ const CODE_MESSAGES = {
   OPPORTUNITY_NOT_BOOKED: 'Change Orders apply only after the Opportunity is booked.',
   ESTIMATE_EXPIRED: 'This Estimate has expired. Revise it and send it again.',
   NTE_SCOPE_CHANGE_REQUIRES_WORKFLOW: 'A Not-to-Exceed amount changes only through a Change Order.',
+  INVALID_PRICING_CONSTRAINT: 'The price constraint is not valid (for example a range whose minimum is above its maximum).',
+  PRICING_APPROVAL_REQUIRED: 'This price needs approval before it can be used. Ask an approver to review it.',
+  MARGIN_APPROVAL_REQUIRED: 'The margin is below the company minimum. A manager must approve this price.',
+  MARGIN_HARD_FLOOR: 'The margin is below the hard floor. This price cannot be used without an exception.',
+  RULE_CONFLICT: 'Two rules that may not both apply matched this job. Check their conditions or stacking.',
+  FORMULA_ERROR: 'A formula or condition could not be evaluated. Check it in the Tariff revision.',
+  INVALID_UNIT: 'A unit of measure is not supported or cannot be converted.',
+  UNKNOWN_PRICING_SKILL: 'The crew uses a pricing skill that does not exist.',
+  INACTIVE_PRICING_SKILL: 'The crew uses a pricing skill that has been deactivated.',
+  INVALID_PRICING_INPUT: 'Some pricing inputs are missing or invalid.',
+  INVALID_ESTIMATE_STATE: 'The Estimate is not in a state that allows this action. Reload to see its current state.',
+  INVALID_CHANGE_ORDER_STATE: 'The Change Order is not in a state that allows this action. Reload to see its current state.',
+  INVALID_ACCEPTANCE: 'The acceptance details are incomplete. Check the method, name and evidence.',
+  INVALID_ESTIMATE_INPUT: 'Some Estimate details are missing or invalid.',
 };
 
 /** { kind, status, code, message, detail, details } for any failed request. */

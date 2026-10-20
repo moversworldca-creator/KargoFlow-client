@@ -155,7 +155,7 @@ function toRows(table, dims) {
   }));
 }
 
-function MatrixDialog({ table, dims, revision, editable, onClose, onSaved }) {
+export function MatrixDialog({ table, dims, revision, editable, onClose, onSaved }) {
   const [rows, setRows] = useState(() => toRows(table, dims));
   const [issues, setIssues] = useState(null);
   const [view, setView] = useState('rows');

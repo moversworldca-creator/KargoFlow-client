@@ -32,13 +32,13 @@ export function PolicySettings() {
     ? { ...Object.fromEntries(POLICY_FIELDS.map((k) => [k, policy.data[k] ?? ''])), ...edits }
     : null;
   const save = useAction(() => pricingApi.savePolicy(Object.fromEntries(Object.entries(form).map(([k, v]) => [k, v === '' ? null : v]))), {
-    success: 'Pricing policy saved.', invalidate: () => invalidate(pricingKeys.policy()),
+    success: 'Pricing settings saved.', invalidate: () => invalidate(pricingKeys.policy()),
   });
   const editable = can(PRICING.PUBLISH);
   const set = (patch) => setEdits({ ...edits, ...patch });
   return (
-    <Section title="Pricing policy" description="Company-wide rules for how Tariffs are released and how prices are checked."
-      actions={editable && form && <Button onClick={() => save.run()} busy={save.busy}>Save policy</Button>}>
+    <Section title="Pricing settings" description="Company-wide rules for how Tariffs are released and how prices are checked."
+      actions={editable && form && <Button onClick={() => save.run()} busy={save.busy}>Save settings</Button>}>
       <QueryState query={policy}>
         {form && (
           <fieldset disabled={!editable} className="space-y-4">

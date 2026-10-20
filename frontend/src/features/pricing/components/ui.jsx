@@ -1,6 +1,6 @@
 // Building blocks shared by the Pricing and Estimates screens. The accessible
 // dialog, field and state primitives are the User Management ones, reused.
-import React, { useCallback, useId, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, Info } from 'lucide-react';
 import { useToast } from '../../../shared/context/ToastContext';
@@ -216,9 +216,15 @@ export function QueryState({ query, empty, emptyText = 'Nothing here yet.', deni
 }
 
 /** Issues from validation (severity, code, message, object). */
-export function IssueList({ issues }) {
+export function IssueList({ issues, onOpen }) {
   if (!issues?.length) return <Callout tone="success">No validation issues.</Callout>;
+  const count = (severity) => issues.filter((i) => i.severity === severity).length;
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
   return (
+    <>
+    <p className="mb-2 text-xs font-semibold text-slate-700" role="status">
+      {plural(count('error'), 'error')} · {plural(count('warning'), 'warning')} · {plural(count('info'), 'note')}
+    </p>
     <ul className="space-y-1.5" aria-label="Validation issues">
       {issues.map((issue, index) => (
         <li key={`${issue.code}-${issue.object_key}-${index}`} className="flex flex-wrap items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs dark:border-slate-800">
@@ -226,8 +232,37 @@ export function IssueList({ issues }) {
           <code className="text-[11px] text-slate-500">{issue.code}</code>
           <span className="min-w-0 flex-1 text-slate-800 dark:text-slate-100">{issue.message}</span>
           {issue.object_key && <span className="text-[11px] text-slate-500">{humanize(issue.object_type)}: {issue.object_key}</span>}
+          {onOpen && issue.object_type && <button type="button" className="text-[11px] font-semibold text-primary" onClick={() => onOpen(issue)}>Go to {humanize(issue.object_type)}</button>}
         </li>
       ))}
     </ul>
+    </>
   );
+}
+
+/**
+ * Plan gate for Estimates / Pricing. Shows why the area is unavailable or
+ * read-only when the plan can be read; renders the children otherwise.
+ */
+export function PlanGate({ feature, children }) {
+  if (feature && !['write', 'read'].includes(feature.mode)) {
+    return <DeniedState title="Not included in your plan">Estimates and pricing are not part of your company&apos;s current subscription.</DeniedState>;
+  }
+  return (
+    <>
+      {feature?.readOnly && <Callout tone="warning" title="Read-only">Your subscription allows viewing only. Changes are disabled.</Callout>}
+      {children}
+    </>
+  );
+}
+
+
+/** Warn before the browser tab closes or reloads while material edits are unsaved. */
+export function useUnsavedChanges(dirty) {
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const warn = (event) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
 }

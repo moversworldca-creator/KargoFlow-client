@@ -2,6 +2,7 @@
 // screens read what is true now; every mutation invalidates what it changed.
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
+import { getEntitlementSnapshot } from '../../services/api';
 import { pricingApi } from './api';
 
 export const pricingKeys = {
@@ -46,7 +47,7 @@ export const useEmployeeSkills = (employeeId) => useQuery({
 export const useOverlays = (params) => useQuery({
   queryKey: pricingKeys.overlays(params), queryFn: async () => list(await pricingApi.listOverlays(params)), ...fresh,
 });
-export const usePolicy = () => useQuery({ queryKey: pricingKeys.policy(), queryFn: pricingApi.getPolicy, ...fresh });
+export const usePolicy = (enabled = true) => useQuery({ queryKey: pricingKeys.policy(), queryFn: pricingApi.getPolicy, enabled, ...fresh });
 export const useTaxComponents = (profileId) => useQuery({
   queryKey: pricingKeys.taxComponents(profileId), queryFn: () => pricingApi.taxComponents(profileId),
   enabled: Boolean(profileId), ...fresh,
@@ -80,4 +81,20 @@ export function useInvalidatePricing() {
     if (!keys.length) return client.invalidateQueries({ queryKey: pricingKeys.all });
     return Promise.all(keys.map((queryKey) => client.invalidateQueries({ queryKey })));
   }, [client]);
+}
+
+/**
+ * Access to the Estimates / Pricing feature (SaaS entitlement "crm.estimates").
+ * Returns null when the plan cannot be read (no entitlements.view): then the
+ * backend's own answer to each request decides. Never a plan name.
+ */
+export const ESTIMATES_FEATURE = 'crm.estimates';
+export function useEstimatesFeature(canReadPlan) {
+  const query = useQuery({
+    queryKey: ['user-admin', 'entitlements'], queryFn: getEntitlementSnapshot, enabled: Boolean(canReadPlan),
+    staleTime: 60 * 1000, retry: false,
+  });
+  if (!canReadPlan || !query.data) return null;
+  const mode = query.data.features?.[ESTIMATES_FEATURE];
+  return { mode: mode ?? 'none', readOnly: ['read_only', 'blocked'].includes(query.data.access_mode) || mode === 'read' };
 }

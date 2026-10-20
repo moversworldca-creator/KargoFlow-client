@@ -2,6 +2,15 @@
 // Used only to offer valid choices; the backend validates every value again.
 export const PRICING_METHODS = ['hourly', 'flat', 'weight', 'volume', 'distance', 'hybrid'];
 export const TARIFF_STATES = ['active', 'inactive', 'archived'];
+export const REVISION_STATES = ['draft', 'validated', 'pending_approval', 'approved', 'scheduled', 'published', 'retired', 'rejected'];
+export const METHOD_HELP = {
+  hourly: 'Best for local moves priced by crew and truck hours.',
+  flat: 'One fixed price for a defined service.',
+  weight: 'Common for long-distance moves, priced by pounds or CWT.',
+  volume: 'Priced by cubic feet or cubic meters of goods.',
+  distance: 'Priced by miles or kilometers, bands or zones.',
+  hybrid: 'Combines several pricing methods (for example labor plus line-haul by weight).',
+};
 export const RULE_TYPES = ['labor', 'transportation', 'travel', 'packing', 'material', 'storage', 'fuel', 'minimum',
   'surcharge', 'discount', 'valuation', 'accessorial', 'tax', 'deposit', 'custom'];
 export const CALCULATION_TYPES = ['flat', 'hourly', 'quantity', 'distance', 'weight', 'volume', 'percentage', 'formula'];

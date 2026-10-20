@@ -5,6 +5,7 @@ import {
   BadgeDollarSign,
   Boxes,
   Calculator,
+  CalendarDays,
   FlaskConical,
   Gavel,
   Building2,
@@ -60,6 +61,7 @@ import ApprovalsQueue from "../../pricing/components/ApprovalsQueue";
 import OverlaysSettings from "../../pricing/components/OverlaysSettings";
 import { PolicySettings, TaxSettings } from "../../pricing/components/PolicyAndTaxSettings";
 import PriceSimulatorPage from "../../pricing/components/PriceSimulatorPage";
+import { PricingCalendarsPage, PricingTestsPage } from "../../pricing/components/CompanyPricingPages";
 import SkillsSettings from "../../pricing/components/SkillsSettings";
 import TariffsPage from "../../pricing/components/TariffsPage";
 
@@ -167,9 +169,11 @@ const SETTINGS_GROUPS = [
     tabs: [
       { id: "tariffs", label: "Tariffs", description: "Tariffs, revisions, rules and rate matrices.", icon: Calculator, render: () => <TariffsPage /> },
       { id: "pricing-skills", label: "Pricing Skills", description: "Crew skills that rates can depend on.", icon: Wrench, render: () => <SkillsSettings /> },
+      { id: "pricing-calendars", label: "Pricing Calendars", description: "Weekend, seasonal, holiday and blackout pricing across Tariffs.", icon: CalendarDays, render: () => <PricingCalendarsPage /> },
       { id: "contract-pricing", label: "Contract Pricing", description: "Customer and contract overlays.", icon: FileSignature, render: () => <OverlaysSettings /> },
+      { id: "pricing-tests", label: "Pricing Tests", description: "Regression tests of every Tariff; run them all.", icon: ListChecks, render: () => <PricingTestsPage /> },
+      { id: "pricing-policy", label: "Pricing Settings", description: "Revision workflow, approvals and margin policy.", icon: Gavel, render: () => <PolicySettings /> },
       { id: "pricing-taxes", label: "Pricing Taxes", description: "Tax components and customer exemptions.", icon: CreditCard, render: (branchId) => <TaxSettings branchId={branchId} /> },
-      { id: "pricing-policy", label: "Pricing Policy", description: "Revision workflow, approvals and margin policy.", icon: Gavel, render: () => <PolicySettings /> },
       { id: "pricing-approvals", label: "Pricing Approvals", description: "Discounts and overrides waiting for a decision.", icon: ShieldCheck, render: () => <ApprovalsQueue /> },
       { id: "price-simulator", label: "Price Simulator", description: "Price a hypothetical job.", icon: FlaskConical, render: () => <PriceSimulatorPage /> },
     ],

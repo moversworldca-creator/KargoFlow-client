@@ -58,3 +58,5 @@ export const CONSTRAINT_PERMISSION = Object.freeze({
 
 // Settings tabs: "any" of these opens the tab.
 export const PRICING_SETTINGS_ACCESS = [PRICING.VIEW];
+// Reading the plan (SaaS entitlements) is its own permission.
+export const ENTITLEMENTS_VIEW = 'entitlements.view';

@@ -11,7 +11,9 @@ import {
   PRICING_MODELS_BY_TYPE, RULE_TYPES, STACKING_BEHAVIORS, TAX_CLASSIFICATIONS,
 } from '../constants';
 import { humanize } from '../format';
+import ConditionBuilder from './ConditionBuilder';
 import FormulaField from './FormulaField';
+import { describeCondition } from '../conditions';
 import {
   Badge, Button, CheckboxField, ConfirmDialog, DecimalField, Dialog, EmptyState, ErrorBanner, SelectField, TextField,
   useAction,
@@ -27,7 +29,7 @@ const BLANK = {
 };
 const CATEGORY_OPTIONS = ['labor', 'transportation', 'travel', 'packing', 'material', 'storage', 'fuel', 'valuation', 'accessorial', 'surcharge', 'custom'];
 
-function fromRule(rule) {
+export function fromRule(rule) {
   const text = (v) => (v === null || v === undefined ? '' : String(v));
   return {
     ...BLANK, ...Object.fromEntries(Object.keys(BLANK).map((k) => [k, rule[k] ?? BLANK[k]])),
@@ -113,7 +115,7 @@ export default function RulesEditor({ revision, editable, onChanged }) {
                   <td className="py-2 pr-3">{humanize(rule.rule_type)}</td>
                   <td className="py-2 pr-3">{humanize(rule.calculation_phase)}</td>
                   <td className="py-2 pr-3">{describeRule(rule)}</td>
-                  <td className="py-2 pr-3"><code className="text-[11px]">{rule.condition_expression?.expr || 'Always'}</code></td>
+                  <td className="py-2 pr-3">{describeCondition(rule.condition_expression)}</td>
                   <td className="py-2 pr-3 tabular-nums">{rule.priority}</td>
                   <td className="py-2 text-right">
                     {editable ? (
@@ -146,7 +148,7 @@ export default function RulesEditor({ revision, editable, onChanged }) {
   );
 }
 
-function RuleDialog({ initial, ruleId, tables, revision, readOnly, onClose, onSaved }) {
+export function RuleDialog({ initial, ruleId, tables, revision, readOnly, onClose, onSaved }) {
   const [form, setForm] = useState(initial);
   const [errors, setErrors] = useState({});
   const set = (patch) => setForm((prev) => ({ ...prev, ...patch }));
@@ -234,8 +236,7 @@ function RuleDialog({ initial, ruleId, tables, revision, readOnly, onClose, onSa
           <FormulaField label="Formula" value={form.formula_expression} onChange={(v) => set({ formula_expression: v })} error={errors.formula_expression}
             issues={issues.filter((i) => i.code === 'FORMULA_ERROR')} tables={tables} readOnly={readOnly} />
         )}
-        <FormulaField label="Applies when (condition)" value={form.condition} onChange={(v) => set({ condition: v })}
-          hint="Leave empty to always apply. Example: is_weekend and crew_size >= 3" condition tables={tables} readOnly={readOnly} />
+        <ConditionBuilder value={form.condition} onChange={(v) => set({ condition: v })} disabled={readOnly} />
 
         <div className="grid gap-3 sm:grid-cols-3">
           <TextField label="Priority" value={form.priority} inputMode="numeric" onChange={(v) => set({ priority: v.replace(/\D/g, '') })} hint="Lower runs first within a phase." />

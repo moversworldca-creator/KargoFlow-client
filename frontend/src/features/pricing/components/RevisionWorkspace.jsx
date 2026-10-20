@@ -16,6 +16,10 @@ import ConstraintsEditor from './ConstraintsEditor';
 import RateTablesEditor from './RateTablesEditor';
 import RevisionDiff from './RevisionDiff';
 import RulesEditor from './RulesEditor';
+import {
+  AccessorialsSection, AdjustmentsSection, CalendarSection, LaborSection, PackingMaterialsSection, TaxDepositSection,
+  TransportSection, TravelSection, sectionForRule,
+} from './RevisionSections';
 import ScenariosPanel from './ScenariosPanel';
 import SimulationPanel from './SimulationPanel';
 import {
@@ -52,7 +56,7 @@ function RevisionView({ revisionId, revision, tariff, revisions, onOpenRevision,
   const { can } = useCan();
   const policy = usePolicy();
   const invalidate = useInvalidatePricing();
-  const [tab, setTab] = useState('rules');
+  const [tab, setTab] = useState('labor');
   const [pending, setPending] = useState(null);
   const [reason, setReason] = useState('');
   const [validation, setValidation] = useState(null);
@@ -97,7 +101,15 @@ function RevisionView({ revisionId, revision, tariff, revisions, onOpenRevision,
   const issues = validation?.issues || (revision ? revision.validation : undefined) || [];
 
   const tabs = [
-    { id: 'rules', label: 'Rules', count: content.rules?.length },
+    { id: 'labor', label: 'Labor' },
+    { id: 'travel', label: 'Travel' },
+    { id: 'transport', label: 'Weight / Volume / Distance' },
+    { id: 'packing', label: 'Packing & Materials' },
+    { id: 'accessorials', label: 'Accessorials' },
+    { id: 'adjustments', label: 'Adjustments' },
+    { id: 'calendar', label: 'Calendar' },
+    { id: 'taxes', label: 'Taxes & Deposit' },
+    { id: 'rules', label: 'All rules', count: content.rules?.length },
     { id: 'rates', label: 'Rate tables', count: content.rate_tables?.length },
     { id: 'applicability', label: 'Applicability', count: content.applicability?.length },
     { id: 'constraints', label: 'Constraints', count: content.constraints?.length },
@@ -148,6 +160,14 @@ function RevisionView({ revisionId, revision, tariff, revisions, onOpenRevision,
             ]} />
             <Tabs tabs={tabs} active={tab} onChange={setTab} label="Revision content" />
             <div role="tabpanel" aria-label={tabs.find((t) => t.id === tab)?.label}>
+              {tab === 'labor' && <LaborSection revision={revision} editable={editable} onChanged={refresh} />}
+              {tab === 'travel' && <TravelSection key={revision.lock_version} revision={revision} editable={editable} onChanged={refresh} />}
+              {tab === 'transport' && <TransportSection revision={revision} editable={editable} onChanged={refresh} />}
+              {tab === 'packing' && <PackingMaterialsSection revision={revision} editable={editable} onChanged={refresh} />}
+              {tab === 'accessorials' && <AccessorialsSection revision={revision} editable={editable} onChanged={refresh} />}
+              {tab === 'adjustments' && <AdjustmentsSection revision={revision} editable={editable} onChanged={refresh} />}
+              {tab === 'calendar' && <CalendarSection revision={revision} editable={editable} onChanged={refresh} />}
+              {tab === 'taxes' && <TaxDepositSection key={revision.lock_version} revision={revision} editable={editable} onChanged={refresh} />}
               {tab === 'rules' && <RulesEditor revision={revision} editable={editable} onChanged={refresh} />}
               {tab === 'rates' && <RateTablesEditor revision={revision} editable={editable} onChanged={refresh} />}
               {tab === 'applicability' && <ApplicabilityEditor revision={revision} editable={editable} onChanged={refresh} />}
@@ -158,7 +178,7 @@ function RevisionView({ revisionId, revision, tariff, revisions, onOpenRevision,
                   {validation?.summary && (
                     <p className="text-xs text-slate-600">{validation.summary.errors} errors · {validation.summary.warnings} warnings · {validation.summary.info} notes</p>
                   )}
-                  <IssueList issues={issues} />
+                  <IssueList issues={issues} onOpen={(issue) => setTab(sectionForIssue(issue, content))} />
                   {!issues.length && revision.state === 'draft' && <p className="text-xs text-slate-500">Run Validate to check this draft.</p>}
                 </div>
               )}
@@ -208,6 +228,18 @@ function RevisionView({ revisionId, revision, tariff, revisions, onOpenRevision,
       )}
     </>
   );
+}
+
+/** The section that shows the object a validation issue is about. */
+export function sectionForIssue(issue, content) {
+  switch (issue.object_type) {
+    case 'rule': return sectionForRule((content.rules || []).find((r) => r.rule_key === issue.object_key));
+    case 'rate_table': case 'cell': case 'dimension': return 'rates';
+    case 'applicability': return 'applicability';
+    case 'constraint': return 'constraints';
+    case 'scenario': return 'tests';
+    default: return 'rules';
+  }
 }
 
 function RevisionSettingsDialog({ revision, onClose, onSaved }) {

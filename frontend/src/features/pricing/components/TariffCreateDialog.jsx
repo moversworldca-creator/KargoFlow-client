@@ -5,7 +5,8 @@ import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getBranches } from '../../../services/api';
 import { pricingApi } from '../api';
-import { PRICING_METHODS } from '../constants';
+import { EFFECTIVE_DATE_BASES, METHOD_HELP, PRICING_METHODS } from '../constants';
+import { humanize } from '../format';
 import { pricingKeys, useInvalidatePricing } from '../queries';
 import SimpleTariffForm, { EMPTY_SIMPLE, toSimpleConfig } from './SimpleTariffForm';
 import { Button, Callout, Dialog, ErrorBanner, SelectField, TextField, useAction } from './ui';
@@ -22,6 +23,9 @@ export default function TariffCreateDialog({ onClose, onCreated }) {
   const [method, setMethod] = useState('hourly');
   const [priority, setPriority] = useState('100');
   const [branchId, setBranchId] = useState('');
+  const [description, setDescription] = useState('');
+  const [dateBasis, setDateBasis] = useState('job_service_date');
+  const [timezoneBasis, setTimezoneBasis] = useState('branch');
   const [simple, setSimple] = useState(EMPTY_SIMPLE);
   const [errors, setErrors] = useState({});
   const branches = useQuery({ queryKey: ['pricing', 'branch-options'], queryFn: getBranches, staleTime: 60_000, retry: false });
@@ -54,7 +58,8 @@ export default function TariffCreateDialog({ onClose, onCreated }) {
     action.run({
       catalog_key: catalogKey, name: name.trim(),
       primary_pricing_method: mode === 'simple' ? (simple.mode === 'flat' ? 'flat' : 'hourly') : method,
-      resolver_priority: Number(priority), branch_id: branchId ? Number(branchId) : null,
+      resolver_priority: Number(priority), branch_id: branchId ? Number(branchId) : null, description,
+      default_effective_date_basis: dateBasis, business_timezone_basis: timezoneBasis,
       ...(mode === 'simple' ? { simple: simpleConfig } : { create_draft: true }),
     });
   };
@@ -74,9 +79,15 @@ export default function TariffCreateDialog({ onClose, onCreated }) {
         <div className="grid gap-3 sm:grid-cols-2">
           <TextField label="Name" value={name} onChange={setName} error={errors.name} required />
           <TextField label="Key" value={catalogKey} onChange={(v) => { setKeyTouched(true); setKey(v); }} error={errors.key} hint="Stable identifier used in reports and imports." required />
-          {mode === 'advanced' && <SelectField label="Primary pricing method" value={method} onChange={setMethod} options={PRICING_METHODS} />}
+          {mode === 'advanced' && <SelectField label="Primary pricing method" value={method} onChange={setMethod} options={PRICING_METHODS} hint={METHOD_HELP[method]} />}
           <TextField label="Resolver priority" value={priority} onChange={(v) => setPriority(v.replace(/\D/g, ''))} inputMode="numeric" error={errors.priority} hint="When several Tariffs apply at the same level, the lowest number wins." />
           <SelectField label="Applies to" value={branchId} onChange={setBranchId} options={branchOptions} />
+          <TextField label="Description" value={description} onChange={setDescription} />
+          <SelectField label="Which date picks the revision" value={dateBasis} onChange={setDateBasis}
+            options={EFFECTIVE_DATE_BASES.filter((b) => b !== 'explicit').map((b) => [b, humanize(b)])}
+            hint="Usually the job's service date: a move in July is priced with the revision in effect in July." />
+          <SelectField label="Business dates follow" value={timezoneBasis} onChange={setTimezoneBasis}
+            options={[['branch', "The branch's timezone"], ['company', "The company's timezone"]]} />
         </div>
         {mode === 'simple'
           ? <SimpleTariffForm value={simple} onChange={setSimple} errors={errors} />

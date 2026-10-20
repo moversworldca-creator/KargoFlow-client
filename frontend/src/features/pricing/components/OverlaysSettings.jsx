@@ -8,7 +8,7 @@ import useCan from '../../../shared/auth/useCan';
 import AsyncSelect from '../../../shared/ui/AsyncSelect';
 import { pricingApi } from '../api';
 import { CONSTRAINT_TYPES } from '../constants';
-import { formatDateTime, humanize } from '../format';
+import { formatDateTime, formatMoney, humanize } from '../format';
 import { PRICING } from '../permissions';
 import { pricingKeys, useInvalidatePricing, useOverlays, useRevision, useTariff, useTariffs } from '../queries';
 import { searchCustomers } from './ApplicabilityEditor';
@@ -31,6 +31,7 @@ export default function OverlaysSettings() {
   const invalidate = useInvalidatePricing();
   const [editing, setEditing] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [expanded, setExpanded] = useState(null);
   const act = useAction(({ id, action }) => pricingApi.overlayAction(id, action), {
     success: (_, { action }) => `Contract pricing ${action === 'validate' ? 'validated' : `${action}d`}.`,
     invalidate: () => invalidate(['pricing', 'overlays']), onSuccess: () => setConfirm(null),
@@ -52,10 +53,12 @@ export default function OverlaysSettings() {
                 {overlay.customer_id ? `Customer #${overlay.customer_id}` : 'Any customer'}{overlay.contract_key && ` · contract ${overlay.contract_key}`}
                 {' '}· on revision {overlay.base_revision_number}{overlay.published_at && ` · published ${formatDateTime(overlay.published_at)}`}
               </span>
+              <Button variant="ghost" aria-expanded={expanded === overlay.id} onClick={() => setExpanded(expanded === overlay.id ? null : overlay.id)}>{expanded === overlay.id ? 'Hide overrides' : 'Show overrides'}</Button>
               {overlay.state === 'draft' && can(PRICING.UPDATE_DRAFT) && <Button variant="ghost" aria-label={`Edit ${overlay.name}`} onClick={() => setEditing(overlay)}><Pencil size={13} aria-hidden="true" /></Button>}
               {ACTIONS.filter(([, , permission, states]) => can(permission) && states.includes(overlay.state)).map(([action, label]) => (
                 <Button key={action} variant={action === 'retire' ? 'danger' : 'ghost'} onClick={() => setConfirm({ id: overlay.id, action, label, name: overlay.name })}>{label}</Button>
               ))}
+              {expanded === overlay.id && <OverlaySummary overlay={overlay} />}
             </li>
           ))}
         </ul>
@@ -184,5 +187,41 @@ function OverlayDialog({ overlay, onClose, onSaved }) {
       </div>
       <ErrorBanner message={save.error?.message} />
     </Dialog>
+  );
+}
+
+
+/** Base Tariff revision + this customer's overrides, shown as before -> after. The base is never edited. */
+export function OverlaySummary({ overlay }) {
+  const base = useRevision(overlay.base_catalog_revision_id);
+  const config = overlay.configuration || {};
+  const rules = base.data?.content?.rules || [];
+  const cells = (base.data?.content?.rate_tables || []).flatMap((t) => (t.cells || []).map((c) => ({ ...c, table_key: t.table_key })));
+  const ruleName = (key) => rules.find((r) => r.rule_key === key)?.name || key;
+  const before = (key) => {
+    const rule = rules.find((r) => r.rule_key === key);
+    return rule ? (rule.rate_amount ?? rule.base_amount ?? rule.percentage) : null;
+  };
+  const lines = [
+    ...(config.rate_overrides || []).map((o) => [ruleName(o.rule_key), formatMoney(before(o.rule_key)), formatMoney(o.rate_amount ?? o.base_amount ?? o.percentage)]),
+    ...(config.cell_overrides || []).map((o) => [`${o.table_key} › ${o.cell_key}`, formatMoney(cells.find((c) => c.table_key === o.table_key && c.cell_key === o.cell_key)?.amount), formatMoney(o.amount)]),
+    ...(config.minimum_overrides || []).map((o) => [`${ruleName(o.rule_key)} minimum`, '—', o.minimum_amount ? formatMoney(o.minimum_amount) : `${o.minimum_quantity}`]),
+    ...(config.disable_rules || []).map((key) => [ruleName(key), 'Standard', 'Waived']),
+    ...(config.adjustments || []).map((a) => [a.name || a.key, '—', a.percentage ? `${a.percentage}%` : formatMoney(a.amount)]),
+  ];
+  return (
+    <div className="mt-2 w-full rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
+      <p className="text-[11px]"><span className="font-semibold">Base:</span> revision {overlay.base_revision_number} (unchanged) <span className="font-semibold">+ Contract:</span> {overlay.name}</p>
+      {!lines.length ? <p className="mt-1 text-[11px] text-slate-500">No overrides.</p> : (
+        <table className="mt-1 w-full text-left text-[11px]">
+          <caption className="sr-only">Overrides of {overlay.name}</caption>
+          <thead className="text-slate-500"><tr><th scope="col">Item</th><th scope="col">Base</th><th scope="col">Contract</th></tr></thead>
+          <tbody>{lines.map(([item, from, to]) => (
+            <tr key={`${item}-${to}`}><td className="py-0.5">{item}</td><td>{from}</td><td className="font-semibold">→ {to}</td></tr>
+          ))}</tbody>
+        </table>
+      )}
+      {config.constraint?.constraint_type && <p className="mt-1 text-[11px]">Contract {humanize(config.constraint.constraint_type)}: {formatMoney(config.constraint.amount)}</p>}
+    </div>
   );
 }
