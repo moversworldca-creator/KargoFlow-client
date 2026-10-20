@@ -220,15 +220,9 @@ export default function SupportSessionsTab({
 
   return (
     <div className="space-y-3 animate-in fade-in duration-150">
-      {/* Top Banner Notice */}
-      <div className="p-3 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-900 dark:text-amber-300">
-        <div className="flex items-center gap-2.5">
-          <Shield size={18} className="text-amber-600 shrink-0" />
-          <span>
-            <strong>Controlled Platform Support Governance (Section 1.9):</strong> Just-in-time impersonation sessions require explicit justification reasons, ticket references, and duration limits (15m - 8h).
-          </span>
-        </div>
-        {canCreate && (
+      {/* Top Actions */}
+      {canCreate && (
+        <div className="flex justify-end items-center">
           <button
             onClick={() => setShowCreateModal(true)}
             className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors shrink-0 cursor-pointer"
@@ -236,8 +230,8 @@ export default function SupportSessionsTab({
             <Plus size={15} />
             <span>New Support Session</span>
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Active Sessions List */}
       <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden">

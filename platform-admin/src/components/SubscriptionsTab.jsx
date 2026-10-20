@@ -80,21 +80,14 @@ export default function SubscriptionsTab({
   return (
     <div className="space-y-3 animate-in fade-in duration-150">
       {/* Top Banner Notice */}
-      <div className="p-3 rounded-xl bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200/80 dark:border-blue-900/40 flex items-center justify-between text-xs text-blue-900 dark:text-blue-300">
         <div className="flex items-center gap-2">
-          <CreditCard size={16} className="text-blue-600 shrink-0" />
-          <span>
-            <strong>Controlled State Transitions:</strong> Every status transition follows the specification matrix (Section 2.10) and appends immutable audit events (Section 2.11).
-          </span>
         </div>
         <button
           onClick={onRefresh}
           className="p-1 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
           title="Refresh subscriptions"
         >
-          <RefreshCw size={13} />
         </button>
-      </div>
 
       {/* Search Bar */}
       <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs flex items-center justify-between">
