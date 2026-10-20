@@ -1818,6 +1818,9 @@ export function Timeline({
                   e?.email_log_details?.body_html ||
                   e?.email_log_details?.body_text ||
                   e?.body_html ||
+                  e?.body_text ||
+                  e?.payload?.body_html ||
+                  e?.payload?.body_text ||
                   e?.description ||
                   e?.content ||
                   ''

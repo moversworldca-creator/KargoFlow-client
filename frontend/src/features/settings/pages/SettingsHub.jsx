@@ -4,6 +4,9 @@ import {
   Activity,
   BadgeDollarSign,
   Boxes,
+  Calculator,
+  FlaskConical,
+  Gavel,
   Building2,
   ChevronRight,
   ClipboardList,
@@ -27,6 +30,7 @@ import {
   Truck,
   UserRoundCog,
   Users,
+  Wrench,
   Webhook,
   X,
 } from "lucide-react";
@@ -52,6 +56,12 @@ import ServiceTypeSettings from "../components/ServiceTypeSettings";
 import StatusCodeSettings from "../components/StatusCodeSettings";
 import TeamManagement from "../components/TeamManagement";
 import AccessOverview from "../userManagement/AccessOverview";
+import ApprovalsQueue from "../../pricing/components/ApprovalsQueue";
+import OverlaysSettings from "../../pricing/components/OverlaysSettings";
+import { PolicySettings, TaxSettings } from "../../pricing/components/PolicyAndTaxSettings";
+import PriceSimulatorPage from "../../pricing/components/PriceSimulatorPage";
+import SkillsSettings from "../../pricing/components/SkillsSettings";
+import TariffsPage from "../../pricing/components/TariffsPage";
 
 const FALLBACK_BRANCHES = [
   { id: "1", name: "Main HQ", is_main: true },
@@ -147,6 +157,21 @@ const SETTINGS_GROUPS = [
       { id: "mover-types", label: "Mover Types", description: "Residential and commercial rules.", icon: Truck, render: (branchId) => <MoverTypeSettings branchId={branchId} /> },
       { id: "service-types", label: "Service Types", description: "Moving and packing services.", icon: Boxes, render: (branchId) => <ServiceTypeSettings branchId={branchId} /> },
       { id: "move-sizes", label: "Move Sizes", description: "Home volume classifications.", icon: SlidersHorizontal, render: (branchId) => <MoverSizeSettings branchId={branchId} /> },
+    ],
+  },
+  {
+    id: "pricing",
+    label: "Pricing & Tariffs",
+    shortLabel: "Pricing",
+    icon: Calculator,
+    tabs: [
+      { id: "tariffs", label: "Tariffs", description: "Tariffs, revisions, rules and rate matrices.", icon: Calculator, render: () => <TariffsPage /> },
+      { id: "pricing-skills", label: "Pricing Skills", description: "Crew skills that rates can depend on.", icon: Wrench, render: () => <SkillsSettings /> },
+      { id: "contract-pricing", label: "Contract Pricing", description: "Customer and contract overlays.", icon: FileSignature, render: () => <OverlaysSettings /> },
+      { id: "pricing-taxes", label: "Pricing Taxes", description: "Tax components and customer exemptions.", icon: CreditCard, render: (branchId) => <TaxSettings branchId={branchId} /> },
+      { id: "pricing-policy", label: "Pricing Policy", description: "Revision workflow, approvals and margin policy.", icon: Gavel, render: () => <PolicySettings /> },
+      { id: "pricing-approvals", label: "Pricing Approvals", description: "Discounts and overrides waiting for a decision.", icon: ShieldCheck, render: () => <ApprovalsQueue /> },
+      { id: "price-simulator", label: "Price Simulator", description: "Price a hypothetical job.", icon: FlaskConical, render: () => <PriceSimulatorPage /> },
     ],
   },
   {
