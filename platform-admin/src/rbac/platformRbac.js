@@ -21,9 +21,15 @@ export const PLATFORM_PERMISSIONS = {
   AUDIT_VIEW: 'platform.audit.view',
   COMMUNICATION_VIEW: 'platform.communication.view',
   COMMUNICATION_MANAGE: 'platform.communication.manage',
+  TEMPLATES_VIEW: 'platform.templates.view',
+  TEMPLATES_MANAGE: 'platform.templates.manage',
+  TEMPLATES_PUBLISH: 'platform.templates.publish',
 };
 
 export const PERMISSION_DEFINITIONS = [
+  { code: 'platform.templates.view', name: 'View Global Templates', category: 'Templates', description: 'View the global template catalog and previews.' },
+  { code: 'platform.templates.manage', name: 'Manage Global Templates', category: 'Templates', description: 'Edit global template drafts and metadata.' },
+  { code: 'platform.templates.publish', name: 'Publish Global Templates', category: 'Templates', description: 'Publish global template revisions.' },
   {
     code: 'platform.users.view',
     name: 'View Platform Staff',
@@ -149,6 +155,9 @@ export const PLATFORM_ROLES = {
       'platform.audit.view',
       'platform.communication.view',
       'platform.communication.manage',
+      'platform.templates.view',
+      'platform.templates.manage',
+      'platform.templates.publish',
     ],
   },
   support_admin: {
@@ -193,6 +202,9 @@ export const PLATFORM_ROLES = {
       'platform.audit.view',
       'platform.communication.view',
       'platform.communication.manage',
+      'platform.templates.view',
+      'platform.templates.manage',
+      'platform.templates.publish',
     ],
   },
   billing_admin: {

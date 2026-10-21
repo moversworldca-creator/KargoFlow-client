@@ -207,9 +207,9 @@ export default function PlatformShell() {
     },
     { 
       to: '/document-templates', 
-      label: 'Document Templates', 
+      label: 'Global Templates',
       icon: FileSignature, 
-      permission: null 
+      permission: PLATFORM_PERMISSIONS.TEMPLATES_VIEW
     },
     { 
       to: '/admins', 
