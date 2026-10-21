@@ -229,7 +229,7 @@ export function BackendWidgetPreview({ block, sampleData = true, scope = {}, cus
       ...(props.show_move_size !== false ? [{ label: "Move size", value: SAMPLE_VARIABLES["move.size"] }] : []),
       ...(props.show_stops !== false ? [{ label: "From", value: SAMPLE_VARIABLES["move.origin_address"] }, { label: "To", value: SAMPLE_VARIABLES["move.destination_address"] }] : []),
     ];
-    return <PreviewTable columns={[{ key: "label", label: "Move details" }, { key: "value", label: " " }]} rows={rows.map((row) => ({ ...row }))} />;
+    return <PreviewTable columns={[{ key: "label", label: block.label || "Move details" }, { key: "value", label: " " }]} rows={rows.map((row) => ({ ...row }))} />;
   }
   if (block.type === "crew_trucks") {
     const rows = [

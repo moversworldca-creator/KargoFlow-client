@@ -20,7 +20,43 @@ function StatefulPropertiesPanel({ initialItem, mode = "document" }) {
   );
 }
 
+function SelectablePropertiesPanel({ item }) {
+  const [selectedItem, setSelectedItem] = useState(null);
+  return (
+    <>
+      <button type="button" onClick={() => setSelectedItem(item)}>Select widget</button>
+      <RightPropertiesPanel
+        selectedItem={selectedItem}
+        onUpdateItem={setSelectedItem}
+        onDeleteItem={() => {}}
+        onDuplicateItem={() => {}}
+        documentSettings={{}}
+        onUpdateDocumentSettings={() => {}}
+      />
+    </>
+  );
+}
+
 describe("RightPropertiesPanel widget fields", () => {
+  it("focuses the widget label after selecting a backend widget", () => {
+    render(
+      <SelectablePropertiesPanel
+        item={{
+          id: "move-details-1",
+          type: "builder_block",
+          blockType: "move_details",
+          label: "Move details",
+          props: {},
+          propsSchema: { type: "object", properties: {} },
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Select widget" }));
+
+    expect(screen.getByDisplayValue("Move details")).toHaveFocus();
+  });
+
   it("keeps the text editor focused while its value updates on each keystroke", () => {
     const item = {
       id: "text-1",

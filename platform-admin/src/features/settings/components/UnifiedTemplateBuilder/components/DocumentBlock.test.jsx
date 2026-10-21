@@ -4,6 +4,27 @@ import { render, screen } from "@testing-library/react";
 import DocumentBlock from "./DocumentBlock";
 
 describe("DocumentBlock typography", () => {
+  it("renders the editable label on move-details widgets", () => {
+    render(
+      <DocumentBlock
+        item={{
+          id: "move-details-widget",
+          type: "builder_block",
+          blockType: "move_details",
+          label: "Trip information",
+          props: {},
+        }}
+        isSelected={false}
+        onSelect={() => {}}
+        onUpdate={() => {}}
+        onDelete={() => {}}
+        onDuplicate={() => {}}
+      />
+    );
+
+    expect(screen.getByRole("columnheader", { name: "Trip information" })).toBeInTheDocument();
+  });
+
   it("applies selected typography to backend text widget content", () => {
     const { container } = render(
       <DocumentBlock

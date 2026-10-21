@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Trash2,
   Copy,
@@ -187,7 +187,12 @@ export default function RightPropertiesPanel({
   const [savedClauses, setSavedClauses] = useState([]);
   const [clauseLoadError, setClauseLoadError] = useState("");
   const [backendBlockMeta, setBackendBlockMeta] = useState({ kind: null, blocks: [], error: "" });
+  const widgetLabelRef = useRef(null);
   const activeBuilderKind = ["estimate", "estimate_portal"].includes(mode) ? "estimate_portal" : mode === "invoice" ? "invoice" : "document";
+
+  useEffect(() => {
+    if (selectedItem?.type === "builder_block") widgetLabelRef.current?.focus();
+  }, [selectedItem?.id, selectedItem?.type]);
 
   useEffect(() => {
     if (selectedItem?.type !== "builder_block" || Object.keys(selectedItem.propsSchema?.properties || {}).length > 0) return undefined;
@@ -946,6 +951,7 @@ export default function RightPropertiesPanel({
             type="text"
             value={selectedItem.label || ""}
             onChange={(e) => onUpdateItem({ ...selectedItem, label: e.target.value })}
+            ref={widgetLabelRef}
             className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs font-medium text-slate-800"
           />
         </div>
