@@ -44,8 +44,18 @@ export function leadPayload(input, { create = false } = {}) {
 
 export function leadRecord(row) {
   if (!row) return row;
+  const fullName = String(
+    row.full_name || row.customer_name || row.lead_name || row.name || row.contact_name || ''
+  ).trim();
+  const nameParts = fullName.split(/\s+/).filter(Boolean);
+  const firstName = String(row.first_name || '').trim() || nameParts[0] || '';
+  const lastName = String(row.last_name || '').trim() || nameParts.slice(1).join(' ');
   return {
     ...row,
+    first_name: firstName,
+    last_name: lastName,
+    full_name: fullName || `${firstName} ${lastName}`.trim(),
+    move_date: row.move_date ? String(row.move_date).slice(0, 10) : null,
     status: row.system_state,
     branch: row.branch_id,
     assigned_to: row.assigned_employee_id,

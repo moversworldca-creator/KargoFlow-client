@@ -4,6 +4,9 @@ import {
   Activity,
   BadgeDollarSign,
   Boxes,
+  Calculator,
+  FlaskConical,
+  Gavel,
   Building2,
   ChevronRight,
   ClipboardList,
@@ -27,6 +30,7 @@ import {
   Truck,
   UserRoundCog,
   Users,
+  Wrench,
   Webhook,
   X,
 } from "lucide-react";
@@ -41,6 +45,7 @@ import AuditLogs from "../components/AuditLogs";
 import CommunicationTemplates from "../components/CommunicationTemplates";
 import CommunicationSetup from "../components/CommunicationSetup";
 import CompanySettings from "../components/CompanySettings";
+import IntegrationSettings from "../components/IntegrationSettings";
 import LeadSourceSettings from "../components/LeadSourceSettings";
 import MoverSizeSettings from "../components/MoverSizeSettings";
 import MoverTypeSettings from "../components/MoverTypeSettings";
@@ -51,6 +56,13 @@ import SchedulingSettings from "../components/SchedulingSettings";
 import ServiceTypeSettings from "../components/ServiceTypeSettings";
 import StatusCodeSettings from "../components/StatusCodeSettings";
 import TeamManagement from "../components/TeamManagement";
+import AccessOverview from "../userManagement/AccessOverview";
+import ApprovalsQueue from "../../pricing/components/ApprovalsQueue";
+import OverlaysSettings from "../../pricing/components/OverlaysSettings";
+import { PolicySettings, TaxSettings } from "../../pricing/components/PolicyAndTaxSettings";
+import PriceSimulatorPage from "../../pricing/components/PriceSimulatorPage";
+import SkillsSettings from "../../pricing/components/SkillsSettings";
+import TariffsPage from "../../pricing/components/TariffsPage";
 
 const FALLBACK_BRANCHES = [
   { id: "1", name: "Main HQ", is_main: true },
@@ -121,6 +133,7 @@ const SETTINGS_GROUPS = [
     tabs: [
       { id: "members", label: "Team Members", description: "Accounts and branch access.", icon: Users, render: (branchId) => <TeamManagement branchId={branchId} /> },
       { id: "roles", label: "Roles & Permissions", description: "Granular access scopes.", icon: ShieldCheck, render: (branchId) => <RolesPermissions branchId={branchId} /> },
+      { id: "access", label: "Access Overrides", description: "Per-user ALLOW / DENY and access explanations.", icon: ShieldCheck, render: () => <AccessOverview /> },
       { id: "audit-logs", label: "Audit Logs", description: "Changes and login history.", icon: Activity, render: (branchId) => <AuditLogs branchId={branchId} /> },
     ],
   },
@@ -144,7 +157,31 @@ const SETTINGS_GROUPS = [
     tabs: [
       { id: "mover-types", label: "Mover Types", description: "Residential and commercial rules.", icon: Truck, render: (branchId) => <MoverTypeSettings branchId={branchId} /> },
       { id: "service-types", label: "Service Types", description: "Moving and packing services.", icon: Boxes, render: (branchId) => <ServiceTypeSettings branchId={branchId} /> },
-      { id: "mover-sizes", label: "Mover Sizes", description: "Home volume classifications.", icon: SlidersHorizontal, render: (branchId) => <MoverSizeSettings branchId={branchId} /> },
+      { id: "move-sizes", label: "Move Sizes", description: "Home volume classifications.", icon: SlidersHorizontal, render: (branchId) => <MoverSizeSettings branchId={branchId} /> },
+    ],
+  },
+  {
+    id: "pricing",
+    label: "Pricing & Tariffs",
+    shortLabel: "Pricing",
+    icon: Calculator,
+    tabs: [
+      { id: "tariffs", label: "Tariffs", description: "Tariffs, revisions, rules and rate matrices.", icon: Calculator, render: () => <TariffsPage /> },
+      { id: "pricing-skills", label: "Pricing Skills", description: "Crew skills that rates can depend on.", icon: Wrench, render: () => <SkillsSettings /> },
+      { id: "contract-pricing", label: "Contract Pricing", description: "Customer and contract overlays.", icon: FileSignature, render: () => <OverlaysSettings /> },
+      { id: "pricing-taxes", label: "Pricing Taxes", description: "Tax components and customer exemptions.", icon: CreditCard, render: (branchId) => <TaxSettings branchId={branchId} /> },
+      { id: "pricing-policy", label: "Pricing Policy", description: "Revision workflow, approvals and margin policy.", icon: Gavel, render: () => <PolicySettings /> },
+      { id: "pricing-approvals", label: "Pricing Approvals", description: "Discounts and overrides waiting for a decision.", icon: ShieldCheck, render: () => <ApprovalsQueue /> },
+      { id: "price-simulator", label: "Price Simulator", description: "Price a hypothetical job.", icon: FlaskConical, render: () => <PriceSimulatorPage /> },
+    ],
+  },
+  {
+    id: "integrations",
+    label: "Integrations",
+    shortLabel: "Integrations",
+    icon: Plug,
+    tabs: [
+      { id: "payment-gateway", label: "Payment Gateway", description: "Configure company-wide Authorize.Net credentials, sandbox or production, and verify the connection.", icon: CreditCard, render: () => <IntegrationSettings view="gateways" /> },
     ],
   },
   {
@@ -160,6 +197,7 @@ const SETTINGS_GROUPS = [
 ];
 
 const LEGACY_ROUTES = {
+  integrations: ["integrations", "payment-gateway"],
   company: ["company", "profile"],
   branches: ["branches", "directory"],
   branding: ["branches", "branding"],
@@ -173,7 +211,8 @@ const LEGACY_ROUTES = {
   "opportunity-loss-reasons": ["sales", "loss-reasons"],
   "mover-types": ["moves", "mover-types"],
   "service-types": ["moves", "service-types"],
-  "mover-sizes": ["moves", "mover-sizes"],
+  "mover-sizes": ["moves", "move-sizes"],
+  "move-sizes": ["moves", "move-sizes"],
   communications: ["communications", "setup"],
   "communication-templates": ["communications", "templates"],
 };
@@ -197,7 +236,7 @@ export default function SettingsHub() {
   const useCanResult = useCan();
   const canAny = useCanResult?.canAny || (() => true);
 
-  const initialBranches = useMemo(loadCachedBranches, []);
+  const initialBranches = useMemo(() => loadCachedBranches(), []);
   const [branches, setBranches] = useState(initialBranches);
   const [branchId, setBranchId] = useState(() => loadInitialBranchId(initialBranches));
   const [branchStatus, setBranchStatus] = useState("loading");
@@ -217,15 +256,19 @@ export default function SettingsHub() {
 
   // Determine current active group and active subtab
   const effectiveMainGroup = mainGroup || tabId;
-  const effectiveSubTab = subTab || subView;
+  const rawSubTab = subTab || subView;
+  const effectiveSubTab = rawSubTab === "mover-sizes" ? "move-sizes" : rawSubTab;
 
   const activeGroup = useMemo(() => {
     return visibleGroups.find((group) => group.id === effectiveMainGroup) || visibleGroups[0] || SETTINGS_GROUPS[0];
   }, [effectiveMainGroup, visibleGroups]);
 
   const activeTab = useMemo(() => {
-    return activeGroup.tabs.find((tab) => tab.id === effectiveSubTab) || activeGroup.tabs[0];
-  }, [activeGroup, effectiveSubTab]);
+    return (
+      activeGroup.tabs.find((tab) => tab.id === effectiveSubTab || (tab.id === "move-sizes" && rawSubTab === "mover-sizes")) ||
+      activeGroup.tabs[0]
+    );
+  }, [activeGroup, effectiveSubTab, rawSubTab]);
 
   // Handle URL normalization and legacy route redirection
   useEffect(() => {

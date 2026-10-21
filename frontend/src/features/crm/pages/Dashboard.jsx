@@ -33,7 +33,8 @@ import {
   Calendar,
   Receipt
 } from 'lucide-react';
-import { getDashboardSummary } from '../../../services/api';
+import { getDashboardSummary, getBranchLookups } from '../../../services/api';
+import { getPipelineQueue } from '../leads/pipelineApi';
 
 /* ---------- Native Lucide Icon Helper ---------- */
 const IconMap = {
@@ -1001,6 +1002,7 @@ function LeaderboardSkeleton() {
    =========================================================== */
 const Dashboard = () => {
   const { user } = useAuth();
+  const dashboardRequestRef = useRef(0);
   const [branches, setBranches] = useState([]);
   const accessibleBranchIds = useMemo(() => getUserBranchIds(user), [user]);
   const restrictToAccessibleBranches = accessibleBranchIds.length > 0 && !user?.is_superuser && !user?.is_system_admin;
@@ -1016,6 +1018,7 @@ const Dashboard = () => {
   const [syncError, setSyncError] = useState(null);
 
   const loadDashboardData = useCallback(async ({ silent = false, branchOverride } = {}) => {
+    const requestId = ++dashboardRequestRef.current;
     const effectiveBranchId = branchOverride !== undefined ? branchOverride : selectedBranchId;
     if (!silent) {
       setLoading(true);
@@ -1024,11 +1027,19 @@ const Dashboard = () => {
       setIsSyncing(true);
     }
     setIsRefreshing(true);
+    setIsSyncing(silent);
     setSyncError(null);
     try {
-      const response = await getDashboardSummary({
-        branch: effectiveBranchId === ALL_BRANCHES ? undefined : effectiveBranchId
-      });
+      const scope = { branch: effectiveBranchId === ALL_BRANCHES ? undefined : effectiveBranchId };
+      let response;
+      try {
+        response = await getDashboardSummary(scope);
+      } catch (err) {
+        if (err.response?.status !== 404) throw err;
+        const [queue, branchResponse] = await Promise.all([getPipelineQueue({ ...scope, all: true }), getBranchLookups()]);
+        response = { branches: Array.isArray(branchResponse) ? branchResponse : branchResponse.results || [], stats: { pipelineOverview: queue.summary } };
+      }
+      if (requestId !== dashboardRequestRef.current) return;
       const payload = response?.data || response || {};
       const nextBranches = Array.isArray(payload.branches) ? payload.branches : [];
       const scopedBranches = restrictToAccessibleBranches
@@ -1046,13 +1057,16 @@ const Dashboard = () => {
       setLastUpdated(new Date());
       setError(null);
     } catch (err) {
+      if (requestId !== dashboardRequestRef.current) return;
       console.error("Dashboard backend load failed:", err);
       if (!silent) setError("Failed to load real-time statistics from the CRM backend. Please check connection.");
       else setSyncError("Background sync failed. Showing cached data.");
     } finally {
-      if (!silent) setLoading(false);
-      else setIsSyncing(false);
-      setIsRefreshing(false);
+      if (requestId === dashboardRequestRef.current) {
+        setLoading(false);
+        setIsSyncing(false);
+        setIsRefreshing(false);
+      }
     }
   }, [accessibleBranchIds, restrictToAccessibleBranches, selectedBranchId]);
 
@@ -1062,6 +1076,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     loadDashboardData();
+    return () => { dashboardRequestRef.current += 1; };
   }, [loadDashboardData]);
 
   useEffect(() => {
@@ -1076,7 +1091,18 @@ const Dashboard = () => {
 
   return (
     <div className="space-y-5 animate-in fade-in duration-300">
-      <DashboardHeader 
+      {dashboardStats?.pipelineOverview ? (
+        <header className="flex items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold">Dashboard</h1>
+          <div className="flex gap-2">
+            <select aria-label="Branch" value={selectedBranchId} onChange={(event) => handleBranchChange(event.target.value)} className="rounded-lg border p-2">
+              <option value="all">All Branches</option>
+              {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+            </select>
+            <button type="button" disabled={isRefreshing} onClick={() => loadDashboardData({ silent: true })} className="rounded-lg border p-2">Refresh</button>
+          </div>
+        </header>
+      ) : <DashboardHeader
         key={`dashboard-header-${selectedBranchId}`}
         branches={branches} 
         selectedBranchId={selectedBranchId} 
@@ -1089,7 +1115,7 @@ const Dashboard = () => {
         onRefresh={() => loadDashboardData({ silent: true })}
         syncError={syncError}
         isRefreshing={isRefreshing}
-      />
+      />}
       
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-xs font-semibold text-red-800 flex items-center justify-between">
@@ -1131,6 +1157,19 @@ const Dashboard = () => {
               <LeaderboardSkeleton />
             </div>
           </div>
+        </div>
+      ) : dashboardStats?.pipelineOverview ? (
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">Current pipeline overview. Revenue, payments, dispatch and historical performance are not available yet.</p>
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            {[
+              ['Total records', dashboardStats.pipelineOverview.total],
+              ['Leads', dashboardStats.pipelineOverview.lead_count],
+              ['Opportunities', dashboardStats.pipelineOverview.opportunity_count],
+              ['New leads', dashboardStats.pipelineOverview.new_count],
+            ].map(([label, value]) => <div key={label} className="rounded-xl border bg-white p-4"><p className="text-sm text-slate-600">{label}</p><p className="text-2xl font-bold">{value}</p></div>)}
+          </div>
+          <a href="/leads/table/dashboard" className="text-sm text-blue-700 underline">Open leads performance dashboard</a>
         </div>
       ) : dashboardStats ? (
         <div className="space-y-5">

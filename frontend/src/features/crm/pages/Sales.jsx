@@ -3,9 +3,9 @@ import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { useAuth } from '../../auth/context/AuthContext';
 import { format, formatDistanceToNowStrict, parseISO, isValid } from 'date-fns';
 import {
-  Plus, Search, SlidersHorizontal, 
+  Plus, Search, SlidersHorizontal,
   MapPin, Phone, Mail, ChevronRight,
-  Loader2, DollarSign, Target, 
+  Loader2, DollarSign, Target,
   Zap, Calendar, ArrowUpRight, X, User,
   ArrowUpDown, ArrowUp, ArrowDown,
   ChevronLeft, ArrowRight, MoreHorizontal, SearchX,
@@ -27,22 +27,25 @@ import {
   getBranchLookups,
   getCommunicationTemplate,
   getCommunicationTemplates,
-  getLookupUsers,
   getLeadStatusCodeLookups,
   getServices,
   getMoveTypeLookups,
   getMoverSizeLookups,
   getStatusCodeLookupsPage,
   getPayments,
-  getTasks,
   seedCommunicationTemplates,
-  getActivities,
-  getLeadActivities,
   updateTask,
   updateSalesActivity,
   deleteSalesActivity,
 } from '../../../services/api';
-import { getSalesDashboardSummary } from '../../../services/api';
+import {
+  getTenantStaff as getLookupUsers,
+  getTenantSalesOverview as getSalesDashboardSummary,
+  getTenantTasks as getTasks,
+  getTenantActivities as getActivities,
+  getTenantLeadActivities as getLeadActivities,
+  updateTenantTask,
+} from '../leads/salesOverviewApi';
 import { getRecordDetailPath, getSalesListTabFromSegment, getSalesListTabPath } from '../utils/recordRoutes';
 import useCan from '../../../shared/auth/useCan';
 import { useToast } from '../../../shared/context/ToastContext';
@@ -217,21 +220,6 @@ const normalizeColorValue = (value) => {
     return `#${longHexMatch[1].toUpperCase()}`;
   }
   return raw;
-};
-
-const dedupeLeadOpportunityRows = (rows = []) => {
-  const linkedLeadIds = new Set(
-    rows
-      .filter((row) => String(row?.row_type || '').toLowerCase() === 'opportunity')
-      .map((row) => Number(row?.lead_id || 0))
-      .filter(Boolean)
-  );
-
-  return rows.filter((row) => {
-    const isLeadRow = String(row?.row_type || '').toLowerCase() === 'lead';
-    if (!isLeadRow) return true;
-    return !linkedLeadIds.has(Number(row?.lead_id || row?.id || 0));
-  });
 };
 
 const getStatusPillColorStyle = (colorHex) => {
@@ -668,8 +656,8 @@ const normalizeTaskRow = (task, cache = {}) => {
   const customerEmail = resolveContactValue('email', entity?.customer_details, entity?.customer, entity);
   const customerPhone = resolveContactValue('phone', entity?.customer_details, entity?.customer, entity);
 
-  const taskStatus = String(task.activity_details?.status || task.activity?.status || 'pending').toLowerCase();
-  
+  const taskStatus = String(task.status || task.activity_details?.status || task.activity?.status || 'pending').toLowerCase();
+
   let origin = '—';
   let destination = '—';
   if (relatedType === 'opportunity') {
@@ -681,9 +669,10 @@ const normalizeTaskRow = (task, cache = {}) => {
   }
 
   return {
-    id: task.id,
+    id: task.record_kind ? `${task.record_kind}:${relatedId}:${task.id}` : task.id,
     row_type: 'task',
     task_id: task.id,
+    native_task: Boolean(task.record_kind),
     activity_id: task.activity_details?.id || task.activity?.id || task.activity,
     task_type: task.task_type || 'general',
     due_date: task.due_date || '',
@@ -693,7 +682,7 @@ const normalizeTaskRow = (task, cache = {}) => {
     status_label: taskStatus === 'completed' ? 'Completed' : 'Pending',
     assigned_user_id: task.assigned_to_details?.id || task.assigned_to || '',
     assigned_user_name: task.assigned_to_details ? `${task.assigned_to_details.first_name} ${task.assigned_to_details.last_name}`.trim() : '—',
-    
+
     related_type: relatedType,
     related_id: relatedId,
     sales_number: entity?.sales_number || null,
@@ -805,6 +794,8 @@ const TaskActionMenu = ({ item, onToggleStatus, onEdit, onDelete }) => {
               {item.status === 'completed' ? 'Mark Pending' : 'Mark Complete'}
             </button>
             <button
+              disabled={item.native_task}
+              title={item.native_task ? "Task deletion is not available; mark it complete instead" : "Delete task"}
               onClick={(e) => {
                 e.stopPropagation();
                 setOpen(false);
@@ -1459,15 +1450,15 @@ const PipelineRecordsPane = React.memo(function PipelineRecordsPane({
                     key={`task-${item.id}`}
                     onClick={(e) => onRowClick(item, e)}
                     className={`bg-white rounded-xl border p-4 transition-all hover:shadow-md cursor-pointer relative overflow-hidden flex flex-col gap-3 ${
-                      isOverdue 
-                        ? "border-rose-200 hover:border-rose-350 shadow-sm shadow-rose-50/40" 
+                      isOverdue
+                        ? "border-rose-200 hover:border-rose-350 shadow-sm shadow-rose-50/40"
                         : "border-slate-200/90 shadow-sm"
                     }`}
                   >
                     {isOverdue && (
                       <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-red-500 to-rose-600" />
                     )}
-                    
+
                     {/* Header: ID, Lead Status, TaskActionMenu */}
                     <div className="flex items-center justify-between gap-2 pr-2">
                       <div className="flex items-center gap-1.5">
@@ -1549,8 +1540,8 @@ const PipelineRecordsPane = React.memo(function PipelineRecordsPane({
                     className={`bg-white rounded-xl border p-4 transition-all hover:shadow-md relative overflow-hidden flex flex-col gap-3 ${
                       canNavigate ? 'cursor-pointer' : 'cursor-default'
                     } ${
-                      isUrgent 
-                        ? "border-rose-200 hover:border-rose-350 shadow-sm shadow-rose-50/40" 
+                      isUrgent
+                        ? "border-rose-200 hover:border-rose-350 shadow-sm shadow-rose-50/40"
                         : "border-slate-200/90 shadow-sm"
                     }`}
                   >
@@ -2226,7 +2217,7 @@ const DashStatCard = ({ icon: IconComp, label, value, trend, prefix = '', suffix
   const iconClass = iconBgStyles[color] || iconBgStyles.slate;
 
   return (
-    <div 
+    <div
       onClick={onClick}
       className={`rounded-xl border p-4 shadow-sm transition-all duration-200 ${wrapperClass} ${onClick ? 'cursor-pointer hover:shadow-md' : ''}`}
     >
@@ -2234,10 +2225,10 @@ const DashStatCard = ({ icon: IconComp, label, value, trend, prefix = '', suffix
         <span className={`inline-flex h-9 w-9 items-center justify-center rounded-lg border ${iconClass}`}>
           <IconComp size={18} strokeWidth={1.8} />
         </span>
-        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${trendColor}`}>
+        {value !== "—" && <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${trendColor}`}>
           <TrendIcon size={11} />
           {trend > 0 ? '+' : ''}{trend}%
-        </span>
+        </span>}
       </div>
       <div className="text-[11px] font-bold uppercase tracking-wider mb-1">{label}</div>
       <div className="font-mono text-2xl font-black tracking-tight leading-none">
@@ -2391,10 +2382,11 @@ const METRIC_HEADER_TITLES = {
 
 const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, branch, assignedUser, branches, users }) => {
   const [items, setItems] = useState([]);
+  const [metricError, setMetricError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
-  const [filterPeriod, setFilterPeriod] = useState('today');
+  const [filterPeriod, setFilterPeriod] = useState(dateRange || 'today');
   const [localBranch, setLocalBranch] = useState(branch || '');
   const [localUser, setLocalUser] = useState(assignedUser || '');
   const [localOutcome, setLocalOutcome] = useState('');
@@ -2405,9 +2397,9 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
 
   useEffect(() => {
     if (!isOpen) return;
-    setFilterPeriod('today');
+    setFilterPeriod(dateRange || 'today');
     setPage(1);
-  }, [isOpen]);
+  }, [isOpen, dateRange]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -2496,7 +2488,7 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
       const day = String(d.getDate()).padStart(2, '0');
       return `${y}-${m}-${day}`;
     };
-    
+
     if (period === 'today') {
       return { startDate: fmt(todayStart), endDate: fmt(todayEnd) };
     } else if (period === 'this_week') {
@@ -2515,8 +2507,9 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
     let isMounted = true;
     const fetchMetricData = async () => {
       setLoading(true);
+      setMetricError(null);
       try {
-        const { startDate, endDate } = getModalDateRange(filterPeriod);
+        const { startDate, endDate } = ['today', 'yesterday', '7d', '30d'].includes(filterPeriod) ? getDateRange(filterPeriod) : getModalDateRange(filterPeriod);
         let rawItems = [];
 
         if (metricType === 'calls' || metricType === 'emails' || metricType === 'sms') {
@@ -2538,7 +2531,7 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
               endDate,
               activity_type: actType,
               ordering: sortConfig.direction === 'desc' ? '-created_at' : 'created_at',
-            }).catch(() => null),
+            }),
           ]);
           const salesItems = asList(salesRes)
             .filter((row) => String(row?.activity_type || '').toLowerCase() === actType)
@@ -2588,8 +2581,8 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
             status: 'pending',
             startDate,
             endDate,
-          }).catch(() => null);
-          rawItems = asList(tasksRes).map((task) => ({
+          });
+          rawItems = asList(tasksRes).filter((task) => (task.status || task.activity_details?.status || 'pending') === 'pending').map((task) => ({
             ...task,
             row_type: 'task',
             related_row_type: task.opportunity ? 'opportunity' : task.lead ? 'lead' : null,
@@ -2606,6 +2599,9 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
           }));
         } else if (metricType === 'leads') {
           const queueRes = await getMyLeadsQueue({
+            row_type: 'lead',
+            all: true,
+            endExclusive: true,
             limit: 500,
             branch: localBranch || undefined,
             assigned_user: localUser || undefined,
@@ -2613,7 +2609,7 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
             endDate,
             date_field: 'created_at',
             include_converted: true,
-          }).catch(() => null);
+          });
           const raw = Array.isArray(queueRes) ? queueRes : (queueRes?.results || []);
           rawItems = raw.map(row => ({
             ...row,
@@ -2630,6 +2626,9 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
           }));
         } else if (metricType === 'won') {
           const queueRes = await getMyLeadsQueue({
+            all: true,
+            endExclusive: true,
+            row_type: 'opportunity',
             limit: 500,
             opp_status: 'booked',
             branch: localBranch || undefined,
@@ -2637,7 +2636,7 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
             startDate,
             endDate,
             include_converted: true,
-          }).catch(() => null);
+          });
           const raw = Array.isArray(queueRes) ? queueRes : (queueRes?.results || []);
           rawItems = raw.map(row => ({
             ...row,
@@ -2654,6 +2653,8 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
           }));
         } else if (metricType === 'lost') {
           const queueRes = await getMyLeadsQueue({
+            all: true,
+            endExclusive: true,
             limit: 500,
             lead_status: 'lost',
             opp_status: 'lost',
@@ -2662,7 +2663,7 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
             startDate,
             endDate,
             include_converted: true,
-          }).catch(() => null);
+          });
           const raw = Array.isArray(queueRes) ? queueRes : (queueRes?.results || []);
           rawItems = raw.map(row => ({
             ...row,
@@ -2684,7 +2685,7 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
             assigned_user: localUser || undefined,
             startDate,
             endDate,
-          }).catch(() => null);
+          });
           const raw = Array.isArray(queueRes) ? queueRes : (queueRes?.results || []);
           rawItems = raw.map((row) => ({
               ...row,
@@ -2761,6 +2762,7 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
           setTotalCount(total);
         }
       } catch (err) {
+        if (isMounted) { setMetricError("Could not load records. Please try again."); setItems([]); setTotalCount(0); }
         console.error("Failed to load metric details", err);
       } finally {
         if (isMounted) setLoading(false);
@@ -2772,7 +2774,7 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
 
   useEffect(() => {
     if (!isOpen) {
-      setFilterPeriod('today');
+      setFilterPeriod(dateRange || 'today');
       setPage(1);
       setLocalOutcome('');
       setOutcomeMenuOpen(false);
@@ -2780,7 +2782,7 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
       setLocalBranch(branch || '');
       setLocalUser(assignedUser || '');
     }
-  }, [isOpen, branch, assignedUser]);
+  }, [isOpen, branch, assignedUser, dateRange]);
 
   useEffect(() => {
     if (!outcomeMenuOpen) return undefined;
@@ -2815,7 +2817,7 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
     if (!dateStr) return '—';
     const d = new Date(dateStr);
     if (Number.isNaN(d.getTime())) return dateStr;
-    return d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }) + ' ' + 
+    return d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }) + ' ' +
            d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
   };
 
@@ -2838,19 +2840,21 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `${metricType || 'metric'}_export_${filterPeriod}.csv`);
+    link.setAttribute('download', `${metricType || 'metric'}_export_${filterPeriod}_page_${page}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const titleMeta = METRIC_HEADER_TITLES[metricType] || { singular: 'Record', plural: 'Records' };
-  const headerPeriodLabel = filterPeriod === 'today' ? 'Today' : filterPeriod === 'this_week' ? 'This Week' : 'This Month';
+  const headerPeriodLabel = DASH_DATE_RANGE_LABELS[filterPeriod] || (filterPeriod === 'this_week' ? 'This Week' : 'This Month');
   const detailColHeader = (metricType === 'payments' || metricType === 'won' || metricType === 'lost' || metricType === 'leads') ? 'VALUE' : metricType === 'tasks' ? 'SUBJECT' : 'OUTCOME / DETAILS';
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
       <div className="w-full max-w-7xl h-[85vh] flex flex-col rounded-xl bg-white shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+        {metricError && <div role="alert" className="bg-amber-50 p-3 text-sm text-amber-900">{metricError}</div>}
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white">
           <div className="flex items-center gap-6">
@@ -2859,7 +2863,7 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
             </h2>
             <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
               {[
-                { id: 'today', label: 'Today' },
+                ...DASH_DATE_RANGES,
                 { id: 'this_week', label: 'This Week' },
                 { id: 'this_month', label: 'This Month' }
               ].map((r) => (
@@ -2879,7 +2883,7 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
                 </button>
               ))}
             </div>
-            
+
             {(branches?.length > 0 || users?.length > 0) && (
               <div className="flex items-center gap-2 ml-2">
                 {branches?.length > 0 && (
@@ -2956,11 +2960,11 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={handleDownloadCSV}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition"
-              title="Download CSV"
+              title="Download the current page (up to 50 records)"
+                onClick={handleDownloadCSV}
+              className="inline-flex h-9 items-center justify-center gap-2 px-3 rounded-md border border-slate-300 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition"
             >
-              <Download size={16} />
+              <Download size={16} /><span className="text-xs">Export current page</span>
             </button>
             <button
               type="button"
@@ -3187,14 +3191,11 @@ const DashboardPane = React.memo(function DashboardPane({
         </div>
         <p className="text-sm font-bold text-slate-800">Unable to load dashboard</p>
         <p className="text-xs text-slate-500 mt-1 max-w-xs text-center">{dashError}</p>
+        <button type="button" className="mt-3 text-sm underline" onClick={() => window.dispatchEvent(new Event('sales-data-changed'))}>Retry</button>
       </div>
     );
   }
 
-  const fmtPay = (val) => {
-    if (val >= 1000) return `$${(val / 1000).toFixed(1)}k`;
-    return `$${(val || 0).toLocaleString('en-CA')}`;
-  };
 
   return (
     <div className="space-y-5">
@@ -3205,6 +3206,7 @@ const DashboardPane = React.memo(function DashboardPane({
           <p className="text-xs text-slate-500 mt-0.5">
             {formatDashboardScope(branchName, userName, dashDateRange)}
           </p>
+          <p className="mt-1 text-xs text-slate-500">Lead, booked and lost counts show the current status of records created in this period.</p>
         </div>
         <div className="flex items-center gap-3">
           {/* Date range segmented control */}
@@ -3240,18 +3242,19 @@ const DashboardPane = React.memo(function DashboardPane({
         </div>
       )}
 
+      {dashData?.workUnavailable && <p role="status" className="text-sm text-amber-800">Some activity or follow-up data could not be loaded. Those metrics are unavailable.</p>}
       {/* ── Stats Row 1 ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <DashStatCard icon={Mail}        label="Emails Logged"   value={d.emailCount ?? 0}     trend={d.emailTrend ?? 0} onClick={() => setStatModalType('emails')} color="blue" />
-        <DashStatCard icon={MessageSquare} label="SMS Logged"    value={d.smsCount ?? 0}       trend={d.smsTrend ?? 0} onClick={() => setStatModalType('sms')} color="violet" />
+        <DashStatCard icon={Mail}        label="Emails Logged"   value={dashData?.workUnavailable ? "—" : d.emailCount ?? 0}     trend={d.emailTrend ?? 0} onClick={() => setStatModalType('emails')} color="blue" />
+        <DashStatCard icon={MessageSquare} label="SMS Logged"    value={dashData?.workUnavailable ? "—" : d.smsCount ?? 0}       trend={d.smsTrend ?? 0} onClick={() => setStatModalType('sms')} color="violet" />
         <DashStatCard icon={Target}      label="Leads Created"   value={d.leadsCount ?? 0}     trend={d.leadsTrend ?? 0} onClick={() => setStatModalType('leads')} color="amber" />
-        <DashStatCard icon={DollarSign}  label="Payments Captured" value={fmtPay(d.paymentTotal ?? 0)} trend={d.paymentTrend ?? 0} onClick={() => setStatModalType('payments')} color="emerald" />
+        <DashStatCard icon={DollarSign} label="Payments unavailable" value="—" color="emerald" />
       </div>
 
       {/* ── Stats Row 2 ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <DashStatCard icon={PhoneCall}      label="Phone Calls Logged"  value={d.phoneCallCount ?? 0}  trend={d.phoneCallTrend ?? 0} onClick={() => setStatModalType('calls')} color="teal" />
-        <DashStatCard icon={CheckCircle2}   label="Follow-up"        value={d.taskCount ?? 0}       trend={d.taskTrend ?? 0} onClick={() => setStatModalType('tasks')} color="orange" />
+        <DashStatCard icon={PhoneCall}      label="Phone Calls Logged"  value={dashData?.workUnavailable ? "—" : d.phoneCallCount ?? 0}  trend={d.phoneCallTrend ?? 0} onClick={() => setStatModalType('calls')} color="teal" />
+        <DashStatCard icon={CheckCircle2}   label="Follow-up"        value={dashData?.workUnavailable ? "—" : d.taskCount ?? 0}       trend={d.taskTrend ?? 0} onClick={() => setStatModalType('tasks')} color="orange" />
         <DashStatCard icon={TrendingUp}     label="Booked Leads"    value={d.wonCount ?? 0}        trend={d.wonTrend ?? 0} onClick={() => setStatModalType('won')} color="indigo" />
         <DashStatCard icon={TrendingDown}   label="Lost This Period"   value={d.lostCount ?? 0}       trend={d.lostTrend ?? 0} onClick={() => setStatModalType('lost')} color="rose" />
       </div>
@@ -3272,13 +3275,13 @@ const DashboardPane = React.memo(function DashboardPane({
         </div>
       </div>
 
-      <StatDetailModal 
-        isOpen={Boolean(statModalType)} 
+      <StatDetailModal
+        isOpen={Boolean(statModalType)}
         metricType={statModalType || 'calls'}
-        onClose={() => setStatModalType(null)} 
-        dateRange={dashDateRange} 
-        branch={selectedBranch} 
-        assignedUser={selectedUser} 
+        onClose={() => setStatModalType(null)}
+        dateRange={dashDateRange}
+        branch={selectedBranch}
+        assignedUser={selectedUser}
         branches={branches}
         users={users}
       />
@@ -3306,11 +3309,11 @@ const Sales = () => {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [viewMode, setViewMode] = useState('table');
   const [currentPage, setCurrentPage] = useState(() => Number(cachedTableState?.currentPage || 1));
-  const [sortConfig, setSortConfig] = useState({ 
+  const [sortConfig, setSortConfig] = useState({
     key: cachedTableState?.sortConfig?.key === 'last_contacted_at'
       ? (initialSalesTab === 'new-leads' ? 'created_at' : initialSalesTab === 'follow-up' ? 'created_at' : 'assigned_at')
       : (cachedTableState?.sortConfig?.key || (initialSalesTab === 'new-leads' ? 'created_at' : initialSalesTab === 'follow-up' ? 'created_at' : 'assigned_at')),
-    direction: cachedTableState?.sortConfig?.direction || 'desc' 
+    direction: cachedTableState?.sortConfig?.direction || 'desc'
   });
   const renderLegacyPipelineTable = import.meta.env.VITE_RENDER_LEGACY_PIPELINE_TABLE === 'true';
 
@@ -3362,6 +3365,7 @@ const Sales = () => {
 
   const isLeadTab = LEAD_TAB_IDS.has(activeTab);
 
+  const [tableError, setTableError] = useState(null);
   const [pagination, setPagination] = useState({
     count: 0,
     page: 1,
@@ -3553,8 +3557,16 @@ const Sales = () => {
     if (sortConfig.key === key && sortConfig.direction === 'asc') {
       direction = 'desc';
     }
+    if (selectedBranchId) {
+      setBranchLeadOrders((previous) => {
+        const next = { ...previous };
+        delete next[selectedBranchId];
+        writeSavedBranchLeadOrders(next);
+        return next;
+      });
+    }
     setSortConfig({ key, direction });
-  }, [activeTab, sortConfig]);
+  }, [activeTab, selectedBranchId, sortConfig]);
 
   const mapOrderingKey = useCallback((key, tab = activeTab) => {
       if (tab === 'follow-up') {
@@ -3707,8 +3719,8 @@ const Sales = () => {
       value: Number(row.value || row.lead_cost || 0),
       lead_cost: Number(row.lead_cost || 0),
       priority: row.priority || '',
-      origin: normalizeDisplayText(row.origin) || null,
-      destination: normalizeDisplayText(row.destination) || null,
+      origin: normalizeDisplayText(row.origin || row.origin_city) || null,
+      destination: normalizeDisplayText(row.destination || row.destination_city) || null,
     };
   }, [activeTab, resolveStatusCodeColor]);
 
@@ -3819,24 +3831,26 @@ const Sales = () => {
           : '-activity__created_at,-sales_number';
         const params = { ordering: followUpOrdering, page: currentPage, page_size: PAGE_SIZE };
         if (filters.branch) params.branch = filters.branch;
-        if (filters.assigned_to) params.assigned_to = filters.assigned_to;
+        if (filters.assigned_to) params.assigned_user = filters.assigned_to;
+        if (filters.status !== 'all') params.status = filters.status;
         const tasksRes = await getTasks(params);
+        if (requestSequenceRef.current !== requestId) return;
         const rawTasks = asList(tasksRes?.data || tasksRes);
         rows = rawTasks.map(task => normalizeTaskRow(task));
 
         const totalCount = Number(tasksRes?.data?.count ?? tasksRes?.count ?? rawTasks.length ?? rows.length ?? 0);
-        
+
         setPagination({
           count: totalCount,
           page: currentPage,
           pageSize: PAGE_SIZE,
           totalPages: Math.max(1, Math.ceil(totalCount / PAGE_SIZE)),
         });
-        
+
         const pendingTasks = rows.filter(r => r.status !== 'completed');
         const overdueTasks = pendingTasks.filter(r => r.due_date && new Date(r.due_date) < new Date());
         const totalValue = pendingTasks.reduce((sum, r) => sum + (r.value || 0), 0);
-        
+
         setQueueSummary(prev => ({
           ...prev,
           total: totalCount,
@@ -3846,6 +3860,7 @@ const Sales = () => {
           new_count: pendingTasks.length,
           value_total: totalValue,
           conversion_rate: 0,
+          ...(tasksRes?.summary || {}),
         }));
       } else {
         const queueParams = {
@@ -3861,6 +3876,7 @@ const Sales = () => {
           queueParams.row_type = 'opportunity';
         }
         const normalizedStatus = normalizeStatusValue(filters.status);
+        if (/^\d+$/.test(normalizedStatus)) queueParams.custom_status_code = normalizedStatus;
         const trimmedSearch = String(searchTerm || '').trim();
         const tabStatus = activeTab === 'booked'
           ? 'booked'
@@ -3874,13 +3890,13 @@ const Sales = () => {
         if (filters.branch) queueParams.branch = filters.branch;
         if (filters.assigned_to) queueParams.assigned_user = filters.assigned_to;
         if (filters.province) queueParams.province = filters.province;
-        if (filters.service_type) queueParams.service_type = filters.service_type;
+
         if (filters.move_type && filters.move_type !== 'all') {
           queueParams.move_type = filters.move_type;
           queueParams.moveType = filters.move_type;
         }
-        if (filters.source) queueParams.source = filters.source;
-        if (filters.move_size) queueParams.move_size = filters.move_size;
+
+
         if (filters.origin) queueParams.origin = filters.origin;
         if (filters.destination) queueParams.destination = filters.destination;
         if (filters.receivedDate) queueParams.receivedDate = filters.receivedDate;
@@ -3891,7 +3907,7 @@ const Sales = () => {
           queueParams.lead_status = 'lost';
           queueParams.opp_status = 'lost';
           queueParams.include_converted = true;
-        } else if (normalizedStatus && normalizedStatus !== 'all') {
+        } else if (normalizedStatus && normalizedStatus !== 'all' && !/^\d+$/.test(normalizedStatus)) {
           if (activeTab === 'all-leads' || activeTab === 'new-leads') {
             queueParams.lead_status = normalizedStatus;
           } else if (activeTab === 'leads') {
@@ -3929,10 +3945,11 @@ const Sales = () => {
 
         if (activeTab === 'lost-leads') {
           const queueRes = cachedResponse || await getMyLeadsQueue(queueParams);
+          if (requestSequenceRef.current !== requestId) return;
           const queueRaw = Array.isArray(queueRes) ? queueRes : (queueRes?.results || []);
           const normalizedRows = queueRaw.map(normalizeQueueRow);
           const lostOnlyRows = normalizedRows.filter(isLostRecord);
-          rows = dedupeLeadOpportunityRows(lostOnlyRows);
+          rows = lostOnlyRows;
           const totalCount = Number(queueRes?.count ?? queueRaw.length ?? rows.length ?? 0);
           setPagination({
             count: totalCount,
@@ -3946,8 +3963,9 @@ const Sales = () => {
           }
         } else if (activeTab === 'all-leads') {
           const queueRes = cachedResponse || await getMyLeadsQueue(queueParams);
+          if (requestSequenceRef.current !== requestId) return;
           const queueRaw = Array.isArray(queueRes) ? queueRes : (queueRes?.results || []);
-          rows = dedupeLeadOpportunityRows(queueRaw.map(normalizeQueueRow).filter((row) => !isLostRecord(row)));
+          rows = queueRaw.map(normalizeQueueRow);
           const totalCount = Number(queueRes?.count ?? queueRaw.length ?? rows.length ?? 0);
           setPagination({
             count: totalCount,
@@ -3961,8 +3979,9 @@ const Sales = () => {
           }
         } else if (activeTab === 'leads') {
           const queueRes = cachedResponse || await getMyLeadsQueue(queueParams);
+          if (requestSequenceRef.current !== requestId) return;
           const queueRaw = Array.isArray(queueRes) ? queueRes : (queueRes?.results || []);
-          rows = dedupeLeadOpportunityRows(queueRaw.map(normalizeQueueRow));
+          rows = queueRaw.map(normalizeQueueRow);
           const totalCount = Number(queueRes?.count ?? queueRaw.length ?? rows.length ?? 0);
           setPagination({
             count: totalCount,
@@ -3976,6 +3995,7 @@ const Sales = () => {
           }
         } else if (activeTab === 'new-leads') {
           const queueRes = cachedResponse || await getMyLeadsQueue(queueParams);
+          if (requestSequenceRef.current !== requestId) return;
           const queueRaw = Array.isArray(queueRes) ? queueRes : (queueRes?.results || []);
           rows = queueRaw.map(normalizeQueueRow);
           const totalCount = Number(queueRes?.count ?? queueRaw.length ?? rows.length ?? 0);
@@ -3994,6 +4014,7 @@ const Sales = () => {
           if (activeTab === 'confirmed') queueParams.opp_status = 'confirmed';
           if (activeTab === 'completed') queueParams.opp_status = 'completed';
           const queueRes = cachedResponse || await getMyLeadsQueue(queueParams);
+          if (requestSequenceRef.current !== requestId) return;
           const queueRaw = Array.isArray(queueRes) ? queueRes : (queueRes?.results || []);
           rows = queueRaw.map(normalizeQueueRow);
           const totalCount = Number(queueRes?.count ?? queueRaw.length ?? rows.length ?? 0);
@@ -4019,6 +4040,7 @@ const Sales = () => {
         seenKeys.add(k);
         return true;
       });
+      setTableError(null);
       setData(uniqueRows);
       setSelectedRecordKeys((prev) => {
         if (!prev.size) return prev;
@@ -4030,7 +4052,7 @@ const Sales = () => {
         return next;
       });
 
-      const sources = Array.from(new Set(rows.map(i => i.source).filter(Boolean)));
+      const sources = [];
 
       setMetadata(prev => ({
         ...prev,
@@ -4044,6 +4066,7 @@ const Sales = () => {
       }));
     } catch (err) {
       if (requestSequenceRef.current !== requestId) return;
+      setTableError('Could not refresh records. Any displayed records may be out of date.');
       console.error('Failed to fetch pipeline data:', err);
       if (!hasCachedTableState) {
         setData([]);
@@ -4108,6 +4131,7 @@ const Sales = () => {
 
   useEffect(() => {
     fetchInitialData();
+    return () => { requestSequenceRef.current += 1; };
   }, [fetchInitialData]);
 
   const refreshSalesDataAfterMutation = useCallback(async () => {
@@ -4167,6 +4191,8 @@ const Sales = () => {
     };
 
     const handleTenantChanged = () => {
+      requestSequenceRef.current += 1;
+      dashboardRequestSeqRef.current += 1;
       queueCacheRef.current.clear();
       metadataCacheRef.current.clear();
       metadataPromiseRef.current = null;
@@ -4264,9 +4290,8 @@ const Sales = () => {
   /* ── Dashboard data fetching ────────────────────────── */
   useEffect(() => {
     if (!isDashboard) return;
-    const requestId = ++dashboardRequestSeqRef.current;
-
     const fetchDashboard = async () => {
+      const requestId = ++dashboardRequestSeqRef.current;
       setDashLoading(true);
       setDashError(null);
 
@@ -4278,10 +4303,6 @@ const Sales = () => {
           tasksRes,
           activitiesRes,
           leadActivitiesRes,
-          leadsRes,
-          wonRes,
-          lostRes,
-          paymentsRes,
         ] = await Promise.all([
           getSalesDashboardSummary({
             ...scopeParams,
@@ -4302,29 +4323,6 @@ const Sales = () => {
             limit: 500,
             ...scopeParams,
           }).catch(() => null),
-          getMyLeadsQueue({
-            limit: 500,
-            ...scopeParams,
-            date_field: 'created_at',
-            include_converted: true,
-          }).catch(() => null),
-          getMyLeadsQueue({
-            limit: 500,
-            opp_status: 'booked',
-            ...scopeParams,
-            include_converted: true,
-          }).catch(() => null),
-          getMyLeadsQueue({
-            limit: 500,
-            lead_status: 'lost',
-            opp_status: 'lost',
-            ...scopeParams,
-            include_converted: true,
-          }).catch(() => null),
-          getPayments({
-            limit: 500,
-            ...scopeParams,
-          }).catch(() => null),
         ]);
 
         if (dashboardRequestSeqRef.current !== requestId) return;
@@ -4342,22 +4340,14 @@ const Sales = () => {
           ...asList(activitiesRes).filter((row) => String(row?.activity_type || '').toLowerCase() === 'call'),
           ...asList(leadActivitiesRes).filter((row) => String(row?.activity_type || '').toLowerCase() === 'call'),
         ];
-        const leadsCount = asList(leadsRes).length;
-        const wonCount = asList(wonRes).length;
-        const lostCount = asList(lostRes).length;
-        const paymentRows = asList(paymentsRes).filter((row) => Number(row.amount || row.value || row.estimate_value || 0) > 0);
         setDashData({
           taskTrend: summaryData?.taskTrend ?? 0,
           emailCount: combinedActivityRows.length,
           smsCount: combinedSmsRows.length,
           phoneCallCount: combinedCallRows.length,
-          leadsCount,
-          paymentTotal: paymentRows.reduce((sum, row) => sum + Number(row.amount || row.value || row.estimate_value || 0), 0),
-          paymentCount: paymentRows.length,
           taskCount,
-          wonCount,
-          lostCount,
           ...(summaryData || {}),
+          workUnavailable: !tasksRes || !activitiesRes || !leadActivitiesRes,
         });
       } catch (err) {
         if (dashboardRequestSeqRef.current !== requestId) return;
@@ -4373,13 +4363,15 @@ const Sales = () => {
     fetchDashboard();
 
     const handleSalesDataChanged = () => {
-      dashboardRequestSeqRef.current += 1;
       fetchDashboard();
     };
 
     window.addEventListener('sales-data-changed', handleSalesDataChanged);
+    window.addEventListener('app:tenant-changed', handleSalesDataChanged);
     return () => {
+      window.removeEventListener('app:tenant-changed', handleSalesDataChanged);
       window.removeEventListener('sales-data-changed', handleSalesDataChanged);
+      dashboardRequestSeqRef.current += 1;
     };
   }, [dashDateRange, filters.assigned_to, filters.branch, isDashboard]);
 
@@ -4392,10 +4384,10 @@ const Sales = () => {
     setTaskActionLoadingId(item.id);
     try {
       const nextStatus = item.status === 'completed' ? 'pending' : 'completed';
-      await updateSalesActivity(item.activity_id, {
+      await (item.native_task ? updateTenantTask(item, { status: nextStatus }) : updateSalesActivity(item.activity_id, {
         status: nextStatus,
         completed_at: nextStatus === 'completed' ? new Date().toISOString() : null,
-      });
+      }));
       setData((prev) => prev.map((row) => (
         row.row_type === 'task' && String(row.id) === String(item.id)
           ? {
@@ -4470,6 +4462,14 @@ const Sales = () => {
     const notes = buildFollowUpNotes(taskEditForm);
     setTaskActionLoadingId(item.id);
     try {
+      if (item.native_task) {
+        await updateTenantTask(item, {
+          title: subject, status: taskEditForm.status,
+          task_type: taskEditForm.task_type || 'general',
+          assigned_to_id: taskEditForm.assigned_to ? Number(taskEditForm.assigned_to) : null,
+          due_date: dueAt.toISOString(), notes,
+        });
+      } else {
       await updateSalesActivity(item.activity_id, {
         subject,
         description: notes || subject,
@@ -4482,6 +4482,7 @@ const Sales = () => {
         due_date: dueAt.toISOString(),
         notes,
       });
+      }
       setData((prev) => prev.map((row) => (
         row.row_type === 'task' && String(row.id) === String(item.id)
           ? {
@@ -4510,6 +4511,7 @@ const Sales = () => {
   }, [canAll, closeEditTaskModal, fetchInitialData, showToast, taskEditForm, taskEditModal.item]);
 
   const handleDeleteTask = useCallback(async (item) => {
+    if (item?.native_task) { showToast('Task deletion is not available. You can mark it complete.', 'warning'); return; }
     if (!item?.activity_id) {
       showToast('This follow-up is missing activity details and cannot be deleted.', 'error');
       return;
@@ -4671,9 +4673,9 @@ const Sales = () => {
     }
     try {
       setAssigningLeadId(assignModal.lead.id);
-      await assignLead(assignModal.lead.id, { 
-        branch: branchId ? Number(branchId) : null, 
-        assigned_to: userId ? Number(userId) : null 
+      await assignLead(assignModal.lead.id, {
+        branch: branchId ? Number(branchId) : null,
+        assigned_to: userId ? Number(userId) : null
       });
       setAssignModal({ open: false, lead: null });
       await fetchInitialData();
@@ -4937,6 +4939,7 @@ const Sales = () => {
         assigned_user: bulkAssignForm.assigned_to ? Number(bulkAssignForm.assigned_to) : null,
       };
       const result = await bulkSalesAssign(payload);
+      await refreshSalesDataAfterMutation();
       const data = result?.data || {};
       setBulkAssignOpen(false);
       setSelectedRecordKeys(new Set());
@@ -5064,7 +5067,7 @@ const Sales = () => {
     setBulkActionLoading(true);
     try {
       const selectedTemplate = bulkEmailTemplates.find((t) => String(t.id) === String(bulkEmailTemplateId));
-      
+
       const result = await bulkSalesEmail({
         items,
         subject: bulkEmailForm.subject,
@@ -5119,7 +5122,7 @@ const Sales = () => {
     setBulkActionLoading(true);
     try {
       const selectedTemplate = bulkSmsTemplates.find((t) => String(t.id) === String(bulkSmsTemplateId));
-      
+
       const result = await bulkSalesSms({
         items,
         message: bulkSmsForm.message,
@@ -5200,7 +5203,7 @@ const Sales = () => {
 
   return (
     <div className="min-h-screen bg-slate-50/30">
-      
+
       {/* 1. Page Header */}
       <div className="border-b border-slate-200 bg-transparent">
         <div className="mx-auto max-w-[1600px] px-6 pt-6">
@@ -5209,7 +5212,7 @@ const Sales = () => {
               <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Pipeline</h1>
               <p className="mt-1 text-sm text-slate-500">Leads, opportunities and booked jobs.</p>
             </div>
-            
+
             <div className="flex items-center gap-2 mb-1">
               <div className="flex gap-2">
                 <select
@@ -5223,11 +5226,13 @@ const Sales = () => {
                   ))}
                 </select>
                 <select
+                  aria-label="Assigned staff"
+                  disabled={!metadata.users.length}
                   value={filters.assigned_to}
                   onChange={(e) => updateFilterValue('assigned_to', e.target.value)}
                   className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 cursor-pointer"
                 >
-                  <option value="">All Staff</option>
+                  <option value="">{metadata.users.length ? 'All Staff' : 'Staff filter unavailable'}</option>
                   {filteredUsersByBranch.map((u) => (
                     <option key={u.id} value={u.id}>
                       {[u.first_name, u.last_name].filter(Boolean).join(' ').trim() || u.email || `User #${u.id}`}
@@ -5286,8 +5291,8 @@ const Sales = () => {
             </div>
           </div>
 
-          
-          
+
+
           {/* Sub-nav tabs */}
         <div className="flex inter-col gap-6 justify-between mt-4">
           <nav className="mt-4 mb-3 flex items-center gap-2 overflow-x-auto no-scrollbar">
@@ -5331,6 +5336,7 @@ const Sales = () => {
       </div>
 
       <main className="mx-auto max-w-[1600px] px-6 py-6 space-y-2">
+        {!isDashboard && tableError && <div role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{tableError} <button type="button" className="underline" onClick={() => fetchInitialData({ forceRefresh: true })}>Retry</button></div>}
         {isDashboard ? (
           <div className="relative rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
             {isTabSwitching ? (
@@ -5369,7 +5375,7 @@ const Sales = () => {
                   <div className="hidden sm:block mt-0.5 text-[11px] opacity-80 font-medium truncate">Global records count</div>
                 </div>
               </div>
-              
+
               {/* Card 2: Violet / Purple Theme */}
               <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 sm:px-3.5 sm:py-2.5 shadow-sm flex items-center gap-3 transition-all hover:shadow-md">
                 <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-50 text-violet-700">
@@ -5395,7 +5401,7 @@ const Sales = () => {
                 </span>
                 <div className="min-w-0 text-amber-700">
                   <div className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider truncate">
-                    {activeTab === 'follow-up' ? 'Revenue' : activeTab === 'lost-leads' ? 'Lost Value' : 'Pipeline'}
+                    {activeTab === 'follow-up' ? 'Associated estimates' : activeTab === 'lost-leads' ? 'Lost Value' : 'Pipeline'}
                   </div>
                   <div className="mt-0.5 font-mono text-base sm:text-xl font-black tracking-tight leading-none">
                     {formatCurrency(stats.value)}
@@ -5413,13 +5419,13 @@ const Sales = () => {
                 </span>
                 <div className="min-w-0 text-emerald-700">
                   <div className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider truncate">
-                    {activeTab === 'follow-up' ? 'Overdue' : activeTab === 'lost-leads' ? 'Loss Ratio' : 'Conversion'}
+                    {activeTab === 'follow-up' ? 'Overdue' : activeTab === 'lost-leads' ? 'Loss ratio unavailable' : 'Lead conversion'}
                   </div>
                   <div className="mt-0.5 font-mono text-base sm:text-xl font-black tracking-tight leading-none">
-                    {activeTab === 'follow-up' ? stats.hot : `${Number(stats.conversion || 0).toFixed(1)}%`}
+                    {activeTab === 'follow-up' ? stats.hot : activeTab === 'lost-leads' ? '—' : `${Number(stats.conversion || 0).toFixed(1)}%`}
                   </div>
                   <div className="hidden sm:block mt-0.5 text-[11px] opacity-80 font-medium truncate">
-                    {activeTab === 'follow-up' ? 'Pending past due date' : activeTab === 'lost-leads' ? 'Lost opportunities ratio' : 'Target performance: 22%'}
+                    {activeTab === 'follow-up' ? 'Pending past due date' : activeTab === 'lost-leads' ? 'Requires historical reporting' : 'Converted leads / matching leads'}
                   </div>
                 </div>
               </div>
@@ -5428,8 +5434,9 @@ const Sales = () => {
         {/* 3. Collapsible Advanced Filters Panel */}
         {isFilterOpen && (
           <div className="border border-slate-200 bg-slate-50 rounded-xl p-4 shadow-sm animate-in slide-in-from-top duration-300">
+            <p className="mb-3 text-xs text-slate-600">Service, source, move size and move type filters are not available yet.</p>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-              
+
               <div className="flex flex-col gap-1">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Status</span>
                 <select
@@ -5467,11 +5474,13 @@ const Sales = () => {
               <div className="flex flex-col gap-1">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Assigned Agent</span>
                 <select
+                  aria-label="Assigned staff"
+                  disabled={!metadata.users.length}
                   value={filters.assigned_to}
                   onChange={(e) => updateFilterValue('assigned_to', e.target.value)}
                   className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 cursor-pointer"
                 >
-                  <option value="">All Staff</option>
+                  <option value="">{metadata.users.length ? 'All Staff' : 'Staff filter unavailable'}</option>
                   {filteredUsersByBranch.map((u) => (
                     <option key={u.id} value={u.id}>{u.first_name} {u.last_name}</option>
                   ))}
@@ -5481,7 +5490,8 @@ const Sales = () => {
               <div className="flex flex-col gap-1">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Service</span>
                 <select
-                  value={filters.service_type}
+                  disabled title="This filter is not available yet"
+                  value=""
                   onChange={(e) => updateFilterValue('service_type', e.target.value)}
                   className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 cursor-pointer"
                 >
@@ -5495,7 +5505,8 @@ const Sales = () => {
               <div className="flex flex-col gap-1">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Source</span>
                 <select
-                  value={filters.source}
+                  disabled title="This filter is not available yet"
+                  value=""
                   onChange={(e) => updateFilterValue('source', e.target.value)}
                   className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 cursor-pointer"
                 >
@@ -5509,7 +5520,8 @@ const Sales = () => {
               <div className="flex flex-col gap-1">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Move Size</span>
                 <select
-                  value={filters.move_size}
+                  disabled title="This filter is not available yet"
+                  value=""
                   onChange={(e) => updateFilterValue('move_size', e.target.value)}
                   className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 cursor-pointer"
                 >
@@ -5520,7 +5532,7 @@ const Sales = () => {
                 </select>
               </div>
 
-              
+
 
               <div className="flex flex-col gap-1">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Origin City</span>
@@ -5558,7 +5570,8 @@ const Sales = () => {
               <div className="flex flex-col gap-1">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Move Type</span>
                 <select
-                  value={filters.move_type}
+                  disabled title="This filter is not available yet"
+                  value="all"
                   onChange={(e) => updateFilterValue('move_type', e.target.value)}
                   className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 cursor-pointer"
                 >
@@ -5568,7 +5581,7 @@ const Sales = () => {
                   ))}
                 </select>
               </div>
-              
+
               <div className="flex flex-col gap-1 justify-end">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Date Filter Type</span>
                 <div className="flex items-center gap-3 py-1.5 px-1">
@@ -5709,7 +5722,7 @@ const Sales = () => {
             {isTabSwitching ? (
               <TabSwitchLoader />
             ) : null}
-            
+
             {/* Desktop Table View */}
             <div className={`relative block overflow-x-auto transition-opacity duration-150 ${isTabSwitching ? 'opacity-0' : 'opacity-100'}`}>
               <table className="w-full min-w-[1200px] divide-y divide-slate-200">
@@ -5840,8 +5853,8 @@ const Sales = () => {
                         >
                           <td className="px-4 py-3.5">
                             <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${
-                              item.status === 'completed' 
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                              item.status === 'completed'
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                 : 'bg-amber-50 text-amber-700 border-amber-200'
                             }`}>
                               <span className="inline-block h-1 w-1 rounded-full bg-current" />
@@ -5892,7 +5905,7 @@ const Sales = () => {
                               item={item}
                               onToggleStatus={handleToggleTaskStatus}
                               onEdit={openEditTaskModal}
-                              onDelete={handleDeleteTask}
+                              onDelete={item.native_task ? undefined : handleDeleteTask}
                             />
                           </td>
                         </tr>
@@ -6080,15 +6093,15 @@ const Sales = () => {
                         key={`task-${item.id}`}
                         onClick={(e) => handleRowClick(item, e)}
                         className={`bg-white rounded-xl border p-4 transition-all hover:shadow-md cursor-pointer relative overflow-hidden flex flex-col gap-3 ${
-                          isOverdue 
-                            ? "border-rose-200 hover:border-rose-350 shadow-sm shadow-rose-50/40" 
+                          isOverdue
+                            ? "border-rose-200 hover:border-rose-350 shadow-sm shadow-rose-50/40"
                             : "border-slate-200/90 shadow-sm"
                         }`}
                       >
                         {isOverdue && (
                           <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-red-500 to-rose-600" />
                         )}
-                        
+
                         {/* Header: ID, Task Type, Status */}
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-1.5">
@@ -6175,7 +6188,7 @@ const Sales = () => {
                               item={item}
                               onToggleStatus={handleToggleTaskStatus}
                               onEdit={openEditTaskModal}
-                              onDelete={handleDeleteTask}
+                              onDelete={item.native_task ? undefined : handleDeleteTask}
                             />
                           </div>
                         </div>
@@ -6190,8 +6203,8 @@ const Sales = () => {
                         key={`${item.row_type}-${item.id}`}
                         onClick={(e) => handleRowClick(item, e)}
                         className={`bg-white rounded-xl border p-4 transition-all hover:shadow-md cursor-pointer relative overflow-hidden flex flex-col gap-3 ${
-                          isUrgent 
-                            ? "border-rose-200 hover:border-rose-350 shadow-sm shadow-rose-50/40" 
+                          isUrgent
+                            ? "border-rose-200 hover:border-rose-350 shadow-sm shadow-rose-50/40"
                             : "border-slate-200/90 shadow-sm"
                         }`}
                       >
@@ -6341,7 +6354,7 @@ const Sales = () => {
                     );
                   })
                 )}
-                
+
                 {filteredItems.length === 0 && (
                   <li className="bg-white rounded-xl border border-slate-205 p-8 text-center">
                     <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-full bg-slate-50 text-slate-400 border border-slate-100">
@@ -6501,7 +6514,7 @@ const Sales = () => {
       )}
 
 
-      
+
     </div>
   );
 };
