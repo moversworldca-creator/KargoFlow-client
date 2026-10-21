@@ -1040,3 +1040,8 @@ export const getBranchLookupsPage = async (search, offset, limit) => {
 
 export const getOpportunityLossReasonLookupsPage = (search, offset, limit) =>
   api.get('/lookups/opportunity-loss-reasons/', { params: { search, offset, limit } });
+
+// Company-wide gateway configuration; authentication testing never creates a charge.
+export const getAuthorizeNetSettings = () => api.get('/tenant/integrations/authorize-net/');
+export const saveAuthorizeNetSettings = (data) => api.post('/tenant/integrations/authorize-net/', data);
+export const verifyAuthorizeNetSettings = () => api.post('/tenant/integrations/authorize-net/verify/');
