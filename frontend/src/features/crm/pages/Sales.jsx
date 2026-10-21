@@ -2217,26 +2217,31 @@ const DashStatCard = ({ icon: IconComp, label, value, trend, prefix = '', suffix
   const iconClass = iconBgStyles[color] || iconBgStyles.slate;
 
   return (
-    <div
-      onClick={onClick}
-      className={`rounded-xl border p-4 shadow-sm transition-all duration-200 ${wrapperClass} ${onClick ? 'cursor-pointer hover:shadow-md' : ''}`}
-    >
+  <div
+    onClick={onClick}
+      className={`flex flex-col justify-between rounded-xl border p-4 shadow-sm transition-all duration-200 min-h-[110px] sm:min-h-[116px] ${wrapperClass} ${onClick ? 'cursor-pointer hover:shadow-md' : ''}`}
+  >
       <div className="flex items-center justify-between mb-3">
-        <span className={`inline-flex h-9 w-9 items-center justify-center rounded-lg border ${iconClass}`}>
-          <IconComp size={18} strokeWidth={1.8} />
+        <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${iconClass}`}>
+          <IconComp size={16} strokeWidth={1.8} />
         </span>
-        {value !== "—" && <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${trendColor}`}>
-          <TrendIcon size={11} />
-          {trend > 0 ? '+' : ''}{trend}%
-        </span>}
+        {value !== "—" && (
+        
+          <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${trendColor}`}>
+            <TrendIcon size={11} />
+            {trend > 0 ? '+' : ''}{trend}%
+          </span>
+        )}
       </div>
-      <div className="text-[11px] font-bold uppercase tracking-wider mb-1">{label}</div>
-      <div className="font-mono text-2xl font-black tracking-tight leading-none">
-        {prefix}{typeof value === 'number' ? value.toLocaleString('en-CA') : value}{suffix}
+      <div className="space-y-1">
+        <div className="text-[11px] font-bold uppercase tracking-wider truncate" title={label}>{label}</div>
+        <div className="font-mono text-2xl font-black tracking-tight leading-none truncate">
+          {prefix}{typeof value === 'number' ? value.toLocaleString('en-CA') : value}{suffix}
+        </div>
+        {scopeLabel ? (
+          <div className="mt-1 text-[10px] opacity-80 font-medium truncate">{scopeLabel}</div>
+        ) : null}
       </div>
-      {scopeLabel ? (
-        <div className="mt-1 text-[10px] opacity-80 font-medium">{scopeLabel}</div>
-      ) : null}
     </div>
   );
 };
@@ -3198,7 +3203,7 @@ const DashboardPane = React.memo(function DashboardPane({
 
 
   return (
-    <div className="space-y-5">
+    <div className="p-4 space-y-4 box-border w-full min-w-0">
       {/* ── Header ── */}
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
@@ -3243,36 +3248,34 @@ const DashboardPane = React.memo(function DashboardPane({
       )}
 
       {dashData?.workUnavailable && <p role="status" className="text-sm text-amber-800">Some activity or follow-up data could not be loaded. Those metrics are unavailable.</p>}
-      {/* ── Stats Row 1 ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <DashStatCard icon={Mail}        label="Emails Logged"   value={dashData?.workUnavailable ? "—" : d.emailCount ?? 0}     trend={d.emailTrend ?? 0} onClick={() => setStatModalType('emails')} color="blue" />
-        <DashStatCard icon={MessageSquare} label="SMS Logged"    value={dashData?.workUnavailable ? "—" : d.smsCount ?? 0}       trend={d.smsTrend ?? 0} onClick={() => setStatModalType('sms')} color="violet" />
-        <DashStatCard icon={Target}      label="Leads Created"   value={d.leadsCount ?? 0}     trend={d.leadsTrend ?? 0} onClick={() => setStatModalType('leads')} color="amber" />
-        <DashStatCard icon={DollarSign} label="Payments unavailable" value="—" color="emerald" />
-      </div>
-
-      {/* ── Stats Row 2 ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <DashStatCard icon={PhoneCall}      label="Phone Calls Logged"  value={dashData?.workUnavailable ? "—" : d.phoneCallCount ?? 0}  trend={d.phoneCallTrend ?? 0} onClick={() => setStatModalType('calls')} color="teal" />
-        <DashStatCard icon={CheckCircle2}   label="Follow-up"        value={dashData?.workUnavailable ? "—" : d.taskCount ?? 0}       trend={d.taskTrend ?? 0} onClick={() => setStatModalType('tasks')} color="orange" />
-        <DashStatCard icon={TrendingUp}     label="Booked Leads"    value={d.wonCount ?? 0}        trend={d.wonTrend ?? 0} onClick={() => setStatModalType('won')} color="indigo" />
-        <DashStatCard icon={TrendingDown}   label="Lost This Period"   value={d.lostCount ?? 0}       trend={d.lostTrend ?? 0} onClick={() => setStatModalType('lost')} color="rose" />
-      </div>
-
-      {/* ── Chart + Insights ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2">
-          <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-            Lead creation only
-          </div>
-          <SimpleBarChart
-            data={d.dailyBreakdown.length > 0 ? d.dailyBreakdown : [{ date: new Date().toISOString().split('T')[0], count: 0, label: 'Today', shortLabel: 'Today' }]}
-            title="Lead Timeline"
-          />
+      {/* ── Top Section: 8 Metric Cards (4x2) + Branch Insights ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch w-full min-w-0">
+        {/* Left: 8 metric cards in 4 columns x 2 rows */}
+        <div className="lg:col-span-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-2 gap-y-3 min-w-0">
+          <DashStatCard icon={Mail}        label="Emails Logged"   value={dashData?.workUnavailable ? "—" : d.emailCount ?? 0}     trend={d.emailTrend ?? 0} onClick={() => setStatModalType('emails')} color="blue" />
+          <DashStatCard icon={MessageSquare} label="SMS Logged"    value={dashData?.workUnavailable ? "—" : d.smsCount ?? 0}       trend={d.smsTrend ?? 0} onClick={() => setStatModalType('sms')} color="violet" />
+          <DashStatCard icon={Target}      label="Leads Created"   value={d.leadsCount ?? 0}     trend={d.leadsTrend ?? 0} onClick={() => setStatModalType('leads')} color="amber" />
+          <DashStatCard icon={DollarSign} label="Payments unavailable" value="—" color="emerald" />
+          <DashStatCard icon={PhoneCall}      label="Phone Calls Logged"  value={dashData?.workUnavailable ? "—" : d.phoneCallCount ?? 0}  trend={d.phoneCallTrend ?? 0} onClick={() => setStatModalType('calls')} color="teal" />
+          <DashStatCard icon={CheckCircle2}   label="Follow-up"        value={dashData?.workUnavailable ? "—" : d.taskCount ?? 0}       trend={d.taskTrend ?? 0} onClick={() => setStatModalType('tasks')} color="orange" />
+          <DashStatCard icon={TrendingUp}     label="Booked Leads"    value={d.wonCount ?? 0}        trend={d.wonTrend ?? 0} onClick={() => setStatModalType('won')} color="indigo" />
+          <DashStatCard icon={TrendingDown}   label="Lost This Period"   value={d.lostCount ?? 0}       trend={d.lostTrend ?? 0} onClick={() => setStatModalType('lost')} color="rose" />
         </div>
-        <div className="lg:col-span-1">
+        {/* Right: Branch Insights aligned beside the metric cards (16px gap via gap-4) */}
+        <div className="lg:col-span-4 flex flex-col min-w-0">
           <InsightsPanel dashData={d} userName={userName} isAllUsers={isAllUsers} />
         </div>
+      </div>
+
+      {/* ── Bottom Section: Lead Timeline spanning 100% width (16px gap via space-y-4) ── */}
+      <div className="w-full min-w-0">
+        <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+          Lead creation only
+        </div>
+        <SimpleBarChart
+          data={d.dailyBreakdown.length > 0 ? d.dailyBreakdown : [{ date: new Date().toISOString().split('T')[0], count: 0, label: 'Today', shortLabel: 'Today' }]}
+          title="Lead Timeline"
+        />
       </div>
 
       <StatDetailModal
