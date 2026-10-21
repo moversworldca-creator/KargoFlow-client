@@ -628,24 +628,24 @@ export const deleteEstimatePackageItem = (id) => api.delete(`/package-items/${id
 export const applyEstimatePackage = (estimateId, data) => api.post(`/estimates/${estimateId}/apply-package/`, data);
 export const resendEstimate = (estimateId, data) => api.post(`/estimates/${estimateId}/resend/`, data);
 export const clearEstimateSignatures = (estimateId) => api.post(`/estimates/${estimateId}/clear-signatures/`, {});
-export const getPublicEstimateInventoryPortal = (token) => api.get("/public/estimates/inventory/", { params: { token } });
-export const submitPublicEstimateInventoryPortal = (data) => api.post("/public/estimates/inventory/", data);
+export const getPublicEstimateInventoryPortal = (token) => api.get("/public/estimates/inventory/", { params: { token }, skipAuth: true });
+export const submitPublicEstimateInventoryPortal = (data) => api.post("/public/estimates/inventory/", data, { skipAuth: true });
 export const uploadPublicEstimateInventoryPortalPhoto = ({ token, file, notes = "" }) => {
   const formData = new FormData();
   formData.append("token", token);
   formData.append("file", file);
   if (notes) formData.append("notes", notes);
-  return api.post("/public/estimates/inventory/photos/", formData);
+  return api.post("/public/estimates/inventory/photos/", formData, { skipAuth: true });
 };
-export const getPublicEstimatePortal = (token) => api.get("/public/estimates/portal/", { params: { token } });
-export const approvePublicEstimatePortal = (data) => api.post("/public/estimates/portal/approve/", data);
+export const getPublicEstimatePortal = (token) => api.get("/public/estimates/portal/", { params: { token }, skipAuth: true });
+export const approvePublicEstimatePortal = (data) => api.post("/public/estimates/portal/approve/", data, { skipAuth: true });
 export const createPublicEstimatePaymentSession = (data) => api.post("/payments/public/estimates/portal/payment-request/", data);
 export const createPublicEstimateSquarePayment = (data) => api.post("/payments/public/estimates/portal/payments/create/", data);
 export const getPublicSquareOrder = (token, orderId) =>
   api.get(`/payments/public/estimates/portal/square/orders/${orderId}/`, { params: { token } });
 
-export const getPublicContractPortal = (token) => api.get("/public/contracts/portal/", { params: { token } });
-export const signPublicContractPortal = (data) => api.post("/public/contracts/portal/sign/", data);
+export const getPublicContractPortal = (token) => api.get("/public/contracts/portal/", { params: { token }, skipAuth: true });
+export const signPublicContractPortal = (data) => api.post("/public/contracts/portal/sign/", data, { skipAuth: true });
 
 export const getDocumentTemplates = (params) => legacyOperationsApiEnabled ? api.get("/documents/templates/", { params }) : Promise.resolve([]);
 export const createDocumentTemplate = (data) => api.post("/documents/templates/", data);
@@ -1040,3 +1040,23 @@ export const getBranchLookupsPage = async (search, offset, limit) => {
 
 export const getOpportunityLossReasonLookupsPage = (search, offset, limit) =>
   api.get('/lookups/opportunity-loss-reasons/', { params: { search, offset, limit } });
+
+// Company-wide gateway configuration; authentication testing never creates a charge.
+export const getAuthorizeNetSettings = () => api.get('/tenant/integrations/authorize-net/');
+export const saveAuthorizeNetSettings = (data) => api.post('/tenant/integrations/authorize-net/', data);
+export const verifyAuthorizeNetSettings = () => api.post('/tenant/integrations/authorize-net/verify/');
+
+const publicPortalPath = (kind) => kind === 'estimate' ? '/public/estimates/portal/' : '/public/contracts/portal/';
+export const downloadPublicPortal = (kind, token) => api.get(`${publicPortalPath(kind)}pdf/`, { params: { token }, responseType: 'blob', skipAuth: true });
+export const publicPortalImageUrl = (kind, token, assetId) => api.getUri({ url: `${publicPortalPath(kind)}image/`, params: { token, asset_id: assetId } });
+export const issueBuilderDocuments = (stage, data, idempotencyKey) => api.post(`/tenant/builder/workflow/${stage}/`, data, { headers: { 'Idempotency-Key': idempotencyKey } });
+export const getIssuedPortals = (opportunityId) => api.get('/tenant/builder/portals/', { params: { opportunity_id: opportunityId } });
+export const revokeIssuedPortal = (id, opportunityId) => api.post(`/tenant/builder/portals/${id}/revoke/`, { opportunity_id: opportunityId });
+
+export const getPortalEstimates = (opportunityId) => api.get('/tenant/builder/portals/estimates/', { params: { opportunity_id: opportunityId } });
+export const emailIssuedPortal = (id, opportunityId, key) => api.post(`/tenant/builder/portals/${id}/email-link/`, { opportunity_id: opportunityId }, { headers: { 'Idempotency-Key': key } });
+
+export const downloadIssuedPortal = (id, opportunityId) => api.get(`/tenant/builder/portals/${id}/pdf/`, { params: { opportunity_id: opportunityId }, responseType: 'blob' });
+
+export const getInventoryPortal = (kind, recordId) => api.get('/tenant/builder/inventory-portals/', { params: { kind, record_id: recordId } });
+export const manageInventoryPortal = (kind, recordId, operation, key) => api.post('/tenant/builder/inventory-portals/manage/', { kind, record_id: recordId, operation }, { headers: key ? { 'Idempotency-Key': key } : {} });

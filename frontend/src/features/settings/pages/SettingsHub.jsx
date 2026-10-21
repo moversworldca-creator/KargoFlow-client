@@ -42,6 +42,7 @@ import { SETTINGS_TAB_PERMISSIONS } from "../../../shared/permissions/registry";
 
 // Keep default landing tab synchronously loaded for zero-delay initial paint
 import CompanySettings from "../components/CompanySettings";
+import IntegrationSettings from "../components/IntegrationSettings";
 
 // Lazy-load all non-default tabs to dramatically reduce initial Settings bundle size and load time
 const BranchSettings = React.lazy(() => import("../components/BranchSettings"));
@@ -194,6 +195,15 @@ const SETTINGS_GROUPS = [
     ],
   },
   {
+    id: "integrations",
+    label: "Integrations",
+    shortLabel: "Integrations",
+    icon: Plug,
+    tabs: [
+      { id: "payment-gateway", label: "Payment Gateway", description: "Configure company-wide Authorize.Net credentials, sandbox or production, and verify the connection.", icon: CreditCard, render: () => <IntegrationSettings view="gateways" /> },
+    ],
+  },
+  {
     id: "communications",
     label: "Communications",
     shortLabel: "Comms",
@@ -206,6 +216,7 @@ const SETTINGS_GROUPS = [
 ];
 
 const LEGACY_ROUTES = {
+  integrations: ["integrations", "payment-gateway"],
   company: ["company", "profile"],
   branches: ["branches", "directory"],
   branding: ["branches", "branding"],
