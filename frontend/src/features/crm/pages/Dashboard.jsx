@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth/context/AuthContext';
-import { getUserBranchIds } from '../../../shared/utils/branchScope';
+import { getUserBranchIds, hasCompanyWideAccess } from '../../../shared/utils/branchScope';
 import {
   Activity,
   Zap,
@@ -1004,8 +1004,9 @@ const Dashboard = () => {
   const { user } = useAuth();
   const dashboardRequestRef = useRef(0);
   const [branches, setBranches] = useState([]);
+  const isCompanyWide = hasCompanyWideAccess(user);
   const accessibleBranchIds = useMemo(() => getUserBranchIds(user), [user]);
-  const restrictToAccessibleBranches = accessibleBranchIds.length > 0 && !user?.is_superuser && !user?.is_system_admin;
+  const restrictToAccessibleBranches = !isCompanyWide && accessibleBranchIds.length > 0 && !user?.is_superuser && !user?.is_system_admin;
   const defaultBranchId = restrictToAccessibleBranches && accessibleBranchIds.length === 1 ? accessibleBranchIds[0] : ALL_BRANCHES;
   const [selectedBranchId, setSelectedBranchId] = useState(defaultBranchId);
   const [dashboardStats, setDashboardStats] = useState(null);
@@ -1077,6 +1078,14 @@ const Dashboard = () => {
   useEffect(() => {
     loadDashboardData();
     return () => { dashboardRequestRef.current += 1; };
+  }, [loadDashboardData]);
+
+  useEffect(() => {
+    const handleBranchesUpdated = () => {
+      loadDashboardData({ silent: true });
+    };
+    window.addEventListener('app:branches-updated', handleBranchesUpdated);
+    return () => window.removeEventListener('app:branches-updated', handleBranchesUpdated);
   }, [loadDashboardData]);
 
   useEffect(() => {

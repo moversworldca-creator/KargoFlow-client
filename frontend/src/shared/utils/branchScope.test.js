@@ -24,7 +24,19 @@ describe('branchScope', () => {
     ]);
   });
 
-  it('returns an empty list when the user has no branch assignments', () => {
-    expect(filterAccessibleBranches(null, [{ id: 1 }])).toEqual([]);
+  it('returns all branches when user has company-wide access', () => {
+    const adminUser = {
+      role_details: [{ name: 'Company Admin', is_system_role: true }],
+      branches: [{ id: 1 }],
+    };
+    const branches = [
+      { id: 1, name: 'Main' },
+      { id: 2, name: 'East' },
+      { id: 3, name: 'West' },
+    ];
+
+    expect(filterAccessibleBranches(adminUser, branches)).toEqual(branches);
+    expect(getAccessibleBranchIds(adminUser, branches)).toEqual([1, 2, 3]);
   });
 });
+

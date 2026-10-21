@@ -50,6 +50,7 @@ import { getRecordDetailPath, getSalesListTabFromSegment, getSalesListTabPath } 
 import useCan from '../../../shared/auth/useCan';
 import { useToast } from '../../../shared/context/ToastContext';
 import { PERMISSIONS } from '../../../shared/permissions/registry';
+import { hasCompanyWideAccess } from '../../../shared/utils/branchScope';
 
 const STATUS = {
   new:               { label: "New",               tone: "bg-sky-50 text-sky-700 border-sky-200" },
@@ -3423,8 +3424,9 @@ const Sales = () => {
   const [selectedRecordKeys, setSelectedRecordKeys] = useState(() => new Set());
   const [branchLeadOrders, setBranchLeadOrders] = useState(() => readSavedBranchLeadOrders());
   const dragSourceLeadIdRef = useRef(null);
+  const isCompanyWide = hasCompanyWideAccess(user);
   const accessibleBranchIds = useMemo(() => new Set(getUserBranchIds(user)), [user]);
-  const restrictToAccessibleBranches = accessibleBranchIds.size > 0 && !user?.is_superuser && !user?.is_system_admin;
+  const restrictToAccessibleBranches = !isCompanyWide && accessibleBranchIds.size > 0 && !user?.is_superuser && !user?.is_system_admin;
   const [bulkAssignOpen, setBulkAssignOpen] = useState(false);
   const [bulkAssignForm, setBulkAssignForm] = useState({ branch: '', assigned_to: '' });
   const [bulkEmailOpen, setBulkEmailOpen] = useState(false);
@@ -3790,7 +3792,7 @@ const Sales = () => {
     }
 
     return metadataPromiseRef.current;
-  }, [accessibleBranchIds, filters.branch, restrictToAccessibleBranches]);
+  }, [accessibleBranchIds, filters.branch, isCompanyWide, restrictToAccessibleBranches]);
 
   const fetchInitialData = useCallback(async (options = {}) => {
     const forceRefresh = Boolean(options?.forceRefresh);
@@ -4132,6 +4134,15 @@ const Sales = () => {
   useEffect(() => {
     fetchInitialData();
     return () => { requestSequenceRef.current += 1; };
+  }, [fetchInitialData]);
+
+  useEffect(() => {
+    const handleBranchesUpdated = () => {
+      metadataCacheRef.current.clear();
+      fetchInitialData({ forceRefresh: true });
+    };
+    window.addEventListener('app:branches-updated', handleBranchesUpdated);
+    return () => window.removeEventListener('app:branches-updated', handleBranchesUpdated);
   }, [fetchInitialData]);
 
   const refreshSalesDataAfterMutation = useCallback(async () => {

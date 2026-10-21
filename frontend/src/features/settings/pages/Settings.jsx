@@ -106,6 +106,12 @@ const Settings = () => {
       }
     };
     fetchBranches();
+
+    const handleBranchesUpdated = () => {
+      fetchBranches();
+    };
+    window.addEventListener('app:branches-updated', handleBranchesUpdated);
+    return () => window.removeEventListener('app:branches-updated', handleBranchesUpdated);
   }, [user]);
 
   const branchIsolatedTabs = ['team', 'crew', 'trucks', 'roles', 'catalog-packages', 'estimate-catalog', 'estimate-portal-templates', 'branding', 'templates', 'document-templates', 'communications', 'status-codes', 'scheduling', 'mover-types', 'service-types', 'mover-sizes', 'move-sizes'];
