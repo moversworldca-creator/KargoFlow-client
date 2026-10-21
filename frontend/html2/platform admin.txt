@@ -1,0 +1,664 @@
+<!DOCTYPE html><html class="h-full bg-slate-50" lang="en" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Platform Operations Dashboard - Kargoflow</title>
+<!-- Load Tailwind CSS v3 with Plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script data-purpose="tailwind-config">
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eff6ff',
+              100: '#dbeafe',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style data-purpose="custom-scrollbars">
+    /* Subtle scrollbar customization */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+  </style>
+</head>
+<body class="h-full font-sans antialiased text-slate-800 bg-[#f8fafc] flex overflow-x-hidden">
+<!-- BEGIN: Sidebar -->
+<aside class="w-64 flex-shrink-0 bg-white border-r border-slate-200 flex flex-col justify-between min-h-screen z-20">
+<div>
+<!-- Brand / Logo -->
+<div class="px-6 py-5 flex items-center gap-3">
+<div class="flex items-center gap-2">
+<!-- Kargoflow Stylized Logo Mark -->
+<div class="w-8 h-8 relative flex items-center justify-center">
+<svg class="w-7 h-7" fill="none" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+<path d="M16 3L28 10V22L16 29L4 22V10L16 3Z" stroke="#2563EB" stroke-linejoin="round" stroke-width="2.5"></path>
+<path d="M16 3V29" stroke="#38BDF8" stroke-linecap="round" stroke-width="2"></path>
+<path d="M4 10L28 22" stroke="#F97316" stroke-linecap="round" stroke-width="2"></path>
+<circle cx="16" cy="16" fill="#2563EB" r="3.5"></circle>
+</svg>
+</div>
+<div>
+<span class="text-xl font-bold tracking-tight text-slate-900 block leading-tight">kargoflow</span>
+<span class="text-[9px] tracking-widest font-semibold text-slate-400 uppercase -mt-0.5 block">OPERATIONS</span>
+</div>
+</div>
+</div>
+<!-- Navigation Section Label -->
+<div class="px-6 pt-3 pb-2">
+<p class="text-[11px] font-bold tracking-wider text-slate-400 uppercase">CONTROL PLANE</p>
+</div>
+<!-- Main Navigation Menu -->
+<nav class="px-3 space-y-1">
+<!-- Dashboard (Active) -->
+<a class="flex items-center gap-3 px-3.5 py-2.5 rounded-lg bg-blue-600 text-white font-medium text-sm shadow-sm shadow-blue-500/20" href="#">
+<svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+<path d="M13 10V3L4 14h7v7l9-11h-7z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+<span class="">Dashboard</span>
+</a>
+<!-- Tenants -->
+<a class="flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 font-medium text-sm transition-colors" href="#">
+<svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+<path d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+<span class="">Tenants</span>
+</a>
+<!-- Subscriptions -->
+<a class="flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 font-medium text-sm transition-colors" href="#">
+<svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+<path d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+<span class="">Subscriptions</span>
+</a>
+<!-- Plans Catalog -->
+<a class="flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 font-medium text-sm transition-colors" href="#">
+<svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+<path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+<span class="">Plans Catalog</span>
+</a>
+<!-- Entitlements & Overrides -->
+<a class="flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 font-medium text-sm transition-colors" href="#">
+<svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+<path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+<span class="">Entitlements &amp; Overrides</span>
+</a>
+<!-- Support Sessions -->
+<a class="flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 font-medium text-sm transition-colors" href="#">
+<svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+<path d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+<span class="">Support Sessions</span>
+</a>
+<!-- Communication Infrastructure -->
+<a class="flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 font-medium text-sm transition-colors" href="#">
+<svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+<path d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+<span class="">Communication Infrastructure</span>
+</a>
+<!-- Platform Staff & RBAC -->
+<a class="flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 font-medium text-sm transition-colors" href="#">
+<svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+<path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+<span class="">Platform Staff &amp; RBAC</span>
+</a>
+<!-- Audit Trail -->
+<a class="flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100/70 font-medium text-sm transition-colors" href="#">
+<svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+<path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+<span class="">Audit Trail</span>
+</a>
+</nav>
+</div>
+<!-- Sidebar Bottom Status -->
+<div class="p-4 border-t border-slate-100">
+<div class="flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-100 animate-pulse"></span>
+<span class="text-xs font-semibold text-slate-900">Control Plane Online</span>
+</div>
+<p class="text-[11px] text-slate-500 mt-0.5 pl-4">Isolated staff instance • 2.4-GA</p>
+</div>
+</aside>
+<!-- END: Sidebar -->
+<!-- BEGIN: MainContent -->
+<main class="flex-1 flex flex-col min-w-0 overflow-y-auto">
+<!-- BEGIN: TopBar -->
+<header class="px-8 pt-7 pb-5">
+<div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+<!-- Title & Subtitle -->
+<div>
+<h1 class="text-2xl font-bold tracking-tight text-slate-900">Platform Operations Dashboard</h1>
+<p class="text-sm text-slate-500 mt-1">Monitor platform health, tenant activity, and system operations</p>
+</div>
+<!-- Right Controls & User Profile -->
+<div class="flex items-center justify-end flex-nowrap gap-2 flex-shrink-0"><!-- Date Widget --><div class="flex items-center gap-2.5 px-3.5 py-1.5 bg-white border border-slate-200 rounded-lg shadow-xs text-xs flex-shrink-0"><svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"></path></svg><div class="leading-tight"><span class="font-semibold text-slate-800">Oct 21, 2026</span><span class="block text-[10px] text-slate-400">Wednesday 1:11 PM</span></div></div><!-- Refresh Button --><button class="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg text-xs font-medium text-slate-700 transition shadow-xs flex-shrink-0" type="button"><svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg><span class="">Refresh</span></button><!-- Provision Tenant Button --><button class="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition shadow-xs shadow-blue-500/20 flex-shrink-0" type="button"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4" stroke-linecap="round" stroke-linejoin="round"></path></svg><span class="">Provision Tenant</span></button><!-- Notifications Button --><button class="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition shadow-xs relative flex-shrink-0" title="Notifications" type="button"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" stroke-linecap="round" stroke-linejoin="round"></path></svg></button><!-- Toggle Theme Button --><button class="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition shadow-xs flex-shrink-0" title="Toggle theme" type="button"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" stroke-linecap="round" stroke-linejoin="round"></path></svg></button><!-- User Profile Avatar --><button class="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-xs shadow-xs cursor-pointer hover:bg-slate-800 transition flex-shrink-0" title="User profile" type="button">P</button></div>
+</div>
+</header>
+<!-- END: TopBar -->
+<!-- Dashboard Content Body -->
+<div class="px-8 pb-10 space-y-5">
+<!-- BEGIN: MetricCardsRow -->
+<section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" data-purpose="metrics-summary">
+<!-- Card 1: TOTAL TENANTS -->
+<div class="bg-white rounded-xl border border-slate-200/90 p-4 shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
+<div class="flex items-center justify-between">
+<div class="w-7 h-7 rounded-md bg-blue-50 text-blue-600 flex items-center justify-center">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+<path d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</div>
+<span class="text-[11px] font-bold tracking-wider text-slate-400 uppercase">TOTAL TENANTS</span>
+</div>
+<div class="mt-3 flex items-baseline justify-between">
+<span class="text-3xl font-extrabold text-slate-900">5</span>
+<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>5 Active
+            </span>
+</div>
+<p class="mt-2 text-xs text-slate-400">0 provisioning &nbsp;•&nbsp; 0 onboarding</p>
+</div>
+<!-- Card 2: PLATFORM MRR -->
+<div class="bg-white rounded-xl border border-slate-200/90 p-4 shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
+<div class="flex items-center justify-between">
+<div class="w-7 h-7 rounded-md bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-sm">
+              $
+            </div>
+<span class="text-[11px] font-bold tracking-wider text-slate-400 uppercase">PLATFORM MRR</span>
+</div>
+<div class="mt-3 flex items-baseline justify-between">
+<span class="text-3xl font-extrabold text-slate-900">$0</span>
+<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-blue-50 text-blue-700">
+              ARR $0
+            </span>
+</div>
+<p class="mt-2 text-xs text-slate-400">Across 1 active subscriptions</p>
+</div>
+<!-- Card 3: SUBSCRIPTIONS HEALTH -->
+<div class="bg-white rounded-xl border border-slate-200/90 p-4 shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
+<div class="flex items-center justify-between">
+<div class="w-7 h-7 rounded-md bg-purple-50 text-purple-600 flex items-center justify-center">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+<path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</div>
+<span class="text-[11px] font-bold tracking-wider text-slate-400 uppercase">SUBSCRIPTIONS HEALTH</span>
+</div>
+<div class="mt-3">
+<span class="text-3xl font-extrabold text-slate-900">5 <span class="text-xs font-normal text-slate-500">accounts</span></span>
+</div>
+<div class="mt-2.5 flex items-center gap-1.5 flex-wrap">
+<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700">3 trial</span>
+<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-50 text-rose-700">0 past due</span>
+<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700">0 suspended</span>
+</div>
+</div>
+<!-- Card 4: ACTIVE SESSIONS -->
+<div class="bg-white rounded-xl border border-slate-200/90 p-4 shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
+<div class="flex items-center justify-between">
+<div class="w-7 h-7 rounded-md bg-amber-50 text-amber-600 flex items-center justify-center">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+<path d="M13 10V3L4 14h7v7l9-11h-7z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</div>
+<span class="text-[11px] font-bold tracking-wider text-slate-400 uppercase">ACTIVE SESSIONS</span>
+</div>
+<div class="mt-3 flex items-baseline justify-between">
+<span class="text-3xl font-extrabold text-slate-900">0</span>
+<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-normal bg-slate-100 text-slate-600">
+              No active sessions
+            </span>
+</div>
+<p class="mt-2 text-xs text-slate-400 truncate">Governed by Section 1.9 Controlled Access</p>
+</div>
+</section>
+<!-- END: MetricCardsRow -->
+<!-- BEGIN: MidSectionGrid -->
+<section class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+<!-- Column Left: Plan Adoption (approx 5 cols) -->
+<div class="lg:col-span-5 bg-white rounded-xl border border-slate-200/90 p-5 shadow-[0_1px_3px_rgba(0,0,0,0.02)] flex flex-col justify-between">
+<div>
+<!-- Card Header -->
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2.5">
+<div class="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+<path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</div>
+<div>
+<h2 class="text-sm font-bold text-slate-900">Plan Adoption</h2>
+<p class="text-xs text-slate-400">Active tenants by plan type</p>
+</div>
+</div>
+<a class="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1" href="#">
+                Manage Plans <span class="">→</span>
+</a>
+</div>
+<!-- Table Header -->
+<div class="grid grid-cols-12 text-[10px] font-bold text-slate-400 tracking-wider uppercase mt-6 pb-2 border-b border-slate-100">
+<div class="col-span-5">PLAN NAME</div>
+<div class="col-span-2 text-left">TENANTS</div>
+<div class="col-span-5 text-left">PERCENTAGE</div>
+</div>
+<!-- Plan Rows -->
+<div class="space-y-4 pt-4 text-xs font-medium text-slate-700">
+<!-- Row 1: Trial Plan -->
+<div class="grid grid-cols-12 items-center">
+<div class="col-span-5 flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+<span class="text-slate-800 font-semibold">Trial Plan</span>
+</div>
+<div class="col-span-2 text-slate-900 font-medium">3</div>
+<div class="col-span-5 flex items-center gap-3">
+<div class="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+<div class="bg-blue-600 h-1.5 rounded-full" style="width: 60%"></div>
+</div>
+<span class="text-[11px] font-semibold text-slate-600 w-7 text-right">60%</span>
+</div>
+</div>
+<!-- Row 2: Medium Plan -->
+<div class="grid grid-cols-12 items-center">
+<div class="col-span-5 flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-sky-400"></span>
+<span class="text-slate-800 font-semibold">Medium Plan</span>
+</div>
+<div class="col-span-2 text-slate-900 font-medium">0</div>
+<div class="col-span-5 flex items-center gap-3">
+<div class="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+<div class="bg-sky-400 h-1.5 rounded-full" style="width: 0%"></div>
+</div>
+<span class="text-[11px] font-semibold text-slate-600 w-7 text-right">0%</span>
+</div>
+</div>
+<!-- Row 3: Basic Plan v4 -->
+<div class="grid grid-cols-12 items-center">
+<div class="col-span-5 flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-indigo-600"></span>
+<span class="text-slate-800 font-semibold">Basic Plan v4</span>
+</div>
+<div class="col-span-2 text-slate-900 font-medium">1</div>
+<div class="col-span-5 flex items-center gap-3">
+<div class="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+<div class="bg-indigo-600 h-1.5 rounded-full" style="width: 20%"></div>
+</div>
+<span class="text-[11px] font-semibold text-slate-600 w-7 text-right">20%</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Column Right: Recent Platform Audits (approx 7 cols) -->
+<div class="lg:col-span-7 bg-white rounded-xl border border-slate-200/90 p-5 shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
+<!-- Card Header -->
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2.5">
+<div class="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+<path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</div>
+<div>
+<h2 class="text-sm font-bold text-slate-900">Recent Platform Audits</h2>
+<p class="text-xs text-slate-400">Immutable log of control plane operations</p>
+</div>
+</div>
+<a class="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1" href="#">
+              View Full Trail <span class="">→</span>
+</a>
+</div>
+<!-- Table Header -->
+<div class="grid grid-cols-12 text-[10px] font-bold text-slate-400 tracking-wider uppercase mt-6 pb-2 border-b border-slate-100">
+<div class="col-span-4">ACTION</div>
+<div class="col-span-3">DETAILS</div>
+<div class="col-span-2">ACTOR</div>
+<div class="col-span-3 text-right">TIME</div>
+</div>
+<!-- Audit Rows List -->
+<div class="space-y-3.5 pt-3 text-xs">
+<!-- Item 1 -->
+<div class="grid grid-cols-12 items-center">
+<div class="col-span-4 flex items-center gap-2.5">
+<div class="w-6 h-6 rounded bg-purple-50 text-purple-600 flex items-center justify-center flex-shrink-0">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</div>
+<span class="font-medium text-slate-800 truncate">Test model assign</span>
+</div>
+<div class="col-span-3">
+<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-mono">subscription.addon.set</span>
+</div>
+<div class="col-span-2 text-slate-600 font-medium">Actor: 1</div>
+<div class="col-span-3 text-right leading-tight">
+<div class="text-[11px] font-semibold text-slate-700">Oct 21, 2026, 01:05 PM</div>
+<div class="text-[10px] text-slate-400">1m ago</div>
+</div>
+</div>
+<!-- Item 2 -->
+<div class="grid grid-cols-12 items-center">
+<div class="col-span-4 flex items-center gap-2.5">
+<div class="w-6 h-6 rounded bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</div>
+<span class="font-medium text-slate-800 truncate">Control plane action</span>
+</div>
+<div class="col-span-3">
+<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-mono">control.update</span>
+</div>
+<div class="col-span-2 text-slate-600 font-medium">System</div>
+<div class="col-span-3 text-right leading-tight">
+<div class="text-[11px] font-semibold text-slate-700">Oct 21, 2026, 01:05 PM</div>
+<div class="text-[10px] text-slate-400">5m ago</div>
+</div>
+</div>
+<!-- Item 3 -->
+<div class="grid grid-cols-12 items-center">
+<div class="col-span-4 flex items-center gap-2.5">
+<div class="w-6 h-6 rounded bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</div>
+<span class="font-medium text-slate-800 truncate">Control plane action</span>
+</div>
+<div class="col-span-3">
+<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-mono">control.update</span>
+</div>
+<div class="col-span-2 text-slate-600 font-medium">Actor: 1</div>
+<div class="col-span-3 text-right leading-tight">
+<div class="text-[11px] font-semibold text-slate-700">Oct 21, 2026, 01:03 PM</div>
+<div class="text-[10px] text-slate-400">7m ago</div>
+</div>
+</div>
+<!-- Item 4 -->
+<div class="grid grid-cols-12 items-center">
+<div class="col-span-4 flex items-center gap-2.5">
+<div class="w-6 h-6 rounded bg-purple-50 text-purple-600 flex items-center justify-center flex-shrink-0">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</div>
+<span class="font-medium text-slate-800 truncate">Administrative add-on allocation</span>
+</div>
+<div class="col-span-3">
+<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-mono">subscription.addon.set</span>
+</div>
+<div class="col-span-2 text-slate-600 font-medium">Actor: 1</div>
+<div class="col-span-3 text-right leading-tight">
+<div class="text-[11px] font-semibold text-slate-700">Oct 21, 2026, 01:03 PM</div>
+<div class="text-[10px] text-slate-400">7m ago</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- END: MidSectionGrid -->
+<!-- BEGIN: BottomSectionGrid -->
+<section class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+<!-- Column 1: Recent Tenants -->
+<div class="bg-white rounded-xl border border-slate-200/90 p-5 shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
+<!-- Header -->
+<div class="flex items-center justify-between pb-3">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded bg-blue-50 text-blue-600 flex items-center justify-center">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</div>
+<h3 class="text-sm font-bold text-slate-900">Recent Tenants</h3>
+</div>
+<a class="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1" href="#">
+              View All <span class="">→</span>
+</a>
+</div>
+<!-- Table -->
+<div class="overflow-x-auto">
+<table class="w-full text-left text-xs">
+<thead>
+<tr class="text-[10px] font-bold text-slate-400 uppercase border-b border-slate-100">
+<th class="pb-2 font-bold">TENANT NAME</th>
+<th class="pb-2 font-bold">PLAN</th>
+<th class="pb-2 font-bold">STATUS</th>
+<th class="pb-2 font-bold text-right">CREATED</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-slate-100 font-medium">
+<tr>
+<td class="py-2 text-slate-800 font-semibold">Demo Movers</td>
+<td class="py-2 text-slate-600">Trial Plan</td>
+<td class="py-2">
+<span class="inline-flex items-center text-[11px] text-emerald-700 font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>Active
+                    </span>
+</td>
+<td class="py-2 text-right text-slate-500">Oct 20, 2026</td>
+</tr>
+<tr>
+<td class="py-2 text-slate-800 font-semibold">North Star Moving</td>
+<td class="py-2 text-slate-600">Basic Plan v4</td>
+<td class="py-2">
+<span class="inline-flex items-center text-[11px] text-emerald-700 font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>Active
+                    </span>
+</td>
+<td class="py-2 text-right text-slate-500">Oct 18, 2026</td>
+</tr>
+<tr>
+<td class="py-2 text-slate-800 font-semibold">City Relocations</td>
+<td class="py-2 text-slate-600">Trial Plan</td>
+<td class="py-2">
+<span class="inline-flex items-center text-[11px] text-emerald-700 font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>Active
+                    </span>
+</td>
+<td class="py-2 text-right text-slate-500">Oct 15, 2026</td>
+</tr>
+<tr>
+<td class="py-2 text-slate-800 font-semibold">Maple Movers</td>
+<td class="py-2 text-slate-600">Trial Plan</td>
+<td class="py-2">
+<span class="inline-flex items-center text-[11px] text-emerald-700 font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>Active
+                    </span>
+</td>
+<td class="py-2 text-right text-slate-500">Oct 12, 2026</td>
+</tr>
+<tr>
+<td class="py-2 text-slate-800 font-semibold">Coastal Moving</td>
+<td class="py-2 text-slate-600">Basic Plan v4</td>
+<td class="py-2">
+<span class="inline-flex items-center text-[11px] text-emerald-700 font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>Active
+                    </span>
+</td>
+<td class="py-2 text-right text-slate-500">Oct 10, 2026</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Column 2: Subscriptions -->
+<div class="bg-white rounded-xl border border-slate-200/90 p-5 shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
+<!-- Header -->
+<div class="flex items-center justify-between pb-3">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded bg-purple-50 text-purple-600 flex items-center justify-center">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</div>
+<h3 class="text-sm font-bold text-slate-900">Subscriptions</h3>
+</div>
+<a class="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1" href="#">
+              View All <span class="">→</span>
+</a>
+</div>
+<!-- Table -->
+<div class="overflow-x-auto">
+<table class="w-full text-left text-xs">
+<thead>
+<tr class="text-[10px] font-bold text-slate-400 uppercase border-b border-slate-100">
+<th class="pb-2 font-bold">TENANT</th>
+<th class="pb-2 font-bold">PLAN</th>
+<th class="pb-2 font-bold">STATUS</th>
+<th class="pb-2 font-bold text-right">RENEWS</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-slate-100 font-medium">
+<tr>
+<td class="py-2 text-slate-800 font-semibold">Demo Movers</td>
+<td class="py-2 text-slate-600">Trial Plan</td>
+<td class="py-2">
+<span class="inline-flex items-center text-[11px] text-amber-700 font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-amber-500 mr-1.5"></span>Trial
+                    </span>
+</td>
+<td class="py-2 text-right text-slate-500">Nov 20, 2026</td>
+</tr>
+<tr>
+<td class="py-2 text-slate-800 font-semibold">Maple Movers</td>
+<td class="py-2 text-slate-600">Trial Plan</td>
+<td class="py-2">
+<span class="inline-flex items-center text-[11px] text-amber-700 font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-amber-500 mr-1.5"></span>Trial
+                    </span>
+</td>
+<td class="py-2 text-right text-slate-500">Nov 12, 2026</td>
+</tr>
+<tr>
+<td class="py-2 text-slate-800 font-semibold">City Relocations</td>
+<td class="py-2 text-slate-600">Trial Plan</td>
+<td class="py-2">
+<span class="inline-flex items-center text-[11px] text-amber-700 font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-amber-500 mr-1.5"></span>Trial
+                    </span>
+</td>
+<td class="py-2 text-right text-slate-500">Nov 18, 2026</td>
+</tr>
+<tr>
+<td class="py-2 text-slate-800 font-semibold">Coastal Moving</td>
+<td class="py-2 text-slate-600">Basic Plan v4</td>
+<td class="py-2">
+<span class="inline-flex items-center text-[11px] text-amber-700 font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-amber-500 mr-1.5"></span>Trial
+                    </span>
+</td>
+<td class="py-2 text-right text-slate-500">Nov 30, 2026</td>
+</tr>
+<tr>
+<td class="py-2 text-slate-800 font-semibold">North Star Moving</td>
+<td class="py-2 text-slate-600">Basic Plan v4</td>
+<td class="py-2">
+<span class="inline-flex items-center text-[11px] text-emerald-700 font-medium">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>Active
+                    </span>
+</td>
+<td class="py-2 text-right text-slate-500">Nov 19, 2026</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Column 3: System Status -->
+<div class="bg-white rounded-xl border border-slate-200/90 p-5 shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
+<!-- Header -->
+<div class="flex items-center gap-2 pb-4">
+<div class="w-6 h-6 rounded bg-blue-50 text-blue-600 flex items-center justify-center">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</div>
+<h3 class="text-sm font-bold text-slate-900">System Status</h3>
+</div>
+<!-- Status List -->
+<div class="space-y-3.5 text-xs font-medium">
+<!-- Row 1 -->
+<div class="flex items-center justify-between">
+<span class="text-slate-800 font-medium">Control Plane</span>
+<div class="flex items-center gap-6">
+<span class="inline-flex items-center text-emerald-700">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>Online
+                </span>
+<span class="text-slate-400 text-right w-16">2.4-GA</span>
+</div>
+</div>
+<!-- Row 2 -->
+<div class="flex items-center justify-between">
+<span class="text-slate-800 font-medium">Database</span>
+<div class="flex items-center gap-6">
+<span class="inline-flex items-center text-emerald-700">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>Healthy
+                </span>
+<span class="text-slate-400 text-right w-16">PostgreSQL</span>
+</div>
+</div>
+<!-- Row 3 -->
+<div class="flex items-center justify-between">
+<span class="text-slate-800 font-medium">Background Workers</span>
+<div class="flex items-center gap-6">
+<span class="inline-flex items-center text-emerald-700">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>Healthy
+                </span>
+<span class="text-slate-400 text-right w-16 truncate">All services</span>
+</div>
+</div>
+<!-- Row 4 -->
+<div class="flex items-center justify-between">
+<span class="text-slate-800 font-medium">Communication Queue</span>
+<div class="flex items-center gap-6">
+<span class="inline-flex items-center text-emerald-700">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>Healthy
+                </span>
+<span class="text-slate-400 text-right w-16">Kafka</span>
+</div>
+</div>
+<!-- Row 5 -->
+<div class="flex items-center justify-between">
+<span class="text-slate-800 font-medium">Storage</span>
+<div class="flex items-center gap-6">
+<span class="inline-flex items-center text-emerald-700">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>Healthy
+                </span>
+<span class="text-slate-400 text-right w-16">Operational</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- END: BottomSectionGrid -->
+</div>
+</main>
+<!-- END: MainContent -->
+
+
+</body></html>
