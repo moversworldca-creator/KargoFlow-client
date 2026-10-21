@@ -580,7 +580,13 @@ const ConfirmDelete = ({ name, onConfirm, onCancel, isLoading }) => (
 
 const BranchSettings = ({ activeBranchId = null, view = null }) => {
   const { user } = useAuth();
-  const { showToast } = useToast();
+  let showToast = null;
+  try {
+    const toast = useToast();
+    showToast = toast?.showToast;
+  } catch {
+    // Graceful fallback for test or unprovided contexts
+  }
   const queryClient = useQueryClient();
 
   const [branches, setBranches] = useState([]);
@@ -612,8 +618,8 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
         : Array.isArray(response?.data)
         ? response.data
         : [];
-      const accessible = filterAccessibleBranches(user, list);
-      setBranches(accessible.length ? accessible : list);
+      // Branch Directory and settings manages all operating company branches
+      setBranches(list);
     } catch (err) {
       console.error('Failed to load branches:', err);
       setMessage({ type: 'error', text: 'Failed to load branches.' });
@@ -648,6 +654,7 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
   const refreshAndInvalidate = async () => {
     await fetchBranches();
     queryClient.invalidateQueries({ queryKey: ['branches'] });
+    window.dispatchEvent(new CustomEvent('app:branches-changed'));
   };
 
   const handleCreateBranch = async (payload) => {

@@ -939,12 +939,12 @@ export default function PlansCatalogTab({
                       </div>
                     )}
 
-                    {/* Primary Action Row: Edit plan, Features with blue accent, Three-dot menu */}
+                    {/* Primary Action Row: Edit plan (solid blue primary), Features (neutral secondary), Three-dot menu */}
                     <div className="flex items-center gap-2 relative">
                       <button
                         type="button"
                         onClick={() => handleOpenEditModal(plan)}
-                        className="flex-1 py-2 px-3 bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-[#E2E8F0] dark:border-slate-700 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                        className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
                       >
                         <Edit3 size={13} />
                         <span>Edit plan</span>
@@ -953,7 +953,7 @@ export default function PlansCatalogTab({
                       <button
                         type="button"
                         onClick={() => setActiveFeatureMatrixPlan(plan)}
-                        className="flex-1 py-2 px-3 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-900/50 text-blue-600 dark:text-blue-400 border border-blue-200/60 dark:border-blue-900/40 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                        className="flex-1 py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
                       >
                         <Layers size={13} />
                         <span>Features</span>
@@ -1298,7 +1298,7 @@ export default function PlansCatalogTab({
                                   <button
                                     type="button"
                                     onClick={() => handleOpenEditModal(vPlan)}
-                                    className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:hover:bg-blue-900/50 dark:text-blue-300 rounded-xl text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
                                   >
                                     <Edit3 size={12} />
                                     <span>Edit Plan</span>
@@ -1310,7 +1310,7 @@ export default function PlansCatalogTab({
                               <button
                                 type="button"
                                 onClick={() => setActiveFeatureMatrixPlan(vPlan)}
-                                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
                               >
                                 <Layers size={12} />
                                 <span>Feature Matrix</span>

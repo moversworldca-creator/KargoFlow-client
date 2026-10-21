@@ -30,16 +30,54 @@ export const getUserBranchIds = (user) => {
   return Array.from(ids);
 };
 
+export const isCompanyWideUser = (user) => {
+  if (!user || typeof user !== 'object') return false;
+  if (user.is_superuser || user.is_system_admin) return true;
+  if (user.is_owner || user.worker_type === 'owner' || user.employee_type === 'owner') return true;
+  if (user.role === 'admin' || user.role === 'owner' || user.role === 'super_admin') return true;
+  if (Array.isArray(user.roles) && user.roles.some((r) => typeof r === 'string' && ['admin', 'owner', 'company admin', 'company owner', 'super admin'].includes(r.toLowerCase()))) {
+    return true;
+  }
+  if (Array.isArray(user.role_details)) {
+    const isCompanyRole = user.role_details.some(
+      (r) =>
+        r &&
+        (r.branch_id === null ||
+          r.branch_id === undefined ||
+          r.scope === 'company' ||
+          ['Company Admin', 'Company Owner', 'Super Admin', 'Admin', 'Owner'].includes(r.name))
+    );
+    if (isCompanyRole) return true;
+  }
+  if (Array.isArray(user.permissions)) {
+    const hasAdminPerm = user.permissions.some((p) =>
+      ['crm.admin', 'branches.manage', 'branches.view', 'settings.manage', 'company.manage'].includes(p)
+    );
+    if (hasAdminPerm) return true;
+  }
+  return false;
+};
+
 export const getAccessibleBranchIds = (user, branches = []) => {
+  const allBranches = Array.isArray(branches) ? branches : [];
+  if (!user) return [];
+  if (isCompanyWideUser(user)) {
+    return allBranches.map((branch) => resolveBranchId(branch));
+  }
   const userBranchIds = new Set(getUserBranchIds(user));
   if (!userBranchIds.size) return [];
-  return (Array.isArray(branches) ? branches : []).filter((branch) => userBranchIds.has(String(resolveBranchId(branch)))).map((branch) => resolveBranchId(branch));
+  return allBranches.filter((branch) => userBranchIds.has(String(resolveBranchId(branch)))).map((branch) => resolveBranchId(branch));
 };
 
 export const filterAccessibleBranches = (user, branches = []) => {
+  const allBranches = Array.isArray(branches) ? branches : [];
+  if (!user) return [];
+  if (isCompanyWideUser(user)) {
+    return allBranches;
+  }
   const userBranchIds = new Set(getUserBranchIds(user));
   if (!userBranchIds.size) return [];
-  return (Array.isArray(branches) ? branches : []).filter((branch) => userBranchIds.has(String(resolveBranchId(branch))));
+  return allBranches.filter((branch) => userBranchIds.has(String(resolveBranchId(branch))));
 };
 
 export const resolveBranchId = (branch) => {

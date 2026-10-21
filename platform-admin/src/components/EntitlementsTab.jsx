@@ -118,6 +118,7 @@ export default function EntitlementsTab({
       { id: 3, code: 'extra_branches_1', name: '1 Additional Branch Terminal', price_cents: 4900, interval: 'month' },
       { id: 4, code: 'extra_sms_1000', name: '1,000 SMS Message Pack', price_cents: 2000, interval: 'month' },
       { id: 5, code: 'addon_premium_support', name: '24/7 Priority Support SLA', price_cents: 9900, interval: 'month' },
+      { id: 8, code: 'extra_automations_500', name: '500 Automation Runs Pack', price_cents: 2500, interval: 'month' },
     ];
   }, [addons]);
 

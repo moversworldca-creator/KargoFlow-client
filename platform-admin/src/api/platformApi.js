@@ -193,6 +193,14 @@ export const platformApi = {
   assignTenantAddon: async (tenantId, data = {}) => {
     return platformAxios.post('/core/add-ons/assign/', { tenant_company_id: tenantId, ...data });
   },
+  removeTenantAddon: async (tenantId, addonId, reason = 'Administrative cancellation') => {
+    return platformAxios.post('/core/add-ons/assign/', {
+      tenant_company_id: Number(tenantId),
+      addon_id: Number(addonId),
+      enable: false,
+      reason,
+    });
+  },
 
   // Support Sessions
   getSupportSessions: async () => {

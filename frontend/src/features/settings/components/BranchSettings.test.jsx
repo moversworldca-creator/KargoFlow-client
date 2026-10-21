@@ -28,24 +28,27 @@ vi.mock('../../../services/api', () => ({
 }));
 
 describe('BranchSettings', () => {
+  const mockBranches = [
+    {
+      id: 1,
+      name: 'Main Branch',
+      city: 'Toronto',
+      state: 'ON',
+      zip_code: 'M5V',
+      dispatch_location: 'Yard A',
+      sales_tax_rate: '0.13',
+      is_main: true,
+      is_active: true,
+      restrict_leads_opportunities_to_branch_users: false,
+      enable_lead_posting: true,
+    },
+  ];
+
   beforeEach(() => {
     vi.clearAllMocks();
+    API.general.getBranches.mockResolvedValue(mockBranches);
     branchesLookupMock.mockReturnValue({
-      data: [
-        {
-          id: 1,
-          name: 'Main Branch',
-          city: 'Toronto',
-          state: 'ON',
-          zip_code: 'M5V',
-          dispatch_location: 'Yard A',
-          sales_tax_rate: '0.13',
-          is_main: true,
-          is_active: true,
-          restrict_leads_opportunities_to_branch_users: false,
-          enable_lead_posting: true,
-        },
-      ],
+      data: mockBranches,
       refetch: vi.fn(),
     });
   });
@@ -66,22 +69,25 @@ describe('BranchSettings', () => {
   it('shows inactive status for disabled branches', async () => {
     const queryClient = new QueryClient();
 
+    const inactiveBranches = [
+      {
+        id: 2,
+        name: 'Secondary Branch',
+        city: 'Ottawa',
+        state: 'ON',
+        zip_code: 'K1A',
+        dispatch_location: 'Yard B',
+        sales_tax_rate: '0.13',
+        is_main: false,
+        is_active: false,
+        restrict_leads_opportunities_to_branch_users: true,
+        enable_lead_posting: false,
+      },
+    ];
+
+    API.general.getBranches.mockResolvedValue(inactiveBranches);
     branchesLookupMock.mockReturnValue({
-      data: [
-        {
-          id: 2,
-          name: 'Secondary Branch',
-          city: 'Ottawa',
-          state: 'ON',
-          zip_code: 'K1A',
-          dispatch_location: 'Yard B',
-          sales_tax_rate: '0.13',
-          is_main: false,
-          is_active: false,
-          restrict_leads_opportunities_to_branch_users: true,
-          enable_lead_posting: false,
-        },
-      ],
+      data: inactiveBranches,
       refetch: vi.fn(),
     });
 

@@ -65,7 +65,7 @@ describe('SettingsHub', () => {
     // Check primary tier-1 rail items
     expect(screen.getByTitle('Company Settings')).toBeInTheDocument();
     expect(screen.getByTitle('Branch Settings')).toBeInTheDocument();
-    expect(screen.getByTitle('Operations & Fleet')).toBeInTheDocument();
+    expect(screen.getByTitle('Operations & Scheduling')).toBeInTheDocument();
     expect(screen.getByTitle('Team & Security')).toBeInTheDocument();
     expect(screen.getByTitle('Sales & CRM')).toBeInTheDocument();
 

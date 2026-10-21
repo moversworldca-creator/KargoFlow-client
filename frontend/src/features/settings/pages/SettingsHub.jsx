@@ -253,35 +253,51 @@ export default function SettingsHub() {
   // Load live branches
   useEffect(() => {
     let active = true;
-    API.general
-      .getBranches()
-      .then((payload) => {
-        if (!active) return;
-        const list = Array.isArray(payload?.results) ? payload.results : Array.isArray(payload) ? payload : [];
-        const scopedBranches = filterAccessibleBranches(user, list);
-        const fetched = (scopedBranches.length ? scopedBranches : list).map((branch) => ({
-          ...branch,
-          id: String(branch.id),
-        }));
-        if (!fetched.length) return;
-        setBranches(fetched);
-        localStorage.setItem(BRANCH_CACHE_KEY, JSON.stringify(fetched));
-        const userBranchIds = getUserBranchIds(user);
-        const defaultBranch =
-          fetched.find((branch) => userBranchIds.includes(String(branch.id))) ||
-          fetched.find((b) => b.id === String(user?.branch_id)) ||
-          fetched.find((branch) => branch.is_main) ||
-          fetched[0];
-        if (defaultBranch) {
-          setBranchId(String(defaultBranch.id));
-          localStorage.setItem(ACTIVE_BRANCH_KEY, String(defaultBranch.id));
-        }
-        setBranchStatus("live");
-      })
-      .catch(() => active && setBranchStatus("offline"));
+
+    const loadBranches = () => {
+      API.general
+        .getBranches()
+        .then((payload) => {
+          if (!active) return;
+          const list = Array.isArray(payload?.results) ? payload.results : Array.isArray(payload) ? payload : [];
+          const scopedBranches = filterAccessibleBranches(user, list);
+          const fetched = (scopedBranches.length ? scopedBranches : list).map((branch) => ({
+            ...branch,
+            id: String(branch.id),
+          }));
+          if (!fetched.length) return;
+          setBranches(fetched);
+          localStorage.setItem(BRANCH_CACHE_KEY, JSON.stringify(fetched));
+          const userBranchIds = getUserBranchIds(user);
+          setBranchId((prevId) => {
+            if (prevId && fetched.some((b) => String(b.id) === String(prevId))) {
+              return prevId;
+            }
+            const defaultBranch =
+              fetched.find((branch) => userBranchIds.includes(String(branch.id))) ||
+              fetched.find((b) => b.id === String(user?.branch_id)) ||
+              fetched.find((branch) => branch.is_main) ||
+              fetched[0];
+            if (defaultBranch) {
+              localStorage.setItem(ACTIVE_BRANCH_KEY, String(defaultBranch.id));
+              return String(defaultBranch.id);
+            }
+            return prevId;
+          });
+          setBranchStatus("live");
+        })
+        .catch(() => active && setBranchStatus("offline"));
+    };
+
+    loadBranches();
+    const handleBranchesChanged = () => {
+      loadBranches();
+    };
+    window.addEventListener("app:branches-changed", handleBranchesChanged);
 
     return () => {
       active = false;
+      window.removeEventListener("app:branches-changed", handleBranchesChanged);
     };
   }, [user]);
 
