@@ -34,9 +34,11 @@ export async function recordTasks(params) {
   return rows.filter((task) => !params.status || task.status === params.status).map((task) => ({
     ...task, assigned_to: task.assigned_to_id, activity: task.activity_id,
     activity_details: { id: task.activity_id, subject: task.title, description: task.notes, status: task.status },
-  })).sort((a, b) => String(b.due_date || '').localeCompare(String(a.due_date || '')));
+  })).sort((a, b) => String(a.due_date || '9999').localeCompare(String(b.due_date || '9999')));
 }
 export const createRecordActivity = (data) => api.post(`${recordWorkBase(data)}activities/`, activityPayload(data));
 export const updateRecordActivity = (id, data, target) => api.patch(`${recordWorkBase(target)}activities/${id}/`, activityPayload(data));
 export const createRecordTask = (data) => api.post(`${recordWorkBase(data)}tasks/`, taskPayload(data));
 export const updateRecordTask = (id, data, target) => api.patch(`${recordWorkBase(target)}tasks/${id}/`, taskPayload(data));
+
+export const completeRecordTask = (id, target) => api.post(`${recordWorkBase(target)}tasks/${id}/complete/`, {});

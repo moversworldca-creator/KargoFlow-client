@@ -6,7 +6,44 @@ import { revisionDiff } from '../components/RevisionDiff';
 import { listToMask, maskToList } from '../components/ApplicabilityEditor';
 import { WEEKDAYS, MONTHS } from '../constants';
 import { pricingError } from '../errors';
-import { buildCalculationBody } from '../../estimates/components/EstimateDetail';
+
+function buildCalculationBody(jobs, form = {}) {
+  const includedJobs = (jobs || [])
+    .filter((j) => j.is_included !== false)
+    .map((j) => ({
+      job_id: j.job_id,
+      inputs: form.jobs?.[j.job_id] || {},
+    }));
+
+  const constraints = [];
+  if (form.estimate?.constraint_type === 'not_to_exceed') {
+    constraints.push({ constraint_type: 'not_to_exceed', amount: form.estimate.amount });
+  } else if (form.estimate?.constraint_type === 'range') {
+    constraints.push({ constraint_type: 'range', range_min: form.estimate.range_min, range_max: form.estimate.range_max });
+  }
+
+  const promotions = (form.estimate?.promotions || []).map((p, idx) => ({
+    key: p.key || `promo${idx + 1}`,
+    name: p.name,
+    percentage: p.percentage,
+  }));
+
+  const manual_adjustments = (form.estimate?.manual_adjustments || []).map((m) => ({
+    ...m,
+    source: m.source || 'manual',
+  }));
+
+  const estimate = {
+    constraints,
+    promotions,
+    manual_adjustments,
+  };
+  if (form.estimate?.tax_exempt) {
+    estimate.tax_exempt = true;
+  }
+
+  return { jobs: includedJobs, estimate };
+}
 
 describe('money and dates are displayed, never computed', () => {
   it('formats backend decimal strings without float conversion', () => {

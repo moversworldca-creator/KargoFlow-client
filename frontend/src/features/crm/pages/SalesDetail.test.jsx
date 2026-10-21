@@ -1,3 +1,5 @@
+import * as inventoryApi from '../leads/leadInventoryApi';
+import { completeRecordTask } from '../leads/recordWorkApi';
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
@@ -5,6 +7,9 @@ import { vi, describe, it, expect, beforeEach } from 'vitest';
 import SalesDetail from './SalesDetail';
 import * as apiService from '../../../services/api';
 
+const permissionState = vi.hoisted(() => ({ denied: [] }));
+vi.mock('../leads/leadInventoryApi', async original => ({ ...await original(), listLeadInventory: vi.fn().mockResolvedValue([]) }));
+vi.mock('../leads/recordWorkApi', async original => ({ ...await original(), completeRecordTask: vi.fn().mockResolvedValue({}) }));
 const routeState = vi.hoisted(() => ({
   params: { id: '123' },
   location: { pathname: '/sales/123', state: {} },
@@ -290,7 +295,7 @@ vi.mock('../../../services/api', () => {
   };
 
   return {
-    default: defaultExport,
+    default: { ...defaultExport, get: vi.fn().mockResolvedValue({}) },
     getOpportunity: vi.fn().mockResolvedValue(mockOpportunity),
     updateOpportunity: vi.fn().mockResolvedValue({}),
     createOpportunity: vi.fn().mockResolvedValue({}),
@@ -421,7 +426,7 @@ vi.mock('../../auth/context/AuthContext', () => ({
 
 vi.mock('../../../shared/auth/useCan', () => ({
   default: () => ({
-    canAll: () => true,
+    canAll: permissions => permissions.every(permission => !permissionState.denied.includes(permission)),
     canAny: () => true,
     can: () => true,
     context: { permissions: new Set(['crm.admin']), isSuperuser: true, isSystemAdmin: false, isCompanyAdmin: false },
@@ -441,6 +446,8 @@ rememberMocks(apiService);
 describe('SalesDetail Component Tests', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    permissionState.denied = [];
+    inventoryApi.listLeadInventory.mockResolvedValue([]);
     mockDefaults.forEach(([mock, implementation]) => mock.mockReset().mockImplementation(implementation));
     timelineState.activities = [];
     routeState.params = { id: '123' };
@@ -514,7 +521,7 @@ describe('SalesDetail Component Tests', () => {
     expect(screen.getByPlaceholderText('Enter destination address')).toHaveValue('90 Job Destination Avenue');
   });
 
-  it('loads estimate context for the sales route so inventory can request data after refresh', async () => {
+  it('loads estimate context for the sales route alongside canonical inventory', async () => {
     renderComponent({
       initialEntry: '/crm/opportunity/123/sales',
       routePath: '/crm/:entityType/:id/:tabId',
@@ -1247,6 +1254,59 @@ describe('SalesDetail Component Tests', () => {
       expect(screen.getAllByText('$250.00').length).toBeGreaterThan(0);
       expect(screen.getByText(/card/i)).toBeInTheDocument();
     });
+  });
+
+
+  it('loads canonical inventory without an estimate detail request', async () => {
+    apiService.getOpportunityBySalesNumber.mockResolvedValueOnce({ id: 123, sales_number: 123, lead_id: 77 });
+    inventoryApi.listLeadInventory.mockResolvedValue([{ id: 7, room_name: 'Office', item_name: 'Desk', quantity: 2, weight_lbs_each: '10', is_fragile: true }]);
+    renderComponent({ initialEntry: '/crm/opportunity/123/sales', routePath: '/crm/:entityType/:id/:tabId', params: { entityType: 'opportunity', id: '123', tabId: 'sales' } });
+    await screen.findByText(/Desk × 2/);
+    expect(inventoryApi.listLeadInventory).toHaveBeenCalledWith(77);
+    expect(apiService.default.get.mock.calls.some(([path]) => /^\/estimates\/[^/]+\/$/.test(path))).toBe(false);
+  });
+
+  it('completes and reopens tasks without activity IDs and refreshes the timeline', async () => {
+    apiService.getTasks.mockResolvedValue([{ id: 7, title: 'Check inventory', notes: 'Call customer', status: 'pending', due_date: '2020-01-01T09:00:00Z', task_type: 'follow_up', assigned_to_id: 7 }]);
+    renderComponent();
+    await screen.findByText('Check inventory');
+    expect(screen.getByText(/Overdue/)).toBeInTheDocument();
+    const timelineCalls = apiService.getActivities.mock.calls.length;
+    apiService.getTasks.mockResolvedValue([{ id: 7, title: 'Check inventory', status: 'completed' }]);
+    fireEvent.click(screen.getByRole('button', { name: 'Mark follow-up complete' }));
+    await waitFor(() => expect(completeRecordTask).toHaveBeenCalledWith(7, { opportunity: 123 }));
+    await waitFor(() => expect(apiService.getActivities.mock.calls.length).toBeGreaterThan(timelineCalls));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Reopen follow-up' })).not.toBeDisabled());
+    apiService.getTasks.mockResolvedValue([{ id: 7, title: 'Check inventory', status: 'pending' }]);
+    fireEvent.click(screen.getByRole('button', { name: 'Reopen follow-up' }));
+    await waitFor(() => expect(apiService.updateTask).toHaveBeenCalledWith(7, { status: 'pending' }, { opportunity: 123 }));
+  });
+
+  it('edits a lead task without an activity ID and filters completed tasks', async () => {
+    apiService.getLead.mockResolvedValue({ id: 123, first_name: 'Ada', last_name: 'Lead', system_state: 'new', branch_id: 1 });
+    apiService.getTasks.mockResolvedValue([{ id: 7, title: 'Original task', notes: 'Confirm items', assigned_to_id: 7, due_date: '2026-10-22T09:00:00Z', task_type: 'follow_up', status: 'pending' }, { id: 8, title: 'Finished task', status: 'completed' }]);
+    renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
+    await screen.findByText('Original task');
+    expect(apiService.getTasks).toHaveBeenCalledWith(expect.objectContaining({ lead: 123 }));
+    fireEvent.change(screen.getByLabelText('Filter follow-ups'), { target: { value: 'completed' } });
+    expect(screen.getByText('Original task')).not.toBeVisible();
+    expect(screen.getByText('Finished task')).toBeVisible();
+    fireEvent.change(screen.getByLabelText('Filter follow-ups'), { target: { value: 'open' } });
+    expect(screen.queryByText('Finished task')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit follow-up' }));
+    fireEvent.change(screen.getByPlaceholderText(/e.g. Check on inventory/i), { target: { value: 'Revised task' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(apiService.updateTask).toHaveBeenCalledWith(7, expect.objectContaining({ title: 'Revised task', assigned_to_id: 7 }), { lead: 123 }));
+  });
+
+  it('hides task mutation controls for viewers', async () => {
+    permissionState.denied = ['opportunities.update'];
+    apiService.getTasks.mockResolvedValue([{ id: 7, title: 'Read only task', status: 'pending' }]);
+    renderComponent();
+    await screen.findByText('Read only task');
+    expect(screen.queryByRole('button', { name: 'Edit follow-up' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Mark follow-up complete' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Add Follow-up/i })).not.toBeInTheDocument();
   });
 
   it('performs CRUD operations on Follow-up Notes', async () => {

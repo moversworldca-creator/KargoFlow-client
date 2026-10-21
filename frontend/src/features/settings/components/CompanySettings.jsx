@@ -43,11 +43,24 @@ const CURRENCY_OPTIONS = [
   { value: 'USD', label: 'USD (US Dollar)' },
 ];
 
+const COMPANY_CACHE_KEY = 'kargoflow:settings:company';
+
+function loadCachedCompany() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(COMPANY_CACHE_KEY) || 'null');
+    if (cached && typeof cached === 'object' && cached.id) return cached;
+  } catch {
+    // Ignore cache read error
+  }
+  return null;
+}
+
 const CompanySettings = ({ branchId = null, view = null }) => {
   const { user, isLoading: authLoading } = useAuth();
   const { showToast } = useToast();
-  const [company, setCompany] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const initialCompany = React.useMemo(() => loadCachedCompany(), []);
+  const [company, setCompany] = useState(initialCompany);
+  const [isLoading, setIsLoading] = useState(!initialCompany);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
   const companyId = user?.company?.id ?? user?.company ?? null;
@@ -56,7 +69,15 @@ const CompanySettings = ({ branchId = null, view = null }) => {
     const fetchCompany = async () => {
       try {
         const response = await getCompanies();
-        setCompany(Array.isArray(response) ? response[0] || null : response);
+        const loaded = Array.isArray(response) ? response[0] || null : response;
+        setCompany(loaded);
+        if (loaded) {
+          try {
+            localStorage.setItem(COMPANY_CACHE_KEY, JSON.stringify(loaded));
+          } catch {
+            // Ignore cache write error
+          }
+        }
       } catch (err) {
         console.error('Failed to fetch company:', err);
         setMessage({ type: 'error', text: 'Failed to load company profile.' });
@@ -73,6 +94,13 @@ const CompanySettings = ({ branchId = null, view = null }) => {
     try {
       const response = await updateCompany(company.id, company);
       setCompany(response);
+      if (response) {
+        try {
+          localStorage.setItem(COMPANY_CACHE_KEY, JSON.stringify(response));
+        } catch {
+          // Ignore cache write error
+        }
+      }
       setMessage({ type: 'success', text: 'Company profile saved successfully.' });
       showToast?.('Company profile saved successfully.', 'success');
       setTimeout(() => setMessage({ type: '', text: '' }), 4000);

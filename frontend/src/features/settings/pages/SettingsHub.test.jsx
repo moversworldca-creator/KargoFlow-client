@@ -118,11 +118,11 @@ describe('SettingsHub', () => {
     expect(screen.queryByRole('button', { name: /Discard/i })).not.toBeInTheDocument();
   });
 
-  it('renders Moves section with Move Sizes tab and mounts the module', () => {
+  it('renders Moves section with Move Sizes tab and mounts the module', async () => {
     routeState.params = { mainGroup: 'moves', subTab: 'move-sizes' };
     render(<SettingsHub />);
 
     expect(screen.getByRole('tab', { name: /Move Sizes/i })).toBeInTheDocument();
-    expect(screen.getByTestId('mover-size-settings-module')).toHaveTextContent('Move Sizes Settings: branch 1');
+    expect(await screen.findByTestId('mover-size-settings-module')).toHaveTextContent('Move Sizes Settings: branch 1');
   });
 });

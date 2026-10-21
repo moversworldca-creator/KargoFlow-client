@@ -1,0 +1,64 @@
+import React from 'react';
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { vi, beforeEach, afterEach, it, expect } from 'vitest';
+import LeadInventory from './LeadInventory';
+import * as api from './leadInventoryApi';
+vi.mock('./leadInventoryApi', async original => ({ ...await original(), listLeadInventory: vi.fn(), createLeadInventoryItem: vi.fn(), updateLeadInventoryItem: vi.fn(), deleteLeadInventoryItem: vi.fn() }));
+const item = { id: 7, room_name: 'Lounge', item_name: 'Sofa', quantity: 2, weight_lbs_each: '85.00', notes: 'Careful', is_fragile: true, is_special: true };
+beforeEach(() => { vi.clearAllMocks(); api.listLeadInventory.mockResolvedValue([item]); });
+afterEach(cleanup);
+it('renders canonical rows and handling summary', async () => {
+  render(<LeadInventory leadId={12} canView canEdit />);
+  expect(screen.getByText('Loading inventory…')).toBeInTheDocument();
+  await screen.findByText(/Sofa × 2/);
+  expect(screen.getByText(/170.00 lbs estimated · 2 fragile · 2 special/)).toBeInTheDocument();
+});
+it('distinguishes retryable errors from empty inventory', async () => {
+  api.listLeadInventory.mockRejectedValueOnce(new Error('network'));
+  render(<LeadInventory leadId={12} canView />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Could not load inventory');
+  expect(screen.queryByText('No inventory items yet.')).not.toBeInTheDocument();
+  api.listLeadInventory.mockResolvedValue([]);
+  fireEvent.click(screen.getByText('Retry'));
+  await screen.findByText('No inventory items yet.');
+});
+it('ignores stale responses after navigation', async () => {
+  let resolveOld;
+  api.listLeadInventory.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve; })).mockResolvedValueOnce([]);
+  const { rerender } = render(<LeadInventory leadId={12} canView />);
+  rerender(<LeadInventory leadId={13} canView />);
+  await screen.findByText('No inventory items yet.');
+  resolveOld([item]);
+  await waitFor(() => expect(screen.queryByText(/Sofa ×/)).not.toBeInTheDocument());
+});
+it('hides mutation controls without permission', async () => {
+  render(<LeadInventory leadId={12} canView canEdit={false} />);
+  await screen.findByText(/Sofa ×/);
+  expect(screen.queryByText('Add item')).not.toBeInTheDocument();
+  expect(screen.queryByText('Edit item')).not.toBeInTheDocument();
+});
+it('creates, edits and confirms deletion using API responses', async () => {
+  api.listLeadInventory.mockResolvedValue([]);
+  api.createLeadInventoryItem.mockResolvedValue(item);
+  api.updateLeadInventoryItem.mockResolvedValue({ ...item, quantity: 3 });
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  render(<LeadInventory leadId={12} canView canEdit />);
+  await screen.findByText('No inventory items yet.');
+  fireEvent.click(screen.getByText('Add item'));
+  fireEvent.change(screen.getByLabelText('Room'), { target: { value: 'Lounge' } });
+  fireEvent.change(screen.getByLabelText('Item name'), { target: { value: 'Sofa' } });
+  fireEvent.click(screen.getByText('Save item'));
+  await screen.findByText(/Sofa × 2/);
+  fireEvent.click(screen.getByText('Edit item'));
+  fireEvent.change(screen.getByLabelText('Quantity'), { target: { value: '3' } });
+  fireEvent.click(screen.getByText('Save item'));
+  await screen.findByText(/Sofa × 3/);
+  expect(api.updateLeadInventoryItem).toHaveBeenCalledWith(12, 7, expect.objectContaining({ quantity: 3 }));
+  fireEvent.click(screen.getByText('Delete item'));
+  expect(api.deleteLeadInventoryItem).not.toHaveBeenCalled();
+  confirm.mockReturnValue(true);
+  fireEvent.click(screen.getByText('Delete item'));
+  await screen.findByText('No inventory items yet.');
+  expect(api.deleteLeadInventoryItem).toHaveBeenCalledWith(12, 7);
+  confirm.mockRestore();
+});

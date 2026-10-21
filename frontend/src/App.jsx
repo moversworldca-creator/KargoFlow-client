@@ -30,7 +30,6 @@ const Marketing = React.lazy(() => import('./features/crm/pages/Marketing'));
 const Automation = React.lazy(() => import('./features/automation/pages/Automation'));
 const AutomationTemplateEditor = React.lazy(() => import('./features/automation/components/TemplateEditor'));
 const PaymentsPage = React.lazy(() => import('./features/payments/pages/Payments'));
-const Settings = React.lazy(() => import('./features/settings/pages/Settings'));
 const SettingsHub = React.lazy(() => import('./features/settings/pages/SettingsHub'));
 const SuperuserCreateCompanyPage = React.lazy(() => import('./features/settings/pages/SuperuserCreateCompanyPage'));
 import MailboxOAuthCallback from './features/settings/pages/MailboxOAuthCallback';
@@ -325,10 +324,13 @@ function App() {
                 <MemberPasswordPage />
               </PermissionRoute>
             } />
-            <Route path="settings" element={withPermission('/settings', <SettingsHub />)} />
-            <Route path="settings/:mainGroup" element={withPermission('/settings', <SettingsHub />)} />
-            <Route path="settings/:mainGroup/:subTab" element={withPermission('/settings', <SettingsHub />)} />
-            <Route path="settings/:tabId/:itemId/:subView" element={withPermission('/settings', <SettingsHub />)} />
+            <Route path="settings" element={withPermission('/settings', <SettingsHub />)}>
+              <Route index element={null} />
+              <Route path=":mainGroup" element={null} />
+              <Route path=":mainGroup/:subTab" element={null} />
+              <Route path=":tabId/:itemId/:subView" element={null} />
+            </Route>
+            <Route path="settings/*" element={withPermission('/settings', <SettingsHub />)} />
             <Route path="superuser/settings/company" element={<SuperuserRoute><SuperuserCreateCompanyPage /></SuperuserRoute>} />
             <Route path="profile" element={<Profile />} />
           </Route>

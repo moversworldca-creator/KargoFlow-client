@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, Suspense } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Activity,
@@ -40,28 +40,47 @@ import useCan from "../../../shared/auth/useCan";
 import { filterAccessibleBranches, getUserBranchIds } from "../../../shared/utils/branchScope";
 import { SETTINGS_TAB_PERMISSIONS } from "../../../shared/permissions/registry";
 
-import BranchSettings from "../components/BranchSettings";
-import AuditLogs from "../components/AuditLogs";
-import CommunicationTemplates from "../components/CommunicationTemplates";
-import CommunicationSetup from "../components/CommunicationSetup";
+// Keep default landing tab synchronously loaded for zero-delay initial paint
 import CompanySettings from "../components/CompanySettings";
-import LeadSourceSettings from "../components/LeadSourceSettings";
-import MoverSizeSettings from "../components/MoverSizeSettings";
-import MoverTypeSettings from "../components/MoverTypeSettings";
-import OpportunityLossReasonSettings from "../components/OpportunityLossReasonSettings";
-import ReferralSourceSettings from "../components/ReferralSourceSettings";
-import RolesPermissions from "../components/RolesPermissions";
-import SchedulingSettings from "../components/SchedulingSettings";
-import ServiceTypeSettings from "../components/ServiceTypeSettings";
-import StatusCodeSettings from "../components/StatusCodeSettings";
-import TeamManagement from "../components/TeamManagement";
-import AccessOverview from "../userManagement/AccessOverview";
-import ApprovalsQueue from "../../pricing/components/ApprovalsQueue";
-import OverlaysSettings from "../../pricing/components/OverlaysSettings";
-import { PolicySettings, TaxSettings } from "../../pricing/components/PolicyAndTaxSettings";
-import PriceSimulatorPage from "../../pricing/components/PriceSimulatorPage";
-import SkillsSettings from "../../pricing/components/SkillsSettings";
-import TariffsPage from "../../pricing/components/TariffsPage";
+
+// Lazy-load all non-default tabs to dramatically reduce initial Settings bundle size and load time
+const BranchSettings = React.lazy(() => import("../components/BranchSettings"));
+const AuditLogs = React.lazy(() => import("../components/AuditLogs"));
+const CommunicationTemplates = React.lazy(() => import("../components/CommunicationTemplates"));
+const CommunicationSetup = React.lazy(() => import("../components/CommunicationSetup"));
+const LeadSourceSettings = React.lazy(() => import("../components/LeadSourceSettings"));
+const MoverSizeSettings = React.lazy(() => import("../components/MoverSizeSettings"));
+const MoverTypeSettings = React.lazy(() => import("../components/MoverTypeSettings"));
+const OpportunityLossReasonSettings = React.lazy(() => import("../components/OpportunityLossReasonSettings"));
+const ReferralSourceSettings = React.lazy(() => import("../components/ReferralSourceSettings"));
+const RolesPermissions = React.lazy(() => import("../components/RolesPermissions"));
+const SchedulingSettings = React.lazy(() => import("../components/SchedulingSettings"));
+const ServiceTypeSettings = React.lazy(() => import("../components/ServiceTypeSettings"));
+const StatusCodeSettings = React.lazy(() => import("../components/StatusCodeSettings"));
+const TeamManagement = React.lazy(() => import("../components/TeamManagement"));
+const AccessOverview = React.lazy(() => import("../userManagement/AccessOverview"));
+const ApprovalsQueue = React.lazy(() => import("../../pricing/components/ApprovalsQueue"));
+const OverlaysSettings = React.lazy(() => import("../../pricing/components/OverlaysSettings"));
+const PolicySettings = React.lazy(() => import("../../pricing/components/PolicyAndTaxSettings").then((m) => ({ default: m.PolicySettings })));
+const TaxSettings = React.lazy(() => import("../../pricing/components/PolicyAndTaxSettings").then((m) => ({ default: m.TaxSettings })));
+const PriceSimulatorPage = React.lazy(() => import("../../pricing/components/PriceSimulatorPage"));
+const SkillsSettings = React.lazy(() => import("../../pricing/components/SkillsSettings"));
+const TariffsPage = React.lazy(() => import("../../pricing/components/TariffsPage"));
+
+function TabLoadingSkeleton() {
+  return (
+    <div className="space-y-4 p-4 animate-pulse" role="status" aria-label="Loading settings tab">
+      <div className="h-6 w-48 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+      <div className="h-4 w-72 bg-slate-100 dark:bg-slate-800 rounded-lg" />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+        <div className="h-28 bg-slate-100 dark:bg-slate-800 rounded-xl" />
+        <div className="h-28 bg-slate-100 dark:bg-slate-800 rounded-xl" />
+        <div className="h-28 bg-slate-100 dark:bg-slate-800 rounded-xl" />
+        <div className="h-28 bg-slate-100 dark:bg-slate-800 rounded-xl" />
+      </div>
+    </div>
+  );
+}
 
 const FALLBACK_BRANCHES = [
   { id: "1", name: "Main HQ", is_main: true },
@@ -228,7 +247,14 @@ export default function SettingsHub() {
   const initialBranches = useMemo(() => loadCachedBranches(), []);
   const [branches, setBranches] = useState(initialBranches);
   const [branchId, setBranchId] = useState(() => loadInitialBranchId(initialBranches));
-  const [branchStatus, setBranchStatus] = useState("loading");
+  const [branchStatus, setBranchStatus] = useState(() => {
+    try {
+      const cached = JSON.parse(localStorage.getItem(BRANCH_CACHE_KEY) || "null");
+      return Array.isArray(cached) && cached.length ? "live" : "loading";
+    } catch {
+      return "loading";
+    }
+  });
   const [searchQuery, setSearchQuery] = useState("");
 
   // Filter groups and tabs by RBAC permissions
@@ -262,7 +288,11 @@ export default function SettingsHub() {
   // Handle URL normalization and legacy route redirection
   useEffect(() => {
     if (!effectiveMainGroup) {
-      navigate("/settings/company/profile", { replace: true });
+      const defaultGroup = visibleGroups[0] || SETTINGS_GROUPS[0];
+      const defaultTab = defaultGroup?.tabs?.[0];
+      if (defaultGroup && defaultTab) {
+        navigate(`/settings/${defaultGroup.id}/${defaultTab.id}`, { replace: true });
+      }
       return;
     }
     const legacy = LEGACY_ROUTES[effectiveMainGroup];
@@ -272,7 +302,7 @@ export default function SettingsHub() {
     }
     const group = visibleGroups.find((item) => item.id === effectiveMainGroup);
     if (!group) {
-      if (visibleGroups[0]) {
+      if (visibleGroups[0]?.tabs?.[0]) {
         navigate(`/settings/${visibleGroups[0].id}/${visibleGroups[0].tabs[0].id}`, { replace: true });
       }
       return;
@@ -485,7 +515,11 @@ export default function SettingsHub() {
 
         {/* Main Content Area (Compact viewport, efficient space usage) */}
         <main className="min-h-0 flex-1 overflow-auto p-2 sm:p-2.5">
-          <div className="mx-auto h-full max-w-7xl">{activeTab && activeTab.render(branchId)}</div>
+          <div className="mx-auto h-full max-w-7xl">
+            <Suspense fallback={<TabLoadingSkeleton />}>
+              {activeTab && activeTab.render(branchId)}
+            </Suspense>
+          </div>
         </main>
       </div>
     </div>

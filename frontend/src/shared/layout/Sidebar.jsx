@@ -1,5 +1,5 @@
-import React from 'react';
-import { NavLink } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutGrid,
   Calendar,
@@ -19,8 +19,26 @@ import companyLogo from '../../assets/comapny_logo.png';
 import { useAuth } from '../../features/auth/context/AuthContext';
 import { NAV_ITEMS, getAllowedNavItems } from '../permissions/registry';
 
+// Preload SettingsHub chunk so clicking Settings opens immediately
+export const preloadSettingsHub = () => {
+  return import('../../features/settings/pages/SettingsHub');
+};
+
 const Sidebar = ({ isOpen, onClose }) => {
   const { permissionContext, user } = useAuth();
+  const location = useLocation();
+
+  useEffect(() => {
+    // Preload SettingsHub during idle time so navigation is instant
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      const handle = window.requestIdleCallback(() => preloadSettingsHub(), { timeout: 3000 });
+      return () => window.cancelIdleCallback?.(handle);
+    } else {
+      const timer = setTimeout(() => preloadSettingsHub(), 1500);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
   const iconByPath = {
     '/dashboard': LayoutGrid,
     '/leads': UserPlus,
@@ -74,15 +92,24 @@ const Sidebar = ({ isOpen, onClose }) => {
         <nav className="flex-1 flex flex-col gap-4 w-full px-3">
           {navItems.map((item, idx) => {
             const Icon = item.icon;
+            const isSettings = item.path === '/settings';
+            const destination = isSettings ? '/settings/company/profile' : item.path;
+            const isCustomActive = isSettings
+              ? location.pathname.startsWith('/settings')
+              : location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
+
             return (
               <NavLink
                 key={idx}
-                to={item.path}
+                to={destination}
+                onMouseEnter={() => {
+                  if (isSettings) preloadSettingsHub();
+                }}
                 onClick={() => {
                   if (window.innerWidth < 1024) onClose();
                 }}
                 className={({ isActive }) => `w-full aspect-square rounded-xl flex items-center justify-center transition-all duration-300 relative group ${
-                  isActive
+                  isActive || isCustomActive
                     ? 'bg-white/10 text-white shadow-lg'
                     : 'text-white/60 hover:bg-white/5 hover:text-white'
                 }`}

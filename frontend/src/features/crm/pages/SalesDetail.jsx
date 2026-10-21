@@ -1,3 +1,7 @@
+import { recordWorkError } from '../leads/recordWorkError';
+import LeadInventory from '../leads/LeadInventory';
+import { recordInventoryLeadId } from '../leads/leadInventoryApi';
+import { completeRecordTask } from '../leads/recordWorkApi';
 import { hasSendingMailbox, getComposerTemplates, getComposerTemplate } from '../leads/communicationSetupApi';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link, useLocation } from 'react-router-dom';
@@ -19,7 +23,7 @@ import {
   RouteSection,
 } from '../../../shared/ui/RedesignAtoms';
 import {
-  SidebarSpecs, InventorySnapshot,
+  SidebarSpecs,
   CustomerCard, PlannedMoveCard, RouteLogisticsCard
 } from '../components/RedesignSalesComponents';
 import { CommsHub, Timeline as RedesignTimeline } from '../components/RedesignSalesComponents';
@@ -159,7 +163,6 @@ import api, {
   getDocumentTemplates,
   createContract,
   getContracts,
-  getEstimatePortalInventory,
   previewDocumentTemplate,
   sendContractForSignature
 } from '../../../services/api';
@@ -2195,8 +2198,6 @@ const SalesDetail = () => {
   const updateTask = (taskId, data) => updateTaskRequest(taskId, data, recordTarget());
   const [estimateOpportunity, setEstimateOpportunity] = useState(null);
   const [estimateSummary, setEstimateSummary] = useState(null);
-  const [estimatePortalInventory, setEstimatePortalInventory] = useState([]);
-  const [isLoadingPortalInventory, setIsLoadingPortalInventory] = useState(false);
   const [isLoadingEstimateOpportunity, setIsLoadingEstimateOpportunity] = useState(false);
   const [activities, setActivities] = useState([]);
   const [commTemplates, setCommTemplates] = useState([]);
@@ -2238,8 +2239,8 @@ const SalesDetail = () => {
     [hasPermission]
   );
   const canCreateTask = useCallback(
-    () => hasPermission(PERMISSIONS.SALES_VIEW_TASK) || hasPermission(PERMISSIONS.SALES_CHANGE_TASK),
-    [hasPermission]
+    () => hasPermission(isLeadPath ? 'lead_activities.create' : 'opportunities.update'),
+    [hasPermission, isLeadPath]
   );
   const canSendEmail = useCallback(
     () => hasPermission(PERMISSIONS.COMMUNICATIONS_EMAIL_SEND),
@@ -2664,10 +2665,12 @@ const SalesDetail = () => {
   const [toast, setToast] = useState({ type: '', text: '' });
   const [isLoadingCommTemplates, setIsLoadingCommTemplates] = useState(false);
   const [followUps, setFollowUps] = useState([]);
+  const [followUpError, setFollowUpError] = useState('');
+  const [followUpFilter, setFollowUpFilter] = useState('all');
   const [isLoadingFollowUps, setIsLoadingFollowUps] = useState(false);
   const [isSavingFollowUp, setIsSavingFollowUp] = useState(false);
   const [isFollowUpModalOpen, setIsFollowUpModalOpen] = useState(false);
-  const [followUpType, setFollowUpType] = useState('general');
+  const [followUpType, setFollowUpType] = useState('follow_up');
   const [followUpSubject, setFollowUpSubject] = useState('');
   const [followUpDueDate, setFollowUpDueDate] = useState('');
   const [followUpDueTime, setFollowUpDueTime] = useState('');
@@ -2847,27 +2850,6 @@ const SalesDetail = () => {
     }
   }, [isCreation, isLeadPath]);
 
-  const loadEstimatePortalInventory = useCallback(async (estimateId, { silent = false } = {}) => {
-    if (!estimateId) {
-      setEstimatePortalInventory([]);
-      return;
-    }
-    setIsLoadingPortalInventory(true);
-    try {
-      const res = await api.get(`/estimates/${estimateId}/`, {
-        include_portal_inventory: 1,
-      });
-      const detail = res?.data || res || {};
-      const rows = Array.isArray(detail?.portal_inventory_items) ? detail.portal_inventory_items : [];
-      setEstimatePortalInventory(rows);
-    } catch (err) {
-      if (!silent) console.warn('Failed to load estimate portal inventory:', err);
-      setEstimatePortalInventory([]);
-    } finally {
-      setIsLoadingPortalInventory(false);
-    }
-  }, []);
-
   const resolvedEstimateId = estimateSummary?.id
     || accountingSummary?.estimate?.id
     || estimateSummary?.payment_summary?.estimate_id
@@ -2875,64 +2857,10 @@ const SalesDetail = () => {
     || invoicePreviewData?.estimate_id
     || null;
 
-  useEffect(() => {
-    if (estimateInitialSubTab !== 'inventory' && activeTab !== 'Sales') {
-      return undefined;
-    }
-
-    if (!resolvedEstimateId) {
-      return undefined;
-    }
-
-    loadEstimatePortalInventory(resolvedEstimateId);
-  }, [
-    estimateInitialSubTab,
-    activeTab,
-    resolvedEstimateId,
-    loadEstimatePortalInventory,
-  ]);
-
-  useEffect(() => {
-    if (!estimateSummary?.id) return undefined;
-
-    const shouldRefreshInventory = estimateInitialSubTab === 'inventory' || activeTab === 'Sales';
-
-    const handleFocus = () => {
-      if (shouldRefreshInventory) {
-        loadEstimatePortalInventory(estimateSummary.id, { silent: true });
-      }
-    };
-
-    window.addEventListener('focus', handleFocus);
-    document.addEventListener('visibilitychange', handleFocus);
-
-    const intervalId = window.setInterval(() => {
-      if (shouldRefreshInventory) {
-        loadEstimatePortalInventory(estimateSummary.id, { silent: true });
-      }
-    }, 15000);
-
-    return () => {
-      window.removeEventListener('focus', handleFocus);
-      document.removeEventListener('visibilitychange', handleFocus);
-      window.clearInterval(intervalId);
-    };
-  }, [estimateInitialSubTab, activeTab, estimateSummary?.id, loadEstimatePortalInventory]);
-
-  const getFollowUpActivityId = (task) => task?.activity_details?.id || task?.activity?.id || task?.activity || null;
-  const getFollowUpTargetPayload = (task) => {
-    const opportunityId = task?.opportunity_id || task?.opportunity?.id || task?.opportunity || null;
-    const leadId = task?.lead_id || task?.lead?.id || task?.lead || null;
-    if (opportunityId) return { opportunity: opportunityId };
-    if (leadId) return { lead: leadId };
-    return isLeadPath
-      ? (opportunity?.opportunity_id ? { opportunity: opportunity.opportunity_id } : { lead: opportunity?.id })
-      : { opportunity: opportunity?.id };
-  };
   const resetFollowUpForm = () => {
     setFollowUpMode('create');
     setEditingFollowUpId(null);
-    setFollowUpType('general');
+    setFollowUpType('follow_up');
     setFollowUpSubject('');
     setFollowUpDueDate('');
     setFollowUpDueTime('');
@@ -2944,16 +2872,15 @@ const SalesDetail = () => {
     setIsFollowUpModalOpen(true);
   };
   const openEditFollowUpModal = (task) => {
-    const activity = task?.activity_details || {};
     const parts = splitLocalDateTime(task?.due_date);
     setFollowUpMode('edit');
     setEditingFollowUpId(task?.id || null);
-    setFollowUpType(String(task?.task_type || 'general'));
-    setFollowUpSubject(activity.subject || '');
+    setFollowUpType(String(task?.task_type || 'follow_up'));
+    setFollowUpSubject(task.title || '');
     setFollowUpDueDate(parts.date);
     setFollowUpDueTime(parts.time || '09:00');
-    setFollowUpAssignedTo(String(task?.assigned_to || task?.assigned_to_details?.id || ''));
-    setFollowUpNotes(task?.notes || activity.description || '');
+    setFollowUpAssignedTo(String(task?.assigned_to_id || task?.assigned_to_details?.id || ''));
+    setFollowUpNotes(task?.notes || '');
     setIsFollowUpModalOpen(true);
   };
   const closeFollowUpModal = () => {
@@ -3077,6 +3004,10 @@ const SalesDetail = () => {
     const requestId = ++recordRequestRef.current;
     setRecordError(null);
     setWorkError(null);
+    setFollowUps([]);
+    setFollowUpError('');
+    setIsSavingFollowUp(false);
+    setIsFollowUpModalOpen(false);
     setConversionReview(null);
     setEstimateOpportunity(null);
     setEstimateSummary(null);
@@ -3115,7 +3046,6 @@ const SalesDetail = () => {
       if (requestId !== recordRequestRef.current) return;
       const status = err.response?.status;
       setRecordError(status === 404 ? 'This record could not be found.' : status === 403 ? 'You do not have permission to open this record.' : 'Could not load this record. Please try again.');
-      console.error('Failed to fetch data:', err);
     }
   };
 
@@ -4039,21 +3969,27 @@ const SalesDetail = () => {
 	      setFollowUps([]);
 	      return;
 	    }
+	    if (!hasPermission(isLeadPath ? 'lead_activities.view' : 'opportunities.view')) {
+          setFollowUps([]);
+          setFollowUpError('You do not have permission to view follow-ups.');
+          setIsLoadingFollowUps(false);
+          return;
+        }
+        setFollowUpError('');
 	    setIsLoadingFollowUps(true);
 	    try {
 	      const params = { ordering: '-due_date' };
 	      if (isLeadPath) {
-	        if (targetEntity?.opportunity_id) params.opportunity = targetEntity.opportunity_id;
-	        else params.lead = targetEntity.id;
+	        params.lead = targetEntity.id;
 	      } else {
 	        params.opportunity = targetEntity.id;
 	      }
 	      const rows = asList(await getTasks(params));
           if (requestId !== recordRequestRef.current || followUpId !== followUpRequestRef.current) return;
 	      setFollowUps(rows);
-	    } catch {
+	    } catch (error) {
           if (requestId !== recordRequestRef.current || followUpId !== followUpRequestRef.current) return;
-          setWorkError('Could not load follow-ups. Please retry.');
+          setFollowUpError(recordWorkError(error, 'Could not load follow-ups. Please retry.'));
 	      setFollowUps([]);
 	    } finally {
 	      if (requestId === recordRequestRef.current && followUpId === followUpRequestRef.current) setIsLoadingFollowUps(false);
@@ -5259,11 +5195,11 @@ const SalesDetail = () => {
     navigateToDetailTab('Sales', { navigateOptions: { replace: true } });
   }, [accountingEnabled, activeTab, navigateToDetailTab]);
   const pendingFollowUps = useMemo(
-    () => followUps.filter((task) => String(task?.activity_details?.status || task?.activity?.status || '').toLowerCase() !== 'completed'),
+    () => followUps.filter((task) => String(task?.status || '').toLowerCase() !== 'completed'),
     [followUps]
   );
   const completedFollowUps = useMemo(
-    () => followUps.filter((task) => String(task?.activity_details?.status || task?.activity?.status || '').toLowerCase() === 'completed'),
+    () => followUps.filter((task) => String(task?.status || '').toLowerCase() === 'completed'),
     [followUps]
   );
   const recordCustomerDetails = getRecordCustomerDetails(opportunity);
@@ -7324,52 +7260,6 @@ const SalesDetail = () => {
     workflowActions,
   ]);
    
-  const inventorySnapshotData = useMemo(() => {
-   
-    const estimateItems = Array.isArray(estimatePortalInventory)
-      ? estimatePortalInventory
-      : Array.isArray(estimateSummary?.portal_inventory_items)
-        ? estimateSummary.portal_inventory_items
-        : Array.isArray(opportunity?.portal_inventory_items)
-          ? opportunity.portal_inventory_items
-          : [];
-    const leadItems = Array.isArray(opportunity?.lead_details?.portal_inventory_items)
-      ? opportunity.lead_details.portal_inventory_items
-      : Array.isArray(estimateOpportunity?.lead_details?.portal_inventory_items)
-        ? estimateOpportunity.lead_details.portal_inventory_items
-        : [];
-
-    const sourceItems = [...leadItems, ...estimateItems];
-
-    const grouped = new globalThis.Map();
-    let totalQty = 0;
-    let totalVol = 0;
-
-    sourceItems.forEach((item) => {
-      const roomName = String(item?.room_name || 'General').trim() || 'General';
-      const qty = Number(item?.quantity || 0);
-      const safeQty = Number.isFinite(qty) ? qty : 0;
-      grouped.set(roomName, (grouped.get(roomName) || 0) + safeQty);
-      totalQty += safeQty;
-      totalVol += safeQty * Number(item?.volume_cuft_each || 0);
-    });
-
-    return {
-      roomCount: grouped.size,
-      totalQty,
-      totalVol,
-      items: [...grouped.entries()]
-        .map(([name, qty]) => ({ name, qty }))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    };
-  }, [
-    estimatePortalInventory,
-    estimateSummary?.portal_inventory_items,
-    opportunity?.portal_inventory_items,
-    opportunity?.lead_details?.portal_inventory_items,
-    estimateOpportunity?.lead_details?.portal_inventory_items,
-  ]);
-
   if (isLoading) return <div className="flex items-center justify-center h-[80vh]"><Loader2 className="w-12 h-12 text-primary animate-spin" /></div>;
   if (!opportunity || recordError) return (
     <div className="max-w-[1400px] mx-auto">
@@ -7776,39 +7666,28 @@ const SalesDetail = () => {
   const handleSaveFollowUp = async () => {
     if (!opportunity?.id || opportunity.id === 'new') return;
     if (!followUpSubject.trim() || !followUpAssignedTo || !followUpDueDate) return;
-    if (!requiresAnyPermission([PERMISSIONS.SALES_CHANGE_TASK, PERMISSIONS.SALES_CHANGE_OPPORTUNITY])) {
-      return denyAction('You do not have permission to manage follow-ups.');
-    }
-    if (!requiresAnyPermission([PERMISSIONS.SALES_CHANGE_TASK, PERMISSIONS.SALES_CHANGE_OPPORTUNITY])) {
-      return denyAction('You do not have permission to manage follow-ups.');
-    }
+    if (!canCreateTask() || isSavingFollowUp) return;
+    const requestId = recordRequestRef.current;
     setIsSavingFollowUp(true);
     setToast({ type: '', text: '' });
     try {
       const time = followUpDueTime || '09:00';
       const dueAtIso = new Date(`${followUpDueDate}T${time}`).toISOString();
-      const description = followUpNotes.trim() || followUpSubject.trim();
       const taskRecord = editingFollowUpId
         ? followUps.find((task) => String(task.id) === String(editingFollowUpId))
         : null;
-      const targetPayload = followUpMode === 'edit' && taskRecord
-        ? getFollowUpTargetPayload(taskRecord)
-        : (isLeadPath
-            ? (opportunity?.opportunity_id ? { opportunity: opportunity.opportunity_id } : { lead: opportunity.id })
-            : { opportunity: opportunity.id });
+      const targetPayload = recordTarget();
       if (followUpMode === 'edit' && editingFollowUpId) {
-        const activityId = getFollowUpActivityId(taskRecord);
-        if (!activityId) throw new Error('Missing activity for follow-up.');
-
         await updateTask(editingFollowUpId, {
           title: followUpSubject.trim(),
-          status: taskRecord?.activity_details?.status || 'pending',
+          status: taskRecord?.status || 'pending',
           ...targetPayload,
           task_type: followUpType,
-          assigned_to: Number(followUpAssignedTo),
+          assigned_to_id: Number(followUpAssignedTo),
           due_date: dueAtIso,
           notes: followUpNotes.trim(),
         });
+        if (requestId !== recordRequestRef.current) return;
         setToast({ type: 'success', text: 'Follow-up updated.' });
       } else {
         await createTask({
@@ -7816,79 +7695,65 @@ const SalesDetail = () => {
           status: 'pending',
           ...targetPayload,
           task_type: followUpType,
-          assigned_to: Number(followUpAssignedTo),
+          assigned_to_id: Number(followUpAssignedTo),
           due_date: dueAtIso,
           notes: followUpNotes.trim(),
         });
+        if (requestId !== recordRequestRef.current) return;
         setToast({ type: 'success', text: 'Follow-up created.' });
       }
 
       closeFollowUpModal();
+      if (requestId !== recordRequestRef.current) return;
       await loadFollowUps(opportunity);
+      if (requestId !== recordRequestRef.current) return;
       await refreshActivityTimeline();
+      if (requestId !== recordRequestRef.current) return;
     } catch (err) {
-      setToast({ type: 'error', text: getErrorMessage(err, 'Failed to save follow-up.') });
+      if (requestId !== recordRequestRef.current) return;
+      setToast({ type: 'error', text: recordWorkError(err, 'Failed to save follow-up.') });
     } finally {
-      setIsSavingFollowUp(false);
+      if (requestId === recordRequestRef.current) setIsSavingFollowUp(false);
     }
   };
 
   const handleToggleFollowUpStatus = async (task) => {
-    const activityId = getFollowUpActivityId(task);
-    if (!activityId) return;
-    if (!requiresAnyPermission([PERMISSIONS.SALES_CHANGE_TASK, PERMISSIONS.SALES_CHANGE_OPPORTUNITY])) {
-      return denyAction('You do not have permission to update follow-ups.');
-    }
-    if (!requiresAnyPermission([PERMISSIONS.SALES_CHANGE_TASK, PERMISSIONS.SALES_CHANGE_OPPORTUNITY])) {
-      return denyAction('You do not have permission to update follow-ups.');
-    }
+    if (!canCreateTask() || isSavingFollowUp) return;
+    const requestId = recordRequestRef.current;
     setIsSavingFollowUp(true);
     try {
-      const currentStatus = String(task?.activity_details?.status || task?.activity?.status || 'pending').toLowerCase();
-      const nextStatus = currentStatus === 'completed' ? 'pending' : 'completed';
-      await updateTask(task.id, {
-        status: nextStatus,
-        completed_at: nextStatus === 'completed' ? new Date().toISOString() : null,
-      });
-      setFollowUps((prev) => prev.map((row) => (
-        String(row.id) === String(task.id)
-          ? {
-              ...row,
-              activity_details: {
-                ...(row.activity_details || {}),
-                status: nextStatus,
-                completed_at: nextStatus === 'completed' ? new Date().toISOString() : null,
-              },
-              activity: {
-                ...(row.activity || {}),
-                status: nextStatus,
-                completed_at: nextStatus === 'completed' ? new Date().toISOString() : null,
-              },
-            }
-          : row
-      )));
+      const nextStatus = task.status === 'completed' ? 'pending' : 'completed';
+      if (nextStatus === 'completed') await completeRecordTask(task.id, recordTarget());
+      else await updateTask(task.id, { status: 'pending' });
+      if (requestId !== recordRequestRef.current) return;
+      await loadFollowUps(opportunity);
+      if (requestId !== recordRequestRef.current) return;
+      await refreshActivityTimeline();
+      if (requestId !== recordRequestRef.current) return;
       setToast({
         type: 'success',
         text: nextStatus === 'completed' ? 'Follow-up marked completed.' : 'Follow-up reopened.',
       });
     } catch (err) {
-      setToast({ type: 'error', text: getErrorMessage(err, 'Failed to update follow-up status.') });
+      if (requestId !== recordRequestRef.current) return;
+      setToast({ type: 'error', text: recordWorkError(err, 'Failed to update follow-up status.') });
     } finally {
-      setIsSavingFollowUp(false);
+      if (requestId === recordRequestRef.current) setIsSavingFollowUp(false);
     }
   };
 
 
   const renderFollowUpItem = (task) => {
-    const activity = task?.activity_details || task?.activity || {};
-    const subject = String(activity.subject || 'Follow-up').trim();
-    const notes = String(task?.notes || activity.description || '').trim();
-    const taskType = String(task?.task_type || 'general');
-    const status = String(activity.status || 'pending').toLowerCase();
+
+    const subject = String(task.title || 'Follow-up').trim();
+    const notes = String(task?.notes || '').trim();
+    const taskType = String(task?.task_type || 'follow_up');
+    const status = String(task.status || 'pending').toLowerCase();
     const isCompleted = status === 'completed';
     const assignee =
       resolveUserLabel(task?.assigned_to_details) ||
-      resolveUserLabel(task?.assigned_to) ||
+      resolveUserLabel(assignableUsers.find(user => String(user.id) === String(task.assigned_to_id))) ||
+      (task.assigned_to_id ? `User #${task.assigned_to_id}` : '') ||
       'Unassigned';
 
     return (
@@ -7902,7 +7767,7 @@ const SalesDetail = () => {
               </span>
             </div>
             <div className="mt-1 text-xs font-semibold text-ink-400">
-              {safeDateTime(task?.due_date)} · {assignee}
+              {safeDateTime(task?.due_date)} · {assignee} {!isCompleted && task.due_date && new Date(task.due_date) < new Date() ? '· Overdue' : ''}
             </div>
             {notes ? <p className="mt-2 line-clamp-2 text-xs text-ink-500">{notes}</p> : null}
           </div>
@@ -7911,19 +7776,15 @@ const SalesDetail = () => {
           </span>
         </div>
         <div className="mt-3 flex items-center justify-end gap-2">
-          <IconButton name="pencil" label="Edit follow-up" onClick={() => openEditFollowUpModal(task)} tone="green" />
+          {canCreateTask() && <>
+          <IconButton disabled={isSavingFollowUp} name="pencil" label="Edit follow-up" onClick={() => openEditFollowUpModal(task)} tone="green" />
           <IconButton
+            disabled={isSavingFollowUp}
             name={isCompleted ? 'rotate-ccw' : 'check'}
             label={isCompleted ? 'Reopen follow-up' : 'Mark follow-up complete'}
             onClick={() => handleToggleFollowUpStatus(task)}
           />
-          <IconButton
-            name="trash-2"
-            label="Task deletion unavailable; mark complete instead"
-            disabled
-            onClick={() => {}}
-            className="text-rose-500"
-          />
+          </>}<span className="text-xs text-ink-400">Task deletion unavailable; mark complete instead.</span>
         </div>
       </div>
     );
@@ -9930,14 +9791,7 @@ const SalesDetail = () => {
                   onDeleteStop={!isLeadPath && !isCreation && canEditOpportunity() ? deleteSalesRouteStop : undefined}
               />
             
-              <InventorySnapshot 
-                roomCount={inventorySnapshotData.roomCount}
-                totalQty={inventorySnapshotData.totalQty}
-	                totalVol={inventorySnapshotData.totalVol}
-	                items={inventorySnapshotData.items}
-                  isLoading={isLoadingPortalInventory}
-	                onOpenFullList={() => navigateToEstimateSubTab('inventory')}
-              />
+              <LeadInventory key={`${isLeadPath}:${id}`} leadId={recordInventoryLeadId(isLeadPath, id, opportunity, isCanonicalRecordRoute)} canView={hasPermission(PERMISSIONS.LEAD_VIEW)} canEdit={hasPermission(PERMISSIONS.LEAD_EDIT)} />
               <div className="max-h-[360px] overflow-hidden rounded-xl border border-ink-100 bg-white shadow-sm flex flex-col">
                 <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-ink-100 bg-white px-4 py-3">
                   <div>
@@ -9948,15 +9802,16 @@ const SalesDetail = () => {
                     <GhostBtn icon="calendar-plus" onClick={openCreateFollowUpModal}>Add Follow-up</GhostBtn>
                   ) : null}
                 </div>
+                <select aria-label="Filter follow-ups" value={followUpFilter} onChange={event => setFollowUpFilter(event.target.value)}><option value="all">All follow-ups</option><option value="open">Open</option><option value="completed">Completed</option></select>
                 <div className="min-h-0 flex-1 overflow-y-auto p-3 space-y-3">
                   {isLoadingFollowUps ? (
                     <div className="py-10 text-center text-ink-400">
                       <Loader2 className="mx-auto mb-3 h-5 w-5 animate-spin" />
                       Loading follow-ups...
                     </div>
-                  ) : followUps.length ? (
+                  ) : followUpError ? <div role="alert">{followUpError}<button onClick={() => loadFollowUps(opportunity)}>Retry follow-ups</button></div> : followUps.length ? (
                     <>
-                      <div>
+                      <div hidden={followUpFilter === 'completed'}>
                         <div className="mb-2 flex items-center justify-between">
                           <span className="text-xs font-bold uppercase tracking-widest text-ink-400">Pending</span>
                           <span className="text-xs font-semibold text-ink-400">{pendingFollowUps.length}</span>
@@ -9969,7 +9824,7 @@ const SalesDetail = () => {
                           )}
                         </div>
                       </div>
-                      {completedFollowUps.length ? (
+                      {completedFollowUps.length && followUpFilter !== 'open' ? (
                         <div>
                           <div className="mb-2 flex items-center justify-between">
                             <span className="text-xs font-bold uppercase tracking-widest text-ink-400">Completed</span>
@@ -10212,36 +10067,36 @@ const SalesDetail = () => {
                 <h3 className="font-black uppercase tracking-tight">
                   {followUpMode === 'edit' ? 'Edit Follow-up' : 'Add Follow-up'}
                 </h3>
-                <button onClick={closeFollowUpModal}><Icon name="x" className="w-5 h-5" /></button>
+                <button disabled={isSavingFollowUp} onClick={closeFollowUpModal}><Icon name="x" className="w-5 h-5" /></button>
              </div>
              <div className="p-6 space-y-4">
                 <div className="space-y-1">
                   <label className="label-eyebrow text-ink-400">Task Type</label>
-                  <select value={followUpType} onChange={e => setFollowUpType(e.target.value)} className={inputCls}>
+                  <select disabled={isSavingFollowUp} value={followUpType} onChange={e => setFollowUpType(e.target.value)} className={inputCls}>
                     <option value="call">Call</option>
                     <option value="email">Email</option>
                     <option value="sms">Text/SMS</option>
                     <option value="meeting">Meeting</option>
-                    <option value="general">General Task</option>
+                    <option value="follow_up">Follow-up</option><option value="other">Other</option>
                   </select>
                 </div>
                 <div className="space-y-1">
                   <label className="label-eyebrow text-ink-400">Subject</label>
-                  <input value={followUpSubject} onChange={e => setFollowUpSubject(e.target.value)} className={inputCls} placeholder="e.g. Check on inventory" />
+                  <input disabled={isSavingFollowUp} value={followUpSubject} onChange={e => setFollowUpSubject(e.target.value)} className={inputCls} placeholder="e.g. Check on inventory" />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="label-eyebrow text-ink-400">Due Date</label>
-                    <input type="date" value={followUpDueDate} onChange={e => setFollowUpDueDate(e.target.value)} className={inputCls} />
+                    <input disabled={isSavingFollowUp} type="date" value={followUpDueDate} onChange={e => setFollowUpDueDate(e.target.value)} className={inputCls} />
                   </div>
                   <div className="space-y-1">
                     <label className="label-eyebrow text-ink-400">Due Time</label>
-                    <input type="time" value={followUpDueTime} onChange={e => setFollowUpDueTime(e.target.value)} className={inputCls} />
+                    <input disabled={isSavingFollowUp} type="time" value={followUpDueTime} onChange={e => setFollowUpDueTime(e.target.value)} className={inputCls} />
                   </div>
                 </div>
                 <div className="space-y-1">
                   <label className="label-eyebrow text-ink-400">Assign To</label>
-                <AsyncSelect 
+                <AsyncSelect disabled={isSavingFollowUp}
                   value={followUpAssignedTo} 
                   onChange={(val) => setFollowUpAssignedTo(val)} 
                   fetchOptions={(search, offset, limit) => getLookupUsersPage(search, offset, limit, selectedBranch?.id || form.branch || null)} 
@@ -10253,7 +10108,7 @@ const SalesDetail = () => {
                 </div>
                 <div className="space-y-1">
                   <label className="label-eyebrow text-ink-400">Notes</label>
-                  <textarea
+                  <textarea disabled={isSavingFollowUp}
                     value={followUpNotes}
                     onChange={e => setFollowUpNotes(e.target.value)}
                     className={inputCls + ' h-28'}
@@ -10261,7 +10116,7 @@ const SalesDetail = () => {
                   />
                 </div>
                 <div className="pt-4 flex justify-end gap-2">
-                  <GhostBtn onClick={closeFollowUpModal}>Cancel</GhostBtn>
+                  <GhostBtn disabled={isSavingFollowUp} onClick={closeFollowUpModal}>Cancel</GhostBtn>
                   <PrimaryBtn onClick={handleSaveFollowUp} loading={isSavingFollowUp}>
                     {followUpMode === 'edit' ? 'Save Changes' : 'Create Follow-up'}
                   </PrimaryBtn>
