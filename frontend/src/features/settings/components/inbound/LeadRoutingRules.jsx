@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Route, Plus, Trash2, Edit3, ArrowUpDown, CheckCircle2, ShieldCheck, X, Sparkles, AlertCircle, Loader2 } from 'lucide-react';
-import { routingApi } from '../../../crm/leads/inboundApi';
+import { routingApi } from '../../../../services/api';
 import { GhostBtn, PrimaryBtn, Pill, StatusDot } from '../../../../shared/ui/RedesignAtoms';
 import { useToast } from '../../../../shared/context/ToastContext';
 
@@ -46,6 +46,16 @@ export default function LeadRoutingRules({ branches = [], staff = [], statuses =
   const [actions, setActions] = useState([]);
   const [isSaving, setIsSaving] = useState(false);
 
+  const getNextAvailablePriority = (ruleList = rules) => {
+    if (!ruleList || ruleList.length === 0) return 10;
+    const used = new Set(ruleList.map(r => Number(r.priority)).filter(p => !isNaN(p) && p > 0));
+    let next = 10;
+    while (used.has(next)) {
+      next += 10;
+    }
+    return next;
+  };
+
   const loadRules = async () => {
     setIsLoading(true);
     try {
@@ -67,7 +77,7 @@ export default function LeadRoutingRules({ branches = [], staff = [], statuses =
   const openCreateModal = () => {
     setEditingRuleId(null);
     setRuleName('');
-    setPriority(10);
+    setPriority(getNextAvailablePriority(rules));
     setConditions([{ field: 'origin_state', op: 'eq', value: '' }]);
     setActions([{ type: 'assign_branch', branch_id: branches[0]?.id || 1 }]);
     setIsModalOpen(true);
@@ -76,7 +86,7 @@ export default function LeadRoutingRules({ branches = [], staff = [], statuses =
   const openEditModal = (rule) => {
     setEditingRuleId(rule.id);
     setRuleName(rule.name || '');
-    setPriority(rule.priority || 10);
+    setPriority(rule.priority ?? 10);
     setConditions(Array.isArray(rule.conditions) ? rule.conditions : []);
     setActions(Array.isArray(rule.actions) ? rule.actions : []);
     setIsModalOpen(true);
@@ -93,9 +103,23 @@ export default function LeadRoutingRules({ branches = [], staff = [], statuses =
     }
   };
 
+  const numericPriority = Number(priority);
+  const duplicateRule = rules.find(
+    r => r.id !== editingRuleId && Number(r.priority) === numericPriority
+  );
+  const isPriorityInvalid = priority === '' || isNaN(numericPriority) || numericPriority < 1;
+
   const handleSaveRule = async () => {
     if (!ruleName.trim()) {
       toast?.showError?.('Rule name is required');
+      return;
+    }
+    if (isPriorityInvalid) {
+      toast?.showError?.('Priority rank must be a valid number (1 or higher)');
+      return;
+    }
+    if (duplicateRule) {
+      toast?.showError?.(`Priority rank ${numericPriority} is already used by "${duplicateRule.name}". Please choose a unique priority rank.`);
       return;
     }
     if (actions.length === 0) {
@@ -107,7 +131,7 @@ export default function LeadRoutingRules({ branches = [], staff = [], statuses =
     try {
       const payload = {
         name: ruleName.trim(),
-        priority: Number(priority),
+        priority: numericPriority,
         is_active: true,
         conditions: conditions.map(c => {
           let val = c.value;
@@ -163,6 +187,7 @@ export default function LeadRoutingRules({ branches = [], staff = [], statuses =
       ) : (
         <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
           {rules.map((rule) => {
+            const isDuplicatePriority = rules.filter(r => Number(r.priority) === Number(rule.priority)).length > 1;
             const branchAction = (rule.actions || []).find(a => a.type === 'assign_branch');
             const targetBranch = branches.find(b => b.id === branchAction?.branch_id);
 
@@ -171,9 +196,18 @@ export default function LeadRoutingRules({ branches = [], staff = [], statuses =
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-sm text-slate-900 dark:text-white">{rule.name}</span>
-                    <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-mono font-bold text-slate-600 dark:text-slate-400">
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-mono font-bold ${
+                      isDuplicatePriority
+                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                    }`}>
                       Priority: {rule.priority}
                     </span>
+                    {isDuplicatePriority && (
+                      <span className="rounded-full bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-300 px-2 py-0.5 text-[10px] font-bold flex items-center gap-1">
+                        <AlertCircle size={10} /> Duplicate Rank
+                      </span>
+                    )}
                     <Pill tone={rule.is_active ? 'green' : 'slate'}>
                       <StatusDot tone={rule.is_active ? 'green' : 'slate'} />
                       <span>{rule.is_active ? 'Active' : 'Inactive'}</span>
@@ -242,7 +276,7 @@ export default function LeadRoutingRules({ branches = [], staff = [], statuses =
             </div>
 
             <div className="max-h-[70vh] overflow-y-auto p-6 space-y-5">
-              <div className="grid grid-cols-1 sm:grid-cols-[1fr_120px] gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_160px] gap-3 items-start">
                 <div>
                   <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">Rule Name</label>
                   <input
@@ -257,11 +291,40 @@ export default function LeadRoutingRules({ branches = [], staff = [], statuses =
                   <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">Priority (Rank)</label>
                   <input
                     type="number"
+                    min="1"
                     value={priority}
                     onChange={(e) => setPriority(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 p-2.5 text-xs font-mono text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+                    className={`w-full rounded-xl border p-2.5 text-xs font-mono text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-white transition-colors ${
+                      duplicateRule
+                        ? 'border-amber-400 focus:border-amber-500 ring-1 ring-amber-400 bg-amber-50/20 dark:bg-amber-950/20'
+                        : isPriorityInvalid
+                        ? 'border-rose-400 focus:border-rose-500 ring-1 ring-rose-400 bg-rose-50/20 dark:bg-rose-950/20'
+                        : 'border-slate-200 dark:border-slate-800'
+                    }`}
                   />
                 </div>
+              </div>
+
+              {/* Priority rank validation and status indicator */}
+              <div className="transition-all duration-150">
+                {duplicateRule ? (
+                  <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50/70 p-2.5 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+                    <AlertCircle size={15} className="shrink-0 text-amber-600 dark:text-amber-400" />
+                    <span>
+                      Priority rank <strong>{priority}</strong> is already used by <strong>"{duplicateRule.name}"</strong>. Each rule must have a unique rank.
+                    </span>
+                  </div>
+                ) : isPriorityInvalid ? (
+                  <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50/70 p-2.5 text-xs text-rose-800 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-300">
+                    <AlertCircle size={15} className="shrink-0 text-rose-500" />
+                    <span>Please enter a valid rank number (1 or higher). Higher numbers evaluate first.</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/60 p-2 text-xs text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300">
+                    <CheckCircle2 size={14} className="shrink-0 text-emerald-600 dark:text-emerald-400" />
+                    <span>Priority rank <strong>{priority}</strong> is accepted & unique.</span>
+                  </div>
+                )}
               </div>
 
               {/* Conditions List */}
@@ -374,7 +437,9 @@ export default function LeadRoutingRules({ branches = [], staff = [], statuses =
 
             <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50 px-6 py-4 dark:border-slate-800 dark:bg-slate-900/60">
               <GhostBtn onClick={() => setIsModalOpen(false)}>Cancel</GhostBtn>
-              <PrimaryBtn onClick={handleSaveRule} loading={isSaving}>Save Rule</PrimaryBtn>
+              <PrimaryBtn onClick={handleSaveRule} loading={isSaving} disabled={Boolean(duplicateRule) || isPriorityInvalid}>
+                Save Rule
+              </PrimaryBtn>
             </div>
           </div>
         </div>

@@ -4,8 +4,7 @@ import {
 } from 'lucide-react';
 import Card from '../../../shared/ui/Card';
 import { GhostBtn, PrimaryBtn, Pill, StatusDot } from '../../../shared/ui/RedesignAtoms';
-import { getBranches, updateBranch } from '../../../services/api';
-import { providerApi } from '../../crm/leads/inboundApi';
+import { getBranches, updateBranch, providerApi } from '../../../services/api';
 import LeadImportModal from '../../crm/components/LeadImportModal';
 import ProviderSecretModal from './inbound/ProviderSecretModal';
 import ProviderConfigDrawer from './inbound/ProviderConfigDrawer';

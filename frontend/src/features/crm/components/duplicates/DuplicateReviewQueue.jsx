@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AlertTriangle, CheckCircle2, RefreshCw, X, Loader2, ArrowRight } from 'lucide-react';
-import { leadApi } from '../../leads/leadApi';
+import { getLead, getDuplicateReviewQueue } from '../../../../services/api';
 import DuplicateComparisonModal from './DuplicateComparisonModal';
 import { Pill, StatusDot, GhostBtn, PrimaryBtn } from '../../../../shared/ui/RedesignAtoms';
 import { useToast } from '../../../../shared/context/ToastContext';
@@ -17,7 +17,7 @@ export default function DuplicateReviewQueue({ isOpen, onClose }) {
   const loadQueue = async () => {
     setIsLoading(true);
     try {
-      const data = await leadApi.listDuplicateQueue({
+      const data = await getDuplicateReviewQueue({
         decision: filterDecision || undefined,
         limit: 100,
       });
@@ -41,7 +41,7 @@ export default function DuplicateReviewQueue({ isOpen, onClose }) {
   const handleOpenComparison = async (rev) => {
     setIsLoadingSubject(true);
     try {
-      const lead = await leadApi.get(rev.subject_lead_id);
+      const lead = await getLead(rev.subject_lead_id);
       setActiveSubjectLead(lead);
       setActiveReview(rev);
     } catch (err) {

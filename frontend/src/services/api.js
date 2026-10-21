@@ -2,7 +2,6 @@ import api from "./axios";
 import { readOpportunity } from '../features/crm/leads/opportunityReadApi';
 import { getTenantStaff } from '../features/crm/leads/salesOverviewApi';
 import { recordActivities, recordTasks, createRecordActivity, updateRecordActivity, createRecordTask, updateRecordTask } from '../features/crm/leads/recordWorkApi';
-import { leadApi, leadPayload } from '../features/crm/leads/leadApi';
 import { getPipelineQueue } from '../features/crm/leads/pipelineApi';
 
 const FILE_TARGET_TYPE_MAP = {
@@ -135,48 +134,132 @@ export const markNotificationRead = async (id) => notificationPayload(await api.
 export const markNotificationUnread = async (id) => notificationPayload(await api.post(`/tenant/notifications/${id}/mark-unread/`));
 export const markAllNotificationsRead = () => api.post("/tenant/notifications/mark-all-read/");
 
+// Lead Field Mappings and Payload Helpers
+const EDITABLE_LEAD_FIELDS = new Set([
+  'first_name', 'last_name', 'full_name', 'email', 'phone', 'phone_type', 'phone_extension',
+  'notes', 'move_date', 'bedrooms', 'lead_cost', 'origin_street', 'origin_unit_number',
+  'origin_city', 'origin_state', 'origin_zip', 'origin_property_type', 'origin_flights_of_stairs',
+  'origin_has_elevator', 'origin_parking_type', 'origin_walk_distance_ft',
+  'destination_street', 'destination_unit_number', 'destination_city', 'destination_state',
+  'destination_zip', 'destination_property_type', 'destination_flights_of_stairs',
+  'destination_has_elevator', 'destination_parking_type', 'destination_walk_distance_ft',
+  'referral_source_id', 'move_type_id', 'service_type_id', 'opportunity_type_id',
+  'move_size_id', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_content',
+  'utm_keyword', 'utm_ad_group', 'utm_custom',
+]);
+const LEAD_FIELD_ALIASES = {
+  branch: 'branch_id', assigned_to: 'assigned_user_id', custom_status_code: 'custom_status_code_id',
+  referral_source: 'referral_source_id', move_type: 'move_type_id', service_type: 'service_type_id',
+  move_size: 'move_size_id', origin_address_line1: 'origin_street',
+  destination_address_line1: 'destination_street',
+};
+const LEAD_CATALOG_REFS = new Set(['branch_id', 'assigned_employee_id', 'assigned_user_id', 'custom_status_code_id',
+  'referral_source_id', 'move_type_id', 'service_type_id', 'opportunity_type_id', 'move_size_id']);
+
+export function leadPayload(input, { create = false } = {}) {
+  const result = {};
+  for (const [name, value] of Object.entries(input || {})) {
+    const field = LEAD_FIELD_ALIASES[name] || name;
+    if (name === 'assigned_to' && input.assigned_employee_id != null) continue;
+    if (name !== field && Object.prototype.hasOwnProperty.call(input, field)) continue;
+    if (!EDITABLE_LEAD_FIELDS.has(field) && field !== 'branch_id' && !(create && ['assigned_employee_id', 'assigned_user_id', 'custom_status_code_id'].includes(field))) continue;
+    if (value === undefined || (LEAD_CATALOG_REFS.has(field) && value === '')) continue;
+    if (LEAD_CATALOG_REFS.has(field) && value != null) {
+      const id = Number(value);
+      if (!Number.isInteger(id) || id < 1) throw new Error(`${field} must be a valid catalog ID.`);
+      result[field] = id;
+    } else {
+      result[field] = value;
+    }
+  }
+  if (create && !result.branch_id) throw new Error('Select a branch before creating a lead.');
+  return result;
+}
+
+export function leadRecord(row) {
+  if (!row) return row;
+  const fullName = String(
+    row.full_name || row.customer_name || row.lead_name || row.name || row.contact_name || ''
+  ).trim();
+  const nameParts = fullName.split(/\s+/).filter(Boolean);
+  const firstName = String(row.first_name || '').trim() || nameParts[0] || '';
+  const lastName = String(row.last_name || '').trim() || nameParts.slice(1).join(' ');
+  return {
+    ...row,
+    first_name: firstName,
+    last_name: lastName,
+    full_name: fullName || `${firstName} ${lastName}`.trim(),
+    move_date: row.move_date ? String(row.move_date).slice(0, 10) : null,
+    status: row.system_state,
+    branch: row.branch_id,
+    assigned_to: row.assigned_employee_id,
+    custom_status_code: row.custom_status_code_id,
+    referral_source: row.referral_source_id,
+    move_type: row.move_type_id,
+    service_type: row.service_type_id,
+    move_size: row.move_size_id,
+  };
+}
+
 // Lead APIs
-export const getLeads = (params) => params ? leadApi.list(params) : leadApi.listAll();
-export const getLead = (id) => leadApi.get(id);
+export const listLeadsPage = async (params = {}) => {
+  const page = await api.get('/tenant/leads/', { params: { limit: 200, ...params } });
+  return { ...page, results: (page.results || []).map(leadRecord) };
+};
+
+export const listAllLeads = async (params = {}) => {
+  const first = await listLeadsPage({ ...params, limit: 200, offset: 0 });
+  const results = [...first.results];
+  for (let offset = 200; offset < (first.count || 0); offset += 200) {
+    const page = await listLeadsPage({ ...params, limit: 200, offset });
+    results.push(...page.results);
+    if (!page.results.length) break;
+  }
+  return { ...first, results };
+};
+
+export const getLeads = (params) => (params ? listLeadsPage(params) : listAllLeads());
+export const getLead = async (id) => leadRecord(await api.get(`/tenant/leads/${id}/`));
 export const getLeadBySalesNumber = async (salesNumber) => {
   const detail = await api.get(`/tenant/pipeline/${salesNumber}/`);
   if (detail?.item?.kind !== 'lead') throw new Error(`Sales number ${salesNumber} is not a lead.`);
-  return leadApi.get(detail.item.id);
+  return getLead(detail.item.id);
 };
-export const createLead = (data) => leadApi.create(data);
+export const createLead = async (data) => leadRecord(await api.post('/tenant/leads/', leadPayload(data, { create: true })));
+export const transitionLead = async (id, action, body = {}) => leadRecord(await api.post(`/tenant/leads/${id}/${action}/`, body));
 export const updateLead = async (id, data = {}) => {
   const payload = leadPayload(data);
   const requestedState = data.status === 'contacted' ? 'in_progress' : data.status;
   let current = null;
   let action = null;
   if (requestedState) {
-    current = await leadApi.get(id);
+    current = await getLead(id);
     if (requestedState !== current.system_state) {
       action = { in_progress: current.system_state === 'lost' ? 'reopen' : 'start', qualified: 'qualify', archived: 'archive' }[requestedState];
       if (!action) throw new Error(`Use the lead workflow to change status to ${requestedState}.`);
     }
   }
-  let updated = Object.keys(payload).length ? await leadApi.update(id, payload) : current;
+  let updated = Object.keys(payload).length ? leadRecord(await api.patch(`/tenant/leads/${id}/`, payload)) : current;
   if (data.custom_status_code !== undefined || data.custom_status_code_id !== undefined) {
     const statusId = data.custom_status_code_id ?? data.custom_status_code;
-    updated = await leadApi.setCustomStatus(id, statusId === '' ? null : statusId);
+    updated = await setLeadCustomStatus(id, statusId === '' ? null : statusId);
   }
   if (data.assigned_employee_id !== undefined || data.assigned_to !== undefined || data.assigned_user_id !== undefined) {
     const employeeId = data.assigned_employee_id;
     const userId = data.assigned_user_id ?? data.assigned_to;
-    updated = await leadApi.assign(id, employeeId ? { employee_id: Number(employeeId) } : userId ? { user_id: Number(userId) } : null);
+    updated = await assignLead(id, employeeId ? { employee_id: Number(employeeId) } : userId ? { user_id: Number(userId) } : null);
   }
-  if (action) updated = await leadApi.transition(id, action, { reason: data.reason || '' });
-  return updated || leadApi.get(id);
+  if (action) updated = await transitionLead(id, action, { reason: data.reason || '' });
+  return updated || getLead(id);
 };
-export const archiveLead = (id, reason = '') => leadApi.transition(id, 'archive', { reason });
+export const archiveLead = (id, reason = '') => transitionLead(id, 'archive', { reason });
 export const deleteLead = (id) => archiveLead(id, 'Archived from CRM hub');
 export const duplicateLead = async (id) => {
-  const source = await leadApi.get(id);
-  return leadApi.create(leadPayload(source, { create: true }));
+  const source = await getLead(id);
+  return createLead(leadPayload(source, { create: true }));
 };
 export const convertLead = async (id, data = {}) => {
-  const result = await leadApi.convert(id, data);
+  const result = await api.post(`/tenant/leads/${id}/convert/`, data);
   return {
     ...result,
     opportunity: result.opportunity_id
@@ -185,51 +268,191 @@ export const convertLead = async (id, data = {}) => {
   };
 };
 export const assignLead = async (id, data) => {
-  if (data?.branch && Number(data.branch) !== Number((await leadApi.get(id)).branch_id)) {
-    await leadApi.update(id, { branch_id: data.branch });
+  if (data?.branch && Number(data.branch) !== Number((await getLead(id)).branch_id)) {
+    await api.patch(`/tenant/leads/${id}/`, { branch_id: data.branch });
   }
   const employeeId = data?.employee_id ?? data?.assigned_employee_id;
   const userId = data?.user_id ?? data?.assigned_to;
-  return leadApi.assign(id, employeeId ? { employee_id: Number(employeeId) } : userId ? { user_id: Number(userId) } : null);
+  const assignee = employeeId ? { employee_id: Number(employeeId) } : userId ? { user_id: Number(userId) } : null;
+  return leadRecord(assignee
+    ? await api.post(`/tenant/leads/${id}/assign/`, assignee)
+    : await api.delete(`/tenant/leads/${id}/assignment/`));
 };
-export const setLeadCustomStatus = (id, statusCodeId) => leadApi.setCustomStatus(id, statusCodeId);
-export const startLead = (id, reason = '') => leadApi.transition(id, 'start', { reason });
-export const qualifyLead = (id, reason = '') => leadApi.transition(id, 'qualify', { reason });
+export const setLeadCustomStatus = async (id, statusCodeId) =>
+  leadRecord(await api.put(`/tenant/leads/${id}/custom-status/`, {
+    status_code_id: statusCodeId == null ? null : Number(statusCodeId),
+  }));
+export const startLead = (id, reason = '') => transitionLead(id, 'start', { reason });
+export const qualifyLead = (id, reason = '') => transitionLead(id, 'qualify', { reason });
 export const bulkUpdateLeadStatus = async ({ ids = [], status_code_id }) => Promise.all(ids.map((id) => setLeadCustomStatus(id, status_code_id)));
 export const bulkEmailLeads = () => { throw new Error('Bulk email requires the communications API.'); };
 export const bulkSmsLeads = () => { throw new Error('Bulk SMS requires the communications API.'); };
-export const markLeadLost = (id, data) => leadApi.transition(id, 'lost', data);
-export const reopenLead = (id, data = {}) => leadApi.transition(id, 'reopen', data);
+export const markLeadLost = (id, data) => transitionLead(id, 'lost', data);
+export const reopenLead = (id, data = {}) => transitionLead(id, 'reopen', data);
+export const disqualifyLead = (id, data) => transitionLead(id, 'disqualify', data);
+export const restoreLead = (id, data = {}) => transitionLead(id, 'restore', data);
+
 export const getReferralSources = (params) => api.get("/tenant/referral-sources/", { params });
 export const getReferralSourceLookups = (params) => api.get("/tenant/referral-sources/", { params });
 export const createReferralSource = (data) => api.post("/tenant/referral-sources/", data);
 export const updateReferralSource = (id, data) => api.patch(`/tenant/referral-sources/${id}/`, data);
 export const deleteReferralSource = (id) => api.delete(`/tenant/referral-sources/${id}/`);
+
 export const getLeadStatusCodes = (params) => api.get("/tenant/lead-statuses/", { params });
 export const getLeadStatusCodeLookups = (params) => api.get("/tenant/lead-statuses/", { params });
 export const createLeadStatusCode = (data) => api.post("/tenant/lead-statuses/", data);
 export const updateLeadStatusCode = (id, data) => api.patch(`/tenant/lead-statuses/${id}/`, data);
 export const deleteLeadStatusCode = (id) => api.delete(`/tenant/lead-statuses/${id}/`);
-export const getInboundLeadConfig = () => api.get("/tenant/lead-settings/");
-export const updateInboundLeadConfig = (data) => api.patch("/tenant/lead-settings/current/", data);
-export const rotateInboundLeadSecret = (providerId = 1) => api.post(`/tenant/lead-providers/${providerId}/rotate-secret/`);
+
 export const getLeadActivities = ({ lead_id, lead, branch, ...params } = {}) => {
   const id = lead_id ?? lead;
-  return id ? leadApi.activities(id) : api.get('/tenant/leads/activity-feed/', {
+  return id ? api.get(`/tenant/leads/${id}/activities/`) : api.get('/tenant/leads/activity-feed/', {
     params: { ...params, ...(branch ? { branch_id: branch } : {}) },
   });
 };
 export const createLeadActivity = ({ lead_id, lead, content, ...data }) =>
-  leadApi.createActivity(lead_id ?? lead, { ...data, description: data.description ?? content ?? '' });
+  api.post(`/tenant/leads/${lead_id ?? lead}/activities/`, { ...data, description: data.description ?? content ?? '' });
 export const updateLeadActivity = (id, data) => {
   const leadId = data.lead_id ?? data.lead;
   if (!leadId) throw new Error('A lead ID is required to update an activity.');
-  return leadApi.updateActivity(leadId, id, {
+  return api.patch(`/tenant/leads/${leadId}/activities/${id}/`, {
     subject: data.subject, description: data.description ?? data.content,
     status: data.status, is_pinned: data.is_pinned,
   });
 };
 export const deleteLeadActivity = () => { throw new Error('Deleting lead activities is not supported.'); };
+
+// Lead Duplicate Reviews
+export const getDuplicateReviews = (id) => api.get(`/tenant/leads/${id}/duplicate-reviews/`);
+export const resolveDuplicateReview = (id, reviewId, data) => api.post(`/tenant/leads/${id}/duplicate-reviews/${reviewId}/resolve/`, data);
+export const getDuplicateReviewQueue = (params = {}) => api.get('/tenant/leads/duplicate-reviews/', { params });
+
+// Lead Inventory, Consent, and Lifecycle History
+export const getLeadInventory = (id) => api.get(`/tenant/leads/${id}/inventory/`);
+export const createLeadInventoryItem = (id, data) => api.post(`/tenant/leads/${id}/inventory/`, data);
+export const updateLeadInventoryItem = (id, itemId, data) => api.patch(`/tenant/leads/${id}/inventory/${itemId}/`, data);
+export const deleteLeadInventoryItem = (id, itemId) => api.delete(`/tenant/leads/${id}/inventory/${itemId}/`);
+export const getLeadConsent = (id) => api.get(`/tenant/leads/${id}/consent/`);
+export const recordLeadConsent = (id, data) => api.post(`/tenant/leads/${id}/consent/`, data);
+export const getLeadStateHistory = (id) => api.get(`/tenant/leads/${id}/state-history/`);
+export const getLeadDispositions = (id) => api.get(`/tenant/leads/${id}/dispositions/`);
+
+// Inbound Lead APIs (Providers, Routing Rules, Mappings, Intake Audit)
+export const getLeadProviders = async () => {
+  const res = await api.get('/tenant/lead-providers/');
+  return Array.isArray(res) ? res : res?.results || [];
+};
+export const getLeadProvider = (id) => api.get(`/tenant/lead-providers/${id}/`);
+export const createLeadProvider = (data) => api.post('/tenant/lead-providers/', data);
+export const updateLeadProvider = (id, data) => api.patch(`/tenant/lead-providers/${id}/`, data);
+export const rotateLeadProviderSecret = (id) => api.post(`/tenant/lead-providers/${id}/rotate-secret/`);
+
+export const getLeadProviderBranches = async (providerId) => {
+  const res = await api.get(`/tenant/lead-providers/${providerId}/branches/`);
+  return Array.isArray(res) ? res : res?.results || [];
+};
+export const addLeadProviderBranch = (providerId, data) => api.post(`/tenant/lead-providers/${providerId}/branches/`, data);
+export const updateLeadProviderBranch = (providerId, recordId, data) => api.patch(`/tenant/lead-providers/${providerId}/branches/${recordId}/`, data);
+export const removeLeadProviderBranch = (providerId, recordId) => api.delete(`/tenant/lead-providers/${providerId}/branches/${recordId}/`);
+
+export const getLeadProviderMappings = async (providerId) => {
+  const res = await api.get(`/tenant/lead-providers/${providerId}/mappings/`);
+  return Array.isArray(res) ? res : res?.results || [];
+};
+export const createLeadProviderMapping = (providerId, data) => api.post(`/tenant/lead-providers/${providerId}/mappings/`, data);
+export const updateLeadProviderMapping = (providerId, recordId, data) => api.patch(`/tenant/lead-providers/${providerId}/mappings/${recordId}/`, data);
+export const removeLeadProviderMapping = (providerId, recordId) => api.delete(`/tenant/lead-providers/${providerId}/mappings/${recordId}/`);
+
+export const getLeadRoutingRules = async (params = {}) => {
+  const res = await api.get('/tenant/lead-routing-rules/', { params });
+  return Array.isArray(res) ? res : res?.results || [];
+};
+export const createLeadRoutingRule = (data) => api.post('/tenant/lead-routing-rules/', data);
+export const updateLeadRoutingRule = (id, data) => api.patch(`/tenant/lead-routing-rules/${id}/`, data);
+export const deleteLeadRoutingRule = (id) => api.delete(`/tenant/lead-routing-rules/${id}/`);
+
+export const getLeadBranchRoutes = async () => {
+  const res = await api.get('/tenant/lead-branch-routes/');
+  return Array.isArray(res) ? res : res?.results || [];
+};
+export const createLeadBranchRoute = (data) => api.post('/tenant/lead-branch-routes/', data);
+export const deleteLeadBranchRoute = (id) => api.delete(`/tenant/lead-branch-routes/${id}/`);
+
+export const getLeadSalesSettings = () => api.get('/tenant/lead-settings/');
+export const updateLeadSalesSettings = (data) => api.patch('/tenant/lead-settings/current/', data);
+export const getInboundLeadConfig = getLeadSalesSettings;
+export const updateInboundLeadConfig = updateLeadSalesSettings;
+export const rotateInboundLeadSecret = (providerId = 1) => rotateLeadProviderSecret(providerId);
+
+export const getLeadIntakeEvents = async (params = {}) => {
+  const res = await api.get('/tenant/lead-intake-events/', { params: { limit: 100, offset: 0, ...params } });
+  return Array.isArray(res) ? res : res?.results || [];
+};
+export const getLeadIntakeEvent = (id) => api.get(`/tenant/lead-intake-events/${id}/`);
+export const getLeadIntakeBranchResults = async (id) => {
+  const res = await api.get(`/tenant/lead-intake-events/${id}/branch-results/`);
+  return Array.isArray(res) ? res : res?.results || [];
+};
+
+export const getLeadImports = () => api.get('/tenant/lead-imports/');
+export const getLeadImport = (id) => api.get(`/tenant/lead-imports/${id}/`);
+export const createLeadImport = (data) => api.post('/tenant/lead-imports/', data);
+
+export const providerApi = {
+  list: getLeadProviders,
+  get: getLeadProvider,
+  create: createLeadProvider,
+  update: updateLeadProvider,
+  rotateSecret: rotateLeadProviderSecret,
+  listBranches: getLeadProviderBranches,
+  addBranch: addLeadProviderBranch,
+  updateBranch: updateLeadProviderBranch,
+  removeBranch: removeLeadProviderBranch,
+  listMappings: getLeadProviderMappings,
+  createMapping: createLeadProviderMapping,
+  updateMapping: updateLeadProviderMapping,
+  removeMapping: removeLeadProviderMapping,
+};
+
+export const routingApi = {
+  listRules: getLeadRoutingRules,
+  createRule: createLeadRoutingRule,
+  updateRule: updateLeadRoutingRule,
+  deleteRule: deleteLeadRoutingRule,
+  listBranchRoutes: getLeadBranchRoutes,
+  createBranchRoute: createLeadBranchRoute,
+  deleteBranchRoute: deleteLeadBranchRoute,
+  getSalesSettings: getLeadSalesSettings,
+  updateSalesSettings: updateLeadSalesSettings,
+};
+
+export const intakeAuditApi = {
+  listEvents: getLeadIntakeEvents,
+  getEvent: getLeadIntakeEvent,
+  getBranchResults: getLeadIntakeBranchResults,
+};
+
+export const leadApi = {
+  list: listLeadsPage,
+  listAll: listAllLeads,
+  get: getLead,
+  create: createLead,
+  update: (id, data) => api.patch(`/tenant/leads/${id}/`, leadPayload(data)).then(leadRecord),
+  assign: (id, assignee) => (assignee ? api.post(`/tenant/leads/${id}/assign/`, assignee) : api.delete(`/tenant/leads/${id}/assignment/`)).then(leadRecord),
+  transition: transitionLead,
+  setCustomStatus: setLeadCustomStatus,
+  convert: (id, body = {}) => api.post(`/tenant/leads/${id}/convert/`, body),
+  activities: (id) => api.get(`/tenant/leads/${id}/activities/`),
+  createActivity: (id, body) => api.post(`/tenant/leads/${id}/activities/`, body),
+  updateActivity: (id, activityId, body) => api.patch(`/tenant/leads/${id}/activities/${activityId}/`, body),
+  inventory: getLeadInventory,
+  consent: getLeadConsent,
+  stateHistory: getLeadStateHistory,
+  dispositions: getLeadDispositions,
+  duplicateReviews: getDuplicateReviews,
+  resolveDuplicateReview: (id, reviewId, data) => resolveDuplicateReview(id, reviewId, data),
+  listDuplicateQueue: getDuplicateReviewQueue,
+};
 
 
 

@@ -24,7 +24,15 @@ import Card from '../../../shared/ui/Card';
 import API from '../../../services/api';
 import { useAuth } from '../../auth/context/AuthContext';
 import { useToast } from '../../../shared/context/ToastContext';
-import { filterAccessibleBranches } from '../../../shared/utils/branchScope';
+import { filterAccessibleBranches, hasCompanyWideAccess } from '../../../shared/utils/branchScope';
+
+const useSafeToast = () => {
+  try {
+    return useToast();
+  } catch {
+    return { showToast: () => {} };
+  }
+};
 
 const isBranchActive = (branch) => branch?.is_active !== false;
 
@@ -580,7 +588,7 @@ const ConfirmDelete = ({ name, onConfirm, onCancel, isLoading }) => (
 
 const BranchSettings = ({ activeBranchId = null, view = null }) => {
   const { user } = useAuth();
-  const { showToast } = useToast();
+  const { showToast } = useSafeToast();
   const queryClient = useQueryClient();
 
   const [branches, setBranches] = useState([]);
@@ -612,8 +620,10 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
         : Array.isArray(response?.data)
         ? response.data
         : [];
+      // In the Branch Directory, display all company branches so new and existing branches are visible.
+      // If user has restricted branch scope without company-wide access, fallback to accessible branches.
       const accessible = filterAccessibleBranches(user, list);
-      setBranches(accessible.length ? accessible : list);
+      setBranches(accessible.length && !hasCompanyWideAccess(user) ? accessible : list);
     } catch (err) {
       console.error('Failed to load branches:', err);
       setMessage({ type: 'error', text: 'Failed to load branches.' });
@@ -648,6 +658,7 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
   const refreshAndInvalidate = async () => {
     await fetchBranches();
     queryClient.invalidateQueries({ queryKey: ['branches'] });
+    window.dispatchEvent(new CustomEvent('app:branches-updated'));
   };
 
   const handleCreateBranch = async (payload) => {

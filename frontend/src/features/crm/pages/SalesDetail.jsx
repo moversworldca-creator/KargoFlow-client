@@ -42,8 +42,6 @@ import MovablePanel from '../components/MovablePanel';
 import CategorizedFilesPanel from '../../files/components/CategorizedFilesPanel';
 import DuplicateComparisonModal from '../components/duplicates/DuplicateComparisonModal';
 import InboundProvenanceCard from '../components/inbound/InboundProvenanceCard';
-import { leadApi } from '../leads/leadApi';
-const CategorizedFilesPanel = React.lazy(() => import('../../files/components/CategorizedFilesPanel'));
 
 const resolveSpecLookupLabel = (value, options = []) => {
   const normalizedValue = String(value ?? '').trim();
@@ -167,7 +165,7 @@ import api, {
   previewDocumentTemplate,
   sendContractForSignature
 } from '../../../services/api';
-import { duplicateLead, duplicateOpportunity } from '../../../services/api';
+import { duplicateLead, duplicateOpportunity, getDuplicateReviews } from '../../../services/api';
 import {
   getLegacyRecordDetailPath,
   getLegacyRecordEstimateTabPath,
@@ -3108,7 +3106,7 @@ const SalesDetail = () => {
 
         setOpportunity(leadData);
         if (leadData?.id) {
-          leadApi.duplicateReviews(leadData.id)
+          getDuplicateReviews(leadData.id)
             .then(res => setDuplicateReviews(Array.isArray(res) ? res : res?.results || []))
             .catch(() => setDuplicateReviews([]));
         }
@@ -8438,11 +8436,7 @@ const SalesDetail = () => {
                 />
                 </>
               )}
-              {isLeadPath && opportunity && (opportunity.branch_routing_source || opportunity.lead_provider_id || opportunity.utm_source) && (
-                <div className="col-span-full">
-                  <InboundProvenanceCard lead={opportunity} />
-                </div>
-              )}
+              {/* Inbound Routing & Provenance card hidden per user request */}
               {['Estimate', 'Files & Photos', 'Accounting', 'Documents', 'Payments'].includes(activeTab) && (
               <RouteLogisticsCard
                 stops={opportunity?.stops || []}
@@ -11378,7 +11372,7 @@ const SalesDetail = () => {
           review={duplicateReviews.find(r => r.decision === 'pending')}
           onResolved={() => {
             if (opportunity?.id) {
-              leadApi.duplicateReviews(opportunity.id)
+              getDuplicateReviews(opportunity.id)
                 .then(res => setDuplicateReviews(Array.isArray(res) ? res : res?.results || []))
                 .catch(() => setDuplicateReviews([]));
             }

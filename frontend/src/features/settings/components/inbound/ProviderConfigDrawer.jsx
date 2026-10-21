@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Sliders, Layers, GitBranch, ArrowRight, Plus, Trash2, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
-import { providerApi } from '../../../crm/leads/inboundApi';
+import { providerApi } from '../../../../services/api';
 import { GhostBtn, PrimaryBtn, Pill } from '../../../../shared/ui/RedesignAtoms';
 import { useToast } from '../../../../shared/context/ToastContext';
 

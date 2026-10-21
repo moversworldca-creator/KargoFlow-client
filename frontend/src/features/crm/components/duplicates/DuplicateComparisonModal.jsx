@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, AlertTriangle, CheckCircle2, UserCheck, Ban, ArrowRight, Loader2, CopyCheck } from 'lucide-react';
-import { leadApi } from '../../leads/leadApi';
+import { getLead, resolveDuplicateReview } from '../../../../services/api';
 import { GhostBtn, PrimaryBtn, Pill, StatusDot } from '../../../../shared/ui/RedesignAtoms';
 import { useToast } from '../../../../shared/context/ToastContext';
 
@@ -35,7 +35,7 @@ export default function DuplicateComparisonModal({
 
     if (review.candidate_lead_id) {
       setIsLoadingCandidate(true);
-      leadApi.get(review.candidate_lead_id)
+      getLead(review.candidate_lead_id)
         .then(res => setCandidateData(res))
         .catch(err => {
           console.error('Failed to load candidate lead details:', err);
@@ -55,7 +55,7 @@ export default function DuplicateComparisonModal({
     if (!selectedDecision) return;
     setIsSubmitting(true);
     try {
-      await leadApi.resolveDuplicateReview(subjectLead.id, review.id, {
+      await resolveDuplicateReview(subjectLead.id, review.id, {
         decision: selectedDecision,
         notes: notes.trim(),
       });

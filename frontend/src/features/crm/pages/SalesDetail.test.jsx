@@ -385,6 +385,7 @@ vi.mock('../../../services/api', () => {
     getOpportunityAvailability: vi.fn().mockResolvedValue({}),
     duplicateLead: vi.fn().mockResolvedValue({}),
     duplicateOpportunity: vi.fn().mockResolvedValue({}),
+    getDuplicateReviews: vi.fn().mockResolvedValue([]),
     getPayments: vi.fn().mockResolvedValue([]),
     getPaymentRequests: vi.fn().mockResolvedValue([]),
     getRefunds: vi.fn().mockResolvedValue([]),

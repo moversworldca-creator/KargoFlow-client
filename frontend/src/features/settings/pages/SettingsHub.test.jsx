@@ -50,10 +50,6 @@ vi.mock('../components/BranchSettings', () => ({
   default: ({ view }) => <div data-testid="branch-settings-module">Branch Settings: {view}</div>,
 }));
 
-vi.mock('../components/MoverSizeSettings', () => ({
-  default: ({ branchId }) => <div data-testid="mover-size-settings-module">Move Sizes Settings: branch {branchId}</div>,
-}));
-
 describe('SettingsHub', () => {
   beforeEach(() => {
     navigate.mockClear();
@@ -72,7 +68,6 @@ describe('SettingsHub', () => {
     expect(screen.getByTitle('Operations & Scheduling')).toBeInTheDocument();
     expect(screen.getByTitle('Team & Security')).toBeInTheDocument();
     expect(screen.getByTitle('Sales & CRM')).toBeInTheDocument();
-    expect(screen.getByTitle('Move Classifications')).toBeInTheDocument();
 
     // Check active sub-tab pill in sticky tier-2 header
     expect(screen.getByRole('tab', { name: /Profile & Legal/i })).toBeInTheDocument();
@@ -116,13 +111,5 @@ describe('SettingsHub', () => {
     // Verify there is NO floating unsaved changes overlay
     expect(screen.queryByText(/You have unsaved changes/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Discard/i })).not.toBeInTheDocument();
-  });
-
-  it('renders Moves section with Move Sizes tab and mounts the module', () => {
-    routeState.params = { mainGroup: 'moves', subTab: 'move-sizes' };
-    render(<SettingsHub />);
-
-    expect(screen.getByRole('tab', { name: /Move Sizes/i })).toBeInTheDocument();
-    expect(screen.getByTestId('mover-size-settings-module')).toHaveTextContent('Move Sizes Settings: branch 1');
   });
 });

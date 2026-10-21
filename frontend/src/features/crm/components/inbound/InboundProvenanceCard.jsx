@@ -11,7 +11,8 @@ const ROUTING_SOURCE_LABELS = {
 };
 
 export default function InboundProvenanceCard({ lead, onInspectIntakeEvent }) {
-  if (!lead) return null;
+  // Hidden per user request
+  return null;
 
   const routingSource = lead.branch_routing_source || 'manual';
   const sourceConfig = ROUTING_SOURCE_LABELS[routingSource] || ROUTING_SOURCE_LABELS.manual;

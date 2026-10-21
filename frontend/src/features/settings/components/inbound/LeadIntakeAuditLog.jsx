@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Eye, Terminal, RefreshCw, X, AlertTriangle, CheckCircle2, ChevronRight, Loader2, ArrowUpRight } from 'lucide-react';
-import { intakeAuditApi } from '../../../crm/leads/inboundApi';
+import { intakeAuditApi } from '../../../../services/api';
 import { Pill, StatusDot, GhostBtn, PrimaryBtn } from '../../../../shared/ui/RedesignAtoms';
 import { useToast } from '../../../../shared/context/ToastContext';
 
