@@ -91,6 +91,38 @@ function toBackendBlock(item, index, kind) {
   const type = String(item.type || '').toLowerCase();
   const props = item.backendProps || {};
   const blockType = item.backendType || type;
+  const legacyCustomFields = { ...(item.customFields || {}) };
+  const columnFieldKeys = {
+    description: 'description_label',
+    quantity: 'quantity_label',
+    unitPrice: 'rate_label',
+    unit_price: 'rate_label',
+    amount: 'amount_label',
+    total: 'amount_label',
+  };
+  (item.columns || []).forEach((column) => {
+    const fieldKey = columnFieldKeys[column.key];
+    if (fieldKey && column.label) {
+      legacyCustomFields[fieldKey] = { ...(legacyCustomFields[fieldKey] || {}), label: column.label };
+    }
+  });
+  const totalFieldKeys = {
+    subtotal: 'subtotal',
+    discount: 'discount',
+    tax: 'tax',
+    grandTotal: 'total',
+    depositDue: 'deposit',
+    balanceDue: 'balance',
+  };
+  (item.fields || []).forEach((field) => {
+    const fieldKey = totalFieldKeys[field.id];
+    if (fieldKey && field.label) {
+      legacyCustomFields[fieldKey] = { ...(legacyCustomFields[fieldKey] || {}), label: field.label };
+    }
+  });
+  const customFieldProps = Object.keys(legacyCustomFields).length
+    ? { custom_fields: legacyCustomFields }
+    : {};
   if (item.backendType) {
     return {
       key,
@@ -103,17 +135,17 @@ function toBackendBlock(item, index, kind) {
     };
   }
 
-  if (type === 'heading') return { key, type, props: { text: String(item.text || item.title || 'Heading'), level: Number(item.level) || 1, align: item.align || 'left' } };
+  if (type === 'heading') return { key, type, props: { text: String(item.text || item.title || item.content || 'Heading'), level: Number(item.level) || 1, align: item.align || 'left', ...customFieldProps } };
   if (type === 'table') return { key, type, props: { columns: item.columns || ['Item', 'Amount'], rows: item.rows || item.tableRows || [] } };
-  if (type === 'divider') return { key, type, props: { style: 'solid', color: item.color || '#CBD5E1' } };
+  if (type === 'divider') return { key, type, props: { style: item.style?.borderStyle || 'solid', color: item.style?.borderColor || item.color || '#CBD5E1' } };
   if (type === 'spacer') return { key, type, props: { height: Math.max(4, Math.min(400, Number(item.height) || 20)) } };
-  if (type === 'signature') return { key, type, props: { field_key: item.field_key || `sig_${index + 1}`, signer_role: item.signer_role || 'customer', label: item.label || 'Customer Signature', required: item.required !== false } };
-  if (type === 'charges' && ['estimate_portal', 'document'].includes(kind)) return { key, type, props: { group_by: item.group_by || 'none', show_tax: Boolean(item.show_tax), show_quantity: Boolean(item.show_quantity) } };
-  if (type === 'estimate_summary' && ['estimate_portal', 'document'].includes(kind)) return { key, type, props: { show_discount: Boolean(item.show_discount), show_tax: Boolean(item.show_tax), show_deposit: Boolean(item.show_deposit), show_binding_note: Boolean(item.show_binding_note) } };
-  if (type === 'move_details') return { key, type, props: { show_dates: true, show_stops: true, show_move_size: true } };
-  if (type === 'line_items' && kind === 'invoice') return { key, type, props: { group_by: item.group_by || 'none', show_tax: item.show_tax !== false } };
-  if (type === 'totals' && kind === 'invoice') return { key, type, props: { show_discount: item.show_discount !== false, show_tax: item.show_tax !== false, show_balance: item.show_balance !== false } };
-  return { key, type: 'text', props: { html: String(item.content || item.html || item.text || '') } };
+  if (type === 'signature') return { key, type, props: { field_key: item.field_key || `sig_${index + 1}`, signer_role: item.signer_role || 'customer', label: item.label || 'Customer Signature', required: item.required !== false, ...customFieldProps } };
+  if (type === 'charges' && ['estimate_portal', 'document'].includes(kind)) return { key, type, props: { group_by: item.group_by || 'none', show_tax: Boolean(item.show_tax), show_quantity: Boolean(item.show_quantity), ...customFieldProps } };
+  if (type === 'estimate_summary' && ['estimate_portal', 'document'].includes(kind)) return { key, type, props: { show_discount: Boolean(item.show_discount), show_tax: Boolean(item.show_tax), show_deposit: Boolean(item.show_deposit), show_binding_note: Boolean(item.show_binding_note), ...customFieldProps } };
+  if (type === 'move_details') return { key, type, props: { show_dates: true, show_stops: true, show_move_size: true, ...customFieldProps } };
+  if (type === 'line_items' && kind === 'invoice') return { key, type, props: { group_by: item.group_by || 'none', show_tax: item.show_tax !== false, ...customFieldProps } };
+  if (type === 'totals' && kind === 'invoice') return { key, type, props: { show_discount: item.show_discount !== false, show_tax: item.show_tax !== false, show_balance: item.show_balance !== false, ...customFieldProps } };
+  return { key, type: 'text', props: { html: String(item.content || item.html || item.text || ''), ...customFieldProps } };
 }
 
 export function normalizePageSize(size) {

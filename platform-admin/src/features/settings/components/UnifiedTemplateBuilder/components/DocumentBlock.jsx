@@ -34,6 +34,7 @@ const SAMPLE_VARIABLES = {
   "opportunity.move_type": "Local",
   "move.date": "June 15, 2026",
   "move.size": "3 bedroom home",
+  "move.estimated_weight": "3 bedroom home",
   "move.origin_address": "123 Main Street, Vancouver, BC",
   "move.destination_address": "456 Oak Avenue, Burnaby, BC",
   "move.distance_miles": "12",
@@ -44,8 +45,10 @@ const SAMPLE_VARIABLES = {
   "estimate.subtotal": "$1,475.00",
   "estimate.discount": "$50.00",
   "estimate.tax": "$77.63",
+  "estimate.tax_amount": "$77.63",
   "estimate.grand_total": "$1,502.63",
   "estimate.deposit_amount": "$300.00",
+  "estimate.deposit_due": "$300.00",
   "estimate.hourly_rate": "$185.00",
   "estimate.crew_size": "3",
   "estimate.truck_count": "1",
@@ -57,6 +60,7 @@ const SAMPLE_VARIABLES = {
   "invoice.due_at": "June 30, 2026",
   "invoice.subtotal": "$1,475.00",
   "invoice.discount": "$50.00",
+  "invoice.tax_amount": "$77.63",
   "invoice.tax": "$77.63",
   "invoice.total": "$1,502.63",
   "invoice.amount_paid": "$300.00",
@@ -104,6 +108,60 @@ function resolvePreviewText(value, sampleData, scope = {}) {
   });
 }
 
+const CURRENCY_AMOUNT_FIELDS = new Set(["subtotal", "discount", "tax", "total", "deposit", "balance"]);
+const LEGACY_TOTAL_FIELD_KEYS = {
+  subtotal: "subtotal",
+  discount: "discount",
+  tax: "tax",
+  grandTotal: "total",
+  depositDue: "deposit",
+  balanceDue: "balance",
+};
+
+function getConfiguredField(props, key, label, value, sampleData, scope = {}, { amount = false } = {}) {
+  const field = (props?.custom_fields || props?.customFields)?.[key];
+  const configuredLabel = field?.label || label;
+  const configuredValue = field?.mode === "custom"
+    ? String(field.customValue ?? (field.mode === "custom" ? field.value : "") ?? "")
+    : field?.dynamicValue || (field?.mode === "dynamic" ? field.value : "") || value;
+  const displayValue = field?.mode === "custom" && (amount || CURRENCY_AMOUNT_FIELDS.has(key))
+    ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(configuredValue))
+    : configuredValue;
+  return {
+    label: resolvePreviewText(configuredLabel, sampleData, scope),
+    value: field?.mode === "custom"
+      ? escapeHtml(displayValue)
+      : resolvePreviewText(configuredValue, sampleData, scope),
+  };
+}
+
+function ConfiguredCustomFields({ fields, sampleData, scope }) {
+  const entries = Object.entries(fields || {}).filter(([key]) => key.startsWith("custom_"));
+  if (!entries.length) return null;
+  return (
+    <div className="mt-2 space-y-1 text-xs">
+      {entries.map(([key, field]) => {
+        const isCustom = field?.mode === "custom";
+        const configuredValue = isCustom
+          ? field.customValue ?? field.value ?? ""
+          : field?.dynamicValue || field?.value || "";
+        const displayValue = isCustom && field.type === "currency" && Number.isFinite(Number(configuredValue))
+          ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(configuredValue))
+          : configuredValue;
+        const value = isCustom
+          ? escapeHtml(displayValue)
+          : resolvePreviewText(configuredValue, sampleData, scope);
+        return (
+          <div key={key} className="flex justify-between gap-3">
+            <span className="text-slate-600">{resolvePreviewText(field?.label || "Custom field", sampleData, scope)}</span>
+            <span className="font-medium text-slate-800">{value}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function matchesPreviewCondition(condition, sampleData, scope) {
   if (!condition) return true;
   if (Array.isArray(condition.all)) return condition.all.every((child) => matchesPreviewCondition(child, sampleData, scope));
@@ -129,10 +187,20 @@ function matchesPreviewCondition(condition, sampleData, scope) {
   return true;
 }
 
-function PreviewTable({ columns, rows }) {
+function PreviewTable({ columns, rows, columnWidths }) {
   return (
     <div className="w-full overflow-x-auto">
-      <table className="w-full border-collapse text-xs">
+      <table
+        className="w-full border-collapse text-xs"
+        style={columnWidths ? { tableLayout: "fixed" } : undefined}
+      >
+        {columnWidths && (
+          <colgroup>
+            {columnWidths.map((width, index) => (
+              <col key={index} style={{ width }} />
+            ))}
+          </colgroup>
+        )}
         <thead className="bg-slate-50">
           <tr>{columns.map((column) => <th key={column.key} className="border-b border-slate-300 px-2 py-1.5 text-left font-semibold text-slate-600">{column.label}</th>)}</tr>
         </thead>
@@ -165,6 +233,41 @@ export function BackendWidgetPreview({ block, sampleData = true, scope = {}, cus
     const HeadingTag = `h${Math.min(4, Math.max(1, Number(props.level) || 2))}`;
     return <HeadingTag className="font-semibold text-slate-800" style={{ textAlign: props.align || "left" }}>{resolvePreviewText(props.text || "Heading", sampleData, scope)}</HeadingTag>;
   }
+  if (block.type === "header") {
+    const company = getConfiguredField(
+      props,
+      "company_name",
+      "Company name",
+      props.company_name || "{{company.name}}",
+      sampleData,
+      scope
+    ).value;
+    const title = getConfiguredField(
+      props,
+      "document_title",
+      "Document title",
+      props.title || "Estimate",
+      sampleData,
+      scope
+    ).value;
+    const number = getConfiguredField(
+      props,
+      "document_number",
+      "Document number",
+      props.document_number || "{{estimate.number}}",
+      sampleData,
+      scope
+    ).value;
+    return (
+      <header className="flex w-full flex-wrap items-start justify-between gap-3 border-b-2 border-slate-200 pb-4">
+        <div className="min-w-0 flex-1 text-xl font-bold text-slate-800">{company}</div>
+        <div className="min-w-0 text-right">
+          <h1 className="text-lg font-bold text-blue-700">{title}</h1>
+          {number && <p className="mt-1 font-mono text-xs text-slate-500">{number}</p>}
+        </div>
+      </header>
+    );
+  }
   if (block.type === "text" || block.type === "terms") {
     const richText = sanitizeHtml(resolvePreviewText(props.html || "", sampleData, scope)).cleanHtml;
     return (
@@ -185,10 +288,27 @@ export function BackendWidgetPreview({ block, sampleData = true, scope = {}, cus
   if (block.type === "divider") return <hr className="my-2" style={{ borderStyle: props.style || "solid", borderColor: props.color || "#cbd5e1" }} />;
   if (block.type === "spacer") return <div style={{ height: Math.min(Number(props.height) || 24, 100) }} />;
   if (block.type === "page_break") return <div className="border-y border-dashed border-slate-300 py-2 text-center text-[10px] uppercase text-slate-400">PDF page break</div>;
-  if (block.type === "variable") return <span>{props.label ? `${props.label}: ` : ""}{resolvePreviewText(`{{${props.token || "variable"}${props.format ? `|${props.format}` : ""}}}`, sampleData, scope)}</span>;
-  if (block.type === "image") return imageUrl
-    ? <div className="my-2" style={{ textAlign: props.align || "left" }}><img src={imageUrl} alt={props.alt || ""} width={props.width || undefined} className="inline-block h-auto max-w-full" /></div>
-    : <div role={imageError ? "alert" : undefined} className={`rounded border border-dashed p-4 text-center text-xs ${imageError ? "border-red-300 text-red-600" : "border-slate-300 text-slate-500"}`}>{imageError || (props.asset_id ? "Loading uploaded image…" : "Select an uploaded image asset to preview it.")}</div>;
+  if (block.type === "variable") {
+    const configuredField = props.custom_fields?.merge_field;
+    const label = configuredField?.label || props.label;
+    const value = configuredField?.mode === "custom"
+      ? escapeHtml(configuredField.customValue ?? configuredField.value ?? "")
+      : resolvePreviewText(`{{${props.token || "variable"}${props.format ? `|${props.format}` : ""}}}`, sampleData, scope);
+    return <span>{label ? `${resolvePreviewText(label, sampleData, scope)}: ` : ""}{value}</span>;
+  }
+  if (block.type === "image") {
+    const altField = props.custom_fields?.image_alt;
+    const captionField = props.custom_fields?.image_caption;
+    const altText = altField
+      ? getConfiguredField(props, "image_alt", props.alt || "", "{{customer.full_name}}", sampleData, scope).value
+      : resolvePreviewText(props.alt || "", sampleData, scope);
+    const captionText = captionField
+      ? getConfiguredField(props, "image_caption", "", "{{customer.full_name}}", sampleData, scope).value
+      : "";
+    return imageUrl
+      ? <div className="my-2" style={{ textAlign: props.align || "left" }}><img src={imageUrl} alt={altText} width={props.width || undefined} className="inline-block h-auto max-w-full" />{captionText && <p className="mt-1 text-xs text-slate-500">{captionText}</p>}</div>
+      : <div role={imageError ? "alert" : undefined} className={`rounded border border-dashed p-4 text-center text-xs ${imageError ? "border-red-300 text-red-600" : "border-slate-300 text-slate-500"}`}>{imageError || (props.asset_id ? "Loading uploaded image…" : "Select an uploaded image asset to preview it.")}</div>;
+  }
   if (block.type === "signature" || block.type === "initial") {
     return <div className="max-w-sm py-2 text-xs text-slate-700"><span>{props.label || block.type.replace(/_/g, " ")}{props.required ? " *" : ""}</span><div className="mt-6 border-b border-slate-400" />{props.signer_role && <small className="mt-1 block text-slate-400">Signer: {props.signer_role}</small>}</div>;
   }
@@ -225,58 +345,100 @@ export function BackendWidgetPreview({ block, sampleData = true, scope = {}, cus
     : <p role={clauseError ? "alert" : undefined} className={`text-xs ${clauseError ? "text-red-600" : "text-slate-500"}`}>{clauseError || "Loading saved clause…"}</p>;
   if (block.type === "move_details") {
     const rows = [
-      ...(props.show_dates !== false ? [{ label: "Move date", value: SAMPLE_VARIABLES["move.date"] }] : []),
-      ...(props.show_move_size !== false ? [{ label: "Move size", value: SAMPLE_VARIABLES["move.size"] }] : []),
-      ...(props.show_stops !== false ? [{ label: "From", value: SAMPLE_VARIABLES["move.origin_address"] }, { label: "To", value: SAMPLE_VARIABLES["move.destination_address"] }] : []),
+      ...(props.show_dates !== false ? [getConfiguredField(props, "move_date", "Move date", "{{move.date}}", sampleData, scope)] : []),
+      ...(props.show_move_size !== false ? [getConfiguredField(props, "move_size", "Move size", "{{move.estimated_weight}}", sampleData, scope)] : []),
+      ...(props.show_stops !== false ? [
+        getConfiguredField(props, "origin", "From", "{{move.origin_address}}", sampleData, scope),
+        getConfiguredField(props, "destination", "To", "{{move.destination_address}}", sampleData, scope),
+      ] : []),
     ];
-    return <PreviewTable columns={[{ key: "label", label: block.label || "Move details" }, { key: "value", label: " " }]} rows={rows.map((row) => ({ ...row }))} />;
+    return <PreviewTable
+      columns={[{ key: "label", label: getConfiguredField(props, "section_title", block.label || "Move details", "", sampleData, scope).label }, { key: "value", label: " " }]}
+      rows={rows}
+      columnWidths={["20%", "80%"]}
+    />;
   }
   if (block.type === "crew_trucks") {
     const rows = [
       ...(props.show_names !== false ? SAMPLE_CREW.map((member) => ({ type: member.role, name: member.name })) : []),
       ...(props.show_trucks !== false ? SAMPLE_TRUCKS.map((truck) => ({ type: "Truck", name: `${truck.name} · ${truck.size}` })) : []),
     ];
-    return <PreviewTable columns={[{ key: "type", label: "Crew / vehicle" }, { key: "name", label: "Assignment" }]} rows={rows} />;
+    return <PreviewTable columns={[
+      { key: "type", label: getConfiguredField(props, "crew_title", "Crew / vehicle", "", sampleData, scope).label },
+      { key: "name", label: getConfiguredField(props, "truck_title", "Assignment", "", sampleData, scope).label },
+    ]} rows={rows} />;
   }
   if (block.type === "charges" || block.type === "line_items") {
-    const rows = SAMPLE_CHARGES.map((row) => ({
-      description: row.name,
+    const isCharges = block.type === "charges";
+    const title = getConfiguredField(props, "section_title", block.label || (isCharges ? "Estimate charges" : "Invoice line items"), "", sampleData, scope).label;
+    const rows = SAMPLE_CHARGES.map((row, index) => {
+      const rate = getConfiguredField(
+        props,
+        `charge_${index}_unit_price`,
+        "Rate",
+        row.unit_price,
+        sampleData,
+        scope,
+        { amount: true },
+      );
+      const rawRate = Number(props.custom_fields?.[`charge_${index}_unit_price`]?.customValue
+        ?? props.custom_fields?.[`charge_${index}_unit_price`]?.value
+        ?? row.unit_price);
+      const quantity = Number(row.quantity) || 0;
+      return {
+      description: getConfiguredField(
+        props,
+        `charge_${index}_description`,
+        "Description",
+        row.name,
+        sampleData,
+        scope,
+      ).value,
       quantity: row.quantity,
-      unit_price: row.unit_price,
-      total: row.total,
-    }));
+      unit_price: rate.value,
+      total: props.custom_fields?.[`charge_${index}_unit_price`]?.mode === "custom"
+        && Number.isFinite(rawRate)
+        ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(rawRate * quantity)
+        : row.total,
+    };
+    });
     return (
       <div className="space-y-1">
-        <p className="text-xs font-semibold text-slate-700">{block.type === "charges" ? "Estimate charges" : "Invoice line items"}</p>
+        <p className="text-xs font-semibold text-slate-700">{title}</p>
         <PreviewTable columns={[
-          { key: "description", label: "Description" },
-          ...(props.show_quantity !== false && block.type === "charges" ? [{ key: "quantity", label: "Qty" }] : []),
-          { key: "unit_price", label: "Rate" },
-          { key: "total", label: "Amount" },
+          { key: "description", label: getConfiguredField(props, "description_label", "Description", "", sampleData, scope).label },
+          ...(props.show_quantity !== false && isCharges ? [{ key: "quantity", label: getConfiguredField(props, "quantity_label", "Qty", "", sampleData, scope).label }] : []),
+          { key: "unit_price", label: getConfiguredField(props, "rate_label", "Rate", "", sampleData, scope).label },
+          { key: "total", label: getConfiguredField(props, "amount_label", "Amount", "", sampleData, scope).label },
         ]} rows={rows} />
       </div>
     );
   }
   if (block.type === "estimate_summary" || block.type === "totals") {
     const isEstimate = block.type === "estimate_summary";
+    const names = isEstimate
+      ? { subtotal: "Subtotal", discount: "Discount", tax: "Tax", total: "Estimate total", deposit: "Deposit due", balance: "Balance due" }
+      : { subtotal: "Subtotal", discount: "Discount", tax: "Tax", total: "Invoice total", balance: "Balance due" };
     const rows = [
-      { label: "Subtotal", value: isEstimate ? SAMPLE_VARIABLES["estimate.subtotal"] : SAMPLE_VARIABLES["invoice.subtotal"] },
-      ...((props.show_discount !== false) ? [{ label: "Discount", value: isEstimate ? SAMPLE_VARIABLES["estimate.discount"] : SAMPLE_VARIABLES["invoice.discount"] }] : []),
-      ...((props.show_tax !== false) ? [{ label: "Tax", value: isEstimate ? SAMPLE_VARIABLES["estimate.tax"] : SAMPLE_VARIABLES["invoice.tax"] }] : []),
-      { label: isEstimate ? "Estimate total" : "Invoice total", value: isEstimate ? SAMPLE_VARIABLES["estimate.grand_total"] : SAMPLE_VARIABLES["invoice.total"] },
-      ...(isEstimate && props.show_deposit ? [{ label: "Deposit due", value: SAMPLE_VARIABLES["estimate.deposit_amount"] }] : []),
-      ...(!isEstimate && props.show_balance !== false ? [{ label: "Balance due", value: SAMPLE_VARIABLES["invoice.balance_due"] }] : []),
+      getConfiguredField(props, "subtotal", names.subtotal, isEstimate ? "{{estimate.subtotal}}" : "{{invoice.total}}", sampleData, scope),
+      ...((props.show_discount !== false) ? [getConfiguredField(props, "discount", names.discount, isEstimate ? "{{estimate.discount}}" : "{{invoice.total}}", sampleData, scope)] : []),
+      ...((props.show_tax !== false) ? [getConfiguredField(props, "tax", names.tax, isEstimate ? "{{estimate.tax_amount}}" : "{{invoice.total}}", sampleData, scope)] : []),
+      getConfiguredField(props, "total", names.total, isEstimate ? "{{estimate.grand_total}}" : "{{invoice.total}}", sampleData, scope),
+      ...(isEstimate && props.show_deposit ? [getConfiguredField(props, "deposit", names.deposit, "{{estimate.deposit_due}}", sampleData, scope)] : []),
+      ...(!isEstimate && props.show_balance !== false ? [getConfiguredField(props, "balance", names.balance, "{{invoice.balance_due}}", sampleData, scope)] : []),
       ...(isEstimate && props.show_binding_note ? [{ label: "Estimate type", value: SAMPLE_VARIABLES["estimate.binding_type"] }] : []),
     ];
-    return <PreviewTable columns={[{ key: "label", label: isEstimate ? "Estimate summary" : "Invoice totals" }, { key: "value", label: "Amount" }]} rows={rows} />;
+    return <PreviewTable columns={[{ key: "label", label: getConfiguredField(props, "section_title", block.label || (isEstimate ? "Estimate summary" : "Invoice totals"), "", sampleData, scope).label }, { key: "value", label: "Amount" }]} rows={rows} />;
   }
   if (block.type === "inventory") {
     if (props.mode === "detailed") return <PreviewTable columns={[
-      { key: "room", label: "Room" }, { key: "item", label: "Item" }, { key: "quantity", label: "Qty" },
-      ...(props.show_volume !== false ? [{ key: "volume_cuft", label: "Volume (cu ft)" }] : []),
-      ...(props.show_weight !== false ? [{ key: "weight_lbs", label: "Weight (lbs)" }] : []),
+      { key: "room", label: getConfiguredField(props, "inventory_room", "Room", "", sampleData, scope).label },
+      { key: "item", label: getConfiguredField(props, "inventory_item", "Item", "", sampleData, scope).label },
+      { key: "quantity", label: "Qty" },
+      ...(props.show_volume !== false ? [{ key: "volume_cuft", label: getConfiguredField(props, "inventory_volume", "Volume (cu ft)", "", sampleData, scope).label }] : []),
+      ...(props.show_weight !== false ? [{ key: "weight_lbs", label: getConfiguredField(props, "inventory_weight", "Weight (lbs)", "", sampleData, scope).label }] : []),
     ]} rows={SAMPLE_INVENTORY} />;
-    return <div className="grid grid-cols-3 gap-2 rounded border border-slate-200 bg-slate-50 p-3 text-xs"><span>Rooms<strong className="block">2</strong></span><span>{props.show_volume !== false ? "Volume" : "Items"}<strong className="block">{props.show_volume !== false ? "155 cu ft" : "2"}</strong></span>{props.show_weight !== false && <span>Weight<strong className="block">320 lbs</strong></span>}</div>;
+    return <div className="grid grid-cols-3 gap-2 rounded border border-slate-200 bg-slate-50 p-3 text-xs"><span>{getConfiguredField(props, "inventory_room", "Rooms", "", sampleData, scope).label}<strong className="block">2</strong></span><span>{props.show_volume !== false ? getConfiguredField(props, "inventory_volume", "Volume", "", sampleData, scope).label : getConfiguredField(props, "inventory_item", "Items", "", sampleData, scope).label}<strong className="block">{props.show_volume !== false ? "155 cu ft" : "2"}</strong></span>{props.show_weight !== false && <span>{getConfiguredField(props, "inventory_weight", "Weight", "", sampleData, scope).label}<strong className="block">320 lbs</strong></span>}</div>;
   }
   if (block.type === "payment_history") return <PreviewTable columns={[
     { key: "date", label: "Date" }, ...(props.show_method !== false ? [{ key: "method", label: "Method" }] : []),
@@ -319,6 +481,11 @@ export default function DocumentBlock({
           item.fields?.find((f) => f.id === "companyName")?.value || "{{company_name}}";
         const numberField =
           item.fields?.find((f) => f.id === "estimateNumber")?.value || "{{estimate_number}}";
+        const configuredHeaderValue = (key, value) => {
+          const configured = item.customFields?.[key];
+          if (configured?.mode === "custom") return configured.customValue ?? configured.value ?? value;
+          return configured?.dynamicValue || configured?.value || value;
+        };
 
         const hasCustomSize = Boolean(style.fontSize);
         const hasCustomWeight = style.fontWeight !== undefined || style.bold !== undefined;
@@ -328,7 +495,7 @@ export default function DocumentBlock({
           <div className="doc-header flex flex-wrap sm:flex-nowrap justify-between items-start gap-3 pb-4 border-b-2 border-slate-200 w-full max-w-full min-w-0 box-border">
             <div className="min-w-0 flex-1 pr-2">
               <InlineEdit
-                value={companyField}
+                value={configuredHeaderValue("company_name", companyField)}
                 part="companyName"
                 selection={selection}
                 preview={preview}
@@ -358,7 +525,7 @@ export default function DocumentBlock({
             </div>
             <div className="text-right min-w-0 max-w-full sm:max-w-[55%]">
               <InlineEdit
-                value={titleField}
+                value={configuredHeaderValue("document_title", titleField)}
                 part="estimateTitle"
                 selection={selection}
                 preview={preview}
@@ -385,7 +552,7 @@ export default function DocumentBlock({
                 }}
               />
               <InlineEdit
-                value={numberField}
+                value={configuredHeaderValue("document_number", numberField)}
                 part="estimateNumber"
                 selection={selection}
                 preview={preview}
@@ -433,10 +600,12 @@ export default function DocumentBlock({
               />
             </div>
             <div className="meta-grid grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs w-full max-w-full">
-              {visibleFields.map((f) => (
+              {visibleFields.map((f) => {
+                const configuredField = getConfiguredField(item, f.id, f.label, f.value || "—", sampleData);
+                return (
                 <div key={f.id} className="flex flex-col min-w-0 max-w-full overflow-hidden">
                   <InlineEdit
-                    value={f.label}
+                    value={configuredField.label}
                     part={`${f.id}_label`}
                     selection={selection}
                     preview={preview}
@@ -454,7 +623,7 @@ export default function DocumentBlock({
                     className="text-[11px] font-semibold text-slate-500 break-words [overflow-wrap:anywhere]"
                   />
                   <InlineEdit
-                    value={f.value || "—"}
+                    value={configuredField.value || "—"}
                     part={`${f.id}_value`}
                     selection={selection}
                     preview={preview}
@@ -472,7 +641,8 @@ export default function DocumentBlock({
                     className="text-slate-800 font-medium break-words [overflow-wrap:anywhere] [word-break:break-word]"
                   />
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         );
@@ -504,14 +674,24 @@ export default function DocumentBlock({
               >
               <thead className="bg-slate-100 text-slate-700 border-b border-slate-200 font-semibold">
                 <tr>
-                  {cols.map((col) => (
-                    <th
+                  {cols.map((col) => {
+                    const labelKeys = {
+                      description: "description_label",
+                      quantity: "quantity_label",
+                      unitPrice: "rate_label",
+                      unit_price: "rate_label",
+                      rate: "rate_label",
+                      amount: "amount_label",
+                      total: "amount_label",
+                    };
+                    const configuredLabel = item.customFields?.[labelKeys[col.key]]?.label;
+                    return (<th
                       key={col.id}
                       style={{ width: col.width ? `${col.width}%` : undefined }}
                       className={`p-2.5 text-${col.align || "left"} break-words overflow-visible align-top`}
                     >
                       <InlineEdit
-                        value={col.label}
+                        value={configuredLabel || col.label}
                         part={`col_${col.id}`}
                         selection={selection}
                         preview={preview}
@@ -528,20 +708,35 @@ export default function DocumentBlock({
                         }}
                         className="font-bold break-words [overflow-wrap:anywhere]"
                       />
-                    </th>
-                  ))}
+                    </th>);
+                  })}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {(item.rows || []).map((row) => (
+                {(item.rows || []).map((row, rowIndex) => (
                   <tr key={row.id} className="hover:bg-slate-50/50">
-                    {cols.map((col) => (
+                    {cols.map((col) => {
+                      const normalizedKey = ["unitPrice", "unit_price", "rate"].includes(col.key)
+                        ? "unit_price"
+                        : col.key === "total" || col.key === "amount"
+                          ? "amount"
+                          : col.key;
+                      const configured = item.customFields?.[`charge_${rowIndex}_${normalizedKey}`];
+                      const customRate = item.customFields?.[`charge_${rowIndex}_unit_price`];
+                      const quantity = Number(row.quantity) || 0;
+                      const rate = Number(customRate?.customValue ?? customRate?.value);
+                      const value = normalizedKey === "amount" && customRate?.mode === "custom" && Number.isFinite(rate)
+                        ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(rate * quantity)
+                        : configured?.mode === "custom"
+                          ? configured.customValue ?? configured.value ?? row[col.key] ?? ""
+                          : row[col.key] || "";
+                      return (
                       <td
                         key={col.id}
                         className={`p-2.5 text-${col.align || "left"} text-slate-700 break-words overflow-hidden [overflow-wrap:anywhere] [word-break:break-word]`}
                       >
                         <InlineEdit
-                          value={row[col.key] || ""}
+                          value={value}
                           part={`cell_${row.id}_${col.key}`}
                           selection={selection}
                           preview={preview}
@@ -560,7 +755,7 @@ export default function DocumentBlock({
                           }}
                         />
                       </td>
-                    ))}
+                    );})}
                   </tr>
                 ))}
               </tbody>
@@ -578,7 +773,17 @@ export default function DocumentBlock({
               style={{ fontSize: style.fontSize ? `${style.fontSize}px` : undefined }}
               className="totals w-72 max-w-full bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1.5 box-border"
             >
-              {visibleFields.map((f) => (
+              {visibleFields.map((f) => {
+                const configuredField = item.customFields?.[LEGACY_TOTAL_FIELD_KEYS[f.id]];
+                const configuredValue = configuredField?.mode === "custom"
+                  ? configuredField.customValue ?? configuredField.value
+                  : configuredField?.mode === "dynamic"
+                    ? configuredField.dynamicValue || configuredField.value
+                    : f.value || "$0.00";
+                const displayValue = configuredField?.mode === "custom"
+                  ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(configuredValue))
+                  : configuredValue;
+                return (
                 <div key={f.id} className="flex justify-between items-center py-0.5 gap-2 min-w-0">
                   <InlineEdit
                     value={f.label}
@@ -599,7 +804,7 @@ export default function DocumentBlock({
                     className="text-slate-600 font-medium min-w-0 break-words [overflow-wrap:anywhere]"
                   />
                   <InlineEdit
-                    value={f.value || "$0.00"}
+                    value={displayValue}
                     part={`total_val_${f.id}`}
                     selection={selection}
                     preview={preview}
@@ -617,7 +822,8 @@ export default function DocumentBlock({
                     className="font-bold text-slate-800 text-right min-w-0 break-words shrink-0 [overflow-wrap:anywhere]"
                   />
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         );
@@ -767,41 +973,68 @@ export default function DocumentBlock({
         const hasCustomSize = Boolean(style.fontSize);
         const hasCustomWeight = style.fontWeight !== undefined || style.bold !== undefined;
         const fontW = style.bold ? 700 : style.fontWeight;
+        const textContent = item.content || "Click to type custom text...";
+        const containsRichText = /<\/?[a-z][\s\S]*>/i.test(textContent);
 
         return (
           <div className="text-block-widget my-1 w-full max-w-full min-w-0 overflow-hidden">
-            <InlineEdit
-              value={item.content || "Click to type custom text..."}
-              part="content"
-              selection={selection}
-              preview={preview}
-              resolveVariables={resolveVariables}
-              onSelect={() => {
-                onSelect();
-                onSelectPart("content");
-              }}
-              onCommit={(val) => onUpdate({ ...item, content: val })}
-              className={`leading-relaxed break-words [overflow-wrap:anywhere] [word-break:break-word] w-full block ${
+            {containsRichText ? (
+              <div
+                className={`leading-relaxed break-words [overflow-wrap:anywhere] [word-break:break-word] w-full ${
+                  hasCustomSize ? "" : "text-xs"
+                } ${hasCustomWeight ? "" : "font-normal"} ${style.color ? "" : "text-slate-700"}`}
+                style={{
+                  fontSize: style.fontSize ? `${style.fontSize}px` : undefined,
+                  fontWeight: fontW,
+                  fontFamily: style.fontFamily || undefined,
+                  color: style.color || undefined,
+                  lineHeight: style.lineHeight || undefined,
+                  textAlign: style.align || style.textAlign || undefined,
+                }}
+                onClick={() => {
+                  if (!preview) {
+                    onSelect();
+                    onSelectPart("content");
+                  }
+                }}
+                dangerouslySetInnerHTML={{
+                  __html: sanitizeHtml(resolvePreviewText(textContent, resolveVariables)).cleanHtml,
+                }}
+              />
+            ) : (
+              <InlineEdit
+                value={textContent}
+                part="content"
+                selection={selection}
+                preview={preview}
+                resolveVariables={resolveVariables}
+                onSelect={() => {
+                  onSelect();
+                  onSelectPart("content");
+                }}
+                onCommit={(val) => onUpdate({ ...item, content: val })}
+                className={`leading-relaxed break-words [overflow-wrap:anywhere] [word-break:break-word] w-full block ${
                 hasCustomSize ? "" : "text-xs"
               } ${hasCustomWeight ? "" : "font-normal"} ${style.color ? "" : "text-slate-700"}`}
-              style={{
-                fontSize: style.fontSize ? `${style.fontSize}px` : undefined,
-                fontWeight: fontW,
-                fontFamily: style.fontFamily || undefined,
-                color: style.color || undefined,
-                lineHeight: style.lineHeight || undefined,
-                textAlign: style.align || style.textAlign || undefined,
-                textTransform: style.textTransform || undefined,
-                letterSpacing: style.letterSpacing ? `${style.letterSpacing}px` : undefined,
-                textDecoration: [
-                  style.underline ? "underline" : "",
-                  style.strikethrough ? "line-through" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ") || undefined,
-                fontStyle: style.italic ? "italic" : undefined,
-              }}
-            />
+                style={{
+                  fontSize: style.fontSize ? `${style.fontSize}px` : undefined,
+                  fontWeight: fontW,
+                  fontFamily: style.fontFamily || undefined,
+                  color: style.color || undefined,
+                  lineHeight: style.lineHeight || undefined,
+                  textAlign: style.align || style.textAlign || undefined,
+                  textTransform: style.textTransform || undefined,
+                  letterSpacing: style.letterSpacing ? `${style.letterSpacing}px` : undefined,
+                  textDecoration: [
+                    style.underline ? "underline" : "",
+                    style.strikethrough ? "line-through" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ") || undefined,
+                  fontStyle: style.italic ? "italic" : undefined,
+                }}
+              />
+            )}
           </div>
         );
       }
@@ -860,12 +1093,23 @@ export default function DocumentBlock({
         return (
           <div className={`doc-image-widget w-full flex ${justifyClass} my-2`}>
             {imgSrc ? (
-              <img
-                src={imgSrc}
-                alt={item.label || "Document Image"}
-                style={{ width: `${imgWidth}%`, maxWidth: "100%", height: "auto" }}
-                className="rounded-lg object-contain border border-slate-200"
-              />
+              <div className="max-w-full">
+                <img
+                  src={imgSrc}
+                  alt={item.customFields?.image_alt?.mode === "custom"
+                    ? item.customFields.image_alt.customValue ?? item.customFields.image_alt.value
+                    : resolvePreviewText(item.customFields?.image_alt?.dynamicValue || item.customFields?.image_alt?.value || item.label || "Document Image", sampleData)}
+                  style={{ width: `${imgWidth}%`, maxWidth: "100%", height: "auto" }}
+                  className="rounded-lg object-contain border border-slate-200"
+                />
+                {item.customFields?.image_caption && (
+                  <p className="mt-1 text-xs text-slate-500">
+                    {item.customFields.image_caption.mode === "custom"
+                      ? item.customFields.image_caption.customValue ?? item.customFields.image_caption.value
+                      : resolvePreviewText(item.customFields.image_caption.dynamicValue || item.customFields.image_caption.value || "", sampleData)}
+                  </p>
+                )}
+              </div>
             ) : (
               <div
                 style={{ width: `${imgWidth}%` }}
@@ -915,8 +1159,26 @@ export default function DocumentBlock({
 
       case "divider": {
         return (
-          <div className="doc-divider-widget py-2 w-full">
-            <hr className="border-t border-slate-200 my-1" />
+          <div className="doc-divider-widget w-full py-2">
+            <hr
+              className="my-1"
+              style={{
+                borderTopStyle: style.borderStyle || "solid",
+                borderTopColor: style.borderColor || item.color || "#CBD5E1",
+              }}
+            />
+          </div>
+        );
+      }
+
+      case "spacer": {
+        return <div aria-label="Spacer" style={{ height: `${Math.max(4, Math.min(400, Number(item.height) || 24))}px` }} />;
+      }
+
+      case "page_break": {
+        return (
+          <div className="border-y border-dashed border-slate-300 py-2 text-center text-[10px] uppercase text-slate-400">
+            PDF page break
           </div>
         );
       }
@@ -1094,16 +1356,14 @@ export default function DocumentBlock({
           )}
           <button
             type="button"
-            onClick={(e) => {
-              e.stopPropagation();
+            onClick={(event) => {
+              event.stopPropagation();
               onSelect();
-              if (item.type === "html" || item.htmlContent) {
-                onOpenHtmlEditor();
-              }
+              onSelectPart("edit-content");
             }}
             className="p-1 text-slate-500 hover:text-blue-600 rounded hover:bg-slate-100"
-            title="Edit content"
-            aria-label="Edit content"
+            title="Edit widget settings"
+            aria-label="Edit widget"
           >
             <Pencil size={13} />
           </button>
@@ -1152,8 +1412,13 @@ export default function DocumentBlock({
         </div>
       )}
 
-      {/* Block Body */}
       {renderContent()}
+      {item.type !== "builder_block" && (
+        <ConfiguredCustomFields fields={item.customFields} sampleData={sampleData} scope={{}} />
+      )}
+      {item.type === "builder_block" && (
+        <ConfiguredCustomFields fields={item.props?.custom_fields} sampleData={sampleData} scope={{}} />
+      )}
     </div>
   );
 }

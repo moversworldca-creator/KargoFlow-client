@@ -4,6 +4,26 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import PreviewModal from "./PreviewModal";
 
 describe("PreviewModal widget editing", () => {
+  it("applies a screen-only gutter after server styles so they cannot override it", () => {
+    const html = "<!doctype html><html><head><title>Preview</title><style>body { padding: 0 !important; }</style></head><body><main>Document</main></body></html>";
+    render(
+      <PreviewModal
+        isOpen
+        doc={{ name: "Preview test", settings: {}, items: [] }}
+        remotePreview={{ data: { html } }}
+        onClose={() => {}}
+      />
+    );
+
+    const iframe = screen.getByTitle("Server rendered sample preview");
+    const srcdoc = iframe.getAttribute("srcdoc");
+    expect(srcdoc).toContain(
+      "@media screen { html, body { width: 100%; max-width: 100%; overflow-x: hidden; } body { box-sizing: border-box; padding: 24px !important; } .kf-document { width: 100%; max-width: 860px; margin: 0 auto; } }"
+    );
+    expect(srcdoc.indexOf("@media screen")).toBeGreaterThan(srcdoc.indexOf("body { padding: 0 !important; }"));
+    expect(iframe.getAttribute("srcdoc")).toContain("<main>Document</main>");
+  });
+
   it("opens widget settings when a backend document widget is selected", () => {
     const onUpdateItem = vi.fn();
     const item = {

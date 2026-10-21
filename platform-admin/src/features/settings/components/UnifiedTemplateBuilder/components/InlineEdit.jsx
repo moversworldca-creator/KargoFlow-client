@@ -56,6 +56,7 @@ export default function InlineEdit({
   resolveVariables = false,
   placeholder = "",
   allowEmpty = false,
+  editRequest = 0,
   style = {},
   onSelect = () => {},
   onCommit = () => {},
@@ -64,10 +65,19 @@ export default function InlineEdit({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const cancelled = useRef(false);
+  const handledEditRequest = useRef(0);
 
   useEffect(() => {
     setDraft(value);
   }, [value]);
+
+  useEffect(() => {
+    if (preview || !editRequest || editRequest === handledEditRequest.current) return;
+    handledEditRequest.current = editRequest;
+    cancelled.current = false;
+    setDraft(value);
+    setEditing(true);
+  }, [editRequest, preview, value]);
 
   const finish = () => {
     setEditing(false);

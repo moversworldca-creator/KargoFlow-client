@@ -37,4 +37,56 @@ describe('Global template document adapter', () => {
       expect(wire.sections[0].blocks[0].type).toBe(blockType);
     }
   });
+
+  it('round-trips edited widget configuration without replacing computed or dynamic values', () => {
+    const native = {
+      settings: {},
+      header: [],
+      footer: [],
+      sections: [{
+        key: 'main',
+        title: 'Main',
+        blocks: [
+          {
+            key: 'summary',
+            type: 'estimate_summary',
+            props: {
+              show_discount: true,
+              show_tax: false,
+              show_deposit: true,
+              show_binding_note: false,
+            },
+          },
+          {
+            key: 'signature',
+            type: 'signature',
+            props: {
+              field_key: 'customer_signature',
+              signer_role: 'customer',
+              label: 'Customer Acceptance',
+              required: true,
+            },
+          },
+        ],
+      }],
+      rules: [],
+      attachments: [],
+    };
+
+    const opened = fromGlobalDocument(native, { mode: 'estimate', name: 'Estimate' });
+    opened.items[0].props = { ...opened.items[0].props, show_tax: true };
+    const saved = toGlobalDocument(opened, 'estimate');
+    const reopened = fromGlobalDocument(saved, { mode: 'estimate', name: 'Estimate' });
+
+    expect(saved.sections[0].blocks[0]).toEqual({
+      ...native.sections[0].blocks[0],
+      props: { ...native.sections[0].blocks[0].props, show_tax: true },
+      children: [],
+    });
+    expect(reopened.items[1]).toMatchObject({
+      id: 'signature',
+      blockType: 'signature',
+      props: native.sections[0].blocks[1].props,
+    });
+  });
 });

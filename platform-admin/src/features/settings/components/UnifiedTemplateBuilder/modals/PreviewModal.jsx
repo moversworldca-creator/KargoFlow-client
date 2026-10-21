@@ -52,6 +52,17 @@ const resolveSmsVariables = (text, resolve) => {
   });
 };
 
+function addScreenPreviewGutter(html) {
+  if (!html) return "";
+  const style = "<style>@media screen { html, body { width: 100%; max-width: 100%; overflow-x: hidden; } body { box-sizing: border-box; padding: 24px !important; } .kf-document { width: 100%; max-width: 860px; margin: 0 auto; } }</style>";
+  const headMatch = /<head\b[^>]*>/i.exec(html);
+  if (!headMatch) return `${style}${html}`;
+  const headEnd = /<\/head\s*>/i.exec(html.slice(headMatch.index + headMatch[0].length));
+  if (!headEnd) return `${html.slice(0, headMatch.index + headMatch[0].length)}${style}${html.slice(headMatch.index + headMatch[0].length)}`;
+  const insertAt = headMatch.index + headMatch[0].length + headEnd.index;
+  return `${html.slice(0, insertAt)}${style}${html.slice(insertAt)}`;
+}
+
 function ScaledPreviewPage({ width, minHeight, zoom, children }) {
   const contentRef = useRef(null);
   const [contentHeight, setContentHeight] = useState(minHeight);
@@ -205,7 +216,7 @@ export default function PreviewModal({
       {remotePreview.loading ? <p role="status" className="p-6">Rendering preview…</p>
         : remotePreview.error ? <p role="alert" className="p-6 text-red-700">{remotePreview.error}</p>
         : mode === 'sms' ? <pre className="p-6 whitespace-pre-wrap">{remotePreview.data?.body_text}</pre>
-        : <iframe title="Server rendered sample preview" sandbox="" srcDoc={remotePreview.data?.html || remotePreview.data?.body_html || ''} className="w-full flex-1 border-0" />}
+        : <iframe title="Server rendered sample preview" sandbox="" srcDoc={addScreenPreviewGutter(remotePreview.data?.html || remotePreview.data?.body_html || '')} className="w-full flex-1 border-0" />}
     </div>
   </div>;
 

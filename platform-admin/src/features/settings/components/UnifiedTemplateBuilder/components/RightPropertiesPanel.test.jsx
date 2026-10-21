@@ -1,16 +1,19 @@
 import React, { useState } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import RightPropertiesPanel from "./RightPropertiesPanel";
 
 afterEach(cleanup);
 
-function StatefulPropertiesPanel({ initialItem, mode = "document" }) {
+function StatefulPropertiesPanel({ initialItem, mode = "document", onUpdate = () => {} }) {
   const [selectedItem, setSelectedItem] = useState(initialItem);
   return (
     <RightPropertiesPanel
       selectedItem={selectedItem}
-      onUpdateItem={setSelectedItem}
+      onUpdateItem={(updated) => {
+        setSelectedItem(updated);
+        onUpdate(updated);
+      }}
       onDeleteItem={() => {}}
       onDuplicateItem={() => {}}
       documentSettings={{}}
@@ -87,7 +90,7 @@ describe("RightPropertiesPanel widget fields", () => {
     expect(editor).toHaveValue("<p>Updated content again</p>");
   });
 
-  it("hides conditional rule key, condition and children JSON controls", () => {
+  it("edits supported conditional rules without exposing internal keys or children JSON", () => {
     const item = {
       id: "conditional-1",
       type: "builder_block",
@@ -108,11 +111,73 @@ describe("RightPropertiesPanel widget fields", () => {
 
     render(<StatefulPropertiesPanel initialItem={item} />);
 
-    expect(screen.queryByText("conditional settings")).not.toBeInTheDocument();
+    expect(screen.getByText("conditional settings")).toBeInTheDocument();
     expect(screen.queryByLabelText("rule key *")).not.toBeInTheDocument();
-    expect(screen.queryByText("Show condition")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Condition variable")).toHaveValue("company.name");
+    expect(screen.getByLabelText("Condition operator")).toHaveValue("not_empty");
     expect(screen.queryByLabelText("children")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Condition variable")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Condition operator"), { target: { value: "eq" } });
+    fireEvent.change(screen.getByLabelText("Condition value"), { target: { value: "KargoFlow" } });
+    expect(screen.getByLabelText("Condition operator")).toHaveValue("eq");
+    expect(screen.getByLabelText("Condition value")).toHaveValue("KargoFlow");
+  });
+
+  it("edits nested content without replacing its block structure or bindings", () => {
+    const item = {
+      id: "conditional-children",
+      type: "builder_block",
+      blockType: "conditional",
+      props: { rule_key: "rule_conditional-children" },
+      condition: { var: "customer.email", op: "not_empty" },
+      children: [{
+        key: "child-1",
+        type: "text",
+        props: { html: "<p>Original {{customer.first_name}}</p>", format: "rich" },
+      }],
+      propsSchema: { type: "object", properties: { rule_key: { type: "string" } } },
+    };
+    const onUpdate = vi.fn();
+    render(<StatefulPropertiesPanel initialItem={item} onUpdate={onUpdate} />);
+
+    const content = screen.getByLabelText("Nested text content child-1");
+    fireEvent.change(content, { target: { value: "<p>Updated {{customer.first_name}}</p>" } });
+
+    expect(onUpdate).toHaveBeenLastCalledWith({
+      ...item,
+      children: [{
+        ...item.children[0],
+        props: {
+          ...item.children[0].props,
+          html: "<p>Updated {{customer.first_name}}</p>",
+        },
+      }],
+    });
+    expect(screen.getByLabelText("Condition variable")).toHaveValue("customer.email");
+  });
+
+  it("updates spacer and divider configuration through the properties panel", () => {
+    render(
+      <StatefulPropertiesPanel initialItem={{ id: "spacer-1", type: "spacer", height: 24 }} />
+    );
+    fireEvent.change(screen.getByLabelText("Spacer Height"), { target: { value: "72" } });
+    expect(screen.getByLabelText("Spacer Height")).toHaveValue("72");
+
+    cleanup();
+    render(
+      <StatefulPropertiesPanel
+        initialItem={{
+          id: "divider-1",
+          type: "divider",
+          style: { borderStyle: "solid", borderWidth: 1, borderColor: "#e2e8f0" },
+          spacing: 8,
+        }}
+      />
+    );
+    fireEvent.change(screen.getByLabelText("Divider line style"), { target: { value: "dashed" } });
+    fireEvent.change(screen.getByLabelText("Divider line color"), { target: { value: "#336699" } });
+    expect(screen.getByLabelText("Divider line style")).toHaveValue("dashed");
+    expect(screen.getByLabelText("Divider line color")).toHaveValue("#336699");
   });
 
   it.each(["document", "estimate"])("hides the raw children editor for container widgets in %s mode", (mode) => {
@@ -175,4 +240,5 @@ describe("RightPropertiesPanel widget fields", () => {
     fireEvent.click(stopsToggle);
     expect(stopsToggle).toBeChecked();
   });
+
 });

@@ -119,6 +119,160 @@ function SchemaField({ name, schema = {}, value, onChange }) {
   );
 }
 
+function getNestedEditableContent(blocks, parentPath = []) {
+  return (blocks || []).flatMap((block, index) => {
+    const path = [...parentPath, index];
+    const property = ["html", "text", "content"].find((key) => typeof block.props?.[key] === "string");
+    const current = property
+      ? [{
+        path,
+        key: block.key || path.join("."),
+        type: block.type || "block",
+        property,
+        value: block.props[property],
+      }]
+      : [];
+    return [...current, ...getNestedEditableContent(block.children, path)];
+  });
+}
+
+function updateNestedEditableContent(blocks, path, property, value, depth = 0) {
+  return (blocks || []).map((block, index) => {
+    if (index !== path[depth]) return block;
+    if (depth === path.length - 1) {
+      return { ...block, props: { ...(block.props || {}), [property]: value } };
+    }
+    return {
+      ...block,
+      children: updateNestedEditableContent(block.children, path, property, value, depth + 1),
+    };
+  });
+}
+
+const WIDGET_EDIT_FIELDS = {
+  header: [
+    { key: "company_name", label: "Company name", value: "{{company.name}}", source: "{{company.name}}", type: "text" },
+    { key: "document_title", label: "Document title", value: "Estimate", type: "text" },
+    { key: "document_number", label: "Document number", value: "{{estimate.number}}", source: "{{estimate.number}}", type: "text" },
+  ],
+  move_details: [
+    { key: "section_title", label: "Section title", value: "Move details", source: "Move details", type: "text", labelOnly: true },
+    { key: "move_date", label: "Move date", value: "June 15, 2026", source: "{{move.date}}", type: "date" },
+    { key: "move_size", label: "Move size", value: "3 bedroom home", source: "{{move.estimated_weight}}", type: "text" },
+    { key: "origin", label: "From", value: "123 Main Street, Vancouver, BC", source: "{{move.origin_address}}", type: "text" },
+    { key: "destination", label: "To", value: "456 Oak Avenue, Burnaby, BC", source: "{{move.destination_address}}", type: "text" },
+  ],
+  shipment: [
+    { key: "section_title", label: "Section title", value: "Move details", source: "Move details", type: "text", labelOnly: true },
+    { key: "move_date", label: "Move date", value: "June 15, 2026", source: "{{move.date}}", type: "date" },
+    { key: "move_size", label: "Move size", value: "3 bedroom home", source: "{{move.estimated_weight}}", type: "text" },
+    { key: "origin", label: "From", value: "123 Main Street, Vancouver, BC", source: "{{move.origin_address}}", type: "text" },
+    { key: "destination", label: "To", value: "456 Oak Avenue, Burnaby, BC", source: "{{move.destination_address}}", type: "text" },
+  ],
+  estimate_summary: [
+    { key: "section_title", label: "Section title", value: "Estimate summary", source: "Estimate summary", type: "text", labelOnly: true },
+    { key: "subtotal", label: "Subtotal", value: 1475, source: "{{estimate.subtotal}}", type: "currency", pricing: true },
+    { key: "discount", label: "Discount", value: 50, source: "{{estimate.discount}}", type: "currency", pricing: true },
+    { key: "tax", label: "Tax (calculated)", value: 77.63, source: "{{estimate.tax_amount}}", type: "number", readOnly: true },
+    { key: "total", label: "Estimate total (calculated)", value: 1502.63, source: "{{estimate.grand_total}}", type: "number", readOnly: true },
+    { key: "deposit", label: "Deposit due", value: 300, source: "{{estimate.deposit_due}}", type: "currency", pricing: true },
+  ],
+  totals: [
+    { key: "section_title", label: "Section title", value: "Invoice totals", source: "Invoice totals", type: "text", labelOnly: true },
+    { key: "subtotal", label: "Subtotal", value: 1475, source: "{{invoice.subtotal}}", type: "currency", pricing: true },
+    { key: "discount", label: "Discount", value: 50, source: "{{invoice.discount}}", type: "currency", pricing: true },
+    { key: "tax", label: "Tax (calculated)", value: 77.63, source: "{{invoice.tax_amount}}", type: "number", readOnly: true },
+    { key: "total", label: "Invoice total (calculated)", value: 1502.63, source: "{{invoice.total}}", type: "number", readOnly: true },
+    { key: "balance", label: "Balance due (calculated)", value: 1202.63, source: "{{invoice.balance_due}}", type: "number", readOnly: true },
+  ],
+  charges: [
+    { key: "section_title", label: "Section title", value: "Estimate charges", source: "Estimate charges", type: "text", labelOnly: true },
+    { key: "description_label", label: "Description heading", value: "Description", source: "Description", type: "text", labelOnly: true },
+    { key: "quantity_label", label: "Quantity heading", value: "Qty", source: "Qty", type: "text", labelOnly: true },
+    { key: "rate_label", label: "Rate heading", value: "Rate", source: "Rate", type: "text", labelOnly: true },
+    { key: "amount_label", label: "Amount heading", value: "Amount", source: "Amount", type: "text", labelOnly: true },
+    { key: "charge_0_description", label: "Moving labor", value: "Moving labor", source: "Moving labor", type: "text", pricing: true },
+    { key: "charge_0_unit_price", label: "Moving labor rate", value: 185, source: "$185.00", type: "currency", pricing: true },
+    { key: "charge_1_description", label: "Moving truck", value: "Moving truck", source: "Moving truck", type: "text", pricing: true },
+    { key: "charge_1_unit_price", label: "Moving truck rate", value: 350, source: "$350.00", type: "currency", pricing: true },
+    { key: "charge_2_description", label: "Packing materials", value: "Packing materials", source: "Packing materials", type: "text", pricing: true },
+    { key: "charge_2_unit_price", label: "Packing materials rate", value: 200, source: "$200.00", type: "currency", pricing: true },
+  ],
+  line_items: [
+    { key: "section_title", label: "Section title", value: "Invoice line items", source: "Invoice line items", type: "text", labelOnly: true },
+    { key: "description_label", label: "Description heading", value: "Description", source: "Description", type: "text", labelOnly: true },
+    { key: "quantity_label", label: "Quantity heading", value: "Qty", source: "Qty", type: "text", labelOnly: true },
+    { key: "rate_label", label: "Rate heading", value: "Rate", source: "Rate", type: "text", labelOnly: true },
+    { key: "amount_label", label: "Amount heading", value: "Amount", source: "Amount", type: "text", labelOnly: true },
+    { key: "charge_0_description", label: "Moving labor", value: "Moving labor", source: "Moving labor", type: "text", pricing: true },
+    { key: "charge_0_unit_price", label: "Moving labor rate", value: 185, source: "$185.00", type: "currency", pricing: true },
+    { key: "charge_1_description", label: "Moving truck", value: "Moving truck", source: "Moving truck", type: "text", pricing: true },
+    { key: "charge_1_unit_price", label: "Moving truck rate", value: 350, source: "$350.00", type: "currency", pricing: true },
+    { key: "charge_2_description", label: "Packing materials", value: "Packing materials", source: "Packing materials", type: "text", pricing: true },
+    { key: "charge_2_unit_price", label: "Packing materials rate", value: 200, source: "$200.00", type: "currency", pricing: true },
+  ],
+  crew_trucks: [
+    { key: "crew_title", label: "Crew column heading", value: "Crew / vehicle", source: "Crew / vehicle", type: "text", labelOnly: true },
+    { key: "truck_title", label: "Assignment column heading", value: "Assignment", source: "Assignment", type: "text", labelOnly: true },
+  ],
+  inventory: [
+    { key: "inventory_room", label: "Room heading", value: "Room", source: "Room", type: "text", labelOnly: true },
+    { key: "inventory_item", label: "Item heading", value: "Item", source: "Item", type: "text", labelOnly: true },
+    { key: "inventory_volume", label: "Volume heading", value: "Volume (cu ft)", source: "Volume (cu ft)", type: "text", labelOnly: true },
+    { key: "inventory_weight", label: "Weight heading", value: "Weight (lbs)", source: "Weight (lbs)", type: "text", labelOnly: true },
+  ],
+  heading: [{ key: "content", label: "Heading", property: "text", value: "Heading", type: "text" }],
+  text: [{ key: "content", label: "Text content", property: "html", value: "", type: "rich" }],
+  terms: [
+    { key: "title", label: "Title", property: "title", value: "", type: "text" },
+    { key: "content", label: "Terms text", property: "html", value: "", type: "rich" },
+  ],
+  clause: [{ key: "block_id", label: "Saved clause ID", property: "block_id", value: "", type: "text" }],
+  variable: [{ key: "merge_field", label: "Merge field value", value: "{{customer.full_name}}", source: "{{customer.full_name}}", type: "text" }],
+  image: [
+    { key: "asset_id", label: "Image asset ID", property: "asset_id", value: "", type: "text", crmBindable: false },
+    { key: "image_alt", label: "Alternative text", value: "", type: "text" },
+    { key: "image_caption", label: "Caption", value: "", type: "text" },
+  ],
+  signature: [{ key: "label", label: "Signature label", property: "label", value: "Customer signature", type: "text" }],
+  initial: [{ key: "label", label: "Initials label", property: "label", value: "Customer initials", type: "text" }],
+  form_field: [
+    { key: "label", label: "Field label", property: "label", value: "Enter a value", type: "text" },
+    { key: "placeholder", label: "Placeholder", property: "placeholder", value: "", type: "text" },
+  ],
+  button: [{ key: "label", label: "Button text", property: "label", value: "Continue", type: "text" }],
+  spacer: [{ key: "height", label: "Height (px)", property: "height", value: 24, type: "number" }],
+  divider: [
+    { key: "style", label: "Line style", property: "style", value: "solid", type: "text" },
+    { key: "color", label: "Line color", property: "color", value: "#CBD5E1", type: "text" },
+  ],
+  columns: [
+    { key: "count", label: "Column count", property: "count", value: 2, type: "number" },
+    { key: "gap", label: "Column gap (px)", property: "gap", value: 16, type: "number" },
+  ],
+  repeater: [
+    { key: "source", label: "Data source", property: "source", value: "estimate.charges", type: "text" },
+    { key: "empty_text", label: "Empty message", property: "empty_text", value: "", type: "text" },
+  ],
+  payment: [
+    { key: "label", label: "Button label", property: "label", value: "Pay now", type: "text" },
+    { key: "amount_source", label: "Payment amount source", property: "amount_source", value: "deposit", type: "text" },
+  ],
+  options: [{ key: "selection", label: "Selection mode", property: "selection", value: "single", type: "text" }],
+  signature: [
+    { key: "label", label: "Signature label", property: "label", value: "Customer Signature", type: "text" },
+    { key: "signer_role", label: "Signer role", property: "signer_role", value: "customer", type: "text" },
+  ],
+  initial: [
+    { key: "label", label: "Initials label", property: "label", value: "Initials", type: "text" },
+    { key: "signer_role", label: "Signer role", property: "signer_role", value: "customer", type: "text" },
+  ],
+};
+
+const PRICING_BLOCKS = new Set(["charges", "line_items", "estimate_summary", "totals"]);
+const CUSTOM_VALUE_INPUT_CLASS = "w-full min-w-0 rounded border border-slate-200 bg-white px-2 py-1.5 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-100";
+const NUMERIC_CUSTOM_VALUE_INPUT_CLASS = `${CUSTOM_VALUE_INPUT_CLASS} [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`;
+
 export const FONT_FAMILIES = [
   {
     group: "Modern Sans-Serif",
@@ -187,12 +341,29 @@ export default function RightPropertiesPanel({
   const [savedClauses, setSavedClauses] = useState([]);
   const [clauseLoadError, setClauseLoadError] = useState("");
   const [backendBlockMeta, setBackendBlockMeta] = useState({ kind: null, blocks: [], error: "" });
+  const [customValueDrafts, setCustomValueDrafts] = useState({});
+  const [crmPlaceholderDrafts, setCrmPlaceholderDrafts] = useState({});
+  const [pricingFieldDrafts, setPricingFieldDrafts] = useState([]);
+  const [removedPricingFieldKeys, setRemovedPricingFieldKeys] = useState([]);
   const widgetLabelRef = useRef(null);
+  const widgetSettingsRef = useRef(null);
+  const tableSettingsRef = useRef(null);
   const activeBuilderKind = ["estimate", "estimate_portal"].includes(mode) ? "estimate_portal" : mode === "invoice" ? "invoice" : "document";
 
   useEffect(() => {
     if (selectedItem?.type === "builder_block") widgetLabelRef.current?.focus();
   }, [selectedItem?.id, selectedItem?.type]);
+
+  useEffect(() => {
+    if (selection?.itemId !== selectedItem?.id || selection?.part !== "edit-content") return;
+    if (selectedItem.type === "builder_block") {
+      widgetSettingsRef.current?.focus();
+    } else if (selectedItem.type === "table") {
+      tableSettingsRef.current?.focus();
+    } else {
+      widgetLabelRef.current?.focus();
+    }
+  }, [selection?.itemId, selection?.part, selectedItem?.id, selectedItem?.type]);
 
   useEffect(() => {
     if (selectedItem?.type !== "builder_block" || Object.keys(selectedItem.propsSchema?.properties || {}).length > 0) return undefined;
@@ -222,6 +393,208 @@ export default function RightPropertiesPanel({
     : backendBlockMeta.kind === activeBuilderKind
       ? backendBlockMeta.blocks.find((block) => block.type === selectedItem?.blockType)?.props_schema
       : null;
+  const widgetType = selectedItem?.type === "builder_block" ? selectedItem.blockType : selectedItem?.type;
+  const widgetCustomFields = selectedItem?.type === "builder_block"
+    ? selectedItem.props?.custom_fields || {}
+    : selectedItem?.customFields || {};
+  const schemaDefaults = Object.fromEntries(
+    Object.entries(selectedBlockSchema?.properties || {})
+      .filter(([, schema]) => ["string", "number", "integer"].includes(schema?.type))
+      .map(([key, schema]) => [key, schema.default ?? ""])
+  );
+  const genericWidgetProps = { ...schemaDefaults, ...(selectedItem?.props || {}) };
+  const widgetEditFields = WIDGET_EDIT_FIELDS[widgetType] || Object.entries(genericWidgetProps)
+    .filter(([key, value]) => !["custom_fields", "children", "columns", "rows", "fields"].includes(key)
+      && !/(^|_)(id|width|height|padding|margin|color|background|font|align|border|radius|opacity|style)(_|$)/i.test(key)
+      && ["string", "number"].includes(typeof value))
+    .map(([key, value]) => ({
+      key,
+      label: key.replace(/_/g, " "),
+      value,
+      property: key,
+      type: typeof value === "number" ? "number" : "text",
+    }));
+  const effectiveWidgetEditFields = selectedItem?.type === "builder_block"
+    ? widgetEditFields
+    : widgetEditFields.map((field) => ({
+      ...field,
+      property: field.property === "html" || field.property === "text"
+        || (widgetType === "button" && field.key === "label")
+        || (widgetType === "image" && field.key === "asset_id")
+        ? "content"
+        : field.property,
+    }));
+  const supportsCustomPricing = PRICING_BLOCKS.has(widgetType);
+  const crmVariableGroups = getVariablesForMode(mode);
+
+  useEffect(() => {
+    setCustomValueDrafts({});
+    setCrmPlaceholderDrafts({});
+    setRemovedPricingFieldKeys([]);
+    setPricingFieldDrafts(
+      Object.entries(widgetCustomFields)
+        .filter(([key]) => key.startsWith("custom_"))
+        .map(([key, field]) => ({
+          key,
+          label: field?.label || "",
+          currentValue: "",
+          value: "",
+          type: "currency",
+        }))
+    );
+  }, [selectedItem?.id, widgetType]);
+
+  const getCrmPlaceholderValue = (field) => {
+    const configured = widgetCustomFields[field.key];
+    if (configured?.mode === "dynamic") return configured.dynamicValue || configured.value || "";
+    if (field.property) {
+      const current = selectedItem.type === "builder_block"
+        ? selectedItem.props?.[field.property]
+        : selectedItem[field.property];
+      return typeof current === "string" && current.startsWith("{{") ? current : "";
+    }
+    return "";
+  };
+
+  const getWidgetFieldCurrentValue = (field) => {
+    const configured = widgetCustomFields[field.key];
+    if (field.labelOnly) return configured?.label ?? field.value ?? "";
+    if (configured?.mode === "custom") {
+      return configured.customValue ?? configured.value ?? field.value ?? "";
+    }
+    if (configured?.mode === "dynamic") {
+      if (configured.dynamicValue === field.source || configured.value === field.source) return field.value ?? "";
+      return configured.dynamicValue ?? configured.value ?? field.value ?? "";
+    }
+    if (widgetType === "header" && selectedItem?.type !== "builder_block") {
+      const legacyFieldId = {
+        company_name: "companyName",
+        document_title: "estimateTitle",
+        document_number: "estimateNumber",
+      }[field.key];
+      return selectedItem?.fields?.find((entry) => entry.id === legacyFieldId)?.value ?? field.value ?? "";
+    }
+    if (field.property) {
+      if (widgetType === "image" && field.property === "content") {
+        return selectedItem?.image?.src || selectedItem?.content || field.value || "";
+      }
+      return (selectedItem?.type === "builder_block"
+        ? selectedItem.props?.[field.property]
+        : selectedItem?.[field.property]) ?? field.value ?? "";
+    }
+    return field.value ?? "";
+  };
+
+  const addPricingField = () => {
+    let nextNumber = 1;
+    while (
+      Object.prototype.hasOwnProperty.call(widgetCustomFields, `custom_${nextNumber}`)
+      || pricingFieldDrafts.some((field) => field.key === `custom_${nextNumber}`)
+    ) nextNumber += 1;
+    setPricingFieldDrafts((current) => [
+      ...current,
+      { key: `custom_${nextNumber}`, label: "", currentValue: "", value: "", type: "currency" },
+    ]);
+  };
+
+  const applyCustomValues = () => {
+    const props = { ...(selectedItem.props || {}) };
+    const updatedLegacyItem = { ...selectedItem };
+    const customFields = { ...widgetCustomFields };
+    removedPricingFieldKeys.forEach((key) => {
+      delete customFields[key];
+    });
+    effectiveWidgetEditFields.forEach((field) => {
+      const value = String(customValueDrafts[field.key] ?? "").trim();
+      if (supportsCustomPricing) {
+        if (field.labelOnly) {
+          if (value) customFields[field.key] = { ...(customFields[field.key] || {}), label: value };
+          return;
+        }
+        if (!value) return;
+        const customValue = ["number", "currency"].includes(field.type) ? Number(value) : value;
+        customFields[field.key] = {
+          ...(customFields[field.key] || {}),
+          mode: "custom",
+          value: customValue,
+          customValue,
+          dynamicValue: field.source || field.value || "",
+        };
+        return;
+      }
+
+      const placeholder = String(crmPlaceholderDrafts[field.key] ?? getCrmPlaceholderValue(field)).trim();
+      if (!placeholder || field.crmBindable === false) return;
+      if (field.property) {
+        if (selectedItem.type === "builder_block") props[field.property] = placeholder;
+        else updatedLegacyItem[field.property] = placeholder;
+      } else if (field.labelOnly) {
+        customFields[field.key] = {
+          ...(customFields[field.key] || {}),
+          label: placeholder,
+        };
+      } else {
+        customFields[field.key] = {
+          ...(customFields[field.key] || {}),
+          mode: "dynamic",
+          value: placeholder,
+          dynamicValue: placeholder,
+        };
+      }
+    });
+
+    effectiveWidgetEditFields.forEach((field) => {
+      if (supportsCustomPricing) return;
+      const value = String(customValueDrafts[field.key] ?? "").trim();
+      if (!value || field.readOnly) return;
+      if (field.property) {
+        const converted = field.type === "number" ? Number(value) : value;
+        if (selectedItem.type === "builder_block") props[field.property] = converted;
+        else updatedLegacyItem[field.property] = converted;
+      } else {
+        const existing = customFields[field.key] || {};
+        const customValue = ["number", "currency"].includes(field.type) ? Number(value) : value;
+        customFields[field.key] = {
+          ...existing,
+          ...(field.labelOnly
+            ? { label: value }
+            : {
+              mode: "custom",
+              value: customValue,
+              customValue,
+              dynamicValue: existing.dynamicValue || field.source || field.value || "",
+            }),
+        };
+      }
+    });
+    pricingFieldDrafts.forEach((field) => {
+      const label = String(field.label || "").trim();
+      const currentValue = String(field.currentValue || "").trim();
+      const value = String(field.value || "").trim();
+      if (!label || (!currentValue && !value)) return;
+      const activeValue = value || currentValue;
+      const parsedValue = field.type === "currency" ? Number(activeValue) : activeValue;
+      const parsedCurrentValue = currentValue
+        ? (field.type === "currency" ? Number(currentValue) : currentValue)
+        : "";
+      customFields[field.key] = {
+        ...(customFields[field.key] || {}),
+        label,
+        currentValue: parsedCurrentValue,
+        mode: "custom",
+        value: parsedValue,
+        customValue: parsedValue,
+        ...(field.type === "currency" ? { type: "currency" } : {}),
+      };
+    });
+    const updatedItem = selectedItem.type === "builder_block"
+      ? { ...selectedItem, props: { ...props, custom_fields: customFields } }
+      : { ...updatedLegacyItem, customFields };
+    onUpdateItem(updatedItem);
+    setRemovedPricingFieldKeys([]);
+    setCustomValueDrafts({});
+    setPricingFieldDrafts((current) => current.map((field) => ({ ...field, value: "" })));
+  };
 
   const handleSendTestClick = async () => {
     const trimmed = (testToEmail || "").trim();
@@ -759,6 +1132,7 @@ export default function RightPropertiesPanel({
   }
 
   const style = selectedItem.style || {};
+  const nestedEditableContent = getNestedEditableContent(selectedItem.children);
 
   const handleStyleChange = (patch) => {
     onUpdateItem({
@@ -956,16 +1330,17 @@ export default function RightPropertiesPanel({
           />
         </div>
 
-        {selectedItem.type === "builder_block" && selectedItem.blockType !== "conditional" && (
-          <section className="space-y-3 border-t border-slate-100 pt-3">
+        {selectedItem.type === "builder_block" && (
+          <section ref={widgetSettingsRef} tabIndex={-1} className="space-y-3 border-t border-slate-100 pt-3 focus:outline-none">
             <h4 className="font-bold uppercase tracking-wide text-[11px] text-slate-700">
               {selectedItem.blockType?.replace(/_/g, " ")} settings
             </h4>
             <div className="space-y-2.5">
               {Object.entries(selectedBlockSchema?.properties || {}).length > 0
                 ? Object.entries(selectedBlockSchema.properties)
-                  .filter(([name]) => !(selectedItem.blockType === "conditional" && name === "rule_key"))
-                  .map(([name, schema]) => (
+                .filter(([name]) => name !== "custom_fields"
+                  && !(selectedItem.blockType === "conditional" && name === "rule_key"))
+                .map(([name, schema]) => (
                   name === "block_id" && selectedItem.blockType === "clause" && savedClauses.length > 0 ? (
                     <label key={name} className="block space-y-1">
                       <span className="text-[11px] font-medium text-slate-600">Saved clause *</span>
@@ -999,13 +1374,11 @@ export default function RightPropertiesPanel({
                   )
                 ))
                 : (
-                  <SchemaField
-                    key={`props-${selectedItem.id}-${selectedItem.blockType}`}
-                    name="props"
-                    schema={{ type: "object" }}
-                    value={selectedItem.props || {}}
-                    onChange={(props) => onUpdateItem({ ...selectedItem, props })}
-                  />
+                  !backendBlockMeta.error && (
+                    <p className="text-[10px] text-slate-500">
+                      Widget settings are unavailable until its field schema loads.
+                    </p>
+                  )
                 )}
                 {backendBlockMeta.error && !selectedBlockSchema && (
                   <p role="alert" className="text-[10px] text-red-600">{backendBlockMeta.error}</p>
@@ -1025,11 +1398,286 @@ export default function RightPropertiesPanel({
           </section>
         )}
 
+        {selectedItem.type !== "table" && (effectiveWidgetEditFields.length > 0 || supportsCustomPricing) && (
+          <section className="space-y-3 border-t border-slate-100 pt-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h4 className="font-bold uppercase tracking-wide text-[11px] text-slate-700">
+                  {supportsCustomPricing ? "Pricing values" : "CRM field bindings"}
+                </h4>
+              </div>
+            </div>
+            {supportsCustomPricing ? (
+              <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1fr)] gap-1.5 border-b border-slate-200 pb-1 text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+                <span>Field name</span>
+                <span>Current value</span>
+                <span>Custom value</span>
+              </div>
+            ) : (
+              <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1fr)] gap-1.5 border-b border-slate-200 pb-1 text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+                <span>Field name</span>
+                <span>Current value</span>
+                <span>CRM field (placeholder)</span>
+              </div>
+            )}
+            {effectiveWidgetEditFields.map((field) => {
+              const currentValue = getWidgetFieldCurrentValue(field);
+              const formatAsCurrency = field.pricing || field.readOnly || field.key.endsWith("_unit_price");
+              const displayedCurrentValue = formatAsCurrency && Number.isFinite(Number(currentValue))
+                ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(currentValue))
+                : currentValue;
+              if (supportsCustomPricing) {
+                return (
+                  <div key={field.key} className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1fr)] items-start gap-1.5">
+                    <span className="break-words pt-1.5 text-[10px] font-medium text-slate-700">{field.label}</span>
+                    <span className="break-words pt-1.5 text-[10px] text-slate-500" title={String(displayedCurrentValue)}>
+                      {String(displayedCurrentValue || "—")}
+                    </span>
+                    {field.type === "rich" ? (
+                      <textarea
+                        aria-label={`${field.label} custom value`}
+                        rows={2}
+                        className={CUSTOM_VALUE_INPUT_CLASS}
+                        value={customValueDrafts[field.key] ?? ""}
+                        onChange={(event) => setCustomValueDrafts((current) => ({
+                          ...current,
+                          [field.key]: event.target.value,
+                        }))}
+                      />
+                    ) : (
+                      <input
+                        aria-label={`${field.label} custom value`}
+                        type={!field.labelOnly && ["number", "currency"].includes(field.type) ? "number" : "text"}
+                        step={!field.labelOnly && ["number", "currency"].includes(field.type) ? "0.01" : undefined}
+                        className={!field.labelOnly && ["number", "currency"].includes(field.type)
+                          ? NUMERIC_CUSTOM_VALUE_INPUT_CLASS
+                          : CUSTOM_VALUE_INPUT_CLASS}
+                        value={customValueDrafts[field.key] ?? ""}
+                        onChange={(event) => setCustomValueDrafts((current) => ({
+                          ...current,
+                          [field.key]: event.target.value,
+                        }))}
+                      />
+                    )}
+                  </div>
+                );
+              }
+              const currentPlaceholder = crmPlaceholderDrafts[field.key] ?? getCrmPlaceholderValue(field);
+              const currentPlaceholderIsAvailable = crmVariableGroups.some((group) =>
+                group.items.some((variable) => variable.tag === currentPlaceholder)
+              );
+              return (
+                <div key={field.key} className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1fr)] items-start gap-1.5">
+                  <span className="break-words pt-1.5 text-[10px] font-medium text-slate-700">{field.label}</span>
+                  <span className="break-words pt-1.5 text-[10px] text-slate-500" title={String(displayedCurrentValue)}>
+                    {String(displayedCurrentValue || "—")}
+                  </span>
+                  {field.crmBindable === false ? (
+                    <span className="pt-1.5 text-[10px] text-slate-400">Not CRM-bindable</span>
+                  ) : (
+                    <select
+                      aria-label={`${field.label} CRM field placeholder`}
+                      className={CUSTOM_VALUE_INPUT_CLASS}
+                      value={currentPlaceholder}
+                      onChange={(event) => setCrmPlaceholderDrafts((current) => ({
+                        ...current,
+                        [field.key]: event.target.value,
+                      }))}
+                    >
+                      {currentPlaceholder && !currentPlaceholderIsAvailable && (
+                        <option value={currentPlaceholder}>{currentPlaceholder}</option>
+                      )}
+                      {crmVariableGroups.map((group) => (
+                        <optgroup key={group.group} label={group.group}>
+                          {group.items.map((variable) => (
+                            <option key={`${group.group}-${variable.tag}`} value={variable.tag}>
+                              {variable.tag}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              );
+            })}
+            {supportsCustomPricing && pricingFieldDrafts.map((field, index) => (
+              <div key={field.key} className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1fr)] items-start gap-1.5">
+                <div className="flex min-w-0 items-start gap-1">
+                  <input
+                    aria-label={`Pricing field ${index + 1} name`}
+                    className={CUSTOM_VALUE_INPUT_CLASS}
+                    value={field.label}
+                    onChange={(event) => setPricingFieldDrafts((current) => current.map((row, rowIndex) =>
+                      rowIndex === index ? { ...row, label: event.target.value } : row
+                    ))}
+                  />
+                  <button
+                    type="button"
+                    aria-label={`Remove custom pricing field ${field.label || index + 1}`}
+                    title="Remove custom pricing field"
+                    className="shrink-0 rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                    onClick={() => {
+                      setPricingFieldDrafts((current) => current.filter((row) => row.key !== field.key));
+                      if (Object.prototype.hasOwnProperty.call(widgetCustomFields, field.key)) {
+                        setRemovedPricingFieldKeys((current) => current.includes(field.key) ? current : [...current, field.key]);
+                      }
+                    }}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+                <input
+                  aria-label={`${field.label || `Pricing field ${index + 1}`} current value`}
+                  type="number"
+                  step="0.01"
+                  className={NUMERIC_CUSTOM_VALUE_INPUT_CLASS}
+                  value={field.currentValue}
+                  onChange={(event) => setPricingFieldDrafts((current) => current.map((row, rowIndex) =>
+                    rowIndex === index ? { ...row, currentValue: event.target.value } : row
+                  ))}
+                />
+                <input
+                  aria-label={`${field.label || `Pricing field ${index + 1}`} custom value`}
+                  type="number"
+                  step="0.01"
+                  className={NUMERIC_CUSTOM_VALUE_INPUT_CLASS}
+                  value={field.value}
+                  onChange={(event) => setPricingFieldDrafts((current) => current.map((row, rowIndex) =>
+                    rowIndex === index ? { ...row, value: event.target.value } : row
+                  ))}
+                />
+              </div>
+            ))}
+            {supportsCustomPricing && (
+              <button
+                type="button"
+                onClick={addPricingField}
+                className="rounded border border-blue-200 px-2.5 py-1.5 text-[10px] font-semibold text-blue-700 hover:bg-blue-50"
+              >
+                Add Custom Pricing Field
+              </button>
+            )}
+            <div className="flex justify-end border-t border-slate-100 pt-2">
+              <button
+                type="button"
+                onClick={applyCustomValues}
+                className="rounded-md bg-blue-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-blue-700"
+              >
+                Apply Changes
+              </button>
+            </div>
+          </section>
+        )}
+
+        {selectedItem.type === "builder_block" && selectedItem.blockType === "conditional" && (
+          <section className="space-y-3 border-t border-slate-100 pt-3">
+            <h4 className="font-bold uppercase tracking-wide text-[11px] text-slate-700">
+              Condition
+            </h4>
+            {selectedItem.condition?.all || selectedItem.condition?.any || selectedItem.condition?.not ? (
+              <p className="text-[11px] text-amber-700" role="status">
+                This nested condition is preserved as-is. The editor only exposes the supported single-rule controls.
+              </p>
+            ) : (
+              <>
+                <label className="block space-y-1">
+                  <span className="text-[11px] font-medium text-slate-600">Variable</span>
+                  <input
+                    aria-label="Condition variable"
+                    className="w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs"
+                    value={selectedItem.condition?.var || ""}
+                    placeholder="customer.email"
+                    onChange={(event) => onUpdateItem({
+                      ...selectedItem,
+                      condition: { ...(selectedItem.condition || {}), var: event.target.value },
+                    })}
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-[11px] font-medium text-slate-600">Operator</span>
+                  <select
+                    aria-label="Condition operator"
+                    className="w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs"
+                    value={selectedItem.condition?.op || "not_empty"}
+                    onChange={(event) => onUpdateItem({
+                      ...selectedItem,
+                      condition: { ...(selectedItem.condition || {}), op: event.target.value },
+                    })}
+                  >
+                    <option value="empty">Is empty</option>
+                    <option value="not_empty">Is not empty</option>
+                    <option value="eq">Equals</option>
+                    <option value="ne">Does not equal</option>
+                    <option value="contains">Contains</option>
+                    <option value="gt">Greater than</option>
+                    <option value="gte">Greater than or equal to</option>
+                    <option value="lt">Less than</option>
+                    <option value="lte">Less than or equal to</option>
+                  </select>
+                </label>
+                {!["empty", "not_empty"].includes(selectedItem.condition?.op) && (
+                  <label className="block space-y-1">
+                    <span className="text-[11px] font-medium text-slate-600">Value</span>
+                    <input
+                      aria-label="Condition value"
+                      className="w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs"
+                      value={selectedItem.condition?.value ?? ""}
+                      onChange={(event) => onUpdateItem({
+                        ...selectedItem,
+                        condition: { ...(selectedItem.condition || {}), value: event.target.value },
+                      })}
+                    />
+                  </label>
+                )}
+              </>
+            )}
+            {backendBlockMeta.error && !selectedBlockSchema && (
+              <p role="alert" className="text-[10px] text-red-600">{backendBlockMeta.error}</p>
+            )}
+          </section>
+        )}
+
+        {selectedItem.type === "builder_block" && ["conditional", "repeater", "columns"].includes(selectedItem.blockType) && (
+          <section className="space-y-3 border-t border-slate-100 pt-3">
+            <h4 className="font-bold uppercase tracking-wide text-[11px] text-slate-700">
+              Nested Content
+            </h4>
+            {nestedEditableContent.length > 0 ? (
+              nestedEditableContent.map((entry) => (
+                <label key={entry.path.join(".")} className="block space-y-1">
+                  <span className="text-[11px] font-medium capitalize text-slate-600">
+                    {entry.type.replace(/_/g, " ")} content
+                  </span>
+                  <textarea
+                    aria-label={`Nested ${entry.type} content ${entry.key}`}
+                    className="min-h-20 w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs focus:bg-white focus:ring-1 focus:ring-blue-500"
+                    value={entry.value}
+                    onChange={(event) => onUpdateItem({
+                      ...selectedItem,
+                      children: updateNestedEditableContent(
+                        selectedItem.children,
+                        entry.path,
+                        entry.property,
+                        event.target.value
+                      ),
+                    })}
+                  />
+                </label>
+              ))
+            ) : (
+              <p className="text-[11px] text-slate-500">
+                No directly editable text blocks are nested here. Existing child structure is preserved.
+              </p>
+            )}
+          </section>
+        )}
+
         {/* ========================================================================= */}
         {/* 1. TABLE STRUCTURE & LAYOUT INSPECTOR (when selectedItem.type === "table") */}
         {/* ========================================================================= */}
         {selectedItem.type === "table" && (
-          <div className="space-y-4 pt-2 border-t border-slate-100">
+          <div ref={tableSettingsRef} tabIndex={-1} className="space-y-4 pt-2 border-t border-slate-100 focus:outline-none">
             {/* Table Structure */}
             <div>
               <div className="flex items-center justify-between mb-2">
@@ -1893,6 +2541,59 @@ export default function RightPropertiesPanel({
               ))}
             </div>
           </div>
+        )}
+
+        {selectedItem.type === "spacer" && (
+          <section className="space-y-2 border-t border-slate-100 pt-3">
+            <label htmlFor="spacer-height" className="block font-bold text-slate-800">Spacer Height</label>
+            <div className="flex items-center gap-2">
+              <input
+                id="spacer-height"
+                type="range"
+                min="4"
+                max="400"
+                value={Math.max(4, Math.min(400, Number(selectedItem.height) || 24))}
+                onChange={(event) => onUpdateItem({ ...selectedItem, height: Number(event.target.value) })}
+                className="w-full"
+              />
+              <span className="w-12 text-right font-mono text-slate-500">{Number(selectedItem.height) || 24}px</span>
+            </div>
+          </section>
+        )}
+
+        {selectedItem.type === "divider" && (
+          <section className="space-y-2 border-t border-slate-100 pt-3">
+            <h4 className="font-bold text-slate-800">Divider Settings</h4>
+            <label className="block space-y-1">
+              <span className="text-[11px] font-medium text-slate-600">Line Style</span>
+              <select
+                aria-label="Divider line style"
+                value={style.borderStyle || "solid"}
+                onChange={(event) => handleStyleChange({ borderStyle: event.target.value })}
+                className="w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs"
+              >
+                {["solid", "dashed", "dotted", "double"].map((lineStyle) => (
+                  <option key={lineStyle} value={lineStyle}>{lineStyle}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block space-y-1">
+              <span className="text-[11px] font-medium text-slate-600">Line Color</span>
+              <input
+                aria-label="Divider line color"
+                type="color"
+                value={style.borderColor || selectedItem.color || "#CBD5E1"}
+                onChange={(event) => handleStyleChange({ borderColor: event.target.value })}
+                className="h-8 w-full rounded border border-slate-200"
+              />
+            </label>
+          </section>
+        )}
+
+        {selectedItem.type === "page_break" && (
+          <p className="border-t border-slate-100 pt-3 text-[11px] text-slate-500">
+            This page-break marker has no additional settings in the current document format.
+          </p>
         )}
 
         {/* ========================================================================= */}

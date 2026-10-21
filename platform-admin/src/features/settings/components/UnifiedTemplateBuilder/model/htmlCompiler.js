@@ -37,7 +37,7 @@ function escapePreviewHtml(value) {
 }
 
 function previewMergeFields(value) {
-  return String(value || "").replace(/\{\{\s*([a-zA-Z0-9_.]+)(?:\|([^}]+))?\s*\}\}/g, (token, name) =>
+  return String(value ?? "").replace(/\{\{\s*([a-zA-Z0-9_.]+)(?:\|([^}]+))?\s*\}\}/g, (token, name) =>
     BACKEND_PREVIEW_VALUES[name] === undefined ? token : BACKEND_PREVIEW_VALUES[name]
   );
 }
@@ -46,12 +46,51 @@ function safeAlignment(value) {
   return ["left", "center", "right"].includes(value) ? value : "left";
 }
 
+function configuredField(props, key, label, fallback, { allowCustom = true, amount = false } = {}) {
+  const field = props.custom_fields?.[key] || {};
+  const isCustom = field.mode === "custom" && allowCustom;
+  const rawValue = isCustom
+    ? field.customValue ?? field.value ?? fallback
+    : field.mode === "dynamic"
+      ? field.dynamicValue || field.value || fallback
+      : fallback;
+  const resolvedValue = isCustom ? rawValue : previewMergeFields(rawValue);
+  const value = amount && isCustom && resolvedValue !== "" && Number.isFinite(Number(resolvedValue))
+    ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(resolvedValue))
+    : resolvedValue;
+  return {
+    label: previewMergeFields(field.label || label),
+    value,
+  };
+}
+
 function compileBackendWidget(item) {
+  const fields = item.props?.custom_fields || {};
+  const customFields = Object.entries(fields)
+    .filter(([key, field]) => key.startsWith("custom_") && field && typeof field === "object")
+    .map(([, field]) => {
+      const label = previewMergeFields(field.label || "Custom field");
+      const rawValue = field.mode === "custom"
+        ? field.customValue ?? field.value ?? ""
+        : field.dynamicValue || field.value || "";
+      const displayValue = field.mode === "custom" && field.type === "currency" && Number.isFinite(Number(rawValue))
+        ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(rawValue))
+        : rawValue;
+      const value = field.mode === "custom" ? displayValue : previewMergeFields(rawValue);
+      return value === ""
+        ? ""
+        : `<div style="display:flex;justify-content:space-between;gap:12px;margin-top:4px;font-size:12px"><span>${escapePreviewHtml(label)}</span><span>${escapePreviewHtml(value)}</span></div>`;
+    })
+    .join("");
+  return `${compileBackendWidgetContent(item)}${customFields ? `<div style="margin-top:8px">${customFields}</div>` : ""}`;
+}
+
+function compileBackendWidgetContent(item) {
   const type = item.blockType;
   const props = item.props || {};
   const children = Array.isArray(item.children) ? item.children : [];
   const childHtml = children.map(compileBackendWidget).join("");
-  const table = (columns, rows) => `<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>${columns.map((column) => `<th style="padding:6px;border-bottom:2px solid #cbd5e1;text-align:left">${escapePreviewHtml(column)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td style="padding:6px;border-bottom:1px solid #e2e8f0">${escapePreviewHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  const table = (columns, rows, columnWidths) => `<table style="width:100%;border-collapse:collapse;font-size:12px">${columnWidths ? `<colgroup>${columnWidths.map((width) => `<col style="width:${width}">`).join("")}</colgroup>` : ""}<thead><tr>${columns.map((column) => `<th style="padding:6px;border-bottom:2px solid #cbd5e1;text-align:left">${escapePreviewHtml(column)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td style="padding:6px;border-bottom:1px solid #e2e8f0">${escapePreviewHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
   const charges = [
     ["Moving labor", "5", "$185.00", "$925.00"],
     ["Moving truck", "1", "$350.00", "$350.00"],
@@ -62,14 +101,28 @@ function compileBackendWidget(item) {
       const level = Math.min(4, Math.max(1, Number(props.level) || 2));
       return `<h${level} style="text-align:${safeAlignment(props.align)}">${escapePreviewHtml(previewMergeFields(props.text || "Heading"))}</h${level}>`;
     }
+    case "header": {
+      const customFields = props.custom_fields || {};
+      const configuredValue = (key, fallback) => {
+        const field = customFields[key];
+        if (field?.mode === "custom") return field.customValue ?? field.value ?? fallback;
+        return previewMergeFields(field?.dynamicValue || field?.value || fallback);
+      };
+      const company = configuredValue("company_name", props.company_name || "{{company.name}}");
+      const title = configuredValue("document_title", props.title || "Estimate");
+      const number = configuredValue("document_number", props.document_number || "{{estimate.number}}");
+      return `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;border-bottom:2px solid #e2e8f0;padding-bottom:16px"><div style="min-width:0;flex:1;font-size:20px;font-weight:700;color:#1e293b">${escapePreviewHtml(company)}</div><div style="min-width:0;text-align:right"><h1 style="margin:0;font-size:18px;font-weight:700;color:#1d4ed8">${escapePreviewHtml(title)}</h1>${number ? `<p style="margin:4px 0 0;font-size:12px;color:#64748b">${escapePreviewHtml(number)}</p>` : ""}</div></div>`;
+    }
     case "text":
       return sanitizeHtml(previewMergeFields(props.html || "")).cleanHtml;
     case "terms":
       return `${props.title ? `<h3>${escapePreviewHtml(previewMergeFields(props.title))}</h3>` : ""}${sanitizeHtml(previewMergeFields(props.html || "")).cleanHtml}`;
     case "table":
       return table(props.columns || [], props.rows || []);
-    case "variable":
-      return `<p>${props.label ? `${escapePreviewHtml(props.label)}: ` : ""}${escapePreviewHtml(previewMergeFields(`{{${props.token || ""}${props.format ? `|${props.format}` : ""}}}`))}</p>`;
+    case "variable": {
+      const configured = configuredField(props, "merge_field", props.label || "", `{{${props.token || ""}${props.format ? `|${props.format}` : ""}}}`);
+      return `<p>${configured.label ? `${escapePreviewHtml(configured.label)}: ` : ""}${escapePreviewHtml(configured.value)}</p>`;
+    }
     case "divider": {
       const style = ["solid", "dashed", "dotted", "double", "none"].includes(props.style) ? props.style : "solid";
       const color = /^#[\da-f]{3,8}$/i.test(props.color || "") ? props.color : "#cbd5e1";
@@ -89,8 +142,11 @@ function compileBackendWidget(item) {
     case "conditional":
     case "repeater":
       return `<div>${childHtml}</div>`;
-    case "image":
-      return `<div style="padding:12px;border:1px dashed #cbd5e1;text-align:center;color:#64748b">Uploaded image asset ${escapePreviewHtml(props.asset_id || "(not selected)")}${props.alt ? ` — ${escapePreviewHtml(props.alt)}` : ""}</div>`;
+    case "image": {
+      const alt = configuredField(props, "image_alt", "Alternative text", props.alt || "");
+      const caption = configuredField(props, "image_caption", "", "");
+      return `<div style="padding:12px;border:1px dashed #cbd5e1;text-align:center;color:#64748b">Uploaded image asset ${escapePreviewHtml(props.asset_id || "(not selected)")}${alt.value ? ` — ${escapePreviewHtml(alt.value)}` : ""}${caption.value ? `<p>${escapePreviewHtml(caption.value)}</p>` : ""}</div>`;
+    }
     case "signature":
     case "initial":
       return `<div style="max-width:360px;margin:16px 0"><div>${escapePreviewHtml(props.label || type)}${props.required ? " *" : ""}</div><div style="height:32px;border-bottom:1px solid #64748b"></div><small>Signer: ${escapePreviewHtml(props.signer_role || "customer")}</small></div>`;
@@ -98,12 +154,18 @@ function compileBackendWidget(item) {
       return `<label style="display:block;margin:8px 0">${escapePreviewHtml(props.label || "Enter a value")}${props.required ? " *" : ""}<div style="height:30px;border:1px solid #cbd5e1;margin-top:4px"></div></label>`;
     case "button":
       return `<p style="text-align:${safeAlignment(props.align)}"><span style="display:inline-block;padding:10px 18px;border-radius:6px;background:#1e40af;color:white">${escapePreviewHtml(previewMergeFields(props.label || "Continue"))}</span></p>`;
-    case "move_details":
-      return table(["Move details", ""], [
-        ...(props.show_dates !== false ? [["Move date", "June 15, 2026"]] : []),
-        ...(props.show_move_size !== false ? [["Move size", "3 bedroom home"]] : []),
-        ...(props.show_stops !== false ? [["From", "123 Main Street, Vancouver, BC"], ["To", "456 Oak Avenue, Burnaby, BC"]] : []),
-      ]);
+    case "move_details": {
+      const rows = [
+        ...(props.show_dates !== false ? [configuredField(props, "move_date", "Move date", "June 15, 2026")] : []),
+        ...(props.show_move_size !== false ? [configuredField(props, "move_size", "Move size", "3 bedroom home")] : []),
+        ...(props.show_stops !== false ? [
+          configuredField(props, "origin", "From", "123 Main Street, Vancouver, BC"),
+          configuredField(props, "destination", "To", "456 Oak Avenue, Burnaby, BC"),
+        ] : []),
+      ];
+      return table([configuredField(props, "section_title", "Move details", "").label, ""],
+        rows.map(({ label, value }) => [label, value]), ["20%", "80%"]);
+    }
     case "crew_trucks":
       return table(["Crew / vehicle", "Assignment"], [
         ...(props.show_names !== false ? [["Crew lead", "Morgan Chen"], ["Mover", "Taylor Rivera"], ["Mover", "Riley Singh"]] : []),
@@ -111,15 +173,62 @@ function compileBackendWidget(item) {
       ]);
     case "charges":
     case "line_items":
-      return table(["Description", ...(props.show_quantity !== false ? ["Qty"] : []), "Rate", "Amount"],
-        charges.map(([name, quantity, rate, amount]) => [name, ...(props.show_quantity !== false ? [quantity] : []), rate, amount]));
+      return table(
+        [
+          configuredField(props, "description_label", "Description", "Description").label,
+          ...(props.show_quantity !== false ? [configuredField(props, "quantity_label", "Qty", "Qty").label] : []),
+          configuredField(props, "rate_label", "Rate", "Rate").label,
+          configuredField(props, "amount_label", "Amount", "Amount").label,
+        ],
+        charges.map(([name, quantity, rate, total], index) => {
+          const customRate = props.custom_fields?.[`charge_${index}_unit_price`];
+          const rawRate = Number(customRate?.customValue ?? customRate?.value ?? rate.replace(/[$,]/g, ""));
+          const displayRate = configuredField(
+            props,
+            `charge_${index}_unit_price`,
+            "Rate",
+            rate,
+            { amount: true },
+          ).value;
+          const displayName = configuredField(
+            props,
+            `charge_${index}_description`,
+            "Description",
+            name,
+          ).value;
+          const calculatedTotal = customRate?.mode === "custom" && Number.isFinite(rawRate)
+            ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(rawRate * Number(quantity))
+            : total;
+          return [
+            displayName,
+            ...(props.show_quantity !== false ? [quantity] : []),
+            displayRate,
+            calculatedTotal,
+          ];
+        }),
+      );
     case "estimate_summary":
     case "totals": {
       const estimate = type === "estimate_summary";
       const values = estimate
-        ? [["Subtotal", "$1,475.00"], ...(props.show_discount !== false ? [["Discount", "$50.00"]] : []), ...(props.show_tax !== false ? [["Tax", "$77.63"]] : []), ["Estimate total", "$1,502.63"], ...(props.show_deposit ? [["Deposit due", "$300.00"]] : [])]
-        : [["Subtotal", "$1,475.00"], ...(props.show_discount !== false ? [["Discount", "$50.00"]] : []), ...(props.show_tax !== false ? [["Tax", "$77.63"]] : []), ["Invoice total", "$1,502.63"], ...(props.show_balance !== false ? [["Balance due", "$1,202.63"]] : [])];
-      return table([estimate ? "Estimate summary" : "Invoice totals", "Amount"], values);
+        ? [
+          configuredField(props, "subtotal", "Subtotal", "$1,475.00", { amount: true }),
+          ...(props.show_discount !== false ? [configuredField(props, "discount", "Discount", "$50.00", { amount: true })] : []),
+          ...(props.show_tax !== false ? [configuredField(props, "tax", "Tax", "$77.63", { amount: true })] : []),
+          configuredField(props, "total", "Estimate total", "$1,502.63", { amount: true }),
+          ...(props.show_deposit ? [configuredField(props, "deposit", "Deposit due", "$300.00", { amount: true })] : []),
+        ]
+        : [
+          configuredField(props, "subtotal", "Subtotal", "$1,475.00", { amount: true }),
+          ...(props.show_discount !== false ? [configuredField(props, "discount", "Discount", "$50.00", { amount: true })] : []),
+          ...(props.show_tax !== false ? [configuredField(props, "tax", "Tax", "$77.63", { amount: true })] : []),
+          configuredField(props, "total", "Invoice total", "$1,502.63", { amount: true }),
+          ...(props.show_balance !== false ? [configuredField(props, "balance", "Balance due", "$1,202.63", { amount: true })] : []),
+        ];
+      return table([
+        configuredField(props, "section_title", estimate ? "Estimate summary" : "Invoice totals", "").label,
+        "Amount",
+      ], values.map(({ label, value }) => [label, value]));
     }
     case "inventory":
       return props.mode === "detailed"
@@ -252,9 +361,16 @@ function compileItemToHtml(item) {
   }
 
   if (item.type === "header") {
-    const titleField = item.fields?.find((f) => f.id === "estimateTitle")?.value || item.label;
-    const companyField = item.fields?.find((f) => f.id === "companyName")?.value || "";
-    const numberField = item.fields?.find((f) => f.id === "estimateNumber")?.value || "";
+    const configuredValue = (key, fieldId, fallback) => {
+      const configured = item.customFields?.[key];
+      const value = configured?.mode === "custom"
+        ? configured.customValue ?? configured.value ?? fallback
+        : configured?.dynamicValue || configured?.value || item.fields?.find((field) => field.id === fieldId)?.value || fallback;
+      return escapePreviewHtml(previewMergeFields(value));
+    };
+    const titleField = configuredValue("document_title", "estimateTitle", item.label || "Estimate");
+    const companyField = configuredValue("company_name", "companyName", "");
+    const numberField = configuredValue("document_number", "estimateNumber", "");
 
     return `
       <div class="kargoflow-block" style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #e2e8f0; padding-bottom: 16px;">

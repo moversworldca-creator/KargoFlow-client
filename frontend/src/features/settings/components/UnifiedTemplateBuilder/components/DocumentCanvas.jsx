@@ -1538,7 +1538,7 @@ export default function DocumentCanvas({
                 className={`h-8 w-8 inline-flex items-center justify-center rounded-md transition ${
                   devicePreview === "tablet" ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600 hover:text-slate-900"
                 }`}
-                title="Tablet view (768px)"
+                title="Tablet view"
                 aria-label="Tablet preview"
               >
                 <Tablet size={17} />
@@ -1553,12 +1553,12 @@ export default function DocumentCanvas({
                 className={`h-8 w-8 inline-flex items-center justify-center rounded-md transition ${
                   devicePreview === "mobile" ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600 hover:text-slate-900"
                 }`}
-                title="Mobile view (375px)"
+                title="Mobile view "
                 aria-label="Mobile preview"
               >
                 <Smartphone size={17} />
               </button>
-              <div className="gdoc-tooltip">Mobile view (375px)</div>
+              <div className="gdoc-tooltip">Mobile view </div>
             </div>
           </div>
 

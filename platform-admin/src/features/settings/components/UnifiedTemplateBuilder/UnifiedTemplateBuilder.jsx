@@ -1066,7 +1066,7 @@ export default function UnifiedTemplateBuilder({
           preview={false}
           resolveVariables={resolveVariables}
           selection={selection}
-          onSelectPart={(part) => setSelection({ itemId: selectedItemId, part })}
+          onSelectPart={(itemId, part) => setSelection({ itemId, part })}
           onOpenHtmlEditor={(item) => {
             setActiveHtmlItem(item || null);
             setIsCodeModalOpen(true);
@@ -1132,7 +1132,6 @@ export default function UnifiedTemplateBuilder({
         </div>
       </div>
 
-      {/* Hidden File Input for JSON Schema Import */}
       <input
         ref={importInputRef}
         type="file"
@@ -1169,13 +1168,13 @@ export default function UnifiedTemplateBuilder({
         }}
         onApply={(cleanHtml, extractedCss) => {
           if (activeHtmlItem) {
+            const currentItem = (doc.items || []).find((item) => item.id === activeHtmlItem.id) || activeHtmlItem;
             handleUpdateItem({
-              ...activeHtmlItem,
+              ...currentItem,
               htmlContent: cleanHtml,
               cssContent: extractedCss,
               content: cleanHtml,
             });
-            setActiveHtmlItem(null);
           } else {
             const htmlWidget = createHtmlWidget(cleanHtml, extractedCss, "Custom HTML");
             const pages = getCurrentPages();

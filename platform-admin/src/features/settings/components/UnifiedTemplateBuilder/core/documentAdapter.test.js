@@ -67,4 +67,79 @@ describe("backend document widgets", () => {
     expect(saved.footer).toEqual(document.footer);
     expect(saved.attachments).toEqual(document.attachments);
   });
+
+  it("persists supported divider style and color options", () => {
+    const result = toBackendDocument({
+      items: [{
+        id: "divider-1",
+        type: "divider",
+        color: "#336699",
+        style: { borderStyle: "dashed" },
+      }],
+      settings: {},
+    }, "contract");
+
+    expect(result.sections[0].blocks[0]).toEqual({
+      key: "divider-1",
+      type: "divider",
+      props: { style: "dashed", color: "#336699" },
+    });
+  });
+
+  it("persists custom widget fields and dynamic bindings through document hydration", () => {
+    const customFields = {
+      move_date: {
+        label: "Scheduled date",
+        mode: "custom",
+        value: "June 20, 2026",
+        customValue: "June 20, 2026",
+        dynamicValue: "{{move.pickup_date}}",
+      },
+    };
+    const document = toBackendDocument({
+      items: [{
+        id: "move-details-1",
+        type: "move_details",
+        label: "Moving schedule",
+        customFields,
+      }],
+      settings: {},
+    }, "contract");
+
+    expect(document.sections[0].blocks[0].props.custom_fields).toEqual(customFields);
+    const reloaded = fromBackendDocument(document);
+    expect(reloaded.items[0].props.custom_fields).toEqual(customFields);
+  });
+
+  it("round-trips widget custom values and merge-field overrides without dropping dynamic bindings", () => {
+    const widget = {
+      id: "editable-variable",
+      type: "builder_block",
+      label: "Customer",
+      blockType: "variable",
+      props: {
+        token: "customer.full_name",
+        custom_fields: {
+          merge_field: {
+            mode: "custom",
+            value: "Template label",
+            customValue: "Template label",
+            dynamicValue: "{{customer.full_name}}",
+          },
+          custom_location: {
+            label: "Service location",
+            mode: "custom",
+            value: "Vancouver",
+            customValue: "Vancouver",
+          },
+        },
+      },
+    };
+    const saved = toBackendDocument({ items: [widget], settings: {} }, "contract");
+    const reopened = fromBackendDocument(saved);
+
+    expect(saved.sections[0].blocks[0].props).toEqual(widget.props);
+    expect(reopened.items[0].props).toEqual(widget.props);
+  });
+
 });
