@@ -45,6 +45,7 @@ import AuditLogs from "../components/AuditLogs";
 import CommunicationTemplates from "../components/CommunicationTemplates";
 import CommunicationSetup from "../components/CommunicationSetup";
 import CompanySettings from "../components/CompanySettings";
+import IntegrationSettings from "../components/IntegrationSettings";
 import LeadSourceSettings from "../components/LeadSourceSettings";
 import MoverSizeSettings from "../components/MoverSizeSettings";
 import MoverTypeSettings from "../components/MoverTypeSettings";
@@ -175,6 +176,15 @@ const SETTINGS_GROUPS = [
     ],
   },
   {
+    id: "integrations",
+    label: "Integrations",
+    shortLabel: "Integrations",
+    icon: Plug,
+    tabs: [
+      { id: "payment-gateway", label: "Payment Gateway", description: "Configure company-wide Authorize.Net credentials, sandbox or production, and verify the connection.", icon: CreditCard, render: () => <IntegrationSettings view="gateways" /> },
+    ],
+  },
+  {
     id: "communications",
     label: "Communications",
     shortLabel: "Comms",
@@ -187,6 +197,7 @@ const SETTINGS_GROUPS = [
 ];
 
 const LEGACY_ROUTES = {
+  integrations: ["integrations", "payment-gateway"],
   company: ["company", "profile"],
   branches: ["branches", "directory"],
   branding: ["branches", "branding"],

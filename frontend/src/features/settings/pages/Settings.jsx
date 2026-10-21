@@ -108,7 +108,7 @@ const Settings = () => {
     fetchBranches();
   }, [user]);
 
-  const branchIsolatedTabs = ['team', 'crew', 'trucks', 'roles', 'catalog-packages', 'estimate-catalog', 'estimate-portal-templates', 'branding', 'templates', 'document-templates', 'integrations', 'communications', 'status-codes', 'scheduling', 'mover-types', 'service-types', 'mover-sizes', 'move-sizes'];
+  const branchIsolatedTabs = ['team', 'crew', 'trucks', 'roles', 'catalog-packages', 'estimate-catalog', 'estimate-portal-templates', 'branding', 'templates', 'document-templates', 'communications', 'status-codes', 'scheduling', 'mover-types', 'service-types', 'mover-sizes', 'move-sizes'];
 
   const toggleSection = (sectionName) => {
     setOpenSections(prev => ({
@@ -141,7 +141,7 @@ const Settings = () => {
     { id: 'customer-portals', label: 'Customer Portal Settings', icon: Globe, section: 'Estimates', description: 'Set up domain bindings, general behaviors, and security checks for your client portals.' },
     { id: 'templates', label: 'Comms Templates', icon: MessageSquare, section: 'Estimates', description: 'Manage transactional emails, text messages, automated follow-ups, and trigger alerts.' },
     { id: 'document-templates', label: 'Documents Templates', icon: FileText, section: 'Documents', description: 'Design PDF templates for moving contracts, invoices, bills of lading, and receipts.' },
-    { id: 'integrations', label: 'Integrations', icon: Cpu, section: 'System', description: 'Connect external applications, email servers, stripe payment gates, and manage API integrations.' },
+    { id: 'integrations', label: 'Integrations', icon: Cpu, section: 'System', description: 'Connect external applications, email servers, Authorize.Net settings, and manage API integrations.' },
     { id: 'communications', label: 'Email & SMS Setup', icon: MessageSquare, section: 'System', description: 'Onboard Resend sending domains, branch sender identities, Telnyx SMS numbers, and reply mailboxes.' },
     { id: 'audit', label: 'Audit Logs', icon: History, section: 'System', description: 'Review security logs, user session activities, settings modifications, and records edits history.' },
   ], []);
@@ -205,7 +205,7 @@ const Settings = () => {
     },
     System: {
       title: 'System & Security',
-      desc: 'Connect Stripe payments, email providers, third-party integrations, and track audit logs.',
+      desc: 'Configure Authorize.Net, email providers, third-party integrations, and track audit logs.',
       badgeColor: 'bg-slate-100 text-slate-700 dark:bg-slate-500/10 dark:text-slate-400 border-slate-200 dark:border-slate-500/20',
     },
   };
@@ -264,7 +264,7 @@ const Settings = () => {
       case 'referrals': return <ReferralSourceSettings />;
       case 'status-codes': return <StatusCodeSettings />;
       case 'opportunity-loss-reasons': return <OpportunityLossReasonSettings />;
-      case 'integrations': return <IntegrationSettings branchId={branchIdProp} />;
+      case 'integrations': return <IntegrationSettings />;
       case 'communications': return <CommunicationSetup branchId={branchIdProp} />;
       case 'templates': return (
         <CommunicationTemplates
