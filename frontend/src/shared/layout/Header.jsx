@@ -5,7 +5,8 @@ import {
   Search, Bell, Mail, Plus, User as UserIcon, Settings, LogOut, 
   FilePlus, ClipboardPlus, UserPlus, CheckSquare,
   MessageSquare, AlertCircle, Menu, Phone, Loader2, Clock, Volume2, CreditCard, FileCheck,
-  Sun, Moon, Target, Layers, Truck, Zap, Building2, ChevronDown, ChevronRight, ChevronLeft, Check, X
+  Sun, Moon, Target, Layers, Truck, Zap, Building2, ChevronDown, ChevronRight, ChevronLeft, Check, X,
+  ArrowUpRight
 } from 'lucide-react';
 import { getTasks, universalSearch, getNotifications, markAllNotificationsRead, markNotificationRead, markNotificationUnread, getCompanies } from '../../services/api';
 import logo from '../../assets/full_logo.png';
@@ -149,26 +150,78 @@ const getNotificationLabel = (notification) => {
   return String(notification?.title || '').trim() || 'Notification';
 };
 
-const getSearchSubtitle = (row) => {
-  const parts = [
-    row?.email,
-    row?.phone,
-    row?.meta,
-    row?.branch_name,
-    row?.assigned_to,
-  ].map((value) => String(value || '').trim()).filter(Boolean);
-  return parts.slice(0, 2).join(' · ');
-};
-
-const getSearchSecondary = (row) => {
+const getSearchBadge = (row) => {
   const type = String(row?.type || '').toLowerCase();
   if (type === 'lead' || type === 'opportunity') {
-    return row?.sales_number ? `#${row.sales_number}` : '—';
+    return row?.sales_number ? `#${row.sales_number}` : row.type?.toUpperCase() || 'LEAD';
   }
   if (type === 'job') {
-    return row?.meta || '—';
+    if (row?.display_number) return `Job #${row.display_number}`;
+    if (row?.sales_number) return `#${row.sales_number}`;
+    return 'JOB';
   }
-  return row?.meta || row?.email || row?.phone || '—';
+  if (type === 'customer') {
+    return 'CUSTOMER';
+  }
+  return row?.type?.toUpperCase() || '';
+};
+
+const getBadgeClasses = (type) => {
+  const t = String(type || '').toLowerCase();
+  if (t === 'lead') {
+    return 'bg-amber-50 text-amber-700 border border-amber-200/80';
+  }
+  if (t === 'opportunity') {
+    return 'bg-purple-50 text-purple-700 border border-purple-200/80';
+  }
+  if (t === 'job') {
+    return 'bg-emerald-50 text-emerald-700 border border-emerald-200/80';
+  }
+  if (t === 'customer') {
+    return 'bg-blue-50 text-blue-700 border border-blue-200/80';
+  }
+  if (t === 'action') {
+    return 'bg-indigo-50 text-indigo-700 border border-indigo-200/80';
+  }
+  if (t === 'service') {
+    return 'bg-teal-50 text-teal-700 border border-teal-200/80';
+  }
+  return 'bg-slate-100 text-slate-600 border border-slate-200/80';
+};
+
+const getSearchDescription = (row) => {
+  const type = String(row?.type || '').toLowerCase();
+  if (type === 'customer') {
+    return [row?.email, row?.phone].map((v) => String(v || '').trim()).filter(Boolean).join(' · ');
+  }
+  if (type === 'lead' || type === 'opportunity' || type === 'job') {
+    if (row?.meta) return String(row.meta).trim();
+    return [row?.email, row?.phone].map((v) => String(v || '').trim()).filter(Boolean).join(' · ');
+  }
+  return String(row?.meta || '').trim();
+};
+
+const getSearchMetaDetails = (row) => {
+  const type = String(row?.type || '').toLowerCase();
+  if (type === 'lead' || type === 'opportunity' || type === 'job') {
+    const parts = [
+      row?.branch_name,
+      row?.assigned_to || row?.email || row?.phone,
+    ].map((v) => String(v || '').trim()).filter(Boolean);
+    return parts.join(' · ');
+  }
+  return '';
+};
+
+const getRowUrl = (row) => {
+  if (row?.url) return row.url;
+  if (!row?.id) return null;
+  const type = String(row?.type || '').toLowerCase();
+  if (type === 'lead') return getLegacyRecordDetailPath('lead', row.id);
+  if (type === 'opportunity') return getLegacyRecordDetailPath('opportunity', row.id);
+  if (type === 'job') return `/jobs/${row.id}`;
+  if (type === 'customer') return `/crm/activities?customer=${row.id}`;
+  return null;
 };
 
 const DropdownItem = ({ icon: Icon, label, description, category, categoryIcon: CategoryIcon, onClick, timestamp, unread, actionLabel, onAction, isExpired, branchName, assignedTo, rightIcon: RightIcon, className = '' }) => (
@@ -317,6 +370,7 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
   const searchWrapRef = useRef(null);
   const [searchTab, setSearchTab] = useState('all');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const selectedItemRef = useRef(null);
 
   const playNotificationSound = () => {
     try {
@@ -555,7 +609,20 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
   }, []);
 
   useEffect(() => {
-    // Replaced by useQuery
+    if (selectedItemRef.current) {
+      selectedItemRef.current.scrollIntoView({ block: 'nearest' });
+    }
+  }, [selectedIndex]);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   useEffect(() => {
@@ -699,31 +766,31 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
 
   const commands = useMemo(
     () => [
-      { type: 'Feature', label: 'Dashboard', meta: 'CRM overview', onSelect: () => navigate('/dashboard') },
-      { type: 'Feature', label: 'Leads', meta: 'Inbound leads list', onSelect: () => navigate('/leads') },
-      { type: 'Feature', label: 'Sales', meta: 'Pipeline opportunities', onSelect: () => navigate('/sales') },
-      { type: 'Feature', label: 'Jobs', meta: 'Operations schedule', onSelect: () => navigate('/jobs') },
-      { type: 'Feature', label: 'Payments', meta: 'Payment requests & payments', onSelect: () => navigate('/payments') },
-      { type: 'Feature', label: 'Fleet', meta: 'Trucks & assignments', onSelect: () => navigate('/fleet') },
-      { type: 'Feature', label: 'Marketing', meta: 'Campaigns & sources', onSelect: () => navigate('/marketing') },
-      { type: 'Feature', label: 'Settings', meta: 'Workspace settings', onSelect: () => navigate('/settings') },
-      { type: 'Feature', label: 'Profile', meta: 'Your account', onSelect: () => navigate('/profile') },
+      { type: 'Feature', label: 'Dashboard', meta: 'CRM overview', url: '/dashboard', onSelect: () => navigate('/dashboard') },
+      { type: 'Feature', label: 'Leads', meta: 'Inbound leads list', url: '/leads', onSelect: () => navigate('/leads') },
+      { type: 'Feature', label: 'Sales', meta: 'Pipeline opportunities', url: '/sales', onSelect: () => navigate('/sales') },
+      { type: 'Feature', label: 'Jobs', meta: 'Operations schedule', url: '/jobs', onSelect: () => navigate('/jobs') },
+      { type: 'Feature', label: 'Payments', meta: 'Payment requests & payments', url: '/payments', onSelect: () => navigate('/payments') },
+      { type: 'Feature', label: 'Fleet', meta: 'Trucks & assignments', url: '/fleet', onSelect: () => navigate('/fleet') },
+      { type: 'Feature', label: 'Marketing', meta: 'Campaigns & sources', url: '/marketing', onSelect: () => navigate('/marketing') },
+      { type: 'Feature', label: 'Settings', meta: 'Workspace settings', url: '/settings', onSelect: () => navigate('/settings') },
+      { type: 'Feature', label: 'Profile', meta: 'Your account', url: '/profile', onSelect: () => navigate('/profile') },
 
-      { type: 'Action', label: 'Add New Lead', meta: 'Create inbound lead', onSelect: () => navigate('/leads/new') },
+      { type: 'Action', label: 'Add New Lead', meta: 'Create inbound lead', url: '/leads/new', onSelect: () => navigate('/leads/new') },
 
       // Services / configuration inside Settings
-      { type: 'Service', label: 'Mover Types', meta: 'Settings → Mover Types', onSelect: () => navigate('/settings') },
-      { type: 'Service', label: 'Mover Sizes', meta: 'Settings → Mover Sizes', onSelect: () => navigate('/settings/mover-sizes') },
-      { type: 'Service', label: 'Estimate Catalog', meta: 'Settings → Catalog Items', onSelect: () => navigate('/settings/estimate-catalog') },
-      { type: 'Service', label: 'Packages', meta: 'Settings → Packages', onSelect: () => navigate('/settings/catalog-packages') },
-      { type: 'Service', label: 'Lead Sources', meta: 'Settings → Lead Sources', onSelect: () => navigate('/settings/leads') },
-      { type: 'Service', label: 'Integrations', meta: 'Settings → Integrations', onSelect: () => navigate('/settings/integrations') },
-      { type: 'Service', label: 'Roles & Permissions', meta: 'Settings → Roles', onSelect: () => navigate('/settings/roles') },
-      { type: 'Service', label: 'Status Codes', meta: 'Settings → Status Codes', onSelect: () => navigate('/settings/status-codes') },
-      { type: 'Service', label: 'Communication Templates', meta: 'Settings → Templates', onSelect: () => navigate('/settings/templates') },
-      { type: 'Service', label: 'Branding', meta: 'Settings → Branding', onSelect: () => navigate('/settings/branding') },
-      { type: 'Service', label: 'Customer Portal', meta: 'Settings → Portal', onSelect: () => navigate('/settings/customer-portals') },
-      { type: 'Service', label: 'Audit Logs', meta: 'Settings → Audit', onSelect: () => navigate('/settings/audit') },
+      { type: 'Service', label: 'Mover Types', meta: 'Settings → Mover Types', url: '/settings', onSelect: () => navigate('/settings') },
+      { type: 'Service', label: 'Mover Sizes', meta: 'Settings → Mover Sizes', url: '/settings/mover-sizes', onSelect: () => navigate('/settings/mover-sizes') },
+      { type: 'Service', label: 'Estimate Catalog', meta: 'Settings → Catalog Items', url: '/settings/estimate-catalog', onSelect: () => navigate('/settings/estimate-catalog') },
+      { type: 'Service', label: 'Packages', meta: 'Settings → Packages', url: '/settings/catalog-packages', onSelect: () => navigate('/settings/catalog-packages') },
+      { type: 'Service', label: 'Lead Sources', meta: 'Settings → Lead Sources', url: '/settings/leads', onSelect: () => navigate('/settings/leads') },
+      { type: 'Service', label: 'Integrations', meta: 'Settings → Integrations', url: '/settings/integrations', onSelect: () => navigate('/settings/integrations') },
+      { type: 'Service', label: 'Roles & Permissions', meta: 'Settings → Roles', url: '/settings/roles', onSelect: () => navigate('/settings/roles') },
+      { type: 'Service', label: 'Status Codes', meta: 'Settings → Status Codes', url: '/settings/status-codes', onSelect: () => navigate('/settings/status-codes') },
+      { type: 'Service', label: 'Communication Templates', meta: 'Settings → Templates', url: '/settings/templates', onSelect: () => navigate('/settings/templates') },
+      { type: 'Service', label: 'Branding', meta: 'Settings → Branding', url: '/settings/branding', onSelect: () => navigate('/settings/branding') },
+      { type: 'Service', label: 'Customer Portal', meta: 'Settings → Portal', url: '/settings/customer-portals', onSelect: () => navigate('/settings/customer-portals') },
+      { type: 'Service', label: 'Audit Logs', meta: 'Settings → Audit', url: '/settings/audit', onSelect: () => navigate('/settings/audit') },
     ],
     [navigate]
   );
@@ -753,6 +820,7 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
         const rows = asList(response.data ?? response)
           .map((row) => ({
             ...row,
+            label: row?.label || row?.title || row?.name || 'Untitled',
             kind: 'live',
           }))
           .filter((row) => row?.label || row?.meta || row?.url);
@@ -803,8 +871,9 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
 
   const handleSearchSelect = (row) => {
     if (!row) return;
-    if (row.url) {
-      navigate(row.url);
+    const targetUrl = getRowUrl(row);
+    if (targetUrl) {
+      navigate(targetUrl);
     } else if (typeof row.onSelect === 'function') {
       row.onSelect();
     }
@@ -813,8 +882,9 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
 
   const handleSearchOpenNewTab = (row) => {
     if (!row) return;
-    if (row.url) {
-      window.open(row.url, '_blank', 'noopener,noreferrer');
+    const targetUrl = getRowUrl(row);
+    if (targetUrl) {
+      window.open(targetUrl, '_blank', 'noopener,noreferrer');
     } else if (typeof row.onSelect === 'function') {
       row.onSelect();
     }
@@ -1043,46 +1113,72 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
                               <div className="divide-y divide-slate-100">
                                 {rows.map((row, index) => {
                                   const globalIndex = filteredSearchResults.findIndex((entry) => entry === row);
+                                  const isSelected = globalIndex === selectedIndex;
+                                  const badge = getSearchBadge(row);
+                                  const description = getSearchDescription(row);
+                                  const metaDetails = getSearchMetaDetails(row);
+
                                   return (
-                                    <button
-                                      key={`${row.type}-${row.label}-${index}`}
-                                      type="button"
+                                    <div
+                                      key={`${row.type}-${row.label || row.title}-${index}`}
+                                      ref={isSelected ? selectedItemRef : null}
+                                      role="button"
+                                      tabIndex={0}
                                       onClick={() => handleSearchSelect(row)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          handleSearchSelect(row);
+                                        }
+                                      }}
                                       onMouseEnter={() => setSelectedIndex(globalIndex)}
-                                      className={`grid w-full grid-cols-1 sm:grid-cols-[100px_minmax(0,1.4fr)_minmax(0,1fr)] items-start sm:items-center gap-1 sm:gap-4 px-3 sm:px-4 py-2 sm:py-2.5 text-left transition-colors cursor-pointer ${
-                                        globalIndex === selectedIndex ? 'bg-blue-50/60' : 'hover:bg-slate-50'
+                                      className={`group flex items-center justify-between gap-3 w-full px-3.5 sm:px-4 py-2 sm:py-2.5 text-left transition-colors cursor-pointer ${
+                                        isSelected ? 'bg-blue-50/70 text-blue-900' : 'hover:bg-slate-50 text-slate-800'
                                       }`}
                                     >
-                                      <div className="min-w-0 text-xs sm:text-sm text-slate-600">
-                                        <div className="inline-flex items-center gap-2">
-                                          <span className="truncate">{getSearchSecondary(row)}</span>
-                                          <span
-                                            aria-label={`Open ${row.label} in new tab`}
-                                            title="Open in new tab"
-                                            className="shrink-0 rounded-full p-1 text-blue-600 hover:bg-blue-100"
-                                            onClick={(e) => {
-                                              e.preventDefault();
-                                              e.stopPropagation();
-                                              handleSearchOpenNewTab(row);
-                                            }}
-                                          >
-                                            ↗
+                                      {/* Left / Primary info */}
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                                          <span className={`text-xs sm:text-sm font-semibold truncate ${
+                                            isSelected ? 'text-blue-700' : 'text-slate-900'
+                                          }`}>
+                                            {row.label || row.title || row.name}
                                           </span>
+                                          {badge ? (
+                                            <span className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider ${getBadgeClasses(row.type)}`}>
+                                              {badge}
+                                            </span>
+                                          ) : null}
                                         </div>
+                                        {description ? (
+                                          <p className="text-xs text-slate-500 truncate mt-0.5">
+                                            {description}
+                                          </p>
+                                        ) : null}
                                       </div>
-                                      <div className="min-w-0">
-                                        <div className="flex items-center gap-1.5">
-                                          <div className="truncate text-xs sm:text-sm font-semibold text-blue-700">{row.label}</div>
-                                          <span className="text-blue-500 text-xs">↗</span>
-                                        </div>
-                                        <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                                          {row.type}
-                                        </div>
+
+                                      {/* Right / Secondary details & open action */}
+                                      <div className="flex items-center gap-2.5 shrink-0">
+                                        {metaDetails ? (
+                                          <span className="hidden sm:inline-block text-xs text-slate-400 truncate max-w-[180px]">
+                                            {metaDetails}
+                                          </span>
+                                        ) : null}
+                                        <button
+                                          type="button"
+                                          aria-label={`Open ${row.label || row.title} in new tab`}
+                                          title="Open in new tab"
+                                          className="p-1 rounded-md text-slate-400 group-hover:text-blue-600 hover:!text-blue-700 hover:bg-blue-100 transition-colors cursor-pointer"
+                                          onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            handleSearchOpenNewTab(row);
+                                          }}
+                                        >
+                                          <ArrowUpRight size={15} />
+                                        </button>
                                       </div>
-                                      <div className="min-w-0 truncate text-xs text-slate-500">
-                                        {getSearchSubtitle(row) || '—'}
-                                      </div>
-                                    </button>
+                                    </div>
                                   );
                                 })}
                               </div>
@@ -1092,6 +1188,24 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
                         .filter(Boolean)}
                     </div>
                   ) : null}
+                </div>
+
+                <div className="border-t border-slate-100 bg-slate-50/80 px-3.5 sm:px-4 py-2 flex items-center justify-between text-[11px] text-slate-500">
+                  <div className="flex items-center gap-3">
+                    <span className="inline-flex items-center gap-1">
+                      <kbd className="font-mono bg-white border border-slate-200 rounded px-1.5 py-0.5 text-[10px] text-slate-600 shadow-2xs font-semibold">↑↓</kbd>
+                      Navigate
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <kbd className="font-mono bg-white border border-slate-200 rounded px-1.5 py-0.5 text-[10px] text-slate-600 shadow-2xs font-semibold">↵</kbd>
+                      Select
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <kbd className="font-mono bg-white border border-slate-200 rounded px-1.5 py-0.5 text-[10px] text-slate-600 shadow-2xs font-semibold">ESC</kbd>
+                      Close
+                    </span>
+                  </div>
+                  <span className="hidden sm:inline text-[10px] text-slate-400 font-medium">Quick Navigation</span>
                 </div>
               </div>
             </>

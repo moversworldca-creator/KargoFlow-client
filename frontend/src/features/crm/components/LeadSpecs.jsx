@@ -12,6 +12,7 @@ import {
   User,
   Target,
 } from "lucide-react";
+import { getUserBranchIds as getMembershipBranchIds } from '../../../shared/utils/branchScope';
 import Card from '../../../shared/ui/Card';
 import { useAuth } from '../../auth/context/AuthContext';
 
@@ -25,34 +26,6 @@ const getMoveTypeLabel = (value) => {
   return titleCase(value);
 };
 
-const getUserBranchIds = (user) => {
-  if (!user) return [];
-  const branchIds = new Set();
-  
-  const addId = (id) => {
-    if (id !== null && id !== undefined && id !== '') {
-      branchIds.add(String(id));
-    }
-  };
-
-  if (Array.isArray(user.branches)) {
-    user.branches.forEach(b => {
-      if (typeof b === 'object' && b !== null && b.id) addId(b.id);
-      else addId(b);
-    });
-  }
-  if (Array.isArray(user.branch_details)) {
-    user.branch_details.forEach(b => {
-      if (b && b.id) addId(b.id);
-    });
-  }
-  if (user.branch) {
-    if (typeof user.branch === 'object' && user.branch.id) addId(user.branch.id);
-    else addId(user.branch);
-  }
-  return Array.from(branchIds);
-};
-
 const getUserDisplayName = (user) => {
   if (!user) return '';
   return (
@@ -63,7 +36,9 @@ const getUserDisplayName = (user) => {
   ).trim();
 };
 
-const isActiveUser = (user) => user && user.is_active !== false && user.active !== false && user.status !== 'inactive';
+const getUserBranchIds = (person) => [...new Set([...getMembershipBranchIds(person), ...(person?.primary_branch_id != null ? [String(person.primary_branch_id)] : [])])];
+
+const isActiveUser = (user) => user && user.is_active !== false && user.active !== false && user.status !== 'inactive' && (!user.employment_status || user.employment_status === 'active');
 
 const getOptionLabel = (option) => {
   if (option == null) return '';
@@ -93,11 +68,17 @@ const getOptionValue = (option) => {
 };
 
 const resolveOptionLabel = (value, options = [], fallback = '') => {
-  const normalizedValue = String(value || '').trim();
+  const normalizedValue = getOptionValue(value).trim();
   if (!normalizedValue) return fallback;
   const match = (Array.isArray(options) ? options : []).find((option) => getOptionValue(option) === normalizedValue);
-  if (!match) return fallback || normalizedValue;
+  if (!match) return (typeof value === 'object' ? getOptionLabel(value) : '') || fallback || normalizedValue;
   return getOptionLabel(match) || fallback || normalizedValue;
+};
+
+const missingSelection = (value, options, label) => {
+  const id = getOptionValue(value);
+  if (!id || options.some((option) => getOptionValue(option) === id)) return null;
+  return <option value={id} disabled>{label || getOptionLabel(value) || id} (unavailable)</option>;
 };
 
 const SERVICE_TYPE_OPTIONS = [
@@ -157,58 +138,45 @@ const LeadSpecs = ({
   const resolvedStatusOptions = useMemo(
     () => {
       const statusOptions = (view.isLead ? leadStatusCodes : opportunityStatusCodes) || [];
-      return Array.isArray(statusOptions) ? statusOptions : [];
+      return Array.isArray(statusOptions) ? statusOptions.filter((status) => status && (status.is_active !== false || getOptionValue(status) === getOptionValue(form.custom_status_code))) : [];
     },
-    [view.isLead, leadStatusCodes, opportunityStatusCodes]
+    [view.isLead, leadStatusCodes, opportunityStatusCodes, form.custom_status_code]
   );
-  const canChangeMoveSize = Boolean(
+  const canChangeMoveSize = view.isLead ? canEditLead : Boolean(
     user?.is_system_admin ||
     user?.is_superuser ||
     hasPermission(['crm.estimates.override_price']) ||
     hasPermission(['crm.admin'])
   );
   
-  const resolvedMoveSizes = (moverSizes || [])
-    .filter((size) => size && size.is_active !== false)
-    .map((size) => ({
-      id: size.id,
-      value: size.value ?? size.id,
-      label: String(size.label || size.name || size.value || '').trim(),
-      name: String(size.name || size.label || size.value || '').trim(),
-    }))
-    .filter((size) => Boolean(size?.name));
-    
-  const moveSizeOptions = resolvedMoveSizes.length ? resolvedMoveSizes : DEFAULT_MOVE_SIZE_OPTIONS;
-  const currentMoveSize = String(form.move_size || '').trim();
-  const hasCustomMoveSize = view.isLead && Boolean(currentMoveSize)
-    ? !moveSizeOptions.some((opt) => {
-        const val = typeof opt === 'object' ? getOptionValue(opt) : String(opt);
-        return val === currentMoveSize;
-      })
-    : false;
-  const resolvedMoveSizeName =
-    view.move_size ||
-    view.moveSize ||
-    (form.move_size
-      ? (resolvedMoveSizes.find((size) => getOptionValue(size) === String(form.move_size))?.name || '')
-      : '') ||
-    '-';
-  const resolvedServiceTypes = Array.isArray(serviceTypes) && serviceTypes.length ? serviceTypes : SERVICE_TYPE_OPTIONS;
-  const resolvedMoveTypes = Array.isArray(moveTypes) && moveTypes.length ? moveTypes : MOVE_TYPE_OPTIONS;
+  const catalogOptions = (items, currentValue) => (Array.isArray(items) ? items : [])
+    .filter((item) => item != null && (item.is_active !== false || getOptionValue(item) === getOptionValue(currentValue)));
+  const resolvedMoveSizes = catalogOptions(moverSizes, form.move_size);
+  const moveSizeOptions = resolvedMoveSizes.length ? resolvedMoveSizes : view.isLead ? [] : DEFAULT_MOVE_SIZE_OPTIONS;
+  const currentMoveSize = getOptionValue(form.move_size).trim();
+  const hasCustomMoveSize = Boolean(currentMoveSize) && !moveSizeOptions.some((option) => getOptionValue(option) === currentMoveSize);
+  const resolvedMoveSizeName = resolveOptionLabel(form.move_size, resolvedMoveSizes,
+    opportunity?.move_size_details?.name || opportunity?.mover_size_details?.name || (typeof form.move_size === 'object' ? getOptionLabel(form.move_size) : '') || view.move_size || view.moveSize || currentMoveSize || '-');
+  const resolvedServiceTypes = catalogOptions(serviceTypes, form.service_type);
+  const resolvedMoveTypes = catalogOptions(moveTypes, form.move_type);
+  if (!view.isLead && !resolvedServiceTypes.length) resolvedServiceTypes.push(...SERVICE_TYPE_OPTIONS);
+  if (!view.isLead && !resolvedMoveTypes.length) resolvedMoveTypes.push(...MOVE_TYPE_OPTIONS);
+  const resolvedReferralSources = catalogOptions(referralSources, form.referral_source);
+  const resolvedBranches = catalogOptions(branches, form.branch);
 
   const selectedCustomStatusCode = useMemo(
-    () => (Array.isArray(resolvedStatusOptions) ? resolvedStatusOptions : []).find((option) => getOptionValue(option) === String(form.custom_status_code || '')),
+    () => (Array.isArray(resolvedStatusOptions) ? resolvedStatusOptions : []).find((option) => getOptionValue(option) === getOptionValue(form.custom_status_code)),
     [form.custom_status_code, resolvedStatusOptions]
   );
   
-  const selectedBranchId = form.branch ? String(form.branch) : null;
+  const selectedBranchId = getOptionValue(form.branch ?? opportunity?.branch_id ?? opportunity?.branch) || null;
   const selectedBranch = useMemo(() => {
     if (!selectedBranchId) return null;
-    return (branches || []).find((branch) => String(branch.id) === selectedBranchId) || null;
+    return (Array.isArray(branches) ? branches : []).find((branch) => String(branch.id) === selectedBranchId) || null;
   }, [branches, selectedBranchId]);
 
   const assignableUsers = useMemo(() => {
-    const allUsers = (users || []).filter(isActiveUser);
+    const allUsers = (Array.isArray(users) ? users : []).filter(isActiveUser);
     if (!selectedBranchId) return allUsers;
     return allUsers.filter((user) => {
       const uBranchIds = getUserBranchIds(user);
@@ -217,15 +185,15 @@ const LeadSpecs = ({
   }, [selectedBranchId, users]);
 
   const selectedUser = useMemo(() => {
-    const assignedId = form.assigned_to;
+    const assignedId = getOptionValue(form.assigned_to);
     if (!assignedId) return null;
-    return (users || []).find((user) => String(user.id) === String(assignedId) && isActiveUser(user));
+    return (Array.isArray(users) ? users : []).find((user) => String(user.id) === String(assignedId) && isActiveUser(user));
   }, [form.assigned_to, users]);
 
   const managerOptions = useMemo(() => {
     const options = [...assignableUsers];
     if (!selectedUser && form.assigned_to) {
-      const fallbackSelected = (users || []).find((user) => String(user.id) === String(form.assigned_to) && isActiveUser(user));
+      const fallbackSelected = (Array.isArray(users) ? users : []).find((user) => String(user.id) === String(form.assigned_to) && isActiveUser(user));
       if (fallbackSelected) options.push(fallbackSelected);
     }
     if (selectedUser && !options.some(u => String(u.id) === String(selectedUser.id))) {
@@ -280,14 +248,16 @@ const LeadSpecs = ({
           {isEditing ? (
             <select
               className={inputCls}
-              value={form.custom_status_code || ''}
+              aria-label="Job Status"
+              value={getOptionValue(form.custom_status_code)}
               onChange={(e) =>
                 setForm((p) => ({ ...p, custom_status_code: e.target.value }))
               }
             >
               <option value="">No Custom Status</option>
+              {missingSelection(form.custom_status_code, resolvedStatusOptions, opportunity?.custom_status_code_details?.label)}
               {resolvedStatusOptions.map((status) => (
-                <option key={String(status.id || status.code || status.label)} value={String(status.id || status.code || '')}>
+                <option key={getOptionValue(status)} value={getOptionValue(status)} disabled={status.is_active === false}>
                   {String(status.label || status.name || status.code || '-')}
                 </option>
               ))}
@@ -307,14 +277,16 @@ const LeadSpecs = ({
           {isEditing ? (
             <select
               className={inputCls}
-              value={form.service_type || ''}
+              aria-label="Job Service"
+              value={getOptionValue(form.service_type)}
               onChange={(e) =>
                 setForm((p) => ({ ...p, service_type: e.target.value }))
               }
             >
               <option value="">Select Service</option>
+              {missingSelection(form.service_type, resolvedServiceTypes, opportunity?.service_type_name)}
               {resolvedServiceTypes.map((option) => (
-                <option key={String(getOptionValue(option))} value={String(getOptionValue(option))}>
+                <option key={String(getOptionValue(option))} value={String(getOptionValue(option))} disabled={option.is_active === false}>
                   {String(getOptionLabel(option))}
                 </option>
               ))}
@@ -322,7 +294,7 @@ const LeadSpecs = ({
           ) : (
             <p className="text-sm font-bold text-primary">
               {resolveOptionLabel(
-                opportunity?.service_type_name || form.service_type || opportunity?.service_type,
+                form.service_type ?? opportunity?.service_type,
                 resolvedServiceTypes,
                 opportunity?.service_type_name || titleCase(opportunity?.service_type || view.serviceType || form.service_type || '-')
               )}
@@ -339,20 +311,21 @@ const LeadSpecs = ({
             canChangeMoveSize ? (
               <select
                 className={inputCls}
-                value={form.move_size || ''}
+                aria-label="Job Size"
+                value={getOptionValue(form.move_size)}
                 onChange={(e) =>
                   setForm((p) => ({ ...p, move_size: e.target.value }))
                 }
               >
                 <option value="">Select Job Size</option>
                 {hasCustomMoveSize ? (
-                  <option value={currentMoveSize}>{currentMoveSize}</option>
+                  <option value={currentMoveSize} disabled={view.isLead}>{resolvedMoveSizeName}</option>
                 ) : null}
                 {(Array.isArray(moveSizeOptions) ? moveSizeOptions : []).map((size) => {
                   const id = typeof size === 'object' ? getOptionValue(size) : size;
                   const label = typeof size === 'object' ? getOptionLabel(size) : size;
                   return (
-                    <option key={String(id)} value={String(id)}>
+                    <option key={String(id)} value={String(id)} disabled={size.is_active === false}>
                       {String(label || '-')}
                     </option>
                   );
@@ -383,14 +356,16 @@ const LeadSpecs = ({
           {isEditing ? (
             <select
               className={inputCls}
-              value={form.move_type || ''}
+              aria-label="Job Type"
+              value={getOptionValue(form.move_type)}
               onChange={(e) =>
                 setForm((p) => ({ ...p, move_type: e.target.value }))
               }
             >
               <option value="">Select Type</option>
+              {missingSelection(form.move_type, resolvedMoveTypes, opportunity?.move_type_name)}
               {resolvedMoveTypes.map((option) => (
-                <option key={String(getOptionValue(option))} value={String(getOptionValue(option))}>
+                <option key={String(getOptionValue(option))} value={String(getOptionValue(option))} disabled={option.is_active === false}>
                   {String(getOptionLabel(option))}
                 </option>
               ))}
@@ -398,7 +373,7 @@ const LeadSpecs = ({
           ) : (
             <p className="text-sm font-bold text-primary">
               {resolveOptionLabel(
-                opportunity?.move_type_name || form.move_type || opportunity?.move_type,
+                form.move_type ?? opportunity?.move_type,
                 resolvedMoveTypes,
                 opportunity?.move_type_name || getMoveTypeLabel(view.moveType || '-')
               )}
@@ -461,20 +436,27 @@ const LeadSpecs = ({
               {isEditing ? (
                 <select
                   className={`${inputCls} !py-1 !text-xs !font-bold`}
-                  value={form.branch || ''}
+                  aria-label="Target Branch"
+                  value={getOptionValue(form.branch)}
                   onChange={(e) =>
-                    setForm((p) => ({ ...p, branch: e.target.value }))
+                    setForm((p) => {
+                      const nextBranch = e.target.value;
+                      const assigned = (Array.isArray(users) ? users : []).find((person) => String(person.id) === getOptionValue(p.assigned_to));
+                      const keepAssigned = !nextBranch || (isActiveUser(assigned) && getUserBranchIds(assigned).includes(nextBranch));
+                      return { ...p, branch: nextBranch, assigned_to: keepAssigned ? p.assigned_to : '' };
+                    })
                   }
                 >
                   <option value="">Select Branch</option>
-                  {(branches || []).map((b) => (
-                    <option key={b.id} value={String(b.id)}>
+                  {missingSelection(form.branch, resolvedBranches, view.branchName)}
+                  {resolvedBranches.map((b) => (
+                    <option key={b.id} value={String(b.id)} disabled={b.is_active === false}>
                       {b.name || `Branch #${b.id}`}
                     </option>
                   ))}
                 </select>
               ) : (
-                <p className="text-sm font-bold text-primary">{view.branchName}</p>
+                <p className="text-sm font-bold text-primary">{selectedBranch?.name || opportunity?.branch_details?.name || view.branchName || 'No branch selected'}</p>
               )}
             </div>
 
@@ -484,12 +466,14 @@ const LeadSpecs = ({
                 <div className="space-y-2 relative z-300">
                   <select
                     className={`${inputCls} !py-1 !text-xs !font-bold`}
-                    value={form.assigned_to || ''}
+                    aria-label="Move Manager"
+                    value={getOptionValue(form.assigned_to)}
                     onChange={(e) =>
                       setForm((p) => ({ ...p, assigned_to: e.target.value }))
                     }
                   >
                     <option value="">Unassigned</option>
+                    {missingSelection(form.assigned_to, managerOptions, view.assignedName)}
                     {(managerOptions || []).map((u) => (
                       <option key={u.id} value={String(u.id)}>
                         {getUserDisplayName(u)}
@@ -515,14 +499,16 @@ const LeadSpecs = ({
           {isEditing ? (
             <select
               className={inputCls}
-              value={form.referral_source || ''}
+              aria-label="Lead Source"
+              value={getOptionValue(form.referral_source)}
               onChange={(e) =>
                 setForm((p) => ({ ...p, referral_source: e.target.value }))
               }
             >
               <option value="">Select Lead Source</option>
-              {(referralSources || []).map((source) => (
-                <option key={String(getOptionValue(source))} value={String(getOptionValue(source))}>
+              {missingSelection(form.referral_source, resolvedReferralSources, opportunity?.referral_source_details?.name)}
+              {resolvedReferralSources.map((source) => (
+                <option key={String(getOptionValue(source))} value={String(getOptionValue(source))} disabled={source.is_active === false}>
                   {String(getOptionLabel(source) || getOptionValue(source) || '-')}
                 </option>
               ))}

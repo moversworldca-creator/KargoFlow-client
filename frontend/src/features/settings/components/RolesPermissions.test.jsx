@@ -1,481 +1,264 @@
 import React from 'react';
-import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
+import { screen, waitFor, fireEvent, act, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import RolesPermissions from './RolesPermissions';
-import {
-  computePermissionDiffs,
-  areGrantsEqual,
-  resolvePermissionMeta,
-} from './rolesPermissionsUtils';
+import { computePermissionDiffs, areGrantsEqual, resolvePermissionMeta } from './rolesPermissionsUtils';
 import * as api from '../../../services/api';
+import { authMock, canMock, grant, renderWithProviders, session } from '../userManagement/__tests__/testUtils';
 
-const { mocks, state } = vi.hoisted(() => ({
-  mocks: {
-    showToast: vi.fn(),
-  },
-  state: {
-    canManage: true,
-  },
-}));
+const { mocks } = vi.hoisted(() => ({ mocks: { showToast: vi.fn() } }));
 
 vi.mock('../../../services/api');
-vi.mock('../../../shared/auth/useCan', () => {
-  const fn = () => ({ canAll: () => state.canManage });
-  return { useCan: fn, default: fn };
-});
+vi.mock('../../../shared/auth/useCan', () => ({ default: () => canMock(), useCan: () => canMock() }));
+vi.mock('../../auth/context/AuthContext', () => ({ useAuth: () => authMock() }));
 vi.mock('../../../shared/context/ToastContext', () => {
   const fn = () => ({ showToast: mocks.showToast });
   return { useToast: fn, default: fn };
 });
 
-describe('RolesPermissions Helpers', () => {
-  it('correctly calculates permission diffs for grants, revokes, and scope updates', () => {
-    const current = new Map([
-      ['perm.a', 'company'],
-      ['perm.b', 'branch'],
-      ['perm.c', 'own'],
-    ]);
-
-    const draft = new Map([
-      ['perm.a', 'company'], // unchanged
-      ['perm.b', 'company'], // scope changed
-      ['perm.d', 'branch'],  // newly added
-      // perm.c removed
-    ]);
-
+describe('RolesPermissions helpers', () => {
+  it('calculates permission diffs for grants, revokes and scope changes', () => {
+    const current = new Map([['perm.a', 'company'], ['perm.b', 'branch'], ['perm.c', 'own']]);
+    const draft = new Map([['perm.a', 'company'], ['perm.b', 'company'], ['perm.d', 'branch']]);
     const { toGrant, toRevoke } = computePermissionDiffs(current, draft);
-
-    // toGrant: newly added perm.d, and new scope for perm.b
-    expect(toGrant).toEqual([
-      { permission_key: 'perm.b', scope: 'company' },
-      { permission_key: 'perm.d', scope: 'branch' },
-    ]);
-
-    // toRevoke: removed perm.c, and old scope for perm.b
-    expect(toRevoke).toEqual([
-      { permission_key: 'perm.b', scope: 'branch' },
-      { permission_key: 'perm.c', scope: 'own' },
-    ]);
+    expect(toGrant).toEqual([{ permission_key: 'perm.b', scope: 'company' }, { permission_key: 'perm.d', scope: 'branch' }]);
+    expect(toRevoke).toEqual([{ permission_key: 'perm.b', scope: 'branch' }, { permission_key: 'perm.c', scope: 'own' }]);
   });
 
-  it('checks grant equality correctly', () => {
+  it('checks grant equality', () => {
     const a = new Map([['p1', 'company'], ['p2', 'branch']]);
-    const b = new Map([['p1', 'company'], ['p2', 'branch']]);
-    const c = new Map([['p1', 'company'], ['p2', 'company']]);
-    const d = new Map([['p1', 'company']]);
-
-    expect(areGrantsEqual(a, b)).toBe(true);
-    expect(areGrantsEqual(a, c)).toBe(false);
-    expect(areGrantsEqual(a, d)).toBe(false);
+    expect(areGrantsEqual(a, new Map([['p1', 'company'], ['p2', 'branch']]))).toBe(true);
+    expect(areGrantsEqual(a, new Map([['p1', 'company'], ['p2', 'company']]))).toBe(false);
+    expect(areGrantsEqual(a, new Map([['p1', 'company']]))).toBe(false);
   });
 
-  it('resolves permission meta with allowed scopes fallback', () => {
-    const permWithScopes = {
-      permission_key: 'crm.leads.view',
-      allowed_scopes: ['own', 'branch', 'company'],
-      description: 'Can view leads',
-    };
-    const meta1 = resolvePermissionMeta(permWithScopes);
-    expect(meta1.key).toBe('crm.leads.view');
-    expect(meta1.allowedScopes).toEqual(['own', 'branch', 'company']);
-
-    const permWithoutScopes = {
-      permission_key: 'custom.perm',
-      description: 'Custom permission',
-    };
-    const meta2 = resolvePermissionMeta(permWithoutScopes);
-    expect(meta2.allowedScopes).toEqual(['company']);
-    expect(meta2.module).toBe('Custom');
+  it('resolves readable meta from backend keys, with a company fallback scope', () => {
+    const meta = resolvePermissionMeta({ permission_key: 'leads.view', allowed_scopes: ['company', 'own', 'branch'] });
+    expect(meta.key).toBe('leads.view');
+    expect(meta.allowedScopes).toEqual(['own', 'branch', 'company']);
+    expect(meta.module).toContain('Leads');
+    expect(resolvePermissionMeta({ permission_key: 'custom.perm' }).allowedScopes).toEqual(['company']);
   });
 });
 
-describe('RolesPermissions Component', () => {
-
-  const mockRoles = [
-    {
-      id: 1,
-      name: 'System Administrator',
-      description: 'Default admin role',
-      is_system_role: true,
-      is_active: true,
-    },
-    {
-      id: 2,
-      name: 'Sales Manager',
-      description: 'Handles branch sales',
-      is_system_role: false,
-      is_active: true,
-    },
-    {
-      id: 3,
-      name: 'Legacy Rep',
-      description: 'Archived role',
-      is_system_role: false,
-      is_active: false,
-    },
+describe('RolesPermissions screen', () => {
+  const ROLES = [
+    { id: 1, name: 'Company Admin', description: 'Default admin role', is_system_role: true, is_active: true },
+    { id: 2, name: 'Sales Manager', description: 'Handles branch sales', is_system_role: false, is_active: true },
+    { id: 3, name: 'Legacy Rep', description: 'Archived role', is_system_role: false, is_active: false },
   ];
-
-  const mockPermissions = [
-    {
-      id: 101,
-      permission_key: 'crm.leads.view',
-      description: 'View Leads list',
-      allowed_scopes: ['own', 'branch', 'company'],
-      module: 'Leads',
-    },
-    {
-      id: 102,
-      permission_key: 'crm.leads.create',
-      description: 'Create new leads',
-      allowed_scopes: ['branch', 'company'],
-      module: 'Leads',
-    },
-    {
-      id: 103,
-      permission_key: 'crm.settings.roles.manage',
-      description: 'Manage roles and grants',
-      allowed_scopes: ['company'],
-      module: 'Settings',
-    },
+  const CATALOG = [
+    { id: 101, permission_key: 'leads.view', allowed_scopes: ['own', 'branch', 'company'] },
+    { id: 102, permission_key: 'leads.create', allowed_scopes: ['branch', 'company'] },
+    { id: 103, permission_key: 'rbac_roles.manage', allowed_scopes: ['company'] },
   ];
+  const ROLE2 = [{ permission_key: 'leads.view', scope: 'branch' }];
+  const MANAGER = ['rbac_roles.view', 'rbac_roles.manage', 'rbac_roles.create', 'rbac_permissions.view'];
 
-  const mockRole2Grants = [
-    { permission_key: 'crm.leads.view', scope: 'branch' },
-  ];
+  const pick = async (name) => {
+    // The role list entry (the heading on the right also carries the name).
+    const entry = (await screen.findAllByText(name)).find((el) => el.tagName !== 'H3');
+    fireEvent.click(entry);
+    await waitFor(() => expect(screen.getByText(name, { selector: 'h3' })).toBeInTheDocument());
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    state.canManage = true;
-
-    api.getRoles.mockResolvedValue(mockRoles);
-    api.getPermissions.mockResolvedValue(mockPermissions);
-    api.getRolePermissions.mockImplementation((roleId) => {
-      if (roleId === 2) return Promise.resolve(mockRole2Grants);
-      if (roleId === 1) {
-        return Promise.resolve([
-          { permission_key: 'crm.leads.view', scope: 'company' },
-          { permission_key: 'crm.leads.create', scope: 'company' },
-          { permission_key: 'crm.settings.roles.manage', scope: 'company' },
-        ]);
-      }
-      return Promise.resolve([]);
-    });
-
+    grant(...MANAGER);
+    session.user = { id: 1, branch_details: [] };
+    api.getRoles.mockResolvedValue(ROLES);
+    api.getPermissions.mockResolvedValue(CATALOG);
+    api.getRolePermissions.mockImplementation((id) => Promise.resolve(
+      id === 2 ? ROLE2 : id === 1 ? CATALOG.map((p) => ({ permission_key: p.permission_key, scope: 'company' })) : [],
+    ));
+    api.getUsers.mockResolvedValue([]);
+    api.getBranches.mockResolvedValue([]);
+    api.getEntitlementSnapshot.mockResolvedValue({ access_mode: 'full', features: {} });
     api.grantRolePermission.mockResolvedValue({ id: 99 });
     api.revokeRolePermission.mockResolvedValue({});
-    api.createRole.mockResolvedValue({ id: 4, name: 'New Role', is_system_role: false, is_active: true });
-    api.updateRole.mockResolvedValue({ id: 2, name: 'Updated Sales Manager' });
+    api.createRole.mockResolvedValue({ id: 4, name: 'Operations Lead', is_system_role: false, is_active: true });
+    api.updateRole.mockResolvedValue({ id: 2, name: 'Sales Manager' });
     api.deactivateRole.mockResolvedValue({});
     api.reactivateRole.mockResolvedValue({});
   });
 
-  it('loads roles, catalog, and selected role grants', async () => {
-    render(<RolesPermissions />);
-
-    // Waits for initial fetch
-    const adminElements = await screen.findAllByText('System Administrator');
-    expect(adminElements.length).toBeGreaterThanOrEqual(1);
+  it('loads roles and the first role; a system role is read-only', async () => {
+    renderWithProviders(<RolesPermissions />);
+    expect(await screen.findByText('System Role (Read-Only)')).toBeInTheDocument();
     expect(screen.getByText('Sales Manager')).toBeInTheDocument();
     expect(screen.getByText('Legacy Rep')).toBeInTheDocument();
-
-    // System Administrator is first role and selected by default
-    await waitFor(() => {
-      expect(api.getRolePermissions).toHaveBeenCalledWith(1);
-    });
-
-    // Check system badge
-    expect(screen.getByText('System Role (Read-Only)')).toBeInTheDocument();
+    await waitFor(() => expect(api.getRolePermissions).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(screen.getAllByRole('checkbox', { name: /Leads/ }).length).toBeGreaterThan(0));
+    for (const box of screen.getAllByRole('checkbox', { name: /Leads|roles/i })) expect(box).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Edit Details/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Deactivate Role/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/one role per branch/i)).toBeInTheDocument();
   });
 
-  it('selects a custom role and displays scope selector and toggle states', async () => {
-    render(<RolesPermissions />);
-
-    expect(await screen.findByText('Sales Manager')).toBeInTheDocument();
-
-    // Click on Sales Manager role
-    fireEvent.click(screen.getByText('Sales Manager'));
-
-    await waitFor(() => {
-      expect(api.getRolePermissions).toHaveBeenCalledWith(2);
-    });
-
-    expect(screen.getByText('Custom Role')).toBeInTheDocument();
-
-    // crm.leads.view should be granted with scope 'branch'
-    const viewLeadsToggle = screen.getByLabelText(/Toggle permission View Leads/i);
-    expect(viewLeadsToggle).toBeChecked();
-
-    const scopeSelect = screen.getByLabelText(/Scope selector for View Leads/i);
-    expect(scopeSelect).toHaveValue('branch');
-    expect(scopeSelect).not.toBeDisabled();
+  it('shows a custom role\'s grants with their scope', async () => {
+    renderWithProviders(<RolesPermissions />);
+    await pick('Sales Manager');
+    const view = await screen.findByRole('checkbox', { name: 'Leads → View' });
+    expect(view).toBeChecked();
+    expect(screen.getByRole('combobox', { name: 'Scope for Leads → View' })).toHaveValue('branch');
+    expect(screen.getByRole('checkbox', { name: 'Leads → Create' })).not.toBeChecked();
   });
 
-  it('changes permission scope and saves exact diffs successfully', async () => {
-    render(<RolesPermissions />);
-
-    expect(await screen.findByText('Sales Manager')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Sales Manager'));
-
-    await waitFor(() => expect(api.getRolePermissions).toHaveBeenCalledWith(2));
-
-    const scopeSelect = await screen.findByLabelText(/Scope selector for View Leads/i);
-    // Change scope from branch to company
-    fireEvent.change(scopeSelect, { target: { value: 'company' } });
-
-    // Also grant crm.leads.create (currently not granted)
-    const createToggle = screen.getByLabelText(/Toggle permission Create Leads/i);
-    expect(createToggle).not.toBeChecked();
-    fireEvent.click(createToggle);
-    expect(createToggle).toBeChecked();
-
-    // Dirty state banner should appear
-    expect(screen.getByText(/You have unsaved changes to this role/i)).toBeInTheDocument();
-
-    // Click Save Changes
-    const saveButton = screen.getByRole('button', { name: /Save Changes/i });
-    fireEvent.click(saveButton);
-
-    // Verify diffs:
-    // 1. revoke old scope for leads.view: { permission_key: 'crm.leads.view', scope: 'branch' }
-    // 2. grant new scope for leads.view: { permission_key: 'crm.leads.view', scope: 'company' }
-    // 3. grant new leads.create: { permission_key: 'crm.leads.create', scope: 'company' }
+  it('saves exactly the changed grants (scope change = revoke old + grant new)', async () => {
+    renderWithProviders(<RolesPermissions />);
+    await pick('Sales Manager');
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Scope for Leads → View' }), { target: { value: 'company' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Leads → Create' }));
+    expect(screen.getByText(/unsaved changes to this role/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
     await waitFor(() => {
-      expect(api.revokeRolePermission).toHaveBeenCalledWith(2, {
-        permission_key: 'crm.leads.view',
-        scope: 'branch',
-      });
-      expect(api.grantRolePermission).toHaveBeenCalledWith(2, {
-        permission_key: 'crm.leads.view',
-        scope: 'company',
-      });
-      expect(api.grantRolePermission).toHaveBeenCalledWith(2, {
-        permission_key: 'crm.leads.create',
-        scope: 'company',
-      });
+      expect(api.revokeRolePermission).toHaveBeenCalledWith(2, { permission_key: 'leads.view', scope: 'branch' });
+      expect(api.grantRolePermission).toHaveBeenCalledWith(2, { permission_key: 'leads.view', scope: 'company' });
+      expect(api.grantRolePermission).toHaveBeenCalledWith(2, expect.objectContaining({ permission_key: 'leads.create' }));
     });
-
     expect(mocks.showToast).toHaveBeenCalledWith('Permissions updated successfully.', 'success');
   });
 
-  it('surfaces error banner on partial failure and does not claim success', async () => {
-    api.grantRolePermission.mockRejectedValueOnce(new Error('Permission quota exceeded'));
-
-    render(<RolesPermissions />);
-    fireEvent.click(await screen.findByText('Sales Manager'));
-    await waitFor(() => expect(api.getRolePermissions).toHaveBeenCalledWith(2));
-
-    // Grant crm.leads.create
-    const createToggle = screen.getByLabelText(/Toggle permission Create Leads/i);
-    fireEvent.click(createToggle);
-
-    // Click Save Changes
+  it('shows the backend detail on a partial failure and never claims success', async () => {
+    api.grantRolePermission.mockRejectedValueOnce({ response: { status: 403, data: { error: 'access_denied', detail: 'You can only grant permissions you hold' } } });
+    renderWithProviders(<RolesPermissions />);
+    await pick('Sales Manager');
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Leads → Create' }));
     fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
-
-    // Should surface partial failure and reload grants
-    await waitFor(() => {
-      expect(screen.getByText(/Error Saving Permissions/i)).toBeInTheDocument();
-      expect(screen.getByText(/Permission quota exceeded/i)).toBeInTheDocument();
-    });
-
-    expect(mocks.showToast).toHaveBeenCalledWith(
-      'Partial failure saving permissions. Reloaded latest grants.',
-      'error',
-    );
-    // Should NOT have called toast with success
-    expect(mocks.showToast).not.toHaveBeenCalledWith(
-      'Permissions updated successfully.',
-      'success',
-    );
+    expect(await screen.findByText(/Error Saving Permissions/i)).toBeInTheDocument();
+    expect(screen.getByText(/You can only grant permissions you hold/)).toBeInTheDocument();
+    expect(mocks.showToast).toHaveBeenCalledWith('Partial failure saving permissions. Reloaded latest grants.', 'error');
+    expect(mocks.showToast).not.toHaveBeenCalledWith('Permissions updated successfully.', 'success');
   });
 
-  it('disables mutation controls for system roles', async () => {
-    render(<RolesPermissions />);
-
-    // System Administrator is selected
-    expect(await screen.findByText('System Role (Read-Only)')).toBeInTheDocument();
-
-    // Checkboxes should be disabled
-    const checkboxes = screen.getAllByRole('checkbox');
-    checkboxes.forEach((cb) => {
-      expect(cb).toBeDisabled();
-    });
-
-    // Save Changes button or Edit Details should not be present
-    expect(screen.queryByRole('button', { name: /Edit Details/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Deactivate Role/i })).not.toBeInTheDocument();
-  });
-
-  it('disables mutation controls when user lacks rbac manage permissions', async () => {
-    state.canManage = false;
-    render(<RolesPermissions />);
-
+  it('without rbac_roles.manage everything is read-only; New Role needs rbac_roles.create', async () => {
+    grant('rbac_roles.view', 'rbac_permissions.view', 'rbac_roles.create');
+    const { unmount } = renderWithProviders(<RolesPermissions />);
     expect(await screen.findByText('Read-only access')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /New Role/i })).toBeInTheDocument();
+    await pick('Sales Manager');
+    expect(await screen.findByRole('checkbox', { name: 'Leads → View' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Deactivate Role/i })).not.toBeInTheDocument();
+    unmount();
+    grant('rbac_roles.view', 'rbac_permissions.view', 'rbac_roles.manage');
+    renderWithProviders(<RolesPermissions />);
+    await screen.findByText('Sales Manager');
     expect(screen.queryByRole('button', { name: /New Role/i })).not.toBeInTheDocument();
-
-    const checkboxes = screen.getAllByRole('checkbox');
-    checkboxes.forEach((cb) => {
-      expect(cb).toBeDisabled();
-    });
   });
 
-  it('supports role creation modal and updates role list', async () => {
-    render(<RolesPermissions />);
+  it('says when the plan does not include custom roles, and hides New Role', async () => {
+    grant(...MANAGER, 'entitlements.view');
+    api.getEntitlementSnapshot.mockResolvedValue({ access_mode: 'full', features: { 'crm.custom_roles': 'read' } });
+    renderWithProviders(<RolesPermissions />);
+    expect(await screen.findByText(/plan does not include custom roles/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /New Role/i })).not.toBeInTheDocument();
+  });
 
-    const newRoleBtn = await screen.findByRole('button', { name: /New Role/i });
-    fireEvent.click(newRoleBtn);
+  it('a read-only subscription blocks every change', async () => {
+    grant(...MANAGER, 'entitlements.view');
+    api.getEntitlementSnapshot.mockResolvedValue({ access_mode: 'read_only', features: {} });
+    renderWithProviders(<RolesPermissions />);
+    expect(await screen.findByText(/subscription is read-only/i)).toBeInTheDocument();
+    await pick('Sales Manager');
+    expect(await screen.findByRole('checkbox', { name: 'Leads → View' })).toBeDisabled();
+  });
 
-    expect(screen.getByRole('dialog', { name: /Create Role/i })).toBeInTheDocument();
-
-    const nameInput = screen.getByLabelText(/Role Name/i);
-    fireEvent.change(nameInput, { target: { value: 'Operations Lead' } });
-
-    const descInput = screen.getByLabelText(/Description/i);
-    fireEvent.change(descInput, { target: { value: 'Oversees logistics' } });
-
-    const submitBtn = screen.getByRole('button', { name: /^Create Role$/i });
-    fireEvent.click(submitBtn);
-
-    await waitFor(() => {
-      expect(api.createRole).toHaveBeenCalledWith({
-        name: 'Operations Lead',
-        description: 'Oversees logistics',
-      });
-    });
-
+  it('creates a role', async () => {
+    renderWithProviders(<RolesPermissions />);
+    fireEvent.click(await screen.findByRole('button', { name: /New Role/i }));
+    fireEvent.change(screen.getByLabelText(/Role Name/i), { target: { value: 'Operations Lead' } });
+    fireEvent.change(screen.getByLabelText(/Description/i), { target: { value: 'Oversees logistics' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Create Role$/i }));
+    await waitFor(() => expect(api.createRole).toHaveBeenCalledWith({ name: 'Operations Lead', description: 'Oversees logistics' }));
     expect(mocks.showToast).toHaveBeenCalledWith('Role "Operations Lead" created.', 'success');
   });
 
-  it('supports role deactivation and reactivation confirmation dialogs', async () => {
-    render(<RolesPermissions />);
-
-    // Select Sales Manager
-    fireEvent.click(await screen.findByText('Sales Manager'));
-    await waitFor(() => expect(api.getRolePermissions).toHaveBeenCalledWith(2));
-
-    // Click Deactivate Role button
-    const deactivateBtn = screen.getByRole('button', { name: /Deactivate Role/i });
-    fireEvent.click(deactivateBtn);
-
-    expect(screen.getByRole('dialog', { name: /Deactivate Role/i })).toBeInTheDocument();
-    expect(screen.getByText(/Are you sure you want to deactivate/i)).toBeInTheDocument();
-
-    // Confirm deactivation
-    const confirmBtn = screen.getByRole('button', { name: /^Deactivate$/i });
-    fireEvent.click(confirmBtn);
-
-    await waitFor(() => {
-      expect(api.deactivateRole).toHaveBeenCalledWith(2);
-    });
-    expect(mocks.showToast).toHaveBeenCalledWith('Role "Sales Manager" deactivated.', 'success');
-
-    // Now select Legacy Rep (which is inactive)
-    fireEvent.click(screen.getByText('Legacy Rep'));
-    await waitFor(() => expect(api.getRolePermissions).toHaveBeenCalledWith(3));
-
-    const reactivateBtn = screen.getByRole('button', { name: /Reactivate Role/i });
-    fireEvent.click(reactivateBtn);
-
-    expect(screen.getByRole('dialog', { name: /Reactivate Role/i })).toBeInTheDocument();
-    const confirmReactivateBtn = screen.getByRole('button', { name: /^Reactivate$/i });
-    fireEvent.click(confirmReactivateBtn);
-
-    await waitFor(() => {
-      expect(api.reactivateRole).toHaveBeenCalledWith(3);
-    });
-    expect(mocks.showToast).toHaveBeenCalledWith('Role "Legacy Rep" reactivated.', 'success');
+  it('a refused role creation explains permission and plan', async () => {
+    api.createRole.mockRejectedValue({ response: { status: 403, data: { error: 'access_denied', detail: 'This operation is not permitted.' } } });
+    renderWithProviders(<RolesPermissions />);
+    fireEvent.click(await screen.findByRole('button', { name: /New Role/i }));
+    fireEvent.change(screen.getByLabelText(/Role Name/i), { target: { value: 'X role' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Create Role$/i }));
+    await waitFor(() => expect(mocks.showToast).toHaveBeenCalledWith(expect.stringMatching(/rbac_roles\.create.*custom roles/), 'error'));
   });
 
-  it('exposes a retry button when loading grants fails', async () => {
-    api.getRolePermissions.mockImplementation((roleId) => {
-      if (roleId === 2) return Promise.reject(new Error('Network error'));
-      return Promise.resolve([]);
-    });
-
-    render(<RolesPermissions />);
-
-    fireEvent.click(await screen.findByText('Sales Manager'));
-
-    expect(await screen.findByText(/Could not load permissions for this role/i)).toBeInTheDocument();
-    const retryBtn = screen.getByRole('button', { name: /Retry/i });
-
-    api.getRolePermissions.mockImplementation((roleId) => {
-      if (roleId === 2) return Promise.resolve(mockRole2Grants);
-      return Promise.resolve([]);
-    });
-    fireEvent.click(retryBtn);
-
-    await waitFor(() => {
-      expect(api.getRolePermissions).toHaveBeenCalledTimes(3);
-    });
+  it('deactivates and reactivates after confirmation', async () => {
+    renderWithProviders(<RolesPermissions />);
+    await pick('Sales Manager');
+    fireEvent.click(screen.getByRole('button', { name: /Deactivate Role/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^Deactivate$/i }));
+    await waitFor(() => expect(api.deactivateRole).toHaveBeenCalledWith(2));
+    await pick('Legacy Rep');
+    fireEvent.click(screen.getByRole('button', { name: /Reactivate Role/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^Reactivate$/i }));
+    await waitFor(() => expect(api.reactivateRole).toHaveBeenCalledWith(3));
   });
 
-  it('drops stale responses when user rapidly switches roles', async () => {
+  it('offers retry when a role\'s grants fail to load', async () => {
+    api.getRolePermissions.mockImplementation((id) => (id === 2 ? Promise.reject(new Error('Network error')) : Promise.resolve([])));
+    renderWithProviders(<RolesPermissions />);
+    await pick('Sales Manager');
+    const retry = await screen.findByRole('button', { name: /Retry/i });
+    api.getRolePermissions.mockImplementation((id) => Promise.resolve(id === 2 ? ROLE2 : []));
+    fireEvent.click(retry);
+    expect(await screen.findByRole('checkbox', { name: 'Leads → View' })).toBeChecked();
+  });
+
+  it('ignores a slow response for a role the user already left', async () => {
     let resolveRole2;
-    api.getRolePermissions.mockImplementation((roleId) => {
-      if (roleId === 2) {
-        return new Promise((resolve) => {
-          resolveRole2 = resolve;
-        });
-      }
-      if (roleId === 3) {
-        return Promise.resolve([{ permission_key: 'crm.settings.roles.manage', scope: 'company' }]);
-      }
+    api.getRolePermissions.mockImplementation((id) => {
+      if (id === 2) return new Promise((resolve) => { resolveRole2 = resolve; });
+      if (id === 3) return Promise.resolve([{ permission_key: 'rbac_roles.manage', scope: 'company' }]);
       return Promise.resolve([]);
     });
-
-    render(<RolesPermissions />);
+    renderWithProviders(<RolesPermissions />);
     await screen.findByText('Sales Manager');
-
-    // Click Sales Manager (Role 2) - its promise is pending
     fireEvent.click(screen.getByText('Sales Manager'));
-
-    // Rapidly click Legacy Rep (Role 3) - its promise resolves immediately
-    fireEvent.click(screen.getByText('Legacy Rep'));
-    await waitFor(() => {
-      expect(screen.getByText('Legacy Rep', { selector: 'h3' })).toBeInTheDocument();
-    });
-
-    // Now resolve Role 2's slow request
-    await act(async () => {
-      resolveRole2([{ permission_key: 'crm.leads.view', scope: 'branch' }]);
-    });
-
-    // Role 3's grant (crm.settings.roles.manage) should remain active and not get replaced by Role 2
-    await waitFor(() => {
-      const toggle = screen.getByLabelText(/Toggle permission Manage roles and grants/i);
-      expect(toggle).toBeChecked();
-    });
+    await pick('Legacy Rep');
+    await act(async () => { resolveRole2([{ permission_key: 'leads.view', scope: 'branch' }]); });
+    expect(await screen.findByRole('checkbox', { name: /Roles.*Manage|Manage/ })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Leads → View' })).not.toBeChecked();
   });
 
-  it('prompts confirmation when switching roles with unsaved changes', async () => {
-    render(<RolesPermissions />);
-
-    fireEvent.click(await screen.findByText('Sales Manager'));
-    await waitFor(() => expect(api.getRolePermissions).toHaveBeenCalledWith(2));
-
-    // Toggle crm.leads.create to make state dirty
-    const createToggle = screen.getByLabelText(/Toggle permission Create Leads/i);
-    fireEvent.click(createToggle);
-    expect(screen.getByText(/You have unsaved changes/i)).toBeInTheDocument();
-
-    // Attempt to switch to Legacy Rep
+  it('asks before discarding unsaved changes when switching roles', async () => {
+    renderWithProviders(<RolesPermissions />);
+    await pick('Sales Manager');
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Leads → Create' }));
     fireEvent.click(screen.getByText('Legacy Rep'));
-
-    // Confirmation dialog should open
-    expect(screen.getByRole('dialog', { name: /Unsaved Changes/i })).toBeInTheDocument();
-
-    // Click Keep Editing
-    fireEvent.click(screen.getByRole('button', { name: /Keep Editing/i }));
-    expect(screen.queryByRole('dialog', { name: /Unsaved Changes/i })).not.toBeInTheDocument();
+    const dialog = screen.getByRole('dialog', { name: /Unsaved Changes/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: /Keep Editing/i }));
     expect(screen.getByText('Sales Manager', { selector: 'h3' })).toBeInTheDocument();
-
-    // Attempt switch again and click Discard & Switch
     fireEvent.click(screen.getByText('Legacy Rep'));
     fireEvent.click(screen.getByRole('button', { name: /Discard & Switch/i }));
+    await waitFor(() => expect(screen.getByText('Legacy Rep', { selector: 'h3' })).toBeInTheDocument());
+  });
 
-    // Now switched to Legacy Rep
-    await waitFor(() => {
-      expect(screen.getByText('Legacy Rep', { selector: 'h3' })).toBeInTheDocument();
-    });
+  it('People tab: gives the role to members of a chosen branch', async () => {
+    grant(...MANAGER, 'users.view', 'users.assign_role', 'branches.view');
+    api.getBranches.mockResolvedValue([{ id: 3, name: 'Toronto', is_active: true }, { id: 4, name: 'Ottawa', is_active: true }]);
+    api.getUsers.mockResolvedValue([
+      { id: 21, first_name: 'Ada', last_name: 'Active', email: 'ada@x.test', is_active: true,
+        branch_details: [{ branch_id: 3, name: 'Toronto', is_active: true }],
+        role_details: [{ id: 2, name: 'Sales Manager', branch_id: 3, branch_name: 'Toronto' }] },
+      { id: 22, first_name: 'Ben', last_name: 'Branch', email: 'ben@x.test', is_active: true,
+        branch_details: [{ branch_id: 3, name: 'Toronto', is_active: true }, { branch_id: 4, name: 'Ottawa', is_active: true }],
+        role_details: [{ id: 9, name: 'Dispatcher', branch_id: 4, branch_name: 'Ottawa' }] },
+    ]);
+    api.assignUserRole.mockResolvedValue(undefined);
+    api.unassignUserRole.mockResolvedValue(undefined);
+    renderWithProviders(<RolesPermissions />);
+    await pick('Sales Manager');
+    fireEvent.click(screen.getByRole('tab', { name: 'People' }));
+    expect(await screen.findByText('1 person has this role')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Branch for this role' }), { target: { value: '4' } });
+    // Only Ben is a member of Ottawa; giving it there replaces his Dispatcher role.
+    expect(screen.getByText('replaces Dispatcher here')).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /Ada Active/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: /Ben Branch/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Give role to 1 person/i }));
+    await waitFor(() => expect(api.assignUserRole).toHaveBeenCalledWith({ user_id: 22, role_id: 2, branch_id: 4 }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Sales Manager from Ada Active in Toronto' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(api.unassignUserRole).toHaveBeenCalledWith({ user_id: 21, role_id: 2, branch_id: 3 }));
   });
 });

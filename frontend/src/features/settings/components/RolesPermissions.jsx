@@ -27,15 +27,19 @@ import {
   deactivateRole,
   reactivateRole,
 } from '../../../services/api';
-import useCan from '../../../shared/auth/useCan';
 import { useToast } from '../../../shared/context/ToastContext';
-import { PERMISSIONS } from '../../../shared/permissions/registry';
+import { useUserAdminAccess } from '../userManagement/permissions';
+import PermissionMatrix from '../userManagement/PermissionMatrix';
+import { defaultScope } from '../userManagement/matrixModel';
+import RolePeople from '../userManagement/RolePeople';
+import { describeError } from '../userManagement/errors';
+import { featureMode, isReadOnlyMode, useEntitlements, useRefreshAfterChange } from '../userManagement/queries';
 import {
   SCOPE_LABELS,
   normalizeListResponse,
-  resolvePermissionMeta,
   computePermissionDiffs,
   areGrantsEqual,
+  SCOPE_HELP,
 } from './rolesPermissionsUtils';
 
 // Modal: Create or Edit Role Name & Description
@@ -227,13 +231,19 @@ const ConfirmDiscardModal = ({ roleName, onConfirm, onCancel }) => (
 
 // Main Component
 const RolesPermissions = () => {
-  const { canAll } = useCan();
   const { showToast } = useToast();
+  const access = useUserAdminAccess();
+  const refreshAfterChange = useRefreshAfterChange();
+  const entitlements = useEntitlements(access.viewEntitlements).data;
+  const readOnly = isReadOnlyMode(entitlements);
+  // null when the plan cannot be read (no entitlements.view): the server's answer decides.
+  const customRolesMode = featureMode(entitlements, 'crm.custom_roles');
+  const customRolesEntitled = customRolesMode === null ? null : customRolesMode === 'write';
 
-  const canManageRoles =
-    canAll([PERMISSIONS.ROLE_EDIT]) ||
-    canAll(['rbac_roles.manage']) ||
-    canAll(['crm.settings.roles.manage']);
+  // Editing a role (name, active state, permission grants) is rbac_roles.manage;
+  // creating one is rbac_roles.create. Neither implies the other.
+  const canManageRoles = access.manageRoles && !readOnly;
+  const canCreateRoles = access.createRoles && !readOnly && customRolesEntitled !== false;
 
   // Data state
   const [roles, setRoles] = useState([]);
@@ -254,7 +264,7 @@ const RolesPermissions = () => {
 
   // Search & filter states
   const [roleSearch, setRoleSearch] = useState('');
-  const [permSearch, setPermSearch] = useState('');
+  const [roleTab, setRoleTab] = useState('permissions');
 
   // Modals state
   const [showRoleModal, setShowRoleModal] = useState(false);
@@ -269,6 +279,8 @@ const RolesPermissions = () => {
 
   // Request race guard for role grants loading
   const grantRequestRef = useRef(0);
+  // Scopes held besides the one shown, per permission key (see loadRoleGrants).
+  const extraScopesRef = useRef(new Map());
 
   // Initial load
   const loadInitialData = useCallback(async () => {
@@ -288,8 +300,7 @@ const RolesPermissions = () => {
         return roleRows.length > 0 ? roleRows[0].id : null;
       });
     } catch (err) {
-      console.error('Failed to load roles and permissions:', err);
-      setInitError('Failed to load roles or permissions catalog. Please try again.');
+      setInitError(describeError(err, 'Failed to load roles or permissions catalog. Please try again.').message);
     } finally {
       setIsLoadingInit(false);
     }
@@ -322,21 +333,31 @@ const RolesPermissions = () => {
       if (reqId !== grantRequestRef.current) return;
 
       const items = normalizeListResponse(res);
-      const grantsMap = new Map();
+      // A role may hold one permission at several scopes (one row each). The
+      // editor shows the broadest; the others are remembered so that changing
+      // or removing the permission revokes every row, not just one.
+      const rank = { own: 0, assigned: 1, branch: 2, company: 3 };
+      const scopesByKey = new Map();
       for (const item of items) {
         const key = item.permission_key || item.codename || item;
-        const scope = item.scope || 'company';
-        if (key) {
-          grantsMap.set(key, scope);
-        }
+        if (!key) continue;
+        if (!scopesByKey.has(key)) scopesByKey.set(key, []);
+        scopesByKey.get(key).push(item.scope || 'company');
       }
+      const grantsMap = new Map();
+      const extra = new Map();
+      for (const [key, scopes] of scopesByKey) {
+        const sorted = [...scopes].sort((a, b) => (rank[b] ?? 0) - (rank[a] ?? 0));
+        grantsMap.set(key, sorted[0]);
+        if (sorted.length > 1) extra.set(key, sorted.slice(1));
+      }
+      extraScopesRef.current = extra;
       setCurrentGrants(grantsMap);
       setDraftGrants(new Map(grantsMap));
       setGrantsError(null);
     } catch (err) {
       if (reqId !== grantRequestRef.current) return;
-      console.error('Failed to load role permissions:', err);
-      setGrantsError('Could not load permissions for this role.');
+      setGrantsError(describeError(err, 'Could not load permissions for this role.').message);
     } finally {
       if (reqId === grantRequestRef.current) {
         setIsLoadingGrants(false);
@@ -413,23 +434,15 @@ const RolesPermissions = () => {
     });
   };
 
-  const handleSelectAllInModule = (modulePermissions, shouldGrant) => {
+  // Page presets from the matrix: none / view only / everything on that page.
+  const handleSetPage = (items, level) => {
     if (!canManageRoles || selectedRole?.is_system_role) return;
-
     setDraftGrants((prev) => {
       const next = new Map(prev);
-      for (const p of modulePermissions) {
-        const meta = resolvePermissionMeta(p);
-        if (shouldGrant) {
-          if (!next.has(meta.key)) {
-            const defaultScope = meta.allowedScopes.includes('company')
-              ? 'company'
-              : meta.allowedScopes[0] || 'company';
-            next.set(meta.key, defaultScope);
-          }
-        } else {
-          next.delete(meta.key);
-        }
+      for (const item of items) {
+        const wanted = level === 'all' || (level === 'view' && item.action === 'view');
+        if (!wanted) next.delete(item.permission_key);
+        else if (!next.has(item.permission_key)) next.set(item.permission_key, defaultScope(item.scopes));
       }
       return next;
     });
@@ -447,6 +460,12 @@ const RolesPermissions = () => {
 
     const { toGrant, toRevoke } = computePermissionDiffs(currentGrants, draftGrants);
     if (toGrant.length === 0 && toRevoke.length === 0) return;
+    // A changed or removed permission loses all of its rows on this role.
+    for (const key of new Set(toRevoke.map((item) => item.permission_key))) {
+      for (const scope of extraScopesRef.current.get(key) || []) {
+        if (!(draftGrants.get(key) === scope)) toRevoke.push({ permission_key: key, scope });
+      }
+    }
 
     setIsSavingGrants(true);
     setSaveError(null);
@@ -465,7 +484,7 @@ const RolesPermissions = () => {
         failures.push({
           type: op.type,
           item: op.item,
-          error: res.reason?.response?.data?.message || res.reason?.message || 'Server error',
+          error: describeError(res.reason, 'Server error').message,
         });
       }
     });
@@ -473,6 +492,7 @@ const RolesPermissions = () => {
     if (failures.length === 0) {
       showToast('Permissions updated successfully.', 'success');
       await loadRoleGrants(selectedRoleId);
+      await refreshAfterChange();
     } else {
       console.error('Some permission operations failed:', failures);
       const detail = failures.map((f) => `${f.type} ${f.item.permission_key}: ${f.error}`).join('; ');
@@ -480,6 +500,7 @@ const RolesPermissions = () => {
       showToast('Partial failure saving permissions. Reloaded latest grants.', 'error');
       // Reload grants to reflect actual server state
       await loadRoleGrants(selectedRoleId);
+      await refreshAfterChange();
     }
 
     setIsSavingGrants(false);
@@ -507,10 +528,15 @@ const RolesPermissions = () => {
       }
       setShowRoleModal(false);
       setRoleDraft(null);
+      await refreshAfterChange();
     } catch (err) {
-      console.error('Failed to save role:', err);
-      const msg = err.response?.data?.message || err.message || 'Failed to save role.';
-      showToast(msg, 'error');
+      const described = describeError(err, 'Failed to save role.');
+      const creatingDenied = !roleDraft?.id && described.kind === 'denied';
+      // The server reports a missing custom-roles plan feature and a missing
+      // permission the same way; say so instead of guessing.
+      showToast(creatingDenied
+        ? `${described.message} Creating roles needs the rbac_roles.create permission and a plan that includes custom roles.`
+        : described.message, 'error');
     } finally {
       setIsSavingRole(false);
     }
@@ -536,10 +562,9 @@ const RolesPermissions = () => {
 
       setShowDeactivateModal(false);
       setRoleToToggleActive(null);
+      await refreshAfterChange();
     } catch (err) {
-      console.error('Failed to update role active status:', err);
-      const msg = err.response?.data?.message || err.message || 'Action failed.';
-      showToast(msg, 'error');
+      showToast(describeError(err, 'Action failed.').message, 'error');
     } finally {
       setIsTogglingActive(false);
     }
@@ -556,29 +581,6 @@ const RolesPermissions = () => {
     );
   }, [roles, roleSearch]);
 
-  // Grouped Permissions
-  const groupedPermissions = useMemo(() => {
-    const q = permSearch.trim().toLowerCase();
-    const filtered = q
-      ? permissionsCatalog.filter((p) => {
-          const key = String(p.permission_key || p.codename || '').toLowerCase();
-          const label = String(p.label || p.name || p.description || '').toLowerCase();
-          const desc = String(p.description || '').toLowerCase();
-          return key.includes(q) || label.includes(q) || desc.includes(q);
-        })
-      : permissionsCatalog;
-
-    const moduleMap = new Map();
-    for (const p of filtered) {
-      const meta = resolvePermissionMeta(p);
-      if (!moduleMap.has(meta.module)) {
-        moduleMap.set(meta.module, { module: meta.module, permissions: [] });
-      }
-      moduleMap.get(meta.module).permissions.push(p);
-    }
-
-    return Array.from(moduleMap.values()).sort((a, b) => a.module.localeCompare(b.module));
-  }, [permissionsCatalog, permSearch]);
 
   if (isLoadingInit) {
     return (
@@ -617,7 +619,7 @@ const RolesPermissions = () => {
           <div>
             <h2 className="text-base font-bold text-heading">Roles &amp; Permissions</h2>
             <p className="text-xs text-muted">
-              Roles are company-wide. Access boundaries are controlled per permission grant via scopes (Own, Assigned, Branch, Company).
+              People get one role per branch, and a role acts only inside that branch. Scopes on each grant (Own, Assigned, Branch) narrow it further; Company scope only reaches past one branch for the system Company Admin.
             </p>
           </div>
         </div>
@@ -643,7 +645,7 @@ const RolesPermissions = () => {
                 </span>
               </div>
 
-              {canManageRoles && (
+              {canCreateRoles && (
                 <button
                   type="button"
                   onClick={() => {
@@ -657,6 +659,19 @@ const RolesPermissions = () => {
                 </button>
               )}
             </div>
+
+            {access.createRoles && customRolesEntitled === false && (
+              <p role="note" className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-900">
+                <Lock size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+                Your plan does not include custom roles. System roles can still be assigned to people.
+              </p>
+            )}
+            {readOnly && (
+              <p role="note" className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-900">
+                <Lock size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+                The subscription is read-only: roles and grants cannot be changed.
+              </p>
+            )}
 
             {/* Role Search */}
             <div className="relative">
@@ -890,166 +905,39 @@ const RolesPermissions = () => {
                 </div>
               )}
 
-              {/* Permissions Search & Controls */}
-              <div className="flex items-center justify-between gap-3">
-                <div className="relative flex-1 max-w-sm">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={15} />
-                  <input
-                    aria-label="Search permissions"
-                    value={permSearch}
-                    onChange={(e) => setPermSearch(e.target.value)}
-                    placeholder="Search permissions by label or key..."
-                    className="w-full pl-9 pr-3 py-2 bg-subtle border border-border rounded-xl text-xs text-body focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-                  />
-                </div>
-
-                <div className="text-xs text-muted font-medium">
-                  Total Granted: <span className="font-bold text-heading">{draftGrants.size}</span>
-                </div>
+              {/* Permissions | People */}
+              <div role="tablist" aria-label="Role sections" className="flex gap-1 border-b border-border">
+                {[['permissions', `Permissions (${draftGrants.size})`], ['people', 'People']].map(([id, label]) => (
+                  <button key={id} type="button" role="tab" aria-selected={roleTab === id} onClick={() => setRoleTab(id)}
+                    className={`-mb-px border-b-2 px-3 py-2 text-xs font-semibold ${roleTab === id ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-heading'}`}>
+                    {label}
+                  </button>
+                ))}
               </div>
 
-              {/* Grants Loading Skeleton/Spinner */}
-              {isLoadingGrants ? (
+              {roleTab === 'people' ? (
+                <RolePeople role={selectedRole} readOnly={readOnly} />
+              ) : isLoadingGrants ? (
                 <div className="flex h-56 items-center justify-center">
                   <Loader2 className="animate-spin text-primary" size={28} />
                 </div>
               ) : (
-                /* Grouped Matrix */
-                <div className="space-y-4 max-h-[calc(100vh-370px)] overflow-y-auto pr-1">
-                  {groupedPermissions.map((group) => {
-                    const groupPerms = group.permissions;
-                    const grantedInGroup = groupPerms.filter((p) => {
-                      const meta = resolvePermissionMeta(p);
-                      return draftGrants.has(meta.key);
-                    });
-                    const isAllGranted = grantedInGroup.length === groupPerms.length && groupPerms.length > 0;
-                    const isSystemOrDisabled = selectedRole.is_system_role || !canManageRoles;
-
-                    return (
-                      <div
-                        key={group.module}
-                        className="border border-border rounded-xl bg-subtle/30 overflow-hidden"
-                      >
-                        {/* Module Group Header */}
-                        <div className="px-4 py-2.5 bg-subtle/70 border-b border-border flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold uppercase tracking-wider text-heading">
-                              {group.module}
-                            </span>
-                            <span className="text-[0.6875rem] font-semibold text-muted">
-                              ({grantedInGroup.length}/{groupPerms.length} granted)
-                            </span>
-                          </div>
-
-                          {!isSystemOrDisabled && (
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => handleSelectAllInModule(groupPerms, !isAllGranted)}
-                                className="px-2.5 py-1 text-[0.6875rem] font-bold rounded-lg border border-border bg-card text-body hover:bg-subtle transition-all"
-                              >
-                                {isAllGranted ? 'Clear Module' : 'Grant All'}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Permission Rows */}
-                        <div className="divide-y divide-border">
-                          {groupPerms.map((perm) => {
-                            const meta = resolvePermissionMeta(perm);
-                            const isGranted = draftGrants.has(meta.key);
-                            const currentScope = draftGrants.get(meta.key) || 'company';
-
-                            return (
-                              <div
-                                key={meta.key}
-                                className={`px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors ${
-                                  isGranted ? 'bg-primary/[0.02]' : 'hover:bg-subtle/40'
-                                }`}
-                              >
-                                {/* Left: Toggle & Info */}
-                                <div className="flex items-start gap-3 min-w-0 flex-1">
-                                  <label className="relative inline-flex items-center cursor-pointer mt-0.5 shrink-0">
-                                    <input
-                                      type="checkbox"
-                                      aria-label={`Toggle permission ${meta.label}`}
-                                      checked={isGranted}
-                                      disabled={isSystemOrDisabled}
-                                      onChange={() => handleTogglePermission(meta, isGranted)}
-                                      className="sr-only peer"
-                                    />
-                                    <div
-                                      className={`w-9 h-5 rounded-full transition-colors peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary/20 ${
-                                        isGranted ? 'bg-primary' : 'bg-border'
-                                      } ${isSystemOrDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                                    >
-                                      <div
-                                        className={`w-4 h-4 rounded-full bg-white transition-transform mt-0.5 ${
-                                          isGranted ? 'translate-x-4' : 'translate-x-0.5'
-                                        }`}
-                                      />
-                                    </div>
-                                  </label>
-
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      <span
-                                        className={`text-xs font-bold ${
-                                          isGranted ? 'text-heading' : 'text-body'
-                                        }`}
-                                      >
-                                        {meta.label}
-                                      </span>
-                                      <code className="text-[0.625rem] px-1.5 py-0.5 rounded bg-subtle text-muted border border-border font-mono">
-                                        {meta.key}
-                                      </code>
-                                    </div>
-                                    <p className="text-[0.6875rem] text-muted mt-0.5">
-                                      {meta.description}
-                                    </p>
-                                  </div>
-                                </div>
-
-                                {/* Right: Scope Selector */}
-                                <div className="flex items-center gap-2 shrink-0 sm:pl-4">
-                                  <span className="text-[0.6875rem] font-bold text-muted uppercase tracking-wider">
-                                    Scope:
-                                  </span>
-
-                                  {meta.allowedScopes.length === 1 ? (
-                                    <span className="px-2.5 py-1 text-xs font-bold rounded-lg bg-subtle text-body border border-border">
-                                      {SCOPE_LABELS[meta.allowedScopes[0]] || meta.allowedScopes[0]}
-                                    </span>
-                                  ) : (
-                                    <select
-                                      aria-label={`Scope selector for ${meta.label}`}
-                                      value={currentScope}
-                                      disabled={!isGranted || isSystemOrDisabled}
-                                      onChange={(e) => handleChangeScope(meta.key, e.target.value)}
-                                      className="px-2.5 py-1 bg-card border border-border rounded-lg text-xs font-semibold text-body focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                      {meta.allowedScopes.map((scopeVal) => (
-                                        <option key={scopeVal} value={scopeVal}>
-                                          {SCOPE_LABELS[scopeVal] || scopeVal}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  {groupedPermissions.length === 0 && (
-                    <div className="p-8 text-center text-xs text-muted border border-dashed border-border rounded-xl">
-                      No permissions found matching &quot;{permSearch}&quot;.
-                    </div>
+                <div className="max-h-[calc(100vh-370px)] overflow-y-auto pr-1">
+                  {(selectedRole.is_system_role || !canManageRoles) && (
+                    <p className="mb-2 text-[11px] text-muted">
+                      {selectedRole.is_system_role ? 'System roles are managed by Kargo and cannot be changed. ' : 'You can view this role but not change it. '}
+                      Tick boxes show what the role grants; the small label under a tick is where it applies.
+                    </p>
                   )}
+                  <PermissionMatrix
+                    mode="role"
+                    catalog={permissionsCatalog}
+                    grants={draftGrants}
+                    editable={!selectedRole.is_system_role && canManageRoles}
+                    onToggle={(item, granted) => handleTogglePermission({ key: item.permission_key, allowedScopes: item.scopes }, granted)}
+                    onScope={handleChangeScope}
+                    onSetPage={handleSetPage}
+                  />
                 </div>
               )}
             </Card>

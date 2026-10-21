@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import api from './axios';
-import { assignUserRole, createEmployee, inviteEmployee, deactivateUser, reactivateUser, updateEmployee, deleteRole, getBranches, getBranchLookups, getBranchLookupsPage, getCompany, getLookupUsers, getNotifications, getTimelineEvents, sendRecordEmail, getUnreadNotificationsCount,
+import { setEmployeeTemporaryPassword, acceptEmployeeInvitation, assignUserRole, createEmployee, inviteEmployee, deactivateUser, reactivateUser, updateEmployee, deleteRole, getBranches, getBranchLookups, getBranchLookupsPage, getCompany, getLookupUsers, getNotifications, getTimelineEvents, sendRecordEmail, getUnreadNotificationsCount,
   markNotificationRead, markNotificationUnread, markAllNotificationsRead } from './api';
 
 vi.mock('./axios', () => ({ default: { get: vi.fn(), post: vi.fn(), patch: vi.fn() } }));
@@ -67,6 +67,27 @@ it('uses tenant communication routes for lead timelines and email', async () => 
   });
 });
 
+it('sends opportunity email through the supported record communication route', async () => {
+  await sendRecordEmail('opportunity', 9, { to: ['customer@example.com'], subject: 'Estimate' });
+  expect(api.post).toHaveBeenCalledWith('/tenant/opportunities/9/communications/email/', {
+    to: ['customer@example.com'], subject: 'Estimate',
+  });
+});
+
+it('uploads attachments and recipient lists together as multipart email', async () => {
+  const file = new File(['pdf'], 'quote.pdf', { type: 'application/pdf' });
+  await sendRecordEmail('lead', 4, {
+    to: ['one@example.com', 'two@example.com'], cc: [], subject: 'Quote', include_signature: true,
+    attachments: [file],
+  });
+  const [url, form] = api.post.mock.calls[0];
+  expect(url).toBe('/tenant/leads/4/communications/email/');
+  expect(form).toBeInstanceOf(FormData);
+  expect(form.getAll('to')).toEqual(['one@example.com', 'two@example.com']);
+  expect(form.get('attachments')).toBe(file);
+  expect(form.get('include_signature')).toBe('true');
+});
+
 it('unwraps notification records for the header without dropping their fields', async () => {
   const notification = { id: 7, title: 'Update', message: 'Saved', read_at: null, created_at: '2026-10-13' };
   api.get.mockResolvedValue([{ id: 7, data: notification }]);
@@ -86,4 +107,20 @@ it('uses tenant notification actions and preserves the unread count', async () =
     '/tenant/notifications/7/mark-read/', '/tenant/notifications/7/mark-unread/',
     '/tenant/notifications/mark-all-read/',
   ]);
+});
+
+
+it('accepts invitations publicly without using the administrator session', async () => {
+  await acceptEmployeeInvitation({ token: 'invitation-code', password: 'chosen-password' });
+  expect(api.post).toHaveBeenCalledWith('/tenant/invitations/accept/', {
+    token: 'invitation-code', password: 'chosen-password',
+  }, { skipAuth: true });
+});
+
+
+it('creates a member login through the tenant admin password endpoint', async () => {
+  await setEmployeeTemporaryPassword(2, 'temporary-password');
+  expect(api.post).toHaveBeenCalledWith('/tenant/employees/2/set-temporary-password/', {
+    password: 'temporary-password',
+  });
 });

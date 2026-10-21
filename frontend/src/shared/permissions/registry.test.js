@@ -48,11 +48,34 @@ describe('Permissions Registry normalization tests', () => {
     expect(canAll(['crm.leads.convert'], ctx)).toBe(false);
   });
 
-  it('should grant access to superusers and system admins automatically', () => {
-    const superuserCtx = { permissions: [], isSuperuser: true };
-    const systemAdminCtx = { permissions: [], isSystemAdmin: true };
-    expect(canAll(['crm.settings.users.view'], superuserCtx)).toBe(true);
-    expect(canAll(['crm.settings.users.view'], systemAdminCtx)).toBe(true);
+  it('never lets an admin flag or invented "crm.admin" stand in for a permission', () => {
+    // The tenant session carries no superuser/system-admin flag; only the
+    // permission list the backend returns decides what the UI offers.
+    expect(canAll(['users.view'], { permissions: [], isSuperuser: true })).toBe(false);
+    expect(canAll(['users.view'], { permissions: [], isSystemAdmin: true })).toBe(false);
+    expect(canAll(['users.view'], { permissions: ['crm.admin'] })).toBe(false);
+  });
+
+  it('matches backend keys exactly: manage never implies create, view never implies manage', () => {
+    const ctx = { permissions: ['rbac_roles.manage', 'employees.view', 'branches.manage'] };
+    expect(canAll(['rbac_roles.manage'], ctx)).toBe(true);
+    expect(canAll(['rbac_roles.create'], ctx)).toBe(false);
+    expect(canAll(['employees.manage'], ctx)).toBe(false);
+    expect(canAll(['branches.create'], ctx)).toBe(false);
+    expect(canAll([PERMISSIONS.ROLE_CREATE], ctx)).toBe(false);
+    expect(canAll([PERMISSIONS.ROLE_EDIT], ctx)).toBe(true);
+  });
+
+  it('maps user and role administration constants to backend keys', () => {
+    expect(PERMISSIONS.USER_VIEW).toBe('users.view');
+    expect(PERMISSIONS.USER_CREATE).toBe('users.manage');
+    expect(PERMISSIONS.EMPLOYEE_VIEW).toBe('employees.view');
+    expect(PERMISSIONS.EMPLOYEE_MANAGE).toBe('employees.manage');
+    expect(PERMISSIONS.USER_ASSIGN_ROLE).toBe('users.assign_role');
+    expect(PERMISSIONS.ROLE_VIEW).toBe('rbac_roles.view');
+    expect(PERMISSIONS.ROLE_CREATE).toBe('rbac_roles.create');
+    expect(PERMISSIONS.ROLE_EDIT).toBe('rbac_roles.manage');
+    expect(PERMISSIONS.AUDIT_VIEW).toBe('audit_logs.view');
   });
 
   it('uses the backend communication permission for email and SMS actions', () => {
@@ -63,6 +86,12 @@ describe('Permissions Registry normalization tests', () => {
     };
     expect(canAll([PERMISSIONS.COMMUNICATIONS_EMAIL_SEND], ctx)).toBe(true);
     expect(canAll([PERMISSIONS.COMMUNICATIONS_SMS_SEND], ctx)).toBe(true);
+  });
+
+  it('shows status creation only with the backend opportunity settings permission', () => {
+    expect(canAll([PERMISSIONS.SALES_ADD_STATUS_CODE], { permissions: ['opportunity_settings.manage'] })).toBe(true);
+    expect(canAll([PERMISSIONS.SALES_ADD_STATUS_CODE], { permissions: ['opportunities.view'] })).toBe(false);
+    expect(canAll([PERMISSIONS.SALES_VIEW_STATUS_CODE], { permissions: ['opportunities.view'] })).toBe(true);
   });
 
   it('should not show the Leads nav item when the user only has lead actions', () => {

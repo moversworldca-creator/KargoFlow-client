@@ -487,6 +487,7 @@ export function RouteSection({
   onSave,
   onChange,
   onAddressPick,
+  onClearAddress,
   saving = false,
 }) {
   const originDisplay = getRouteLine(origin);
@@ -515,7 +516,14 @@ export function RouteSection({
       {editing ? (
         <div className="space-y-4">
           <div className="space-y-1">
-            <label className="text-[10px] font-bold uppercase tracking-widest text-ink-400">Origin Address</label>
+            <div className="flex items-center justify-between gap-3">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-ink-400">Origin Address</label>
+              {onClearAddress && origin?.line1 ? (
+                <button type="button" onClick={() => onClearAddress('origin')} className="text-[10px] font-bold uppercase tracking-widest text-rose-600 hover:text-rose-700">
+                  Clear origin
+                </button>
+              ) : null}
+            </div>
             <AddressAutocomplete
               country="ca,us"
               className="w-full rounded-xl border-2 border-ink-200 bg-white px-3 py-2 text-sm font-semibold text-ink-900 placeholder:text-ink-400 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/10 transition"
@@ -529,7 +537,14 @@ export function RouteSection({
           <div className="h-px bg-ink-100 my-4" />
 
           <div className="space-y-1">
-            <label className="text-[10px] font-bold uppercase tracking-widest text-ink-400">Destination Address</label>
+            <div className="flex items-center justify-between gap-3">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-ink-400">Destination Address</label>
+              {onClearAddress && destination?.line1 ? (
+                <button type="button" onClick={() => onClearAddress('destination')} className="text-[10px] font-bold uppercase tracking-widest text-rose-600 hover:text-rose-700">
+                  Clear destination
+                </button>
+              ) : null}
+            </div>
             <AddressAutocomplete
               country="ca,us"
               className="w-full rounded-xl border-2 border-ink-200 bg-white px-3 py-2 text-sm font-semibold text-ink-900 placeholder:text-ink-400 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/10 transition"

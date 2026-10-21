@@ -1,4 +1,5 @@
 import React, { useRef, useState, useMemo, useEffect } from 'react';
+import MessageAttachments from './MessageAttachments';
 import { Icon, Pill, StatusDot, IconButton, PrimaryBtn, GhostBtn } from '../../../shared/ui/RedesignAtoms';
 import InlineEdit from '../../../shared/ui/InlineEdit';
 import RichTextEditor from '../../../shared/ui/RichTextEditor';
@@ -70,11 +71,11 @@ const stripTrailingUS = (str) => String(str || '').replace(/(?:,\s*(?:US|USA|Uni
 
 const formatAddressBlock = (address) => {
   const line1 = stripTrailingUS(normalizeDisplayText(address?.address_line1 || address?.street));
-  // const city = normalizeDisplayText(address?.city);
-  // const state = normalizeDisplayText(address?.state);
-  // const country = normalizeDisplayText(address?.country);
-  // const cleanCity = city.toLowerCase() === state.toLowerCase() ? '' : city;
-  // const locality = [cleanCity, state].filter(Boolean).join(', ');
+  const city = normalizeDisplayText(address?.city);
+  const state = normalizeDisplayText(address?.state);
+  const country = normalizeDisplayText(address?.country);
+  const cleanCity = city.toLowerCase() === state.toLowerCase() ? '' : city;
+  const locality = [cleanCity, state].filter(Boolean).join(', ');
 
   if (!line1) {
     return {
@@ -298,6 +299,9 @@ export function CustomerCard({
 }) {
   const [copiedField, setCopiedField] = useState(null);
   const displayPhone = formatPhoneDisplay(phone);
+  const fallbackNameParts = String(customerName || '').trim().split(/\s+/).filter(Boolean);
+  const resolvedFirstName = String(firstName || '').trim() || fallbackNameParts[0] || '';
+  const resolvedLastName = String(lastName || '').trim() || fallbackNameParts.slice(1).join(' ');
 
   const handleCopy = (type, text) => {
     if (!text) return;
@@ -332,9 +336,9 @@ export function CustomerCard({
                 </div>
                 <div className="min-w-0 flex-1">
                   <h2 className="flex flex-wrap items-center text-lg lg:text-xl 2xl:text-2xl font-black tracking-tight text-slate-900 leading-tight w-full break-words gap-x-1">
-                    <InlineEdit value={firstName} placeholder="First Name" onSave={(val) => onInlineSave('first_name', val)} className="break-words" />
+                    <InlineEdit value={resolvedFirstName} placeholder="First Name" onSave={(val) => onInlineSave('first_name', val)} className="break-words" />
                     <InlineEdit
-                      value={lastName}
+                      value={resolvedLastName}
                       placeholder="Add last name"
                       renderDisplay={(value) => value || (
                         <span className="inline-flex items-center gap-1 rounded-md border border-dashed border-transparent bg-transparent px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-300 opacity-60 not-italic transition-colors group-hover:border-slate-200 group-hover:bg-slate-50 group-hover:text-slate-400 group-hover:opacity-100">
@@ -573,7 +577,7 @@ export function PlannedMoveCard({
     draftArrivalWindowStart && draftArrivalWindowEnd
       ? `${formatTimeAMPM(draftArrivalWindowStart)} - ${formatTimeAMPM(draftArrivalWindowEnd)}`
       : 'No time selected';
-  const canOpenScheduler = !isLeadPath && hasBranch;
+  const canOpenScheduler = Boolean(isLeadPath || hasBranch);
   const openSchedulerPopup = () => {
     if (!canOpenScheduler) return;
     onStartEdit?.();
@@ -662,6 +666,44 @@ export function PlannedMoveCard({
           </button>
         </div>
       </article>
+      {isLeadPath && isAvailabilityModalOpen ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-[2px]">
+          <button type="button" className="absolute inset-0" onClick={closeSchedulerPopup} aria-label="Close move date editor" />
+          <div className="relative z-10 w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-black">Planned move</div>
+                <h3 className="mt-1 text-xl font-black text-slate-900">Edit move date</h3>
+              </div>
+              <button type="button" onClick={closeSchedulerPopup} className="rounded-full border border-slate-200 p-2 text-black hover:bg-slate-50" aria-label="Close move date editor">
+                <Icon name="x" className="h-4 w-4" />
+              </button>
+            </div>
+            <label className="mt-5 block space-y-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-black">Move date</span>
+              <input
+                type="date"
+                aria-label="Move date"
+                ref={modalDateInputRef}
+                value={moveDate ? String(moveDate).slice(0, 10) : ''}
+                onChange={(event) => onMoveDateChange?.(event.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-900 outline-none focus:border-brand focus:ring-2 focus:ring-brand/10"
+              />
+            </label>
+            <div className="mt-6 flex items-center justify-end gap-3">
+              {moveDate && onClearSchedule ? (
+                <button type="button" onClick={clearSchedule} disabled={saving} className="rounded-lg border border-rose-200 px-4 py-2.5 text-sm font-bold text-rose-600 disabled:opacity-60">
+                  Clear date
+                </button>
+              ) : null}
+              <button type="button" onClick={closeSchedulerPopup} className="px-4 py-2.5 text-sm font-semibold text-black">Cancel</button>
+              <button type="button" onClick={applyScheduler} disabled={saving || !moveDate} className="rounded-lg bg-brand px-5 py-2.5 text-sm font-bold text-white disabled:opacity-60">
+                {saving ? 'Saving…' : 'Save date'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {!isLeadPath && hasBranch && isAvailabilityModalOpen ? (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-[2px] animate-in fade-in duration-200">
           <button
@@ -1038,6 +1080,8 @@ export function CommsHub({
   setActivityCallRecipient,
   activitySmsRecipients,
   setActivitySmsRecipients,
+  isLeadPath = false,
+  onRecordSmsConsent,
 }) {
   const attachmentInputRef = useRef(null);
   const imageInputRef = useRef(null);
@@ -1046,6 +1090,7 @@ export function CommsHub({
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
   const [showCategoryPopup, setShowCategoryPopup] = useState(false);
   const [showTemplatePopup, setShowTemplatePopup] = useState(false);
+  const [smsConsentConfirmed, setSmsConsentConfirmed] = useState(false);
   const [toolsByChannel, setToolsByChannel] = useState({});
   const showEmailTools = toolsByChannel[currentChannel] ?? false;
   const toggleMessageTools = () => setToolsByChannel(previous => ({
@@ -1367,6 +1412,18 @@ export function CommsHub({
               className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-bold text-slate-900 outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/10"
               placeholder="Enter phone number..."
             />
+            <label className="mt-2 flex items-start gap-2 text-xs text-body">
+              <input type="checkbox" checked={smsConsentConfirmed} onChange={async (e) => {
+                const checked = e.target.checked;
+                if (checked && onRecordSmsConsent) {
+                  const destination = activitySmsRecipients?.[0];
+                  if (!destination) { setSmsConsentConfirmed(false); return; }
+                  try { await onRecordSmsConsent(destination); } catch { setSmsConsentConfirmed(false); return; }
+                }
+                setSmsConsentConfirmed(checked);
+              }} />
+              <span>I have recorded the recipient&apos;s permission to receive SMS messages.</span>
+            </label>
           </div>
         )}
 
@@ -1384,7 +1441,6 @@ export function CommsHub({
                 placeholder="Enter phone number..."
               />
             </div>
-
             <div className="relative group">
               <div className="absolute -inset-0.5 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-2xl blur opacity-10 group-hover:opacity-20 transition duration-500"></div>
               <div className="relative flex items-center justify-between rounded-xl border border-emerald-100 bg-white p-4 shadow-sm">
@@ -1777,6 +1833,9 @@ export function Timeline({
                   e?.email_log_details?.body_html ||
                   e?.email_log_details?.body_text ||
                   e?.body_html ||
+                  e?.body_text ||
+                  e?.payload?.body_html ||
+                  e?.payload?.body_text ||
                   e?.description ||
                   e?.content ||
                   ''
@@ -1953,6 +2012,8 @@ export function Timeline({
                           ) : null}
                         </div>
                       )}
+                      {(e.thread_messages || [e]).map(message => <MessageAttachments
+                        key={message.id} messageId={message.communication_message_id} attachments={message.attachments} />)}
                       {isInboundEmail && emailAttachments.length ? (
                         <div className="border-t border-sky-100 bg-white px-4 py-3">
                           <div className="mb-2 text-[10px] font-black uppercase tracking-[0.18em] text-sky-700">
@@ -2090,6 +2151,14 @@ export function SidebarSpecs({
     return String(option);
   };
 
+  const optionValue = (option) => typeof option === 'object' && option !== null
+    ? String(option.id ?? option.value ?? option.code ?? '')
+    : String(option ?? '');
+  const selectedLabel = (spec) => {
+    const match = spec.options?.find((option) => optionValue(option) === optionValue(spec.value));
+    return (match != null ? getOptionLabel(match) : '') || spec.displayValue || (spec.fetchOptions ? '—' : (getOptionLabel(spec.value) || '—'));
+  };
+
   return (
     <section className="rounded-xl border border-ink-100 bg-white shadow-sm flex flex-col overflow-visible">
       <header className="bg-[#EBF3FA] text-[#133559] flex items-center justify-between border-b border-blue-100 px-3 py-2">
@@ -2122,16 +2191,19 @@ export function SidebarSpecs({
                   />
                 ) : s.options ? (
                   <select
-                    value={s.value}
+                    value={optionValue(s.value)}
                     disabled={saving}
                     aria-label={s.label}
-                    onChange={(e) => commit(s, e.target.value)}
+                    onChange={(e) => commit(s, e.target.value, s.options.find((option) => optionValue(option) === e.target.value))}
                     autoFocus
                     className="mt-1 w-full rounded-lg border-2 border-brand/20 bg-brand-tint px-2 py-1.5 text-sm font-semibold text-ink-800 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/10"
                   >
                     <option value="">Select...</option>
+                    {optionValue(s.value) && !s.options.some((option) => optionValue(option) === optionValue(s.value)) && (
+                      <option value={optionValue(s.value)} disabled>{selectedLabel(s)}</option>
+                    )}
                     {s.options.map((o) => (
-                      <option key={o?.id ?? o} value={o?.id ?? o}>{getOptionLabel(o)}</option>
+                      <option key={optionValue(o)} value={optionValue(o)} disabled={o?.is_active === false}>{getOptionLabel(o)}</option>
                     ))}
                   </select>
                 ) : (
@@ -2162,8 +2234,8 @@ export function SidebarSpecs({
                     type="button" disabled={saving} aria-label={`Edit ${s.label}`}
                     className="max-w-full truncate rounded border-b border-dashed border-brand/30 text-brand hover:bg-blue-50 disabled:opacity-50"
                     onClick={() => { setSaveError(''); setEditingId(s.id); }}
-                  >{s.displayValue || (s.fetchOptions ? '—' : (s.value || '—'))}</button>
-                    : <span>{s.displayValue || (s.fetchOptions ? '—' : (s.value || '—'))}</span>}
+                  >{selectedLabel(s)}</button>
+                    : <span>{selectedLabel(s)}</span>}
                 </dd>
               )}
             </div>
@@ -2247,12 +2319,21 @@ export function RouteLogisticsCard({
     .map((stop, index) => ({ stop, index }))
     .filter(({ stop }) => stop?.type !== 'origin' && stop?.type !== 'destination');
 
-  const originBlock = originStop
-    ? { line1: originStop.address || 'Origin not set', line2: originStop.subAddress || '' }
-    : formatAddressBlock(origin);
-  const destinationBlock = destinationStop
-    ? { line1: destinationStop.address || 'Destination not set', line2: destinationStop.subAddress || '' }
-    : formatAddressBlock(destination);
+  const originFromRecord = formatAddressBlock(origin);
+  const destinationFromRecord = formatAddressBlock(destination);
+  // The main record is updated by the route editor before a planned job's
+  // cached endpoint stops are refreshed. Prefer those current values so the
+  // card does not continue displaying the old origin and destination.
+  const originBlock = originFromRecord.line1
+    ? originFromRecord
+    : originStop
+      ? { line1: originStop.address || 'Origin not set', line2: originStop.subAddress || '' }
+      : { line1: 'Origin not set', line2: '' };
+  const destinationBlock = destinationFromRecord.line1
+    ? destinationFromRecord
+    : destinationStop
+      ? { line1: destinationStop.address || 'Destination not set', line2: destinationStop.subAddress || '' }
+      : { line1: 'Destination not set', line2: '' };
   const originAddress = [originBlock.line1, originBlock.line2].filter(Boolean).join(', ');
   const destinationAddress = [destinationBlock.line1, destinationBlock.line2].filter(Boolean).join(', ');
   const stopsCount = extraStops.length || (Array.isArray(stops) ? stops.length : 0);

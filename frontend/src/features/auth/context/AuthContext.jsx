@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { queryClient } from '../../../shared/queries/queryClient';
 import { authService } from '../../../services/auth';
 import { clearTenantSession, getTenantToken } from '../../../services/tenantSession';
@@ -102,6 +102,41 @@ export const AuthProvider = ({ children }) => {
     await pending;
   };
 
+  // Re-read the session's permissions after an administrator changes roles,
+  // grants, overrides or login state, or when the backend refuses something
+  // the UI offered (403): the backend is authoritative and the UI follows it.
+  const refreshInFlight = useRef(null);
+  const lastRefresh = useRef(0);
+  const refreshSession = useCallback(async () => {
+    if (!getTenantToken()) return null;
+    if (refreshInFlight.current) return refreshInFlight.current;
+    const attempt = operation.current;
+    refreshInFlight.current = (async () => {
+      try {
+        const profile = await authService.me();
+        if (attempt === operation.current) setUser(profile);
+        return profile;
+      } catch {
+        // A revoked or expired session is handled by the API client (401).
+        return null;
+      } finally {
+        lastRefresh.current = Date.now();
+        refreshInFlight.current = null;
+      }
+    })();
+    return refreshInFlight.current;
+  }, []);
+
+  useEffect(() => {
+    const onForbidden = () => {
+      // At most once every 5 seconds, so a denied action never loops.
+      if (Date.now() - lastRefresh.current < 5000) return;
+      refreshSession();
+    };
+    window.addEventListener('app:forbidden', onForbidden);
+    return () => window.removeEventListener('app:forbidden', onForbidden);
+  }, [refreshSession]);
+
   const switchCompany = async () => {
     throw new Error('Sign out and sign in with an account belonging to that company.');
   };
@@ -110,13 +145,11 @@ export const AuthProvider = ({ children }) => {
     permissions: permissionSet,
     isSuperuser: false,
     isSystemAdmin: false,
-    isCompanyAdmin: permissionSet.has('crm.admin'),
   }), [permissionSet]);
 
   const value = {
     user, isAuthenticated: Boolean(user), isLoading, login, logout, switchCompany, setUser, supportConsoleContext,
-    permissionSet, permissionContext,
-    hasRole: (names) => Boolean(user?.role_details?.some(role => names.includes(role.name))),
+    permissionSet, permissionContext, refreshSession,
     hasPermission: (permissions) => canAll(permissions, permissionContext),
   };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

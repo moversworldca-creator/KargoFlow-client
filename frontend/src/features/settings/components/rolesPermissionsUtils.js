@@ -1,10 +1,12 @@
-import { FEATURE_PERMISSION_CATALOG } from '../../../shared/permissions/registry';
+import { AREA_ORDER, SCOPE_HELP, describePermission } from '../userManagement/permissionLabels';
+
+export { SCOPE_HELP };
 
 export const SCOPE_LABELS = {
-  company: 'Company (All)',
-  branch: 'Branch',
-  assigned: 'Assigned',
-  own: 'Own',
+  company: 'Whole company',
+  branch: 'Their branches',
+  assigned: 'Jobs they are crewed on',
+  own: 'Their own records',
 };
 
 export const normalizeListResponse = (value) => {
@@ -12,6 +14,7 @@ export const normalizeListResponse = (value) => {
   return value?.results || [];
 };
 
+// Kept for older callers.
 export const deriveModuleFromKey = (key) => {
   if (!key) return 'Other';
   const parts = key.split('.');
@@ -22,23 +25,35 @@ export const deriveModuleFromKey = (key) => {
   return 'Other';
 };
 
+/**
+ * Display data for a backend permission row. The key stays the identity; the
+ * label, page and area are plain-language names (permissionLabels.js), and the
+ * allowed scopes come from the backend catalog (rbac_permission_scope).
+ */
 export const resolvePermissionMeta = (perm) => {
   const key = perm.permission_key || perm.codename || '';
-  const catalogEntry = FEATURE_PERMISSION_CATALOG[key] || {};
-  const label = catalogEntry.label || perm.name || perm.label || perm.description || key;
-  const description = perm.description || catalogEntry.label || key;
-  const moduleName = catalogEntry.module || perm.module || deriveModuleFromKey(key);
-
-  const rawScopes = perm.allowed_scopes || perm.allowedScopes || catalogEntry.allowedScopes || ['company'];
-  const allowedScopes = Array.isArray(rawScopes) && rawScopes.length > 0 ? rawScopes : ['company'];
-
+  const readable = describePermission(key);
+  const rawScopes = perm.allowed_scopes || perm.allowedScopes || ['company'];
+  const order = ['own', 'assigned', 'branch', 'company'];
+  const allowedScopes = (Array.isArray(rawScopes) && rawScopes.length > 0 ? [...rawScopes] : ['company'])
+    .sort((a, b) => order.indexOf(a) - order.indexOf(b));
   return {
     key,
-    label,
-    description,
-    module: moduleName,
+    label: readable.action,
+    fullLabel: readable.label,
+    description: perm.description || readable.label,
+    module: `${readable.area} · ${readable.page}`,
+    area: readable.area,
     allowedScopes,
   };
+};
+
+/** Sort order for permission groups: by area (Sales first), then page name. */
+export const compareModules = (a, b) => {
+  const [areaA] = a.split(' · ');
+  const [areaB] = b.split(' · ');
+  const byArea = AREA_ORDER.indexOf(areaA) - AREA_ORDER.indexOf(areaB);
+  return byArea !== 0 ? byArea : a.localeCompare(b);
 };
 
 export const computePermissionDiffs = (currentGrants, draftGrants) => {

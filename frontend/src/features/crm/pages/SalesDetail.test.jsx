@@ -32,7 +32,20 @@ vi.mock('../components/RedesignSalesComponents', () => ({
     <button type="button" onClick={() => onInlineSave('move_size', '8', { id: 8, label: '2 Bedroom' })}>Set move size</button>
   </div>,
   InventorySnapshot: () => <div data-testid="inventory-snapshot" />,
-  RouteLogisticsCard: () => <div data-testid="route-logistics-card" />,
+  RouteLogisticsCard: ({ routeStops = [], onEdit }) => (
+    <div data-testid="route-logistics-card">
+      {routeStops.map((stop) => <div key={stop.id}>{stop.address}</div>)}
+      {onEdit ? <button type="button" onClick={onEdit}>Edit route logistics</button> : null}
+    </div>
+  ),
+  RouteSection: ({ origin, destination, onChange, onSave, onCancelEdit }) => (
+    <div role="dialog" aria-label="Route editor">
+      <input aria-label="Origin address" value={origin?.line1 || ''} onChange={(event) => onChange('origin_street', event.target.value)} />
+      <input aria-label="Destination address" value={destination?.line1 || ''} onChange={(event) => onChange('destination_street', event.target.value)} />
+      <button type="button" onClick={onSave}>Save route</button>
+      <button type="button" onClick={onCancelEdit}>Cancel route</button>
+    </div>
+  ),
   CustomerCard: ({ customerName, email, phone, location, onInlineSave, onManageContacts, additionalContacts = [] }) => (
     <div data-testid="customer-card">
       <div>{customerName}</div>
@@ -62,7 +75,7 @@ vi.mock('../components/RedesignSalesComponents', () => ({
         onClick={() => {
           onStartEdit();
           onMoveDateChange('2026-07-10');
-          onArrivalWindowChange('09:00', '11:00');
+          onArrivalWindowChange?.('09:00', '11:00');
         }}
       >
         Select Schedule
@@ -295,7 +308,9 @@ vi.mock('../../../services/api', () => {
     markOpportunityLost: vi.fn().mockResolvedValue({}),
     reopenOpportunity: vi.fn().mockResolvedValue({}),
     createOpportunityStop: vi.fn().mockResolvedValue({}),
+    createOpportunityJobStop: vi.fn().mockResolvedValue({}),
     updateOpportunityStop: vi.fn().mockResolvedValue({}),
+    updateOpportunityJobStop: vi.fn().mockResolvedValue({}),
     deleteOpportunityStop: vi.fn().mockResolvedValue({}),
     createSalesActivity: vi.fn().mockResolvedValue({}),
     updateSalesActivity: vi.fn().mockResolvedValue({}),
@@ -337,6 +352,7 @@ vi.mock('../../../services/api', () => {
       is_primary: false,
     }),
     updateCustomerContact: vi.fn().mockResolvedValue({}),
+    deleteCustomerContact: vi.fn().mockResolvedValue({}),
     seedCommunicationTemplates: vi.fn().mockResolvedValue({}),
     getSendGridConfig: vi.fn().mockResolvedValue([]),
     getResendConfig: vi.fn().mockResolvedValue([]),
@@ -457,6 +473,47 @@ describe('SalesDetail Component Tests', () => {
     });
   });
 
+  it('renders route logistics from the primary planned job stops', async () => {
+    apiService.default.sales.getOpportunityPlannedSubJobs.mockResolvedValue([
+      {
+        id: 880,
+        is_primary: true,
+        stops: [
+          {
+            id: 881,
+            stop_type: 'origin',
+            sort_order: 0,
+            address_line1: '25 Job Origin Road',
+            city: 'Airdrie',
+            state: 'AB',
+            zip_code: 'T4A 0A1',
+          },
+          {
+            id: 882,
+            stop_type: 'destination',
+            sort_order: 1,
+            address_line1: '90 Job Destination Avenue',
+            city: 'Edmonton',
+            state: 'AB',
+            zip_code: 'T5J 0N3',
+          },
+        ],
+      },
+    ]);
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(apiService.default.sales.getOpportunityPlannedSubJobs).toHaveBeenCalledWith(123);
+    });
+    expect(await screen.findByText(/25 Job Origin Road/)).toBeInTheDocument();
+    expect(screen.getByText(/90 Job Destination Avenue/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit route logistics' }));
+    expect(screen.getByPlaceholderText('Enter origin address')).toHaveValue('25 Job Origin Road');
+    expect(screen.getByPlaceholderText('Enter destination address')).toHaveValue('90 Job Destination Avenue');
+  });
+
   it('loads estimate context for the sales route so inventory can request data after refresh', async () => {
     renderComponent({
       initialEntry: '/crm/opportunity/123/sales',
@@ -511,6 +568,73 @@ describe('SalesDetail Component Tests', () => {
       expect(apiService.getLead).toHaveBeenCalledWith('123');
       expect(apiService.assignLead).not.toHaveBeenCalled();
       expect(apiService.updateLead).not.toHaveBeenCalled();
+    });
+  });
+
+  it('reads, updates, and clears route logistics on the lead details page', async () => {
+    apiService.getLead.mockResolvedValue({
+      id: 123,
+      system_state: 'new',
+      first_name: 'Dinesh',
+      last_name: 'Kumar',
+      email: 'dinesh@example.com',
+      origin_street: '10 Existing Origin Street',
+      origin_city: 'Calgary',
+      origin_state: 'AB',
+      origin_zip: 'T2P 1J9',
+      destination_street: '20 Existing Destination Road',
+      destination_city: 'Edmonton',
+      destination_state: 'AB',
+      destination_zip: 'T5J 0N3',
+    });
+    apiService.updateLead.mockResolvedValue({
+      id: 123,
+      system_state: 'new',
+      origin_street: '10 Existing Origin Street',
+      destination_street: '20 Existing Destination Road',
+      origin_address_details: { address_line1: '10 Existing Origin Street', city: 'Calgary', state: 'AB' },
+      destination_address_details: { address_line1: '20 Existing Destination Road', city: 'Edmonton', state: 'AB' },
+    });
+
+    renderComponent({
+      initialEntry: '/leads/123',
+      routePath: '/leads/:id',
+      params: { id: '123' },
+    });
+
+    expect(await screen.findByText(/10 Existing Origin Street/)).toBeInTheDocument();
+    expect(screen.getByText(/20 Existing Destination Road/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit route logistics' }));
+    fireEvent.change(screen.getByPlaceholderText('Enter origin address'), {
+      target: { value: '30 Updated Origin Avenue' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Enter destination address'), {
+      target: { value: '40 Updated Destination Boulevard' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => {
+      expect(apiService.updateLead).toHaveBeenCalledWith(123, expect.objectContaining({
+        origin_street: '30 Updated Origin Avenue',
+        destination_street: '40 Updated Destination Boulevard',
+      }));
+    });
+    expect(apiService.updateLead.mock.calls[0][1]).not.toHaveProperty('origin_address_line1');
+    expect(apiService.updateLead.mock.calls[0][1]).not.toHaveProperty('destination_address_line1');
+    expect(screen.getByText(/30 Updated Origin Avenue/)).toBeInTheDocument();
+    expect(screen.getByText(/40 Updated Destination Boulevard/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit route logistics' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear origin' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear destination' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => {
+      expect(apiService.updateLead).toHaveBeenLastCalledWith(123, expect.objectContaining({
+        origin_street: '',
+        destination_street: '',
+      }));
     });
   });
 
@@ -588,7 +712,7 @@ describe('SalesDetail Component Tests', () => {
 
     await waitFor(() => {
       expect(apiService.updateCustomer).toHaveBeenCalledWith(321, expect.objectContaining({
-        email: 'sandeshnirmalme28@gmail.com',
+        email: 'updated@example.com',
         primary_phone: '555-777-8888',
       }));
     });
@@ -618,7 +742,7 @@ describe('SalesDetail Component Tests', () => {
         phone_type: 'mobile',
         relationship: 'Spouse',
         is_primary: false,
-      });
+      }, 321);
     });
   });
 
@@ -654,6 +778,19 @@ describe('SalesDetail Component Tests', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('customer-card')).toHaveTextContent('Ravi Kumar');
+    });
+  });
+
+  it('deactivates an additional contact and removes it from the customer card', async () => {
+    renderComponent();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Contacts$/i }));
+    expect(await screen.findByText('Additional Contact Details')).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('Delete contact'));
+
+    await waitFor(() => {
+      expect(apiService.deleteCustomerContact).toHaveBeenCalledWith('901', 321);
+      expect(screen.getByTestId('customer-card')).not.toHaveTextContent('Asha Kumar');
     });
   });
 
@@ -725,6 +862,45 @@ describe('SalesDetail Component Tests', () => {
         arrival_window_end: null,
       });
     });
+  });
+
+  it('loads, updates, and creates from the estimate requirements modal', async () => {
+    apiService.getOpportunityBySalesNumber.mockResolvedValueOnce({
+      id: 123,
+      workflow_stage: 'opportunity',
+      system_state: 'open',
+      customer: 321,
+      branch: 1,
+      branch_id: 1,
+      service_type: 2,
+      move_type: 3,
+      move_date: null,
+      customer_details: {
+        id: 321, full_name: 'Dinesh Kumar', first_name: 'Dinesh', last_name: 'Kumar',
+        email: 'sandeshnirmalme28@gmail.com', primary_phone: '95854561230',
+      },
+      origin_address_details: { address_line1: '1 Origin St' },
+      destination_address_details: { address_line1: '2 Destination Ave' },
+    });
+    apiService.updateOpportunity.mockResolvedValueOnce({ id: 123, move_date: '2026-08-10' });
+    apiService.createEstimate.mockResolvedValueOnce({ id: 777, opportunity: 123, method: 'manual' });
+
+    renderComponent();
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Create Estimate' }))[0]);
+    const requirementsHeading = await screen.findByText('Complete Required Fields');
+    expect(requirementsHeading).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Dinesh')).toBeInTheDocument();
+    fireEvent.change(document.querySelector('input[type="date"]'), { target: { value: '2026-08-10' } });
+    const requirementSelects = requirementsHeading.closest('.fixed').querySelectorAll('select');
+    fireEvent.change(requirementSelects[0], { target: { value: '7' } });
+    fireEvent.change(requirementSelects[1], { target: { value: requirementSelects[1].options[1].value } });
+    fireEvent.change(requirementSelects[2], { target: { value: requirementSelects[2].options[1].value } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save And Create Estimate' }));
+
+    await waitFor(() => expect(apiService.updateOpportunity).toHaveBeenCalledWith(123, expect.objectContaining({
+      move_date: '2026-08-10',
+    })));
+    expect(apiService.createEstimate).toHaveBeenCalledWith({ opportunity: 123, method: 'manual' });
   });
 
   it('opens the unbook modal from the workflow menu and submits the selected options', async () => {
@@ -1136,6 +1312,22 @@ describe('SalesDetail Component Tests', () => {
     confirmSpy.mockRestore();
   });
   const leadFixture = { id: 123, first_name: 'Ada', last_name: 'Lead', status: 'new', system_state: 'new', branch: 1, branch_id: 1, assigned_to: null, move_size: 2 };
+  it('renders the canonical full name when separate lead name fields are empty', async () => {
+    apiService.getLead.mockResolvedValue({ ...leadFixture, first_name: '', last_name: '', full_name: 'Grace Hopper' });
+    renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
+    expect(await screen.findByText('Grace Hopper')).toBeInTheDocument();
+  });
+
+  it('updates the planned move date from a lead detail page', async () => {
+    apiService.getLead.mockResolvedValue({ ...leadFixture, move_date: '2026-07-09' });
+    apiService.updateLead.mockResolvedValue({ ...leadFixture, move_date: '2026-07-10' });
+    renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
+    await screen.findByText('Ada Lead');
+    fireEvent.click(screen.getByRole('button', { name: /Select Schedule/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Apply Schedule/i }));
+    await waitFor(() => expect(apiService.updateLead).toHaveBeenCalledWith(123, { move_date: '2026-07-10' }));
+  });
+
   it('reloads the same lead when quickly unmounted and reopened', async () => {
     apiService.getLead.mockResolvedValue(leadFixture);
     const first = renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
