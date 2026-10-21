@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { getBuilderVariables, getBuilderBlocks, getBuilderSettings, getBuilderMeta } from "../../../../../services/api";
+import { getBuilderVariables, getBuilderMeta } from "../../../../../services/api";
 import {
   Blocks,
   Bookmark,
@@ -134,13 +134,14 @@ export default function LeftSidebar({
   const [copiedTag, setCopiedTag] = useState(null);
 
   const { common = [], specific = [] } = getWidgetsForMode(mode) || {};
-  const defaultGroups = getVariablesForMode(mode);
+  const defaultGroups = [];
   const [variableGroups, setVariableGroups] = useState(defaultGroups);
-  const [savedBlocks, setSavedBlocks] = useState([]);
+  const savedBlocks = [];
   const [backendPalette, setBackendPalette] = useState({ kind: null, blocks: [], error: "" });
-  const [builderSettings, setBuilderSettings] = useState(null);
+  const builderSettings = null;
+  const [variableError, setVariableError] = useState("");
   const fallbackBranchId = branches[0]?.id;
-  const activeBuilderKind = ["estimate", "estimate_portal"].includes(mode) ? "estimate_portal" : mode === "invoice" ? "invoice" : "document";
+  const activeBuilderKind = ["estimate", "estimate_portal"].includes(mode) ? "estimate_portal" : mode === "invoice" ? "invoice" : ["email", "sms"].includes(mode) ? "communication" : "document";
   const backendWidgets = backendPalette.kind === activeBuilderKind ? backendPalette.blocks : [];
   const backendWidgetsError = backendPalette.kind === activeBuilderKind ? backendPalette.error : "";
 
@@ -155,7 +156,7 @@ export default function LeftSidebar({
           if (!Array.isArray(data?.blocks)) {
             throw new Error("The Builder widget palette response is invalid.");
           }
-          if (isMounted) setBackendPalette({ kind, blocks: data.blocks, error: "" });
+          if (isMounted) setBackendPalette({ kind, blocks: data.blocks.filter((block) => !["image", "clause"].includes(block.type)), error: "" });
         })
         .catch((error) => {
           if (isMounted) {
@@ -167,46 +168,18 @@ export default function LeftSidebar({
           }
         });
     }
-    if (!["email", "sms"].includes(mode) && typeof getBuilderVariables === "function") {
-      getBuilderVariables(kind, variableBranchId ? { branch_id: variableBranchId } : {})
+    if (typeof getBuilderVariables === "function") {
+      setVariableGroups([]);
+      setVariableError("");
+      getBuilderVariables(kind)
         .then((res) => {
           const data = res?.data ?? res;
           const formatted = normalizeBuilderVariableGroups(data);
-          if (isMounted && formatted.length > 0) {
+          if (isMounted) {
             setVariableGroups(formatted);
           }
         })
-        .catch(() => {
-          // Fallback gracefully to default static registry
-        });
-    }
-
-    // Also load reusable saved clauses/blocks from backend
-    if (typeof getBuilderBlocks === "function") {
-      getBuilderBlocks()
-        .then((res) => {
-          const data = res?.data ?? res;
-          const list = Array.isArray(data) ? data : data?.results || [];
-          if (isMounted && Array.isArray(list)) {
-            setSavedBlocks(list);
-          }
-        })
-        .catch(() => {
-          // Ignore if unconfigured
-        });
-    }
-
-    // Load publishing & approval policy
-    if (typeof getBuilderSettings === "function") {
-      getBuilderSettings()
-        .then((res) => {
-          if (isMounted && res?.data) {
-            setBuilderSettings(res.data);
-          }
-        })
-        .catch(() => {
-          // Default
-        });
+        .catch((error) => { if (isMounted) setVariableError(error?.response?.data?.detail || "Unable to load merge fields."); });
     }
 
     return () => {
@@ -235,6 +208,7 @@ export default function LeftSidebar({
 
   return (
     <aside className="w-72 max-w-[85vw] bg-white border-r border-slate-200 flex flex-col h-full min-h-0 select-none">
+      {variableError && <p role="alert" className="p-3 text-xs text-red-600">{variableError}</p>}
       {/* 3 Tab Switcher */}
       <div className="flex items-center border-b border-slate-200 bg-slate-50">
         <button
@@ -370,14 +344,14 @@ export default function LeftSidebar({
             )}
 
             {/* Standard Common Layout & Grid Widgets (Non-SMS Modes) */}
-            {mode !== "sms" && common.filter((w) => filterItem(w.label)).length > 0 && (
+            {mode !== "sms" && common.filter((w) => !["custom_field", "image", "logo"].includes(w.type) && filterItem(w.label)).length > 0 && (
               <div>
                 <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2 px-1">
                   General & Layout
                 </h3>
                 <div className="grid grid-cols-1 gap-1.5">
                   {common
-                    .filter((w) => filterItem(w.label))
+                    .filter((w) => !["custom_field", "image", "logo"].includes(w.type) && filterItem(w.label))
                     .map((widget) => (
                       <button
                         key={widget.id}
@@ -460,8 +434,8 @@ export default function LeftSidebar({
                 </h3>
                 <div className="grid grid-cols-1 gap-1.5">
                   {[
-                    { label: "Customer Portal URL", snippet: "{{portal.action_url}}" },
-                    { label: "Quote & Estimate Link", snippet: "{{quote_link}}" },
+                    { label: "Customer Portal URL", snippet: "{{links.estimate_portal}}" },
+                    { label: "Quote & Estimate Link", snippet: "{{links.estimate_portal}}" },
                     { label: "Opt-Out Compliance", snippet: "Reply STOP to unsubscribe." },
                   ].map((snip) => (
                     <button

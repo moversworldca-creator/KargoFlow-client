@@ -16,7 +16,7 @@ import InlineEdit from "./InlineEdit";
 import NotesRichTextEditor from "./NotesRichTextEditor";
 import EditableHtmlBlock from "./EditableHtmlBlock";
 import InteractiveTableBlock from "./InteractiveTableBlock";
-import { getBuilderBlock, downloadFile } from "../../../../../services/api";
+
 import { sanitizeHtml } from "../core/htmlSanitizer";
 
 const SAMPLE_VARIABLES = {
@@ -152,57 +152,14 @@ export function BackendWidgetPreview({ block, sampleData = true, scope = {}, cus
   const props = block.props || {};
   const children = Array.isArray(block.children) ? block.children : [];
   const [imageUrl, setImageUrl] = useState("");
-  const [imageError, setImageError] = useState("");
+  const imageError = "Global templates cannot reference tenant image files.";
   const [clauseBlocks, setClauseBlocks] = useState(null);
-  const [clauseError, setClauseError] = useState("");
+  const clauseError = "Use inline terms in global templates.";
   const nested = children.map((child, index) => (
     <BackendWidgetPreview key={`${child.key || index}-${child.props?.asset_id || ""}-${child.props?.block_id || ""}`} block={child} sampleData={sampleData} scope={scope} customerPreview={customerPreview} />
   ));
 
-  useEffect(() => {
-    const assetId = Number(props.asset_id);
-    if (block.type !== "image" || !Number.isInteger(assetId) || assetId <= 0) return undefined;
-    let isMounted = true;
-    let objectUrl = "";
-    downloadFile(assetId)
-      .then((response) => {
-        const blob = response?.data ?? response;
-        if (!(blob instanceof Blob)) throw new Error("The image download did not return a file.");
-        objectUrl = URL.createObjectURL(blob);
-        if (isMounted) setImageUrl(objectUrl);
-        else URL.revokeObjectURL(objectUrl);
-      })
-      .catch((error) => {
-        if (isMounted) setImageError(error?.response?.data?.detail || error.message || "Unable to load this image asset.");
-      });
-    return () => {
-      isMounted = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [block.type, props.asset_id]);
 
-  useEffect(() => {
-    const blockId = Number(props.block_id);
-    if (block.type !== "clause" || !Number.isInteger(blockId) || blockId <= 0) return undefined;
-    let isMounted = true;
-    getBuilderBlock(blockId)
-      .then((response) => {
-        const data = response?.data ?? response;
-        const revision = data?.published || data?.published_revision || data?.revision;
-        const saved = revision?.blocks || data?.blocks || [];
-        if (!Array.isArray(saved)) throw new Error("Saved clause content is invalid.");
-        if (isMounted) {
-          setClauseBlocks(saved);
-          setClauseError("");
-        }
-      })
-      .catch((error) => {
-        if (isMounted) setClauseError(error?.response?.data?.detail || error.message || "Unable to load this saved clause.");
-      });
-    return () => {
-      isMounted = false;
-    };
-  }, [block.type, props.block_id]);
 
   if (block.type === "heading") {
     const HeadingTag = `h${Math.min(4, Math.max(1, Number(props.level) || 2))}`;

@@ -138,6 +138,10 @@ function compileBackendWidget(item) {
   }
 }
 
+export function compileDocumentBodyToHtml(doc) {
+  return (doc?.items || []).filter((item) => item.visible !== false).map(compileItemToHtml).join('\n');
+}
+
 export function compileDocumentToHtml(doc, mode = "estimate", pageSize = "A4", orientation = "Portrait") {
   if (!doc) return "";
 
@@ -148,11 +152,7 @@ export function compileDocumentToHtml(doc, mode = "estimate", pageSize = "A4", o
   const pageBaseHeight = effPageSize === "Letter" ? 1056 : effPageSize === "Legal" ? 1344 : 1123;
   const targetWidth = isLandscape ? pageBaseHeight : pageBaseWidth;
 
-  const items = doc.items || [];
-  const bodyItemsHtml = items
-    .filter((it) => it.visible !== false)
-    .map((item) => compileItemToHtml(item))
-    .join("\n");
+  const bodyItemsHtml = compileDocumentBodyToHtml(doc);
 
   const pageCss = `
     @page {
@@ -243,6 +243,7 @@ function compileItemToHtml(item) {
   }
 
   if (item.type === "html") {
+    if (item.globalEmailBody && !item.cssContent) return item.htmlContent ?? item.content ?? '';
     const scopeClass = `html-doc-${item.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
     const scopedStyle = item.cssContent
       ? `<style>${scopeCss(item.cssContent, scopeClass)}</style>`

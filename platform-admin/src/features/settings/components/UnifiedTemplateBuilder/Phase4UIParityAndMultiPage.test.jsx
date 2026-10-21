@@ -574,7 +574,7 @@ describe("Phase 4: Reference UI Parity & Multi-Page Viewport Controls", () => {
     expect(handleClose).toHaveBeenCalledTimes(1);
   });
 
-  it("11. sidebar widgets and variables are draggable with proper dataTransfer payload", () => {
+  it("11. sidebar widgets and variables are draggable with proper dataTransfer payload", async () => {
     render(
       <LeftSidebar
         mode="estimate"
@@ -600,7 +600,7 @@ describe("Phase 4: Reference UI Parity & Multi-Page Viewport Controls", () => {
     fireEvent.click(varsTab);
 
     // Variable row is draggable
-    const varRow = screen.getByText("Company Name").closest("[draggable='true']");
+    const varRow = (await screen.findByText("Company Name")).closest("[draggable='true']");
     expect(varRow).toBeDefined();
     expect(varRow.getAttribute("draggable")).toBe("true");
 
@@ -608,7 +608,7 @@ describe("Phase 4: Reference UI Parity & Multi-Page Viewport Controls", () => {
     fireEvent.dragStart(varRow, {
       dataTransfer: { setData: setVarData, effectAllowed: "" },
     });
-    expect(setVarData).toHaveBeenCalledWith("variable", "{{customer.company}}");
+    expect(setVarData).toHaveBeenCalledWith("variable", "{{company.name}}");
   });
 
   it("12. canvas renders drop zones that handle dragOver and onDropInPage", () => {

@@ -130,6 +130,7 @@ export default function PreviewModal({
   onOpenHtmlEditor = () => {},
   onDeleteItem = () => {},
   onDuplicateItem = () => {},
+  remotePreview = null,
 }) {
   const [zoom, setZoom] = useState(() => {
     if (typeof window !== "undefined" && window.innerHeight) {
@@ -196,6 +197,17 @@ export default function PreviewModal({
   ]);
 
   if (!isOpen || !doc) return null;
+
+  if (remotePreview) return <div role="dialog" aria-label="Global template preview" className="fixed inset-0 z-50 bg-slate-900/60 p-5 flex items-center justify-center">
+    <div className="bg-white rounded-xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden">
+      <header className="flex justify-between items-center p-4 border-b"><h2 className="font-semibold">Sample preview</h2>
+        <button aria-label="Close preview" onClick={onClose}><X size={20} /></button></header>
+      {remotePreview.loading ? <p role="status" className="p-6">Rendering preview…</p>
+        : remotePreview.error ? <p role="alert" className="p-6 text-red-700">{remotePreview.error}</p>
+        : mode === 'sms' ? <pre className="p-6 whitespace-pre-wrap">{remotePreview.data?.body_text}</pre>
+        : <iframe title="Server rendered sample preview" sandbox="" srcDoc={remotePreview.data?.html || remotePreview.data?.body_html || ''} className="w-full flex-1 border-0" />}
+    </div>
+  </div>;
 
   const effPageSize = doc.settings?.pageSize || pageSize || "A4";
   const effOrientation = doc.settings?.orientation || orientation || "Portrait";

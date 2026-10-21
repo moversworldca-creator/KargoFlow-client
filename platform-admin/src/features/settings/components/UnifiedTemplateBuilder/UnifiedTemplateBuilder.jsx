@@ -35,12 +35,17 @@ import {
   publishBuilderTemplateDraft,
   discardBuilderTemplateDraft,
   validateBuilderTemplateDraft,
+  startBuilderTemplateDraft,
+  previewBuilderTemplate,
+  getApiErrorMessage,
 } from "../../../../services/api";
 import {
   toBackendDocument,
   createBackendWidget,
   fromBackendDocument,
 } from "./core/documentAdapter";
+
+import { fromGlobalDocument, toGlobalDocument } from "./core/globalTemplateAdapter";
 
 export default function UnifiedTemplateBuilder({
   mode = "estimate",
@@ -57,6 +62,8 @@ export default function UnifiedTemplateBuilder({
   onModeChange,
   onSendTestEmail,
   isSendingTest = false,
+  canSave = true,
+  canPublish = true,
 }) {
   const modeConfig = getModeConfig(mode);
   const initialSource = draft || template;
@@ -66,10 +73,10 @@ export default function UnifiedTemplateBuilder({
   const [doc, setDoc] = useState(() => {
     let initial;
     if (initialSource && typeof initialSource === "object") {
-      if (initialSource.items && Array.isArray(initialSource.items) && initialSource.items.length > 0) {
-        initial = initialSource;
-      } else if (initialSource.content && typeof initialSource.content === "object" && Array.isArray(initialSource.content.items) && initialSource.content.items.length > 0) {
-        initial = initialSource.content;
+      if (initialSource.items && Array.isArray(initialSource.items)) {
+        initial = deepClone(initialSource);
+      } else if (initialSource.content && typeof initialSource.content === "object" && Array.isArray(initialSource.content.items)) {
+        initial = deepClone(initialSource.content);
       }
     }
     if (!initial) {
@@ -104,36 +111,39 @@ export default function UnifiedTemplateBuilder({
       branch: initialSource?.branch || branchId || initial.settings?.branch || null,
       category: initialSource?.category || initial.settings?.category || (mode === "email" ? "Email" : mode === "sms" ? "SMS" : "Estimate"),
     };
+    initial.lock_version = initialSource?.lock_version || initial.lock_version || 1;
     return initial;
   });
 
   const [smsText, setSmsText] = useState(() => {
-    return initialSource?.body_sms || initialSource?.sms_body || initialSource?.body || (typeof value === "string" ? value : "") || "";
+    return initialSource?.body_text ?? initialSource?.content?.smsText ?? initialSource?.body_sms ?? initialSource?.sms_body ?? initialSource?.body ?? (typeof value === "string" ? value : "");
   });
 
   useEffect(() => {
-    const nextSms = initialSource?.body_sms || initialSource?.sms_body || initialSource?.body || (typeof value === "string" ? value : "") || "";
-    if (nextSms && nextSms !== smsText) {
+    const nextSms = initialSource?.body_text ?? initialSource?.content?.smsText ?? initialSource?.body_sms ?? initialSource?.sms_body ?? initialSource?.body ?? (typeof value === "string" ? value : "");
+    if (nextSms !== smsText) {
       setSmsText(nextSms);
     }
-  }, [initialSource?.body_sms, initialSource?.sms_body, initialSource?.body, value]);
+  }, [initialSource?.body_text, initialSource?.content?.smsText, initialSource?.body_sms, initialSource?.sms_body, initialSource?.body, value]);
 
   // Server draft hydration on mount/change
   useEffect(() => {
     let isCancelled = false;
     const targetId = template?.id || draft?.id || initialSource?.id;
-    if (targetId) {
+    if (targetId && !initialSource?.isHydratedFromServer) {
       getBuilderTemplateDraft(targetId)
         .then((res) => {
           if (isCancelled) return;
           const draftData = res?.data ?? res;
-          if (draftData?.document?.sections && Array.isArray(draftData.document.sections)) {
-            const loaded = fromBackendDocument(draftData.document, {
+          if (draftData?.document) {
+            const loaded = fromGlobalDocument(draftData.document, {
               name: draftData.template?.name || template?.name || draft?.name || doc.name,
               mode,
             });
             if (loaded) {
               const lockVersion = draftData.revision?.lock_version || draftData.lock_version || 1;
+              lockVersionRef.current = lockVersion;
+              if (mode === "sms") setSmsText(loaded.smsText ?? "");
               updateDoc({ ...loaded, lock_version: lockVersion, isHydratedFromServer: true });
             }
           }
@@ -147,6 +157,13 @@ export default function UnifiedTemplateBuilder({
       isCancelled = true;
     };
   }, [template?.id, draft?.id, initialSource?.id]);
+
+  const lockVersionRef = useRef(initialSource?.lock_version || doc.lock_version || 1);
+  const needsNewDraftRef = useRef(false);
+  const hasPublishedRef = useRef(Boolean(initialSource?.published_revision));
+  const remoteBusyRef = useRef(false);
+  const editVersionRef = useRef(0);
+  const [remotePreview, setRemotePreview] = useState(null);
 
   // Editor State
   const [selectedItemId, setSelectedItemId] = useState(null);
@@ -259,7 +276,7 @@ export default function UnifiedTemplateBuilder({
       id: createId("snap"),
       name,
       timestamp: Date.now(),
-      doc: deepClone(doc),
+      doc: deepClone({ ...doc, smsText }),
     };
     setSnapshots((prev) => [snap, ...prev]);
     setToastMessage(`Snapshot "${name}" saved`);
@@ -268,6 +285,7 @@ export default function UnifiedTemplateBuilder({
   // Restore Snapshot
   const handleRestoreSnapshot = (snapshotDoc) => {
     updateDoc(deepClone(snapshotDoc));
+    if (mode === "sms") setSmsText(snapshotDoc.smsText ?? "");
     setSelectedItemId(null);
     setToastMessage("Restored version snapshot");
   };
@@ -304,7 +322,7 @@ export default function UnifiedTemplateBuilder({
       });
       setHistoryIdx((prev) => prev + 1);
       setDoc(newDoc);
-      if (markDirty) setIsDirty(true);
+      if (markDirty) { editVersionRef.current += 1; setIsDirty(true); }
 
       if (onChange) {
         const compiledHtml = compileDocumentToHtml(newDoc, mode);
@@ -328,6 +346,7 @@ export default function UnifiedTemplateBuilder({
 
   const handleSmsChange = useCallback(
     (text) => {
+      editVersionRef.current += 1;
       setSmsText(text);
       setIsDirty(true);
       if (onChange) {
@@ -819,184 +838,109 @@ export default function UnifiedTemplateBuilder({
     setToastMessage("Removed template from library");
   };
 
-  // Save Handler
-  const handleSave = async () => {
-    setIsSaving(true);
-    try {
-      const compiledHtml = compileDocumentToHtml(doc, mode);
-      const backendDoc = toBackendDocument(doc, mode);
-      const targetTemplateId = initialSource?.id || template?.id || draft?.id;
-      const currentLock = doc.lock_version || draft?.lock_version || 1;
-
-      const payload = {
-        name: doc.name,
-        mode,
-        content: doc,
-        document: backendDoc,
-        html_content: compiledHtml,
-        body_html: compiledHtml,
-        body_sms: smsText,
-        pageSize,
-        orientation,
-        subject: doc.settings?.subject || initialSource?.subject || "",
-        template_key: doc.settings?.template_key || initialSource?.template_key || "",
-        branch: doc.settings?.branch || initialSource?.branch || branchId || null,
-        category: doc.settings?.category || initialSource?.category || null,
-        template_type: doc.settings?.template_type || initialSource?.template_type || (mode === "estimate" ? "moving" : "contract"),
-        version: doc.version || initialSource?.version || 1,
-        lock_version: currentLock,
-      };
-
-      await handleSaveToLibrary(doc);
-      await saveDocument(doc);
-
-      if (targetTemplateId) {
-        try {
-          const draftRes = await saveBuilderTemplateDraft(targetTemplateId, {
-            lock_version: currentLock,
-            document: backendDoc,
-          });
-          const nextLock = draftRes?.data?.revision?.lock_version || draftRes?.data?.lock_version || (currentLock + 1);
-          setDoc((prev) => ({ ...prev, lock_version: nextLock }));
-        } catch (serverErr) {
-          if (serverErr?.response?.status === 409) {
-            setToastMessage("Conflict: Template was modified elsewhere. Please refresh.");
-            setIsSaving(false);
-            return;
-          }
-          console.warn("Backend draft save warning:", serverErr?.message);
-        }
+  // A server save has one owner; parent callbacks update metadata only.
+  const persistDraft = async () => {
+    if (!canSave) throw new Error("You do not have permission to edit global templates.");
+    const editVersion = editVersionRef.current;
+    let warnings = [];
+    const document = toGlobalDocument(doc, mode, smsText);
+    const payload = { name: doc.name, mode, content: doc, document, body_sms: smsText,
+      subject: doc.settings?.subject || "", category: doc.settings?.category || initialSource?.category,
+      lock_version: lockVersionRef.current };
+    if (targetTemplateId) {
+      if (needsNewDraftRef.current) {
+        const { data } = await startBuilderTemplateDraft(targetTemplateId);
+        lockVersionRef.current = data.revision.lock_version;
+        needsNewDraftRef.current = false;
       }
-
-      if (onSave) {
-        await onSave(payload);
-      }
-      setIsDirty(false);
-      setToastMessage("Template saved successfully");
-    } catch (err) {
-      console.error("Save error:", err);
-      setToastMessage("Failed to save template");
-    } finally {
-      setIsSaving(false);
+      const { data } = await saveBuilderTemplateDraft(targetTemplateId, {
+        lock_version: lockVersionRef.current, document,
+      });
+      lockVersionRef.current = data.revision.lock_version;
+      warnings = data.warnings || [];
+      setDoc((current) => ({ ...current, lock_version: data.revision.lock_version }));
+    } else if (!onSave) {
+      throw new Error("Create a global template before saving.");
     }
+    if (onSave) await onSave(payload);
+    if (editVersion === editVersionRef.current) setIsDirty(false);
+    return warnings;
   };
 
-  // Draft Save Handler
-  const handleSaveDraft = async () => {
+  const performRemoteAction = async (operation) => {
+    if (remoteBusyRef.current) return;
+    remoteBusyRef.current = true;
     setIsSaving(true);
-    try {
-      const compiledHtml = compileDocumentToHtml(doc, mode);
-      const backendDoc = toBackendDocument(doc, mode);
-      const targetTemplateId = initialSource?.id || template?.id || draft?.id;
-      const currentLock = doc.lock_version || draft?.lock_version || 1;
-
-      const payload = {
-        name: doc.name,
-        mode,
-        content: doc,
-        document: backendDoc,
-        html_content: compiledHtml,
-        body_html: compiledHtml,
-        body_sms: smsText,
-        pageSize,
-        orientation,
-        subject: doc.settings?.subject || initialSource?.subject || "",
-        template_key: doc.settings?.template_key || initialSource?.template_key || "",
-        branch: doc.settings?.branch || initialSource?.branch || branchId || null,
-        category: doc.settings?.category || initialSource?.category || null,
-        is_draft: true,
-        lock_version: currentLock,
-      };
-
-      await handleSaveToLibrary({ ...doc, name: `${doc.name} (Draft)` });
-      await saveDocument(doc);
-
-      if (targetTemplateId) {
-        try {
-          const draftRes = await saveBuilderTemplateDraft(targetTemplateId, {
-            lock_version: currentLock,
-            document: backendDoc,
-          });
-          const nextLock = draftRes?.data?.revision?.lock_version || draftRes?.data?.lock_version || (currentLock + 1);
-          setDoc((prev) => ({ ...prev, lock_version: nextLock }));
-        } catch (serverErr) {
-          if (serverErr?.response?.status === 409) {
-            setToastMessage("Conflict: Template was modified elsewhere. Please refresh.");
-            setIsSaving(false);
-            return;
-          }
-          console.warn("Backend draft save warning:", serverErr?.message);
-        }
-      }
-
-      if (onSave) {
-        await onSave(payload);
-      }
-      setIsDirty(false);
-      setToastMessage("Draft saved successfully");
-    } catch (err) {
-      console.error("Draft error:", err);
-      setToastMessage("Draft saved to local storage");
-    } finally {
-      setIsSaving(false);
-    }
+    try { await operation(); }
+    catch (error) { setToastMessage(getApiErrorMessage(error)); }
+    finally { remoteBusyRef.current = false; setIsSaving(false); }
   };
 
-  // Discard Draft Handler
-  const handleDiscardDraft = async () => {
-    const targetTemplateId = initialSource?.id || template?.id || draft?.id;
-    if (!targetTemplateId) return;
-    const ok = window.confirm("Discard uncommitted draft changes and revert to the published revision?");
-    if (!ok) return;
+  const handleSave = () => performRemoteAction(async () => {
+    const warnings = await persistDraft();
+    setToastMessage(warnings.length ? `Draft saved. ${warnings.map((item) => item.message).join(' ')}` : "Template draft saved successfully.");
+  });
+  const handleSaveDraft = handleSave;
 
-    setIsSaving(true);
-    try {
+  const applyServerDraft = (data) => {
+    const loaded = fromGlobalDocument(data.document, { name: data.template?.name || doc.name, mode });
+    lockVersionRef.current = data.revision.lock_version;
+    needsNewDraftRef.current = false;
+    if (mode === "sms") setSmsText(loaded.smsText ?? "");
+    updateDoc({ ...loaded, lock_version: data.revision.lock_version });
+    setIsDirty(false);
+  };
+
+  const handleDiscardDraft = () => {
+    if (!canSave || !targetTemplateId || !window.confirm("Discard this draft? Unpublished changes will be removed.")) return;
+    return performRemoteAction(async () => {
       await discardBuilderTemplateDraft(targetTemplateId);
-      const freshDraft = await getBuilderTemplateDraft(targetTemplateId);
-      const draftData = freshDraft?.data ?? freshDraft;
-      if (draftData?.document?.sections) {
-        const loaded = fromBackendDocument(draftData.document, {
-          name: draftData.template?.name || doc.name,
-          mode,
-        });
-        const lockVersion = draftData.revision?.lock_version || draftData.lock_version || 1;
-        updateDoc({ ...loaded, lock_version: lockVersion });
+      needsNewDraftRef.current = true;
+      if (hasPublishedRef.current) {
+        const { data } = await startBuilderTemplateDraft(targetTemplateId);
+        applyServerDraft(data);
+      } else {
+        onBack?.();
       }
-      setIsDirty(false);
-      setToastMessage("Draft reverted to published version.");
-    } catch (err) {
-      console.warn("Discard draft notice:", err?.message);
-      setToastMessage("Reverted to base template.");
-    } finally {
-      setIsSaving(false);
-    }
+      setToastMessage("Draft discarded.");
+    });
   };
 
-  // Publish Handler
-  const handlePublish = async () => {
-    const targetTemplateId = initialSource?.id || template?.id || draft?.id;
-    if (!targetTemplateId) {
-      setToastMessage("Please save the template first before publishing.");
-      return;
-    }
-    setIsSaving(true);
+  const handlePublish = () => performRemoteAction(async () => {
+    if (!canPublish) throw new Error("You do not have permission to publish global templates.");
+    if (!targetTemplateId) throw new Error("Save the template before publishing.");
+    await persistDraft();
+    const { data: validation } = await validateBuilderTemplateDraft(targetTemplateId);
+    if (!validation.valid) throw new Error((validation.errors || []).map((item) => item.message).join(" ") || "The draft is not valid.");
+    await publishBuilderTemplateDraft(targetTemplateId);
+    hasPublishedRef.current = true;
+    needsNewDraftRef.current = true;
+    setToastMessage("Template published successfully.");
+  });
+
+  const handleServerPreview = async () => {
+    setIsPreviewOpen(true);
+    setRemotePreview({ loading: true });
     try {
-      await handleSave();
-      try {
-        await validateBuilderTemplateDraft(targetTemplateId);
-      } catch (valErr) {
-        console.warn("Pre-publish validation notice:", valErr?.response?.data || valErr?.message);
-      }
-      await publishBuilderTemplateDraft(targetTemplateId);
-      setToastMessage("Template published successfully!");
-    } catch (err) {
-      console.error("Publish error:", err);
-      const detail = err?.response?.data?.detail || err?.response?.data?.error || "Failed to publish template.";
-      setToastMessage(typeof detail === "string" ? detail : "Failed to publish template.");
-    } finally {
-      setIsSaving(false);
-    }
+      if (!targetTemplateId) throw new Error("Create the template before previewing it.");
+      const { data } = await previewBuilderTemplate(targetTemplateId, {
+        document: toGlobalDocument(doc, mode, smsText), format: "both",
+      });
+      setRemotePreview({ data });
+    } catch (error) { setRemotePreview({ error: getApiErrorMessage(error) }); }
   };
+
+  const handlePdfExport = () => performRemoteAction(async () => {
+    const { data } = await previewBuilderTemplate(targetTemplateId, {
+      document: toGlobalDocument(doc, mode, smsText), format: "pdf",
+    });
+    const url = URL.createObjectURL(data);
+    const link = window.document.createElement("a");
+    link.href = url;
+    link.download = `${doc.name || "template"}.pdf`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
 
   const selectedItem = (doc.items || []).find((it) => it.id === selectedItemId);
 
@@ -1012,21 +956,21 @@ export default function UnifiedTemplateBuilder({
         onRedo={handleRedo}
         isDirty={isDirty}
         isSaving={isSaving}
-        onSave={handleSave}
-        onSaveDraft={handleSaveDraft}
-        onDiscardDraft={targetTemplateId ? handleDiscardDraft : null}
-        onPublish={handlePublish}
-        onBack={onBack}
+        onSave={canSave ? handleSave : null}
+        onSaveDraft={canSave ? handleSaveDraft : null}
+        onDiscardDraft={canSave && targetTemplateId ? handleDiscardDraft : null}
+        onPublish={canPublish && canSave ? handlePublish : null}
+        onBack={() => { if (!isDirty || window.confirm("Leave without saving your changes?")) onBack?.(); }}
         onOpenCode={() => {
           setActiveHtmlItem(null);
           setIsCodeModalOpen(true);
         }}
-        onOpenPreview={() => setIsPreviewOpen(true)}
+        onOpenPreview={handleServerPreview}
         mode={mode}
         modeConfig={modeConfig}
         onOpenTransfer={() => setIsTransferModalOpen(true)}
         onOpenHistory={() => setIsHistoryModalOpen(true)}
-        onPrint={handleDirectPrint}
+        onPrint={["email", "sms"].includes(mode) ? handleDirectPrint : handlePdfExport}
         isSidebarOpen={isSidebarOpen}
         onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
         isPanelOpen={isPanelOpen}
@@ -1259,6 +1203,7 @@ export default function UnifiedTemplateBuilder({
 
       <PreviewModal
         isOpen={isPreviewOpen}
+        remotePreview={remotePreview}
         doc={doc}
         mode={mode}
         pageSize={pageSize}
@@ -1290,6 +1235,8 @@ export default function UnifiedTemplateBuilder({
         onClose={() => setIsHistoryModalOpen(false)}
         onCreateSnapshot={handleCreateSnapshot}
         onRestoreSnapshot={handleRestoreSnapshot}
+        onRestoreServerDraft={applyServerDraft}
+        canRestore={canSave}
       />
 
       <CustomFieldModal

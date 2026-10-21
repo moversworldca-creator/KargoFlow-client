@@ -175,7 +175,7 @@ export default function TopNavbar({
         <button
           type="button"
           onClick={onSaveDraft}
-          disabled={isSaving}
+          disabled={isSaving || !onSaveDraft}
           className="hidden md:flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition disabled:opacity-50"
           title="Save Draft"
           aria-label="Save Draft"
@@ -187,7 +187,7 @@ export default function TopNavbar({
         <button
           type="button"
           onClick={onSave}
-          disabled={isSaving}
+          disabled={isSaving || !onSave}
           className="flex items-center gap-1.5 px-3 sm:px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md shadow-xs transition disabled:opacity-50"
           title="Save Template"
           aria-label="Save Template"
@@ -196,7 +196,9 @@ export default function TopNavbar({
           <span>{isSaving ? "..." : "Save"}</span>
         </button>
 
-       
+        {onPublish && <button type="button" onClick={onPublish} disabled={isSaving}
+          className="px-3 py-1.5 rounded-md bg-emerald-600 text-white text-xs font-semibold disabled:opacity-50"
+          aria-label="Publish Template">Publish</button>}
 
         <div className="hidden lg:block h-5 w-px bg-slate-200 mx-0.5" />
 
@@ -270,7 +272,7 @@ export default function TopNavbar({
                   type="button"
                   onClick={() => {
                     setIsMoreMenuOpen(false);
-                    onSaveDraft();
+                    onSaveDraft?.();
                   }}
                   className="w-full flex items-center gap-2 px-3.5 py-2 hover:bg-slate-100 text-slate-700 text-left md:hidden"
                 >

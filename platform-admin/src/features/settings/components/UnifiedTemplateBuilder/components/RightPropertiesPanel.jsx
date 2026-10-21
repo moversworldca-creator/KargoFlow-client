@@ -37,7 +37,7 @@ import {
 import { createId } from "../model/templateModel";
 import { getVariablesForMode } from "../config/variableRegistry";
 import { analyzeSmsText } from "../core/smsCalculator";
-import { getBuilderBlocks, getBuilderMeta } from "../../../../../services/api";
+import { getBuilderMeta } from "../../../../../services/api";
 import {
   insertRows,
   insertCols,
@@ -212,28 +212,6 @@ export default function RightPropertiesPanel({
     };
   }, [selectedItem?.type, selectedItem?.blockType, activeBuilderKind, selectedItem?.propsSchema]);
 
-  useEffect(() => {
-    if (selectedItem?.type !== "builder_block" || selectedItem.blockType !== "clause") return undefined;
-    let isMounted = true;
-    getBuilderBlocks()
-      .then((res) => {
-        const data = res?.data ?? res;
-        const list = Array.isArray(data) ? data : data?.results || [];
-        if (isMounted) {
-          setSavedClauses(list);
-          setClauseLoadError("");
-        }
-      })
-      .catch((error) => {
-        if (isMounted) {
-          setClauseLoadError(error?.response?.data?.detail || error.message || "Unable to load saved clauses.");
-        }
-      });
-    return () => {
-      isMounted = false;
-    };
-  }, [selectedItem?.type, selectedItem?.blockType]);
-
   const selectedBlockSchema = Object.keys(selectedItem?.propsSchema?.properties || {}).length > 0
     ? selectedItem.propsSchema
     : backendBlockMeta.kind === activeBuilderKind
@@ -261,24 +239,7 @@ export default function RightPropertiesPanel({
         setTestStatusMsg({ type: "error", text: err?.message || "Failed to send test email." });
       }
     } else {
-      setLocalSendingTest(true);
-      try {
-        const formData = new FormData();
-        formData.append("channel", "email");
-        formData.append("to_email", trimmed);
-        formData.append("subject", documentSettings?.subject || docName || "Test Email");
-        // Try importing API if available or send test request
-        const { default: API } = await import("../../../../../services/api");
-        await API.post("/integrations/communication-templates/send/", formData);
-        setTestStatusMsg({ type: "success", text: "Test email sent successfully!" });
-      } catch (err) {
-        setTestStatusMsg({
-          type: "error",
-          text: err?.response?.data?.detail || err?.message || "Failed to send test email.",
-        });
-      } finally {
-        setLocalSendingTest(false);
-      }
+      setTestStatusMsg({ type: "error", text: "Global templates support sample preview. Test sending is not available." });
     }
   };
 
@@ -308,6 +269,7 @@ export default function RightPropertiesPanel({
             <div>
               <label className="block text-slate-600 font-semibold mb-1">Channel</label>
               <select
+                disabled={!onModeChange}
                 value={documentSettings?.channel || mode || "email"}
                 onChange={(e) => {
                   const val = e.target.value;
@@ -432,7 +394,7 @@ export default function RightPropertiesPanel({
               <button
                 type="button"
                 onClick={handleSendTestClick}
-                disabled={isSendingTest || localSendingTest}
+                disabled={!onSendTestEmail || isSendingTest || localSendingTest}
                 className="w-full py-2 px-3 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 disabled:opacity-60 cursor-pointer"
               >
                 {(isSendingTest || localSendingTest) ? (

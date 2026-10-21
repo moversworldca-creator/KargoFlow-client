@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { History, X, RotateCcw, Plus, Clock, Check, Bookmark, Loader2 } from "lucide-react";
-import { getBuilderTemplateRevisions, restoreBuilderTemplateRevision } from "../../../../../services/api";
+import { getBuilderTemplateRevisions, restoreBuilderTemplateRevision, discardBuilderTemplateDraft, getApiErrorMessage } from "../../../../../services/api";
 
 export default function VersionHistoryModal({
   isOpen,
@@ -9,7 +9,11 @@ export default function VersionHistoryModal({
   onClose,
   onCreateSnapshot,
   onRestoreSnapshot,
+  onRestoreServerDraft,
+  canRestore = true,
 }) {
+  const [error, setError] = useState("");
+  const [restoring, setRestoring] = useState(false);
   const [snapshotName, setSnapshotName] = useState("");
   const [selectedSnapshotId, setSelectedSnapshotId] = useState(null);
   const [remoteRevisions, setRemoteRevisions] = useState([]);
@@ -17,9 +21,13 @@ export default function VersionHistoryModal({
 
   useEffect(() => {
     if (!isOpen || !templateId) return;
+    let active = true;
+    setRemoteRevisions([]);
+    setError("");
     setIsLoadingRevisions(true);
     getBuilderTemplateRevisions(templateId)
       .then((res) => {
+        if (!active) return;
         const data = res?.data ?? res;
         if (Array.isArray(data)) {
           setRemoteRevisions(data);
@@ -27,12 +35,11 @@ export default function VersionHistoryModal({
           setRemoteRevisions(data.results);
         }
       })
-      .catch(() => {
-        setRemoteRevisions([]);
-      })
+      .catch((err) => { if (active) setError(getApiErrorMessage(err)); })
       .finally(() => {
-        setIsLoadingRevisions(false);
+        if (active) setIsLoadingRevisions(false);
       });
+    return () => { active = false; };
   }, [isOpen, templateId]);
 
   if (!isOpen) return null;
@@ -99,6 +106,7 @@ export default function VersionHistoryModal({
           </button>
         </form>
 
+        {error && <p role="alert" className="p-4 text-red-700">{error}</p>}
         {/* Snapshot List & Detail View */}
         <div className="flex-1 overflow-y-auto p-6">
           {isLoadingRevisions && (
@@ -134,25 +142,25 @@ export default function VersionHistoryModal({
                       <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-2">
                         <span>{rev.created_at ? new Date(rev.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Published"}</span>
                         <span>&bull;</span>
-                        <span className="font-medium text-indigo-700">Server Published</span>
+                        <span className="font-medium text-indigo-700">{rev.state || "published"}</span>
                       </div>
                     </div>
                   </div>
                   <button
                     type="button"
+                    disabled={!canRestore || restoring || !['published', 'retired'].includes(rev.state)}
                     onClick={async () => {
-                      if (templateId && rev.id) {
-                        try {
-                          const restored = await restoreBuilderTemplateRevision(templateId, rev.id);
-                          if (restored?.data?.document) {
-                            onRestoreSnapshot(restored.data.document);
-                          }
-                        } catch {
-                          // Continue with local document if available
-                        }
-                      }
-                      if (rev.document) onRestoreSnapshot(rev.document);
-                      onClose();
+                      if (!window.confirm("Replace the current draft with this revision? Current draft changes will be discarded.")) return;
+                      setRestoring(true);
+                      setError("");
+                      try {
+                        try { await discardBuilderTemplateDraft(templateId); }
+                        catch (err) { if (err?.response?.status !== 404) throw err; }
+                        const { data } = await restoreBuilderTemplateRevision(templateId, rev.id);
+                        await onRestoreServerDraft?.(data);
+                        onClose();
+                      } catch (err) { setError(getApiErrorMessage(err)); }
+                      finally { setRestoring(false); }
                     }}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-white hover:bg-indigo-100 border border-indigo-200 rounded-lg shadow-xs transition"
                   >
