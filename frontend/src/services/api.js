@@ -628,14 +628,14 @@ export const deleteEstimatePackageItem = (id) => api.delete(`/package-items/${id
 export const applyEstimatePackage = (estimateId, data) => api.post(`/estimates/${estimateId}/apply-package/`, data);
 export const resendEstimate = (estimateId, data) => api.post(`/estimates/${estimateId}/resend/`, data);
 export const clearEstimateSignatures = (estimateId) => api.post(`/estimates/${estimateId}/clear-signatures/`, {});
-export const getPublicEstimateInventoryPortal = (token) => api.get("/public/estimates/inventory/", { params: { token } });
-export const submitPublicEstimateInventoryPortal = (data) => api.post("/public/estimates/inventory/", data);
+export const getPublicEstimateInventoryPortal = (token) => api.get("/public/estimates/inventory/", { params: { token }, skipAuth: true });
+export const submitPublicEstimateInventoryPortal = (data) => api.post("/public/estimates/inventory/", data, { skipAuth: true });
 export const uploadPublicEstimateInventoryPortalPhoto = ({ token, file, notes = "" }) => {
   const formData = new FormData();
   formData.append("token", token);
   formData.append("file", file);
   if (notes) formData.append("notes", notes);
-  return api.post("/public/estimates/inventory/photos/", formData);
+  return api.post("/public/estimates/inventory/photos/", formData, { skipAuth: true });
 };
 export const getPublicEstimatePortal = (token) => api.get("/public/estimates/portal/", { params: { token }, skipAuth: true });
 export const approvePublicEstimatePortal = (data) => api.post("/public/estimates/portal/approve/", data, { skipAuth: true });
@@ -1057,3 +1057,6 @@ export const getPortalEstimates = (opportunityId) => api.get('/tenant/builder/po
 export const emailIssuedPortal = (id, opportunityId, key) => api.post(`/tenant/builder/portals/${id}/email-link/`, { opportunity_id: opportunityId }, { headers: { 'Idempotency-Key': key } });
 
 export const downloadIssuedPortal = (id, opportunityId) => api.get(`/tenant/builder/portals/${id}/pdf/`, { params: { opportunity_id: opportunityId }, responseType: 'blob' });
+
+export const getInventoryPortal = (kind, recordId) => api.get('/tenant/builder/inventory-portals/', { params: { kind, record_id: recordId } });
+export const manageInventoryPortal = (kind, recordId, operation, key) => api.post('/tenant/builder/inventory-portals/manage/', { kind, record_id: recordId, operation }, { headers: key ? { 'Idempotency-Key': key } : {} });
