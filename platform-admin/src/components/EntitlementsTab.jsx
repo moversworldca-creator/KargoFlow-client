@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Sliders, Building2, Plus, Trash2, CheckCircle2, 
   AlertTriangle, Shield, Clock, Loader2, Sparkles, 
-  Zap, PackagePlus, ArrowRight, ChevronDown 
+  Zap, PackagePlus, ArrowRight, ChevronDown, Package, Info, AlertCircle 
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import platformApi from '../api/platformApi';
@@ -118,6 +118,8 @@ export default function EntitlementsTab({
       { id: 3, code: 'extra_branches_1', name: '1 Additional Branch Terminal', price_cents: 4900, interval: 'month' },
       { id: 4, code: 'extra_sms_1000', name: '1,000 SMS Message Pack', price_cents: 2000, interval: 'month' },
       { id: 5, code: 'addon_premium_support', name: '24/7 Priority Support SLA', price_cents: 9900, interval: 'month' },
+      { id: 6, code: 'extra_email_10000', name: '10,000 Email Pack', price_cents: 1500, interval: 'month' },
+      { id: 7, code: 'extra_api_50000', name: '50,000 API Requests Pack', price_cents: 3500, interval: 'month' },
       { id: 8, code: 'extra_automations_500', name: '500 Automation Runs Pack', price_cents: 2500, interval: 'month' },
     ];
   }, [addons]);
@@ -128,6 +130,9 @@ export default function EntitlementsTab({
   const [addonQuantity, setAddonQuantity] = useState(1);
   const [addonReason, setAddonReason] = useState('Administrative add-on allocation');
   const [isSubmittingAddon, setIsSubmittingAddon] = useState(false);
+  const [removingAddonId, setRemovingAddonId] = useState(null);
+  const [addonActionMode, setAddonActionMode] = useState('add');
+  const [adjustingAddonId, setAdjustingAddonId] = useState(null);
 
   // Synchronize selectedAddonId whenever addons/displayAddons are available
   useEffect(() => {
@@ -139,21 +144,26 @@ export default function EntitlementsTab({
     }
   }, [displayAddons, selectedAddonId]);
 
-  const fetchEntitlements = async (tId) => {
+  const fetchEntitlements = async (tId, { silent = false } = {}) => {
     if (!tId) return;
-    setIsLoading(true);
+    if (!silent) {
+      setIsLoading(true);
+    }
     try {
       const res = await platformApi.getTenantEntitlements(tId);
       setEntitlementsData(res.data);
     } catch (err) {
       showToast(err?.response?.data?.error || err?.message || 'Failed to load entitlements', 'error');
     } finally {
-      setIsLoading(false);
+      if (!silent) {
+        setIsLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     if (selectedTenantId) {
+      setEntitlementsData(null);
       fetchEntitlements(selectedTenantId);
     }
   }, [selectedTenantId]);
@@ -192,7 +202,7 @@ export default function EntitlementsTab({
       setShowOverrideModal(false);
       setOverrideReason('');
       setOverrideExpiresAt('');
-      fetchEntitlements(selectedTenantId);
+      fetchEntitlements(selectedTenantId, { silent: true });
     } catch (err) {
       const errorMsg =
         err?.response?.data?.detail ||
@@ -210,7 +220,7 @@ export default function EntitlementsTab({
     try {
       await platformApi.deleteTenantOverride(selectedTenantId, overrideId);
       showToast('Administrative override removed.', 'success');
-      fetchEntitlements(selectedTenantId);
+      fetchEntitlements(selectedTenantId, { silent: true });
     } catch (err) {
       showToast(err?.response?.data?.error || err?.message || 'Failed to remove override', 'error');
     }
@@ -228,17 +238,25 @@ export default function EntitlementsTab({
       return;
     }
 
+    const existing = entitlementsData?.active_addons?.find(
+      (a) => Number(a.addon_id) === parsedAddonId
+    );
+    const qty = Math.max(1, Number(addonQuantity) || 1);
+    const finalQuantity = (existing && addonActionMode === 'add')
+      ? (Number(existing.quantity) || 0) + qty
+      : qty;
+
     setIsSubmittingAddon(true);
     try {
       await platformApi.assignTenantAddon(selectedTenantId, {
         tenant_company_id: Number(selectedTenantId),
         addon_id: parsedAddonId,
-        quantity: Math.max(1, Number(addonQuantity) || 1),
+        quantity: finalQuantity,
         reason: addonReason.trim(),
       });
-      showToast('Add-on assigned to tenant.', 'success');
+      showToast(`Add-on updated (${finalQuantity} pack${finalQuantity > 1 ? 's' : ''}).`, 'success');
       setShowAddonModal(false);
-      fetchEntitlements(selectedTenantId);
+      fetchEntitlements(selectedTenantId, { silent: true });
     } catch (err) {
       showToast(
         err?.response?.data?.error || 
@@ -251,6 +269,119 @@ export default function EntitlementsTab({
     } finally {
       setIsSubmittingAddon(false);
     }
+  };
+
+  const handleQuickAdjustAddonQuantity = async (addon, delta) => {
+    const currentQty = Number(addon.quantity) || 1;
+    const newQty = currentQty + delta;
+    if (newQty <= 0) {
+      handleRemoveAddon(addon);
+      return;
+    }
+    setAdjustingAddonId(addon.addon_id);
+
+    // Optimistic UI update so quantity changes immediately without full page flicker
+    const previousAddons = entitlementsData?.active_addons;
+    if (entitlementsData?.active_addons) {
+      setEntitlementsData((prev) => {
+        if (!prev || !prev.active_addons) return prev;
+        return {
+          ...prev,
+          active_addons: prev.active_addons.map((a) =>
+            a.addon_id === addon.addon_id ? { ...a, quantity: newQty } : a
+          ),
+        };
+      });
+    }
+
+    try {
+      await platformApi.assignTenantAddon(selectedTenantId, {
+        tenant_company_id: Number(selectedTenantId),
+        addon_id: addon.addon_id,
+        quantity: newQty,
+        reason: `Quantity ${delta > 0 ? 'increased' : 'decreased'} via quick adjustment to ${newQty}`,
+      });
+      showToast(`Updated "${addon.name || addon.code}" to ${newQty} pack(s).`, 'success');
+      fetchEntitlements(selectedTenantId, { silent: true });
+    } catch (err) {
+      // Revert optimistic update on failure
+      if (previousAddons) {
+        setEntitlementsData((prev) => (prev ? { ...prev, active_addons: previousAddons } : prev));
+      }
+      showToast(err?.response?.data?.error || err?.message || 'Failed to adjust quantity', 'error');
+    } finally {
+      setAdjustingAddonId(null);
+    }
+  };
+
+  const handleRemoveAddon = async (addon) => {
+    const addonTitle = addon.name || addon.code || 'Add-on';
+    if (!window.confirm(`Are you sure you want to remove the "${addonTitle}" add-on from this tenant?`)) {
+      return;
+    }
+
+    setRemovingAddonId(addon.addon_id);
+    try {
+      await platformApi.removeTenantAddon(
+        selectedTenantId,
+        addon.addon_id,
+        'Administrative add-on removal via Entitlements console'
+      );
+      showToast(`Add-on "${addonTitle}" removed successfully.`, 'success');
+      fetchEntitlements(selectedTenantId, { silent: true });
+    } catch (err) {
+      showToast(err?.response?.data?.error || err?.message || 'Failed to remove add-on', 'error');
+    } finally {
+      setRemovingAddonId(null);
+    }
+  };
+
+  const getAddonImpact = (addonCode, quantity = 1) => {
+    const qty = Number(quantity) || 1;
+    switch (addonCode) {
+      case 'extra_sms_1000':
+        return `+${(1000 * qty).toLocaleString()} Monthly SMS`;
+      case 'extra_users_5':
+        return `+${5 * qty} Active Users`;
+      case 'extra_branches_1':
+        return `+${1 * qty} Additional Branch`;
+      case 'extra_storage_10gb':
+        return `+${10 * qty} GB Cloud Storage`;
+      case 'extra_email_10000':
+        return `+${(10000 * qty).toLocaleString()} Monthly Emails`;
+      case 'extra_api_50000':
+        return `+${(50000 * qty).toLocaleString()} API Requests`;
+      case 'extra_automations_500':
+        return `+${(500 * qty).toLocaleString()} Monthly Automation Runs`;
+      case 'addon_premium_support':
+        return '24/7 Priority SLA Support';
+      default:
+        return `${qty}x Allocated Pack`;
+    }
+  };
+
+  const getAddonBoostForLimit = (limitKey) => {
+    if (!entitlementsData?.active_addons?.length) return 0;
+    let boost = 0;
+    for (const addon of entitlementsData.active_addons) {
+      const qty = Number(addon.quantity) || 1;
+      if (limitKey === 'sms.monthly' && addon.code === 'extra_sms_1000') {
+        boost += 1000 * qty;
+      } else if (limitKey === 'users.max_active' && addon.code === 'extra_users_5') {
+        boost += 5 * qty;
+      } else if (limitKey === 'branches.max_active' && addon.code === 'extra_branches_1') {
+        boost += 1 * qty;
+      } else if ((limitKey === 'storage_bytes' || limitKey === 'storage.bytes') && addon.code === 'extra_storage_10gb') {
+        boost += 10 * 1073741824 * qty;
+      } else if (limitKey === 'email.monthly' && addon.code === 'extra_email_10000') {
+        boost += 10000 * qty;
+      } else if (limitKey === 'api.monthly_requests' && addon.code === 'extra_api_50000') {
+        boost += 50000 * qty;
+      } else if (limitKey === 'automation.monthly_runs' && (addon.code === 'extra_automations_500' || addon.code.includes('automation'))) {
+        boost += 500 * qty;
+      }
+    }
+    return boost;
   };
 
   const formatQuota = (key, val) => {
@@ -310,7 +441,7 @@ export default function EntitlementsTab({
         </div>
       </div>
 
-      {isLoading ? (
+      {isLoading && !entitlementsData ? (
         <div className="p-10 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-center text-slate-400 flex items-center justify-center gap-2.5">
           <Loader2 size={18} className="animate-spin text-blue-600" />
           <span className="text-xs font-medium">Computing effective tenant entitlements...</span>
@@ -376,6 +507,10 @@ export default function EntitlementsTab({
               {Object.entries(entitlementsData.effective_limits || {}).map(([key, limit]) => {
                 const usage = entitlementsData.current_usage?.[key] || 0;
                 const pct = limit ? Math.min(Math.round((usage / limit) * 100), 100) : 0;
+                const activeOverride = (entitlementsData.active_overrides || []).find(
+                  (o) => o.type === 'limit' && o.limit_key === key
+                );
+                const addonBoost = getAddonBoostForLimit(key);
                 return (
                   <div key={key} className="p-2.5 rounded-lg bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800 space-y-1.5 text-xs">
                     <div className="flex items-center justify-between gap-1">
@@ -394,10 +529,156 @@ export default function EntitlementsTab({
                         style={{ width: `${Math.max(pct, 3)}%` }}
                       />
                     </div>
+                    {(activeOverride || addonBoost > 0) && (
+                      <div className="flex flex-col gap-0.5 pt-0.5 text-[10px]">
+                        {activeOverride && (
+                          <div className="flex items-center justify-between text-amber-600 dark:text-amber-400 font-medium">
+                            <span className="flex items-center gap-1">
+                              <AlertTriangle size={11} className="shrink-0" />
+                              Override: {activeOverride.override_type} {activeOverride.value}
+                            </span>
+                            <span className="text-[9px] text-slate-400 font-normal">
+                              {activeOverride.override_type === 'replace' ? 'replaces base limit' : 'adds to base'}
+                            </span>
+                          </div>
+                        )}
+                        {addonBoost > 0 && (
+                          <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 font-medium">
+                            <span>+{formatQuota(key, addonBoost)} from add-on pack</span>
+                            <span className="text-[9px] text-emerald-600/80 font-normal">active</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
+          </div>
+
+          {/* Active Assigned Add-ons Table Section */}
+          <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden">
+            <div className="px-3.5 py-2.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-xs font-semibold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <Package size={14} className="text-blue-600 dark:text-blue-400" />
+                  Active Assigned Add-on Packages
+                </h3>
+                <p className="text-[11px] text-slate-500">Purchased or administratively allocated capacity & feature packs</p>
+              </div>
+              <button
+                onClick={() => {
+                  if (displayAddons.length > 0 && !selectedAddonId) {
+                    setSelectedAddonId(String(displayAddons[0].id));
+                  }
+                  setAddonQuantity(1);
+                  setAddonReason('Administrative add-on allocation');
+                  setShowAddonModal(true);
+                }}
+                className="text-xs font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 flex items-center gap-1 cursor-pointer"
+              >
+                <Plus size={13} />
+                <span>Assign Add-on</span>
+              </button>
+            </div>
+
+            {(entitlementsData.active_addons || []).length === 0 ? (
+              <div className="py-8 text-center text-slate-400 dark:text-slate-500 text-xs font-normal">
+                No active add-on packages assigned to this tenant.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 text-[11px] font-semibold uppercase text-slate-500 dark:text-slate-400 tracking-wider">
+                      <th className="py-2 px-3">Package Name</th>
+                      <th className="py-2 px-3">Quantity</th>
+                      <th className="py-2 px-3">Quota / Capacity Impact</th>
+                      <th className="py-2 px-3">Status</th>
+                      <th className="py-2 px-3">Allocation Date</th>
+                      <th className="py-2 px-3">Expires</th>
+                      <th className="py-2 px-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {entitlementsData.active_addons.map((addon) => (
+                      <tr key={addon.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
+                        <td className="py-2 px-3">
+                          <div className="font-semibold text-slate-800 dark:text-slate-200">
+                            {addon.name || addon.code}
+                          </div>
+                          <div className="font-mono text-[10px] text-slate-400">
+                            {addon.code}
+                          </div>
+                        </td>
+                        <td className="py-2 px-3">
+                          <div className="flex items-center gap-1.5">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-mono">
+                              {addon.quantity} {addon.quantity === 1 ? 'pack' : 'packs'}
+                            </span>
+                            <div className="inline-flex items-center rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-hidden shadow-2xs">
+                              <button
+                                type="button"
+                                onClick={() => handleQuickAdjustAddonQuantity(addon, -1)}
+                                disabled={adjustingAddonId === addon.addon_id}
+                                className="px-1.5 py-0.5 text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer text-xs font-bold disabled:opacity-40"
+                                title="Decrease by 1 pack"
+                              >
+                                -
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleQuickAdjustAddonQuantity(addon, 1)}
+                                disabled={adjustingAddonId === addon.addon_id}
+                                className="px-1.5 py-0.5 text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 border-l border-slate-200 dark:border-slate-700 transition-colors cursor-pointer text-xs font-bold disabled:opacity-40"
+                                title="Increase by 1 pack"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-2 px-3 font-medium text-xs text-blue-600 dark:text-blue-400">
+                          {getAddonImpact(addon.code, addon.quantity)}
+                        </td>
+                        <td className="py-2 px-3">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wider border bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200/60 dark:border-emerald-900/50">
+                            <CheckCircle2 size={10} />
+                            {addon.status || 'Active'}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 text-[11px] text-slate-500 dark:text-slate-400">
+                          {addon.starts_at ? new Date(addon.starts_at).toLocaleDateString() : 'Active'}
+                        </td>
+                        <td className="py-2 px-3 text-[11px] text-slate-500 dark:text-slate-400">
+                          {addon.ends_at ? (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200/60 dark:border-amber-900/50">
+                              {new Date(addon.ends_at).toLocaleDateString()}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">Active Renewal (Indefinite)</span>
+                          )}
+                        </td>
+                        <td className="py-2 px-3 text-right">
+                          <button
+                            onClick={() => handleRemoveAddon(addon)}
+                            disabled={removingAddonId === addon.addon_id}
+                            className="p-1 rounded text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer disabled:opacity-50"
+                            title="Remove / Cancel Add-on"
+                          >
+                            {removingAddonId === addon.addon_id ? (
+                              <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                              <Trash2 size={14} />
+                            )}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           {/* Active Overrides Table Section */}
@@ -693,7 +974,7 @@ export default function EntitlementsTab({
 
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">
-                  Quantity
+                  Quantity (Packs)
                 </label>
                 <input
                   type="number"
@@ -704,6 +985,60 @@ export default function EntitlementsTab({
                   className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 font-medium text-xs outline-none"
                 />
               </div>
+
+              {(() => {
+                const existing = (entitlementsData?.active_addons || []).find(
+                  (a) => String(a.addon_id) === String(selectedAddonId)
+                );
+                if (!existing) return null;
+                const qty = Number(addonQuantity) || 1;
+                const totalIfAdd = (Number(existing.quantity) || 0) + qty;
+                return (
+                  <div className="p-2.5 rounded-xl bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-900/40 space-y-2">
+                    <div className="flex items-center justify-between text-[11px] font-semibold text-blue-900 dark:text-blue-200">
+                      <span>Currently Assigned:</span>
+                      <span className="font-mono bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded">
+                        {existing.quantity} {existing.quantity === 1 ? 'pack' : 'packs'}
+                      </span>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block">
+                        Allocation Action
+                      </span>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setAddonActionMode('add')}
+                          className={`p-1.5 rounded-lg border text-left text-[11px] transition-all cursor-pointer ${
+                            addonActionMode === 'add'
+                              ? 'border-blue-600 bg-white dark:bg-slate-900 font-bold text-blue-600 shadow-2xs'
+                              : 'border-transparent text-slate-600 dark:text-slate-400 hover:bg-white/50'
+                          }`}
+                        >
+                          <div>+ Add to Existing</div>
+                          <div className="text-[10px] font-normal text-slate-500">
+                            New Total: <strong className="text-blue-600">{totalIfAdd} packs</strong>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAddonActionMode('set')}
+                          className={`p-1.5 rounded-lg border text-left text-[11px] transition-all cursor-pointer ${
+                            addonActionMode === 'set'
+                              ? 'border-blue-600 bg-white dark:bg-slate-900 font-bold text-blue-600 shadow-2xs'
+                              : 'border-transparent text-slate-600 dark:text-slate-400 hover:bg-white/50'
+                          }`}
+                        >
+                          <div>Set Total Directly</div>
+                          <div className="text-[10px] font-normal text-slate-500">
+                            Total: <strong className="text-blue-600">{qty} pack{qty > 1 ? 's' : ''}</strong>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">
