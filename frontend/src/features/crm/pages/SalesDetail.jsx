@@ -40,6 +40,7 @@ import { getLookupEmployeesPage, getLeadStatusCodeLookups, getLookupUsersPage, g
 import { useMoverSizesLookup } from '../../../shared/queries/sharedQueries';
 
 import EstimateView from '../components/EstimateView';
+const OpportunityTariffPanel = React.lazy(() => import('../../pricing/components/OpportunityTariffPanel'));
 import PaymentsPanel from '../components/PaymentsPanel';
 import StorageView from '../components/StorageView';
 import LeadSpecs from '../components/LeadSpecs';
@@ -8466,6 +8467,12 @@ const SalesDetail = () => {
                   return <RedesignTimeline {...timelineProps} />;
                 })()}
               </div>
+            )}
+
+            {activeTab === "Estimate" && !isLeadPath && Number(opportunity?.id) > 0 && (
+              <React.Suspense fallback={null}>
+                <OpportunityTariffPanel opportunityId={Number(opportunity.id)} locked={isOpportunityLost} />
+              </React.Suspense>
             )}
 
             {activeTab === "Estimate" && (
