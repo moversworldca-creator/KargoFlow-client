@@ -325,7 +325,8 @@ export const SETTINGS_TAB_PERMISSIONS = {
   'move-sizes': [PERMISSIONS.SALES_VIEW_OPPORTUNITY, PERMISSIONS.COMPANY_ADMIN, PERMISSIONS.FLEET_VIEW],
   'estimate-catalog': [PERMISSIONS.CATALOG_VIEW],
   'catalog-packages': [PERMISSIONS.CATALOG_VIEW],
-  inventory: [PERMISSIONS.CATALOG_VIEW],
+  // inventory: accessible to tenant users who have access to Settings (room templates and default furniture items)
+  inventory: [],
   'estimate-discount-presets': [PERMISSIONS.DISCOUNTS_VIEW],
   'estimate-portal-templates': [PERMISSIONS.PORTAL_TEMPLATES_VIEW],
   'customer-portals': [PERMISSIONS.CUSTOMER_PORTALS_VIEW],

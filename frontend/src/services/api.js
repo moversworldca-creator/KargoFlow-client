@@ -612,14 +612,233 @@ export const createEstimateDiscountPreset = (data) => api.post("/estimate-discou
 export const updateEstimateDiscountPreset = (id, data) => api.patch(`/estimate-discount-presets/${id}/`, data);
 export const deleteEstimateDiscountPreset = (id) => api.delete(`/estimate-discount-presets/${id}/`);
 export const seedEstimateDiscountPresets = (data = {}) => api.post("/estimate-discount-presets/seed-defaults/", data);
-export const getInventoryRoomTemplates = (params) => api.get("/inventory-room-templates/", { params });
-export const createInventoryRoomTemplate = (data) => api.post("/inventory-room-templates/", data);
-export const updateInventoryRoomTemplate = (id, data) => api.patch(`/inventory-room-templates/${id}/`, data);
-export const deleteInventoryRoomTemplate = (id) => api.delete(`/inventory-room-templates/${id}/`);
-export const getInventoryItemTemplates = (params) => api.get("/inventory-item-templates/", { params });
-export const createInventoryItemTemplate = (data) => api.post("/inventory-item-templates/", data);
-export const updateInventoryItemTemplate = (id, data) => api.patch(`/inventory-item-templates/${id}/`, data);
-export const deleteInventoryItemTemplate = (id) => api.delete(`/inventory-item-templates/${id}/`);
+// Tenant catalogs wrap record fields in `data`; UI consumers use flat records.
+const catalogRecord = (record) => record?.data && typeof record.data === 'object'
+  ? { ...record.data, id: record.id ?? record.data.id }
+  : record;
+const catalogResponse = (response) => {
+  if (Array.isArray(response)) return response.map(catalogRecord);
+  if (Array.isArray(response?.results)) return { ...response, results: response.results.map(catalogRecord) };
+  return catalogRecord(response);
+};
+
+// Inventory Room & Item Template APIs (/tenant/rooms/ & /tenant/inventory/)
+export const getInventoryRoomTemplates = async (params = {}) => {
+  const branchVal = params?.applicable_branch_id ?? params?.branch_id ?? params?.branch ?? null;
+  const roomQueryParams = { limit: 100 };
+  const itemQueryParams = { limit: 100 };
+  if (branchVal !== null && branchVal !== undefined && branchVal !== '') {
+    roomQueryParams.applicable_branch_id = Number(branchVal);
+    itemQueryParams.applicable_branch_id = Number(branchVal);
+  }
+  if (params?.q || params?.search) {
+    roomQueryParams.q = params.q || params.search;
+  }
+  if (params?.active !== undefined) {
+    roomQueryParams.active = params.active;
+    itemQueryParams.active = params.active;
+  }
+
+  const roomsRes = catalogResponse(await api.get("/tenant/rooms/", { params: roomQueryParams }));
+  const rawRooms = Array.isArray(roomsRes)
+    ? roomsRes
+    : Array.isArray(roomsRes?.results)
+    ? roomsRes.results
+    : [];
+
+  let rawItems = [];
+  try {
+    const itemsRes = catalogResponse(await api.get("/tenant/inventory/", { params: itemQueryParams }));
+    rawItems = Array.isArray(itemsRes)
+      ? itemsRes
+      : Array.isArray(itemsRes?.results)
+      ? itemsRes.results
+      : [];
+  } catch {
+    rawItems = [];
+  }
+
+  const itemsByRoom = {};
+  rawItems.forEach((item) => {
+    const rId = String(item.room_template_id ?? item.room_template);
+    if (!itemsByRoom[rId]) itemsByRoom[rId] = [];
+    itemsByRoom[rId].push({
+      ...item,
+      room_template: item.room_template_id ?? item.room_template,
+      room_template_id: item.room_template_id ?? item.room_template,
+      branch: item.branch_id ?? item.branch,
+      branch_id: item.branch_id ?? item.branch,
+      weight_lbs_each: Number(item.weight_lbs_each ?? 0),
+    });
+  });
+
+  return rawRooms
+    .sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0))
+    .map((room, rIdx) => {
+      const rId = String(room.id);
+      const items = (itemsByRoom[rId] || [])
+        .sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0))
+        .map((it, iIdx) => ({
+          ...it,
+          sort_order: iIdx + 1,
+        }));
+      return {
+        ...room,
+        sort_order: rIdx + 1,
+        branch: room.branch_id ?? room.branch,
+        branch_id: room.branch_id ?? room.branch,
+        item_templates: items,
+      };
+    });
+};
+
+export const createInventoryRoomTemplate = async (data) => {
+  const payload = {
+    name: data.name,
+    sort_order: Number(data.sort_order ?? 0),
+    is_active: data.is_active !== false,
+  };
+  const branchId = data.branch_id ?? data.branch;
+  if (branchId !== undefined && branchId !== null && branchId !== '') {
+    payload.branch_id = Number(branchId);
+  }
+
+  const res = catalogResponse(await api.post("/tenant/rooms/", payload));
+  return {
+    ...res,
+    branch: res.branch_id ?? res.branch ?? payload.branch_id ?? null,
+    branch_id: res.branch_id ?? payload.branch_id ?? null,
+    item_templates: res.item_templates || [],
+  };
+};
+
+export const updateInventoryRoomTemplate = async (id, data) => {
+  const payload = {};
+  if (data.name !== undefined) payload.name = data.name;
+  if (data.sort_order !== undefined) payload.sort_order = Number(data.sort_order);
+  if (data.is_active !== undefined) payload.is_active = data.is_active;
+  const branchId = data.branch_id ?? data.branch;
+  if (branchId !== undefined) {
+    payload.branch_id = branchId ? Number(branchId) : null;
+  }
+
+  const res = catalogResponse(await api.patch(`/tenant/rooms/${id}/`, payload));
+  return {
+    ...res,
+    branch: res.branch_id ?? res.branch ?? payload.branch_id ?? null,
+    branch_id: res.branch_id ?? payload.branch_id ?? null,
+  };
+};
+
+export const deleteInventoryRoomTemplate = async (id) => {
+  try {
+    const itemsRes = catalogResponse(await api.get("/tenant/inventory/", { params: { room_template_id: id, limit: 100 } }));
+    const items = Array.isArray(itemsRes) ? itemsRes : Array.isArray(itemsRes?.results) ? itemsRes.results : [];
+    for (const item of items) {
+      try {
+        await api.delete(`/tenant/inventory/${item.id}/`);
+      } catch {
+        // ignore individual item deletion error
+      }
+    }
+  } catch {
+    // ignore
+  }
+  await api.delete(`/tenant/rooms/${id}/`);
+  return { success: true };
+};
+
+export const getInventoryItemTemplates = async (params = {}) => {
+  const queryParams = { limit: 100 };
+  const roomTemplateId = params?.room_template_id ?? params?.room_template;
+  if (roomTemplateId) {
+    queryParams.room_template_id = roomTemplateId;
+  }
+  const branchId = params?.applicable_branch_id ?? params?.branch_id ?? params?.branch;
+  if (branchId) {
+    queryParams.applicable_branch_id = branchId;
+  }
+  if (params?.active !== undefined) {
+    queryParams.active = params.active;
+  }
+  if (params?.q || params?.search) {
+    queryParams.q = params.q || params.search;
+  }
+
+  const res = catalogResponse(await api.get("/tenant/inventory/", { params: queryParams }));
+  const rows = Array.isArray(res) ? res : Array.isArray(res?.results) ? res.results : [];
+  return rows.map((item) => ({
+    ...item,
+    room_template: item.room_template_id ?? item.room_template,
+    room_template_id: item.room_template_id ?? item.room_template,
+    branch: item.branch_id ?? item.branch,
+    branch_id: item.branch_id ?? item.branch,
+    weight_lbs_each: Number(item.weight_lbs_each ?? 0),
+  }));
+};
+
+export const createInventoryItemTemplate = async (data) => {
+  const payload = {
+    name: data.name,
+    room_template_id: Number(data.room_template_id ?? data.room_template),
+    weight_lbs_each: Number(data.weight_lbs_each ?? 0),
+    sort_order: Number(data.sort_order ?? 0),
+    is_active: data.is_active !== false,
+  };
+  const branchId = data.branch_id ?? data.branch;
+  if (branchId !== undefined && branchId !== null && branchId !== '') {
+    payload.branch_id = Number(branchId);
+  }
+
+  const res = catalogResponse(await api.post("/tenant/inventory/", payload));
+  return {
+    ...res,
+    room_template: res.room_template_id ?? res.room_template ?? payload.room_template_id,
+    room_template_id: res.room_template_id ?? payload.room_template_id,
+    branch: res.branch_id ?? res.branch ?? payload.branch_id ?? null,
+    branch_id: res.branch_id ?? payload.branch_id ?? null,
+    weight_lbs_each: Number(res.weight_lbs_each ?? payload.weight_lbs_each),
+  };
+};
+
+export const updateInventoryItemTemplate = async (id, data) => {
+  const payload = {};
+  if (data.name !== undefined) payload.name = data.name;
+  if (data.room_template_id !== undefined || data.room_template !== undefined) {
+    payload.room_template_id = Number(data.room_template_id ?? data.room_template);
+  }
+  if (data.weight_lbs_each !== undefined) {
+    payload.weight_lbs_each = Number(data.weight_lbs_each ?? 0);
+  }
+  if (data.sort_order !== undefined) {
+    payload.sort_order = Number(data.sort_order ?? 0);
+  }
+  if (data.is_active !== undefined) {
+    payload.is_active = data.is_active;
+  }
+  const branchId = data.branch_id ?? data.branch;
+  if (branchId !== undefined) {
+    payload.branch_id = branchId ? Number(branchId) : null;
+  }
+
+  const res = catalogResponse(await api.patch(`/tenant/inventory/${id}/`, payload));
+  return {
+    ...res,
+    room_template: res.room_template_id ?? res.room_template ?? payload.room_template_id,
+    room_template_id: res.room_template_id ?? payload.room_template_id,
+    branch: res.branch_id ?? res.branch ?? payload.branch_id ?? null,
+    branch_id: res.branch_id ?? payload.branch_id ?? null,
+    weight_lbs_each: Number(res.weight_lbs_each ?? payload.weight_lbs_each ?? 0),
+  };
+};
+
+export const deleteInventoryItemTemplate = (id) => api.delete(`/tenant/inventory/${id}/`).then(() => ({ success: true }));
+
+export const getInventoryRooms = (params) => getInventoryRoomTemplates(params);
+export const getInventoryRoomLookups = async (params) => catalogResponse(await api.get("/tenant/rooms/lookup/", { params }));
+export const getInventoryItems = (params) => getInventoryItemTemplates(params);
+export const getInventory = (params) => getInventoryItemTemplates(params);
+export const getInventoryItemLookups = async (params) => catalogResponse(await api.get("/tenant/inventory/lookup/", { params }));
 export const getEstimateCatalogItems = (params) => legacyOperationsApiEnabled ? api.get("/catalog-items/", { params }) : Promise.resolve([]);
 export const getEstimatePortalTemplates = (params) => legacyOperationsApiEnabled ? api.get("/portal-templates/", { params }) : Promise.resolve([]);
 export const createEstimatePortalTemplate = (data) => api.post("/portal-templates/", data);
@@ -772,16 +991,6 @@ export const createAutomationStep = (data) => api.post("/automations/steps/", da
 export const updateAutomationStep = (id, data) => api.patch(`/automations/steps/${id}/`, data);
 export const deleteAutomationStep = (id) => api.delete(`/automations/steps/${id}/`);
 export const getAutomationRuns = (params) => api.get("/automations/runs/", { params });
-
-// Tenant catalogs wrap record fields in `data`; UI consumers use flat records.
-const catalogRecord = (record) => record?.data && typeof record.data === 'object'
-  ? { ...record.data, id: record.id ?? record.data.id }
-  : record;
-const catalogResponse = (response) => {
-  if (Array.isArray(response)) return response.map(catalogRecord);
-  if (Array.isArray(response?.results)) return { ...response, results: response.results.map(catalogRecord) };
-  return catalogRecord(response);
-};
 
 // Mover Type & Size APIs
 export const getServices = async (params) => catalogResponse(await api.get("/tenant/service-types/", { params }));
@@ -1026,6 +1235,16 @@ const API = {
     listShareLinks: listFileShareLinks,
     createShareLink: createFileShareLink,
     revokeShareLink: revokeFileShareLink,
+  },
+  inventory: {
+    getInventoryRoomTemplates,
+    createInventoryRoomTemplate,
+    updateInventoryRoomTemplate,
+    deleteInventoryRoomTemplate,
+    getInventoryItemTemplates,
+    createInventoryItemTemplate,
+    updateInventoryItemTemplate,
+    deleteInventoryItemTemplate,
   },
   // tariffs removed
 };
