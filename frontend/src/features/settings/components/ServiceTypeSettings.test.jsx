@@ -40,10 +40,10 @@ describe('ServiceTypeSettings', () => {
     expect(actionsHeader.className).toContain('sm:px-6');
   });
 
-  it('loads only the selected branch catalog', async () => {
+  it('loads the company catalog despite a selected branch', async () => {
     render(<ServiceTypeSettings branchId="12" />);
 
-    await waitFor(() => expect(api.getServiceTypes).toHaveBeenCalledWith({ branch_id: 12 }));
+    await waitFor(() => expect(api.getServiceTypes).toHaveBeenCalledWith());
   });
 
   it('toggles status with a minimal patch and updates the row', async () => {
@@ -59,7 +59,7 @@ describe('ServiceTypeSettings', () => {
     expect(await screen.findByRole('button', { name: 'Activate Packing' })).toBeInTheDocument();
   });
 
-  it('creates a branch-scoped service type and renders the API result', async () => {
+  it('creates a company-wide service type and renders the API result', async () => {
     api.createServiceType.mockResolvedValueOnce({ id: 8, name: 'Storage', description: 'Warehouse', is_active: true, sort_order: 0 });
     render(<ServiceTypeSettings branchId={12} />);
 
@@ -70,7 +70,7 @@ describe('ServiceTypeSettings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create Type' }));
 
     await waitFor(() => expect(api.createServiceType).toHaveBeenCalledWith({
-      name: 'Storage', description: 'Warehouse', is_active: true, code: 'storage', branch_id: 12,
+      name: 'Storage', description: 'Warehouse', is_active: true, code: 'storage',
     }));
     expect(await screen.findByText('Storage')).toBeInTheDocument();
   });

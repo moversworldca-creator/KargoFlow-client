@@ -9,7 +9,7 @@ import {
   getServiceTypes, createServiceType, updateServiceType, deleteServiceType 
 } from '../../../services/api';
 
-const ServiceTypeSettings = ({ branchId }) => {
+const ServiceTypeSettings = () => {
   const loadRequestRef = useRef(0);
   const [serviceTypes, setServiceTypes] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -35,8 +35,7 @@ const ServiceTypeSettings = ({ branchId }) => {
     setIsLoading(true);
     setMessage({ type: '', text: '' });
     try {
-      const params = branchId ? { branch_id: Number(branchId) } : undefined;
-      const response = await getServiceTypes(params);
+      const response = await getServiceTypes();
       const data = Array.isArray(response) ? response : (response?.results || []);
       if (requestId !== loadRequestRef.current) return;
       setServiceTypes(data);
@@ -48,7 +47,7 @@ const ServiceTypeSettings = ({ branchId }) => {
     } finally {
       if (requestId === loadRequestRef.current) setIsLoading(false);
     }
-  }, [branchId]);
+  }, []);
 
   useEffect(() => {
     const requestId = ++loadRequestRef.current;
@@ -188,7 +187,6 @@ const ServiceTypeSettings = ({ branchId }) => {
         description: formData.description?.trim() || '',
         is_active: formData.is_active !== false,
         code: formData.name.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_').slice(0, 50),
-        branch_id: branchId ? Number(branchId) : null,
       };
       if (editingType) {
         const updated = await updateServiceType(editingType.id, payload);

@@ -9,7 +9,7 @@ import {
   getMoverTypes, createMoverType, updateMoverType, deleteMoverType 
 } from '../../../services/api';
 
-const MoverTypeSettings = ({ branchId }) => {
+const MoverTypeSettings = () => {
   const loadRequestRef = useRef(0);
   const [moverTypes, setMoverTypes] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -35,8 +35,7 @@ const MoverTypeSettings = ({ branchId }) => {
     setIsLoading(true);
     setMessage({ type: '', text: '' });
     try {
-      const params = branchId ? { branch_id: Number(branchId) } : undefined;
-      const response = await getMoverTypes(params);
+      const response = await getMoverTypes();
       const data = Array.isArray(response) ? response : (response?.results || []);
       if (requestId !== loadRequestRef.current) return;
       setMoverTypes(data);
@@ -48,7 +47,7 @@ const MoverTypeSettings = ({ branchId }) => {
     } finally {
       if (requestId === loadRequestRef.current) setIsLoading(false);
     }
-  }, [branchId]);
+  }, []);
 
   useEffect(() => {
     const requestId = ++loadRequestRef.current;
@@ -188,7 +187,6 @@ const MoverTypeSettings = ({ branchId }) => {
         description: formData.description?.trim() || '',
         is_active: formData.is_active !== false,
         code: formData.name.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_').slice(0, 50),
-        branch_id: branchId ? Number(branchId) : null,
       };
       if (editingType) {
         const updated = await updateMoverType(editingType.id, payload);

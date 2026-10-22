@@ -155,8 +155,8 @@ const SETTINGS_GROUPS = [
     shortLabel: "Moves",
     icon: Boxes,
     tabs: [
-      { id: "mover-types", label: "Mover Types", description: "Residential and commercial rules.", icon: Truck, render: (branchId) => <MoverTypeSettings branchId={branchId} /> },
-      { id: "service-types", label: "Service Types", description: "Moving and packing services.", icon: Boxes, render: (branchId) => <ServiceTypeSettings branchId={branchId} /> },
+      { id: "mover-types", label: "Mover Types", description: "Residential and commercial rules.", icon: Truck, render: () => <MoverTypeSettings /> },
+      { id: "service-types", label: "Service Types", description: "Moving and packing services.", icon: Boxes, render: () => <ServiceTypeSettings /> },
       { id: "move-sizes", label: "Move Sizes", description: "Home volume classifications.", icon: SlidersHorizontal, render: (branchId) => <MoverSizeSettings branchId={branchId} /> },
     ],
   },

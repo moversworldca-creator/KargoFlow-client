@@ -40,10 +40,10 @@ describe('MoverTypeSettings', () => {
     expect(actionsHeader.className).toContain('sm:px-6');
   });
 
-  it('loads only the selected branch catalog', async () => {
+  it('loads the company catalog despite a selected branch', async () => {
     render(<MoverTypeSettings branchId="12" />);
 
-    await waitFor(() => expect(api.getMoverTypes).toHaveBeenCalledWith({ branch_id: 12 }));
+    await waitFor(() => expect(api.getMoverTypes).toHaveBeenCalledWith());
   });
 
   it('toggles status with a minimal patch and updates the row', async () => {
@@ -59,7 +59,7 @@ describe('MoverTypeSettings', () => {
     expect(await screen.findByRole('button', { name: 'Activate Local' })).toBeInTheDocument();
   });
 
-  it('creates a branch-scoped move type and renders the API result', async () => {
+  it('creates a company-wide move type and renders the API result', async () => {
     api.createMoverType.mockResolvedValueOnce({ id: 7, name: 'Interstate', description: 'Long haul', is_active: true, sort_order: 0 });
     render(<MoverTypeSettings branchId={12} />);
 
@@ -70,7 +70,7 @@ describe('MoverTypeSettings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create Type' }));
 
     await waitFor(() => expect(api.createMoverType).toHaveBeenCalledWith({
-      name: 'Interstate', description: 'Long haul', is_active: true, code: 'interstate', branch_id: 12,
+      name: 'Interstate', description: 'Long haul', is_active: true, code: 'interstate',
     }));
     expect(await screen.findByText('Interstate')).toBeInTheDocument();
   });
