@@ -5,14 +5,11 @@ import {
   BadgeDollarSign,
   Boxes,
   Calculator,
-  FlaskConical,
-  Gavel,
   Building2,
   ChevronRight,
   ClipboardList,
   Clock3,
   CreditCard,
-  FileSignature,
   FileText,
   Globe2,
   Image,
@@ -30,9 +27,9 @@ import {
   Truck,
   UserRoundCog,
   Users,
-  Wrench,
   Webhook,
   X,
+  Warehouse,
 } from "lucide-react";
 import API from "../../../services/api";
 import { useAuth } from "../../auth/context/AuthContext";
@@ -60,13 +57,9 @@ const ServiceTypeSettings = React.lazy(() => import("../components/ServiceTypeSe
 const StatusCodeSettings = React.lazy(() => import("../components/StatusCodeSettings"));
 const TeamManagement = React.lazy(() => import("../components/TeamManagement"));
 const AccessOverview = React.lazy(() => import("../userManagement/AccessOverview"));
-const ApprovalsQueue = React.lazy(() => import("../../pricing/components/ApprovalsQueue"));
-const OverlaysSettings = React.lazy(() => import("../../pricing/components/OverlaysSettings"));
-const PolicySettings = React.lazy(() => import("../../pricing/components/PolicyAndTaxSettings").then((m) => ({ default: m.PolicySettings })));
-const TaxSettings = React.lazy(() => import("../../pricing/components/PolicyAndTaxSettings").then((m) => ({ default: m.TaxSettings })));
-const PriceSimulatorPage = React.lazy(() => import("../../pricing/components/PriceSimulatorPage"));
-const SkillsSettings = React.lazy(() => import("../../pricing/components/SkillsSettings"));
 const TariffsPage = React.lazy(() => import("../../pricing/components/TariffsPage"));
+const ValuationTemplatesPage = React.lazy(() => import("../../pricing/components/CompanyTariffSettings").then((m) => ({ default: m.ValuationTemplatesPage })));
+const StorageRatesPage = React.lazy(() => import("../../pricing/components/CompanyTariffSettings").then((m) => ({ default: m.StorageRatesPage })));
 
 function TabLoadingSkeleton() {
   return (
@@ -181,17 +174,21 @@ const SETTINGS_GROUPS = [
   },
   {
     id: "pricing",
-    label: "Pricing & Tariffs",
-    shortLabel: "Pricing",
+    label: "Tariffs",
+    shortLabel: "Tariffs",
     icon: Calculator,
     tabs: [
-      { id: "tariffs", label: "Tariffs", description: "Tariffs, revisions, rules and rate matrices.", icon: Calculator, render: () => <TariffsPage /> },
-      { id: "pricing-skills", label: "Pricing Skills", description: "Crew skills that rates can depend on.", icon: Wrench, render: () => <SkillsSettings /> },
-      { id: "contract-pricing", label: "Contract Pricing", description: "Customer and contract overlays.", icon: FileSignature, render: () => <OverlaysSettings /> },
-      { id: "pricing-taxes", label: "Pricing Taxes", description: "Tax components and customer exemptions.", icon: CreditCard, render: (branchId) => <TaxSettings branchId={branchId} /> },
-      { id: "pricing-policy", label: "Pricing Policy", description: "Revision workflow, approvals and margin policy.", icon: Gavel, render: () => <PolicySettings /> },
-      { id: "pricing-approvals", label: "Pricing Approvals", description: "Discounts and overrides waiting for a decision.", icon: ShieldCheck, render: () => <ApprovalsQueue /> },
-      { id: "price-simulator", label: "Price Simulator", description: "Price a hypothetical job.", icon: FlaskConical, render: () => <PriceSimulatorPage /> },
+      { id: "tariffs", label: "Tariff Library", description: "Tariffs: rates, materials, fees, valuation and defaults.", icon: Calculator, render: () => <TariffsPage /> },
+      { id: "valuation-templates", label: "Valuation Templates", description: "Company valuation options used by tariffs.", icon: ShieldCheck, render: () => <ValuationTemplatesPage /> },
+    ],
+  },
+  {
+    id: "storage",
+    label: "Storage",
+    shortLabel: "Storage",
+    icon: Warehouse,
+    tabs: [
+      { id: "storage-rates", label: "Storage Rates", description: "Warehouse storage tariffs and their warehouses.", icon: Warehouse, render: () => <StorageRatesPage /> },
     ],
   },
   {

@@ -215,19 +215,34 @@ export function QueryState({ query, empty, emptyText = 'Nothing here yet.', deni
   return children;
 }
 
-/** Issues from validation (severity, code, message, object). */
-export function IssueList({ issues }) {
-  if (!issues?.length) return <Callout tone="success">No validation issues.</Callout>;
+/** Field problems from the backend ({path, message}), shown together. */
+export function ProblemList({ problems, title = 'Fix these before saving' }) {
+  if (!problems?.length) return null;
   return (
-    <ul className="space-y-1.5" aria-label="Validation issues">
-      {issues.map((issue, index) => (
-        <li key={`${issue.code}-${issue.object_key}-${index}`} className="flex flex-wrap items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs dark:border-slate-800">
-          <Badge tone={{ error: 'red', warning: 'amber', info: 'blue' }[issue.severity] || 'slate'}>{humanize(issue.severity)}</Badge>
-          <code className="text-[11px] text-slate-500">{issue.code}</code>
-          <span className="min-w-0 flex-1 text-slate-800 dark:text-slate-100">{issue.message}</span>
-          {issue.object_key && <span className="text-[11px] text-slate-500">{humanize(issue.object_type)}: {issue.object_key}</span>}
-        </li>
-      ))}
-    </ul>
+    <Callout tone="danger" title={title}>
+      <ul className="list-inside list-disc space-y-0.5">
+        {problems.map((p, index) => <li key={`${p.path}-${index}`}><code className="text-[11px]">{p.path}</code>: {p.message}</li>)}
+      </ul>
+    </Callout>
   );
+}
+
+/** What the plan allows for tariffs; shows why the screen is unavailable. */
+export function PlanGate({ feature }) {
+  return (
+    <Callout tone="warning" title="Not included in your plan">
+      Tariffs are part of the Estimates entitlement{feature?.mode === 'none' ? ', which this company does not have' : ''}.
+      A platform administrator can enable it.
+    </Callout>
+  );
+}
+
+/** Ask before leaving with unsaved changes. */
+export function useUnsavedChanges(dirty) {
+  React.useEffect(() => {
+    if (!dirty) return undefined;
+    const handler = (event) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [dirty]);
 }

@@ -1,307 +1,160 @@
+// Distance Rates (DST-01..07): named mileage x weight / volume tables.
 import React, { useState } from 'react';
-import { Clock, Map, Percent, Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
+import { Badge, Button, TextField, inputClass } from '../components/ui';
+import { DISTANCE_RATE_TYPES } from '../constants';
+import { move, newId, setIn } from '../tariffConfig';
+import { DecimalField, DecimalInput, IconButton, PeriodPicker, ReorderableList, SectionHeader, SectionProblems, SelectInput, Toggle } from './fields';
 
-const RATE_TYPES = [
-  { value: 'weight_cwt', label: 'Weight (per 100 lbs / CWT)' },
-  { value: 'volume_cuft', label: 'Volume (per cubic foot)' },
-  { value: 'flat_weight', label: 'Flat by Weight Tier' },
-  { value: 'flat_volume', label: 'Flat by Volume Tier' },
-];
+const BLANK = (taken) => ({ id: newId('distance rate', taken), name: 'New distance rate', rate_type: 'weight_cwt', breakpoints: false,
+  mileage_bands: ['0'], size_bands: ['0'], periods: { default: [[null]] } });
 
-export default function DistanceRatesSection({ config, onChange, isReadOnly, selectedPeriodId, onSelectPeriod }) {
-  const distanceSchedules = config.distance_rates || [];
-  const periods = config.periods || [];
-  const currentPeriod = selectedPeriodId || periods[0]?.id || 'default';
-  const [activeScheduleId, setActiveScheduleId] = useState(distanceSchedules[0]?.id || null);
-  const [scalePct, setScalePct] = useState('5.0');
+/** Resizes every period's grid to the current band counts, keeping values. */
+function reshape(rate) {
+  const periods = Object.fromEntries(Object.entries(rate.periods || {}).map(([pid, grid]) => [pid,
+    rate.mileage_bands.map((_, r) => rate.size_bands.map((__, c) => grid?.[r]?.[c] ?? null))]));
+  return { ...rate, periods: Object.keys(periods).length ? periods : { default: rate.mileage_bands.map(() => rate.size_bands.map(() => null)) } };
+}
 
-  const setSchedules = (updated) => {
-    onChange({
-      ...config,
-      distance_rates: updated,
-    });
-  };
-
-  const currentSchedule = distanceSchedules.find((s) => s.id === activeScheduleId) || distanceSchedules[0];
-
-  const handleAddSchedule = () => {
-    const newId = `dist_${Date.now()}`;
-    const newSched = {
-      id: newId,
-      name: `Distance Schedule ${distanceSchedules.length + 1}`,
-      rate_type: 'weight_cwt',
-      auto_scale_pct: '0',
-      enable_breakpoints: true,
-      overage_per_cwt: '2.50',
-      overage_per_mile: '1.75',
-      mileage_bands: ['0 - 50', '51 - 100', '101 - 250', '251 - 500', '501+'],
-      weight_bands: ['1,000 lbs', '2,500 lbs', '5,000 lbs', '8,000 lbs', '10,000+ lbs'],
-      matrix: {
-        '0': { '0': '25.00', '1': '22.00', '2': '19.50', '3': '17.00', '4': '15.00' },
-        '1': { '0': '32.00', '1': '28.00', '2': '25.00', '3': '22.00', '4': '19.50' },
-        '2': { '0': '45.00', '1': '40.00', '2': '36.00', '3': '32.00', '4': '28.00' },
-      },
-    };
-    setSchedules([...distanceSchedules, newSched]);
-    setActiveScheduleId(newId);
-  };
-
-  const handleUpdateCurrent = (patch) => {
-    if (!currentSchedule) return;
-    setSchedules(
-      distanceSchedules.map((s) => (s.id === currentSchedule.id ? { ...s, ...patch } : s))
-    );
-  };
-
-  const handleDeleteCurrent = () => {
-    if (isReadOnly || !currentSchedule) return;
-    const remaining = distanceSchedules.filter((s) => s.id !== currentSchedule.id);
-    setSchedules(remaining);
-    setActiveScheduleId(remaining[0]?.id || null);
-  };
-
-  const handleCellChange = (mIdx, wIdx, val) => {
-    const matrix = { ...(currentSchedule.matrix || {}) };
-    matrix[String(mIdx)] = { ...(matrix[String(mIdx)] || {}), [String(wIdx)]: val };
-    handleUpdateCurrent({ matrix });
-  };
-
-  const handleApplyScaling = (percent) => {
-    if (isReadOnly || !currentSchedule) return;
-    const factor = 1 + Number(percent) / 100;
-    const matrix = { ...(currentSchedule.matrix || {}) };
-
-    Object.keys(matrix).forEach((mKey) => {
-      matrix[mKey] = { ...matrix[mKey] };
-      Object.keys(matrix[mKey]).forEach((wKey) => {
-        const val = parseFloat(matrix[mKey][wKey]);
-        if (!isNaN(val)) {
-          matrix[mKey][wKey] = (val * factor).toFixed(2);
-        }
-      });
-    });
-
-    handleUpdateCurrent({ matrix });
-  };
-
+export default function DistanceRatesSection({ config, onChange, isReadOnly, selectedPeriodId, onSelectPeriod, problems }) {
+  const rates = config.distance_rates || [];
+  const [openId, setOpenId] = useState(rates[0]?.id || null);
+  const set = (next) => onChange({ ...config, distance_rates: next });
+  const open = rates.find((r) => r.id === openId);
+  const update = (next) => set(rates.map((r) => (r.id === next.id ? next : r)));
   return (
-    <div className="space-y-6">
-      {/* Header and Period Selector */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-200 pb-4 dark:border-slate-800">
-        <div>
-          <h3 className="text-base font-bold text-slate-900 dark:text-white">Distance Rates</h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Configure mileage and shipment weight/volume rate matrices for intrastate and interstate long-distance moves.
-          </p>
-        </div>
-        {!isReadOnly && (
-          <button
-            type="button"
-            onClick={handleAddSchedule}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-brand-navy px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 transition dark:bg-blue-600"
-          >
-            <Plus size={14} /> Add Schedule
+    <div className="space-y-4">
+      <SectionHeader title="Distance Rates" description="Mileage × shipment weight or volume tables. Rows are mileage bands, columns are weight or volume bands, both given by their starting value.">
+        {!isReadOnly && <Button onClick={() => { const rate = BLANK(rates.map((r) => r.id)); set([...rates, rate]); setOpenId(rate.id); }}><Plus size={14} aria-hidden="true" /> Add Distance Rate</Button>}
+      </SectionHeader>
+      <SectionProblems problems={problems} section="distance_rates" />
+      <ReorderableList items={rates} disabled={isReadOnly} emptyText="No distance rates." labelOf={(r) => r.name}
+        onReorder={(from, to) => set(move(rates, from, to))} onEdit={(r) => setOpenId(r.id)}
+        onRemove={isReadOnly ? null : (r) => set(rates.filter((x) => x.id !== r.id))}
+        render={(r) => (
+          <button type="button" className="flex w-full items-center gap-2 text-left" onClick={() => setOpenId(r.id)} aria-pressed={r.id === openId}>
+            <span className="font-semibold">{r.name}</span>
+            <Badge tone="blue">{DISTANCE_RATE_TYPES.find(([k]) => k === r.rate_type)?.[1]}</Badge>
+            {r.id === openId && <Badge tone="green">Editing</Badge>}
           </button>
-        )}
+        )} />
+      {open && <RateEditor key={open.id} rate={open} update={update} config={config} periodId={selectedPeriodId || 'default'}
+        onSelectPeriod={onSelectPeriod} readOnly={isReadOnly} />}
+    </div>
+  );
+}
+
+function RateEditor({ rate, update, config, periodId, onSelectPeriod, readOnly }) {
+  const [scale, setScale] = useState('');
+  const flat = rate.rate_type.startsWith('flat_');
+  const byWeight = ['weight_cwt', 'flat_weight'].includes(rate.rate_type);
+  const sizeUnit = byWeight ? 'lbs' : 'cu ft';
+  const grid = rate.periods?.[periodId] || [];
+  // Adding or removing a band inserts or drops that row / column in every period.
+  const editBands = (name, op, value, removeAt) => {
+    const bands = [...rate[name]];
+    const rows = name === 'mileage_bands';
+    const index = op === 'add' ? bands.filter((b) => Number(b) < Number(value)).length : removeAt;
+    if (op === 'add') bands.splice(index, 0, value); else bands.splice(index, 1);
+    const periods = Object.fromEntries(Object.entries(rate.periods || {}).map(([pid, grid]) => {
+      const copy = (grid || []).map((row) => [...row]);
+      if (rows) {
+        if (op === 'add') copy.splice(index, 0, rate.size_bands.map(() => null)); else copy.splice(index, 1);
+      } else {
+        copy.forEach((row) => (op === 'add' ? row.splice(index, 0, null) : row.splice(index, 1)));
+      }
+      return [pid, copy];
+    }));
+    update(reshape({ ...rate, [name]: bands, periods }));
+  };
+  // DST-04: scale the entered rates by a fixed percentage; they stay editable.
+  const applyScale = () => {
+    const factor = 1 + Number(scale) / 100;
+    if (!Number.isFinite(factor) || factor <= 0) return;
+    const scaled = grid.map((row) => row.map((v) => (v == null || v === '' ? v : (Math.round(Number(v) * factor * 100) / 100).toFixed(2))));
+    update(setIn(rate, ['periods', periodId], scaled));
+    setScale('');
+  };
+  return (
+    <div className="space-y-4 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+      <fieldset disabled={readOnly} className="grid gap-3 sm:grid-cols-2">
+        <TextField label="Name" value={rate.name} onChange={(name) => update({ ...rate, name })} required />
+        <SelectInput label="Rate type" value={rate.rate_type} options={DISTANCE_RATE_TYPES}
+          onChange={(rate_type) => update({ ...rate, rate_type, breakpoints: rate_type.startsWith('flat_') ? false : rate.breakpoints })} />
+        {!flat && <Toggle label="Use breakpoints" checked={rate.breakpoints} onChange={(breakpoints) => update({ ...rate, breakpoints })}
+          hint="A shipment is priced at the next tier’s starting size when that is cheaper." />}
+      </fieldset>
+      {flat && (
+        <fieldset disabled={readOnly} className="grid gap-3 sm:grid-cols-4">
+          <DecimalField label={`Top ${byWeight ? 'weight' : 'volume'} range ends at (${sizeUnit})`} places={2} value={rate.size_range_end} onChange={(v) => update({ ...rate, size_range_end: v })} />
+          <DecimalField label={byWeight ? 'Per additional 100 lbs' : 'Per additional cu ft'} value={rate.additional_size_rate} onChange={(v) => update({ ...rate, additional_size_rate: v })} />
+          <DecimalField label="Mileage range ends at (miles)" places={2} value={rate.mileage_range_end} onChange={(v) => update({ ...rate, mileage_range_end: v })} />
+          <DecimalField label="Per additional mile" value={rate.additional_mile_rate} onChange={(v) => update({ ...rate, additional_mile_rate: v })} />
+        </fieldset>
+      )}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <BandEditor label="Mileage bands (miles, starting value)" values={rate.mileage_bands} onEdit={(op, v, i) => editBands('mileage_bands', op, v, i)} readOnly={readOnly} />
+        <BandEditor label={`${byWeight ? 'Weight' : 'Volume'} bands (${sizeUnit}, starting value)`} values={rate.size_bands} onEdit={(op, v, i) => editBands('size_bands', op, v, i)} readOnly={readOnly} />
       </div>
-
-      {/* Schedule Tabs */}
-      {distanceSchedules.length > 0 ? (
-        <>
-          <div className="flex items-center gap-2 overflow-x-auto border-b border-slate-200 dark:border-slate-800 pb-2">
-            {distanceSchedules.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => setActiveScheduleId(s.id)}
-                className={`rounded-lg px-3 py-1.5 text-xs font-bold transition whitespace-nowrap ${
-                  (currentSchedule?.id === s.id)
-                    ? 'bg-brand-navy text-white shadow-sm dark:bg-blue-600'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
-                }`}
-              >
-                {s.name}
-              </button>
+      <PeriodPicker config={config} value={periodId} onChange={onSelectPeriod} />
+      <div className="overflow-x-auto">
+        <table className="text-xs" aria-label={`${rate.name} rates`}>
+          <thead><tr className="text-[11px] text-slate-500">
+            <th scope="col" className="px-1 text-left">Miles \ {sizeUnit}</th>
+            {rate.size_bands.map((s) => <th key={s} scope="col" className="px-1 text-right">{Number(s).toLocaleString()}+</th>)}
+          </tr></thead>
+          <tbody>
+            {rate.mileage_bands.map((m, r) => (
+              <tr key={m}>
+                <th scope="row" className="px-1 text-left font-semibold">{Number(m).toLocaleString()}+</th>
+                {rate.size_bands.map((s, c) => (
+                  <td key={s} className="px-1 py-0.5">
+                    <DecimalInput label={`${m}+ miles, ${s}+ ${sizeUnit}`} disabled={readOnly} className="min-w-[5rem] text-right"
+                      value={grid[r]?.[c]} onChange={(v) => update(setIn(reshape(rate), ['periods', periodId, r, c], v))} />
+                  </td>
+                ))}
+              </tr>
             ))}
-          </div>
-
-          {currentSchedule && (
-            <div className="space-y-4">
-              {/* Schedule Metadata */}
-              <div className="grid gap-4 sm:grid-cols-3 p-4 rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Schedule Name
-                  </label>
-                  <input
-                    type="text"
-                    disabled={isReadOnly}
-                    value={currentSchedule.name}
-                    onChange={(e) => handleUpdateCurrent({ name: e.target.value })}
-                    className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Rate Type
-                  </label>
-                  <select
-                    disabled={isReadOnly}
-                    value={currentSchedule.rate_type}
-                    onChange={(e) => handleUpdateCurrent({ rate_type: e.target.value })}
-                    className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                  >
-                    {RATE_TYPES.map((t) => (
-                      <option key={t.value} value={t.value}>{t.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex items-end justify-between">
-                  <label className="flex items-center gap-2 cursor-pointer pb-2">
-                    <input
-                      type="checkbox"
-                      disabled={isReadOnly}
-                      checked={currentSchedule.enable_breakpoints !== false}
-                      onChange={(e) => handleUpdateCurrent({ enable_breakpoints: e.target.checked })}
-                      className="rounded text-brand-blue focus:ring-brand-blue"
-                    />
-                    <span className="text-xs font-bold text-slate-800 dark:text-white">Enable Breakpoints</span>
-                  </label>
-                  {!isReadOnly && distanceSchedules.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={handleDeleteCurrent}
-                      className="text-xs font-semibold text-rose-600 hover:underline pb-2"
-                    >
-                      Delete Schedule
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Auto-scaling Utility Bar */}
-              <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
-                <div className="flex items-center gap-2 text-xs">
-                  <Percent size={14} className="text-brand-blue" />
-                  <span className="font-semibold text-slate-700 dark:text-slate-300">Auto-Scale Rates:</span>
-                  <input
-                    type="number"
-                    step="0.5"
-                    disabled={isReadOnly}
-                    value={scalePct}
-                    onChange={(e) => setScalePct(e.target.value)}
-                    className="w-16 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs text-center dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                  />
-                  <span className="text-slate-500">%</span>
-                  {!isReadOnly && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => handleApplyScaling(scalePct)}
-                        className="rounded bg-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-700 hover:bg-slate-300 dark:bg-slate-800 dark:text-slate-200"
-                      >
-                        +{scalePct}%
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleApplyScaling(`-${scalePct}`)}
-                        className="rounded bg-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-700 hover:bg-slate-300 dark:bg-slate-800 dark:text-slate-200"
-                      >
-                        -{scalePct}%
-                      </button>
-                    </>
-                  )}
-                </div>
-                <span className="text-[11px] text-slate-400">Values scale proportionally; cells remain manually editable.</span>
-              </div>
-
-              {/* 2D Rate Matrix */}
-              <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden dark:border-slate-800 dark:bg-slate-900">
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[650px] text-xs">
-                    <thead>
-                      <tr className="border-b border-slate-200 bg-slate-50/50 text-slate-500 text-[11px] uppercase tracking-wide dark:border-slate-800 dark:bg-slate-900/50">
-                        <th scope="col" className="py-2.5 px-3 text-left w-32">Miles \ Weight</th>
-                        {(currentSchedule.weight_bands || []).map((wBand, wIdx) => (
-                          <th key={wIdx} scope="col" className="py-2.5 px-2 text-center">{wBand}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {(currentSchedule.mileage_bands || []).map((mBand, mIdx) => (
-                        <tr key={mIdx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
-                          <td className="py-2 px-3 font-semibold text-slate-800 dark:text-slate-200">{mBand}</td>
-                          {(currentSchedule.weight_bands || []).map((_, wIdx) => {
-                            const val = currentSchedule.matrix?.[String(mIdx)]?.[String(wIdx)] ?? '';
-                            return (
-                              <td key={wIdx} className="py-1 px-2 text-center">
-                                <div className="relative">
-                                  <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">$</span>
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    disabled={isReadOnly}
-                                    value={val}
-                                    onChange={(e) => handleCellChange(mIdx, wIdx, e.target.value)}
-                                    placeholder="0.00"
-                                    className="w-full text-center rounded border border-slate-200 bg-white py-1 pl-4 pr-1 text-xs font-medium dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                                  />
-                                </div>
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Overage Charges */}
-              <div className="grid gap-4 sm:grid-cols-2 p-4 rounded-xl border border-slate-200 bg-slate-50/50 dark:border-slate-800">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Charge per Additional 100 lbs (above max weight tier)
-                  </label>
-                  <div className="relative">
-                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      disabled={isReadOnly}
-                      value={currentSchedule.overage_per_cwt || ''}
-                      onChange={(e) => handleUpdateCurrent({ overage_per_cwt: e.target.value })}
-                      placeholder="2.50"
-                      className="w-full rounded border border-slate-300 bg-white pl-7 pr-3 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Charge per Additional Mile (above max mileage tier)
-                  </label>
-                  <div className="relative">
-                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      disabled={isReadOnly}
-                      value={currentSchedule.overage_per_mile || ''}
-                      onChange={(e) => handleUpdateCurrent({ overage_per_mile: e.target.value })}
-                      placeholder="1.75"
-                      className="w-full rounded border border-slate-300 bg-white pl-7 pr-3 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </>
-      ) : (
-        <div className="p-8 text-center text-xs text-slate-500">
-          No distance schedules configured. Click &quot;Add Schedule&quot; to create one.
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[11px] text-slate-500">{flat ? 'Each cell is the flat charge.' : `Each cell is the rate ${byWeight ? 'per 100 lbs' : 'per cubic foot'}.`}</p>
+      {!readOnly && (
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="text-xs"><span className="mb-1 block font-semibold">Auto-Scale Rates (%)</span>
+            <input className={`${inputClass} w-28`} inputMode="decimal" value={scale} onChange={(e) => /^-?\d{0,3}(\.\d{0,2})?$/.test(e.target.value) && setScale(e.target.value)} placeholder="5" /></label>
+          <Button variant="ghost" onClick={applyScale} disabled={!scale}>Scale this period’s rates</Button>
         </div>
       )}
     </div>
   );
 }
+
+function BandEditor({ label, values, onEdit, readOnly }) {
+  const [next, setNext] = useState('');
+  const add = () => {
+    if (next === '' || values.some((v) => Number(v) === Number(next))) return;
+    onEdit('add', next);
+    setNext('');
+  };
+  return (
+    <div className="text-xs">
+      <p className="mb-1 font-semibold">{label}</p>
+      <div className="flex flex-wrap items-center gap-1">
+        {values.map((v, i) => (
+          <span key={v} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
+            {Number(v).toLocaleString()}
+            {!readOnly && i > 0 && <IconButton label={`Remove band ${v}`} onClick={() => onEdit('remove', v, i)}><Trash2 size={11} /></IconButton>}
+          </span>
+        ))}
+        {!readOnly && (
+          <>
+            <DecimalInput label={`Add to ${label}`} value={next} onChange={(v) => setNext(v ?? '')} places={2} className="w-24" />
+            <Button variant="ghost" onClick={add} disabled={next === ''}><Plus size={12} aria-hidden="true" /> Add</Button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+

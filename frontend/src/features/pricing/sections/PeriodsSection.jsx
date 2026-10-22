@@ -1,264 +1,81 @@
+// Periods (PER-01..06): Default covers every date; custom periods are checked
+// top to bottom and the first enabled match wins. Unlimited periods.
 import React, { useState } from 'react';
-import { ArrowDown, ArrowUp, Calendar, Check, Copy, GripVertical, Plus, Trash2 } from 'lucide-react';
+import { CalendarRange, Plus, Trash2 } from 'lucide-react';
+import { Badge, Button, Dialog, TextField } from '../components/ui';
+import { formatDateOnly } from '../format';
+import { move, newId } from '../tariffConfig';
+import { IconButton, ReorderableList, SectionHeader, SectionProblems, Toggle } from './fields';
 
-export default function PeriodsSection({ config, onChange, isReadOnly }) {
+export default function PeriodsSection({ config, onChange, isReadOnly, problems }) {
   const periods = config.periods || [];
-  const [editingId, setEditingId] = useState(null);
-
-  const setPeriods = (updated) => {
-    onChange({
-      ...config,
-      periods: updated,
-    });
+  const [editing, setEditing] = useState(null);
+  const set = (next) => onChange({ ...config, periods: next });
+  const save = (period) => {
+    const index = periods.findIndex((p) => p.id === period.id);
+    set(index >= 0 ? periods.map((p, i) => (i === index ? period : p)) : [...periods, period]);
+    setEditing(null);
   };
-
-  const handleAddPeriod = () => {
-    const newId = `period_${Date.now()}`;
-    const newPeriod = {
-      id: newId,
-      name: `Peak Season ${periods.length}`,
-      is_default: false,
-      is_active: true,
-      priority: periods.length + 1,
-      date_type: 'range', // "range" | "single"
-      start_date: new Date().toISOString().slice(0, 10),
-      end_date: new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10),
-    };
-    // Insert before default period (default is lowest priority / fallback)
-    const nonDefault = periods.filter((p) => !p.is_default);
-    const defaultP = periods.find((p) => p.is_default) || {
-      id: 'default',
-      name: 'Default (All Dates)',
-      is_default: true,
-      is_active: true,
-      priority: 999,
-      date_type: 'all',
-    };
-    const next = [...nonDefault, newPeriod, defaultP].map((p, idx) => ({
-      ...p,
-      priority: idx + 1,
-    }));
-    setPeriods(next);
-    setEditingId(newId);
-  };
-
-  const handleToggleActive = (id) => {
-    if (isReadOnly) return;
-    setPeriods(
-      periods.map((p) => (p.id === id ? { ...p, is_active: !p.is_active } : p))
-    );
-  };
-
-  const handleDelete = (id) => {
-    if (isReadOnly) return;
-    setPeriods(periods.filter((p) => p.id !== id || p.is_default));
-  };
-
-  const handleMove = (index, direction) => {
-    if (isReadOnly) return;
-    const targetIndex = index + direction;
-    if (targetIndex < 0 || targetIndex >= periods.length) return;
-    // Don't move past or swap the default period
-    if (periods[index].is_default || periods[targetIndex].is_default) return;
-
-    const copy = [...periods];
-    const temp = copy[index];
-    copy[index] = copy[targetIndex];
-    copy[targetIndex] = temp;
-    // Re-assign priorities
-    setPeriods(copy.map((p, idx) => ({ ...p, priority: idx + 1 })));
-  };
-
-  const handleUpdate = (id, patch) => {
-    setPeriods(periods.map((p) => (p.id === id ? { ...p, ...patch } : p)));
-  };
-
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-200 pb-4 dark:border-slate-800">
-        <div>
-          <h3 className="text-base font-bold text-slate-900 dark:text-white">Pricing Periods</h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Configure seasonal dates (peak, holiday, off-peak). Periods are evaluated top-to-bottom; the first matching period applies.
-          </p>
-        </div>
-        {!isReadOnly && (
-          <button
-            type="button"
-            onClick={handleAddPeriod}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-brand-navy px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 transition dark:bg-blue-600 dark:hover:bg-blue-700"
-          >
-            <Plus size={14} /> Add Period ({periods.length})
-          </button>
+    <div className="space-y-4">
+      <SectionHeader title="Periods" description="Pricing periods change rates by job date (for example peak and off-peak). They are checked from the top; the first enabled period that includes the job date is used, otherwise Default.">
+        {!isReadOnly && <Button onClick={() => setEditing({ id: '', name: '', is_enabled: true, date_ranges: [{ start: '', end: '' }] })}><Plus size={14} aria-hidden="true" /> Add Period</Button>}
+      </SectionHeader>
+      <SectionProblems problems={problems} section="periods" />
+      <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-800 dark:bg-slate-900">
+        <CalendarRange size={14} className="text-brand-blue" aria-hidden="true" />
+        <span className="font-semibold">Default</span><Badge tone="green">Always on</Badge>
+        <span className="text-slate-500">Covers every date no custom period matches.</span>
+      </div>
+      <ReorderableList
+        items={periods} disabled={isReadOnly} emptyText="No custom periods. Every job uses the Default period."
+        labelOf={(p) => p.name || p.id}
+        onReorder={(from, to) => set(move(periods, from, to))}
+        onEdit={(p) => setEditing(p)}
+        onRemove={(p) => set(periods.filter((x) => x.id !== p.id))}
+        render={(p, index) => (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] text-slate-400">#{index + 1}</span>
+            <span className="font-semibold">{p.name}</span>
+            {p.is_enabled ? <Badge tone="green">Enabled</Badge> : <Badge>Disabled</Badge>}
+            <span className="text-slate-500">{(p.date_ranges || []).map((r) => (r.start === r.end ? formatDateOnly(r.start) : `${formatDateOnly(r.start)} – ${formatDateOnly(r.end)}`)).join(', ')}</span>
+          </div>
         )}
-      </div>
-
-      <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3 text-xs text-blue-900 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-300">
-        <strong>First-match priority rule:</strong> When pricing an estimate or job, KargoFlow evaluates the periods in the order listed below. The first active period whose date range covers the move date is chosen. The <em>Default</em> period applies to any dates not covered by custom periods.
-      </div>
-
-      <div className="space-y-3" role="list" aria-label="Pricing periods">
-        {periods.map((period, index) => {
-          const isDefault = period.is_default;
-          const isEditing = editingId === period.id;
-
-          return (
-            <div
-              key={period.id}
-              role="listitem"
-              className={`rounded-xl border transition-all ${
-                period.is_active
-                  ? 'border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900'
-                  : 'border-slate-200/60 bg-slate-50/60 opacity-60 dark:border-slate-800/60 dark:bg-slate-950'
-              }`}
-            >
-              <div className="flex items-center gap-3 p-3">
-                {/* Drag / Priority indicator */}
-                <div className="flex items-center gap-1 text-slate-400">
-                  <span className="w-5 text-center text-xs font-bold text-slate-400">{index + 1}</span>
-                  {!isDefault && !isReadOnly && (
-                    <div className="flex flex-col">
-                      <button
-                        type="button"
-                        aria-label={`Move ${period.name} up`}
-                        disabled={index === 0}
-                        onClick={() => handleMove(index, -1)}
-                        className="rounded p-0.5 hover:bg-slate-100 disabled:opacity-30 dark:hover:bg-slate-800"
-                      >
-                        <ArrowUp size={12} />
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Move ${period.name} down`}
-                        disabled={index >= periods.length - 2} // Before default
-                        onClick={() => handleMove(index, 1)}
-                        className="rounded p-0.5 hover:bg-slate-100 disabled:opacity-30 dark:hover:bg-slate-800"
-                      >
-                        <ArrowDown size={12} />
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Period Info & Quick edit */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-xs text-slate-900 dark:text-white truncate">
-                      {period.name}
-                    </span>
-                    {isDefault ? (
-                      <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                        Default Fallback
-                      </span>
-                    ) : (
-                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                        {period.date_type === 'single'
-                          ? `Date: ${period.start_date}`
-                          : `${period.start_date} → ${period.end_date}`}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Status Toggle & Actions */}
-                <div className="flex items-center gap-2 shrink-0">
-                  {!isDefault && (
-                    <button
-                      type="button"
-                      onClick={() => setEditingId(isEditing ? null : period.id)}
-                      className="text-xs font-semibold text-brand-blue hover:underline px-2 py-1"
-                    >
-                      {isEditing ? 'Done' : 'Edit Dates'}
-                    </button>
-                  )}
-
-                  <label className="flex items-center gap-1.5 text-xs font-medium cursor-pointer">
-                    <input
-                      type="checkbox"
-                      disabled={isDefault || isReadOnly}
-                      checked={period.is_active}
-                      onChange={() => handleToggleActive(period.id)}
-                      className="rounded text-brand-blue focus:ring-brand-blue"
-                    />
-                    <span className="text-[11px] text-slate-500">{period.is_active ? 'Active' : 'Disabled'}</span>
-                  </label>
-
-                  {!isDefault && !isReadOnly && (
-                    <button
-                      type="button"
-                      aria-label={`Delete ${period.name}`}
-                      onClick={() => handleDelete(period.id)}
-                      className="rounded p-1 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Inline editor panel if open */}
-              {isEditing && !isDefault && (
-                <div className="border-t border-slate-100 bg-slate-50/70 p-3 rounded-b-xl dark:border-slate-800 dark:bg-slate-900/70 grid gap-3 sm:grid-cols-3">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                      Period Name
-                    </label>
-                    <input
-                      type="text"
-                      disabled={isReadOnly}
-                      value={period.name}
-                      onChange={(e) => handleUpdate(period.id, { name: e.target.value })}
-                      className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                      Date Type
-                    </label>
-                    <select
-                      disabled={isReadOnly}
-                      value={period.date_type}
-                      onChange={(e) => handleUpdate(period.id, { date_type: e.target.value })}
-                      className="w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                    >
-                      <option value="range">Date Range</option>
-                      <option value="single">Single Date</option>
-                    </select>
-                  </div>
-                  <div className="flex gap-2 items-center">
-                    <div className="flex-1">
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                        {period.date_type === 'single' ? 'Date' : 'Start Date'}
-                      </label>
-                      <input
-                        type="date"
-                        disabled={isReadOnly}
-                        value={period.start_date || ''}
-                        onChange={(e) => handleUpdate(period.id, { start_date: e.target.value })}
-                        className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                      />
-                    </div>
-                    {period.date_type === 'range' && (
-                      <div className="flex-1">
-                        <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                          End Date
-                        </label>
-                        <input
-                          type="date"
-                          disabled={isReadOnly}
-                          value={period.end_date || ''}
-                          onChange={(e) => handleUpdate(period.id, { end_date: e.target.value })}
-                          className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+      />
+      {editing && <PeriodDialog period={editing} periods={periods} readOnly={isReadOnly} onClose={() => setEditing(null)} onSave={save} />}
     </div>
+  );
+}
+
+function PeriodDialog({ period, periods, readOnly, onClose, onSave }) {
+  const [form, setForm] = useState(period);
+  const ranges = form.date_ranges?.length ? form.date_ranges : [{ start: '', end: '' }];
+  const setRange = (index, patch) => setForm({ ...form, date_ranges: ranges.map((r, i) => (i === index ? { ...r, ...patch } : r)) });
+  const valid = form.name.trim() && ranges.every((r) => r.start && (!r.end || r.end >= r.start));
+  const submit = () => onSave({
+    ...form, name: form.name.trim(),
+    id: form.id || newId(form.name, ['default', ...periods.map((p) => p.id)]),
+    date_ranges: ranges.map((r) => ({ start: r.start, end: r.end || r.start })),
+  });
+  return (
+    <Dialog title={period.id ? 'Edit period' : 'Add period'} onClose={onClose} footer={(
+      <><Button variant="ghost" onClick={onClose}>Cancel</Button>{!readOnly && <Button onClick={submit} disabled={!valid}>Apply</Button>}</>
+    )}>
+      <fieldset disabled={readOnly} className="space-y-3">
+        <TextField label="Name" value={form.name} onChange={(name) => setForm({ ...form, name })} required />
+        <Toggle label="Enabled" checked={form.is_enabled} onChange={(is_enabled) => setForm({ ...form, is_enabled })} />
+        <div className="space-y-2">
+          <p className="text-xs font-semibold">Dates <span className="font-normal text-slate-500">— a range, or a single date (leave the end empty)</span></p>
+          {ranges.map((range, index) => (
+            <div key={index} className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
+              <TextField label="From" type="date" value={range.start} onChange={(start) => setRange(index, { start })} required />
+              <TextField label="Until" type="date" value={range.end === range.start ? '' : range.end} onChange={(end) => setRange(index, { end })} />
+              <IconButton label={`Remove dates ${index + 1}`} disabled={ranges.length === 1} onClick={() => setForm({ ...form, date_ranges: ranges.filter((_, i) => i !== index) })}><Trash2 size={13} /></IconButton>
+            </div>
+          ))}
+          <Button variant="ghost" onClick={() => setForm({ ...form, date_ranges: [...ranges, { start: '', end: '' }] })}><Plus size={12} aria-hidden="true" /> Add dates</Button>
+        </div>
+      </fieldset>
+    </Dialog>
   );
 }
