@@ -2,6 +2,7 @@ import api from "./axios";
 import { readOpportunity } from '../features/crm/leads/opportunityReadApi';
 import { getTenantStaff } from '../features/crm/leads/salesOverviewApi';
 import { recordActivities, recordTasks, createRecordActivity, updateRecordActivity, createRecordTask, updateRecordTask } from '../features/crm/leads/recordWorkApi';
+import { canTransition } from '../features/crm/utils/statusWorkflow';
 import { leadApi, leadPayload } from '../features/crm/leads/leadApi';
 import { getPipelineQueue } from '../features/crm/leads/pipelineApi';
 
@@ -152,8 +153,10 @@ export const updateLead = async (id, data = {}) => {
   if (requestedState) {
     current = await leadApi.get(id);
     if (requestedState !== current.system_state) {
-      action = { in_progress: current.system_state === 'lost' ? 'reopen' : 'start', qualified: 'qualify', archived: 'archive' }[requestedState];
+      if (!canTransition(true, current.system_state, requestedState)) throw new Error(`Invalid lead transition: ${current.system_state} → ${requestedState}.`);
+      action = { in_progress: ['archived', 'disqualified'].includes(current.system_state) ? 'restore' : current.system_state === 'lost' ? 'reopen' : 'start', qualified: 'qualify', archived: 'archive' }[requestedState];
       if (!action) throw new Error(`Use the lead workflow to change status to ${requestedState}.`);
+      if (action === 'restore' && !String(data.reason || '').trim()) throw new Error('A reason is required to restore a lead.');
     }
   }
   let updated = Object.keys(payload).length ? await leadApi.update(id, payload) : current;
@@ -414,13 +417,20 @@ export const updateOpportunityJobStop = (opportunityId, jobId, stopId, data) =>
 export const deleteOpportunity = (id) => api.delete(`/sales/opportunities/${id}/`);
 export const startOpportunityWorking = (id) => api.post(`/sales/opportunities/${id}/start-working/`);
 export const markOpportunityEstimateCreated = (id) => api.post(`/sales/opportunities/${id}/mark-estimate-created/`);
-export const bookOpportunityJob = (id, data = {}) => api.post(`/sales/opportunities/${id}/book-job/`, data);
-export const unbookOpportunityJob = (id, data = {}) => api.post(`/sales/opportunities/${id}/unbook-job/`, data);
+export const getOpportunityBookingReadiness = (id) => api.get(`/tenant/opportunities/${id}/booking-readiness/`);
+export const bookOpportunityJob = (id, data = {}) => api.post(`/tenant/opportunities/${id}/book/`, {
+  override_requirements: data.override_requirements || [], override_reason: data.override_reason || '',
+});
+export const getCancellationReasons = () => api.get('/tenant/cancellation-reasons/', { params: { active: true } });
+export const getDisqualificationReasons = () => api.get('/tenant/disqualification-reasons/', { params: { active: true } });
+export const disqualifyLead = (id, data) => leadApi.transition(id, 'disqualify', data);
+export const restoreLead = (id, data = {}) => leadApi.transition(id, 'restore', data);
+export const unbookOpportunityJob = (id, data = {}) => api.post(`/tenant/opportunities/${id}/unbook/`, data);
 export const confirmOpportunityJob = (id) => api.post(`/sales/opportunities/${id}/confirm-job/`);
-export const cancelOpportunityJob = (id, data) => api.post(`/sales/opportunities/${id}/cancel-job/`, data);
-export const completeOpportunityJob = (id) => api.post(`/sales/opportunities/${id}/complete-job/`);
-export const markOpportunityLost = (id, data) => api.post(`/sales/opportunities/${id}/mark-lost/`, data);
-export const reopenOpportunity = (id, data = {}) => api.post(`/sales/opportunities/${id}/reopen/`, data);
+export const cancelOpportunityJob = (id, data = {}) => api.post(`/tenant/opportunities/${id}/cancel/`, data);
+export const completeOpportunityJob = (id, data = {}) => api.post(`/tenant/opportunities/${id}/complete/`, data);
+export const markOpportunityLost = (id, data = {}) => api.post(`/tenant/opportunities/${id}/mark-lost/`, data);
+export const reopenOpportunity = (id, data = {}) => api.post(`/tenant/opportunities/${id}/reopen/`, data);
 export const createOpportunityStop = (data) => api.post("/sales/opportunity-stops/", data);
 export const updateOpportunityStop = (id, data) => api.patch(`/sales/opportunity-stops/${id}/`, data);
 export const deleteOpportunityStop = (id) => api.delete(`/sales/opportunity-stops/${id}/`);
@@ -508,11 +518,14 @@ export const getJobs = (params = {}) => {
   if (params?.opportunity) {
     return api.get(`/tenant/opportunities/${params.opportunity}/jobs/`);
   }
-  return legacyOperationsApiEnabled ? api.get("/jobs/", { params }) : Promise.resolve([]);
+  // Without the legacy operations API, jobs are the operational jobs created at booking.
+  return legacyOperationsApiEnabled
+    ? api.get("/jobs/", { params })
+    : api.get("/tenant/jobs/", { params }).then((page) => page?.results || []);
 };
 export const getJobsByServiceDateReport = (params = {}) => api.get("/jobs/reports/service-date/", { params });
 export const createJob = (data) => api.post("/jobs/", data);
-export const getJob = (id) => api.get(`/jobs/${id}/`);
+export const getJob = (id) => (legacyOperationsApiEnabled ? api.get(`/jobs/${id}/`) : api.get(`/tenant/jobs/${id}/`));
 export const updateJob = (id, data) => api.patch(`/jobs/${id}/`, data);
 export const deleteJob = (id) => api.delete(`/jobs/${id}/`);
 export const getTrucks = (params = {}) => api.get("/jobs/trucks/", { params });

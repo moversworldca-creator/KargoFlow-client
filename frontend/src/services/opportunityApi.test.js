@@ -2,6 +2,8 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import api from './axios';
 import {
   createEstimate,
+  bookOpportunityJob, getOpportunityBookingReadiness, unbookOpportunityJob, cancelOpportunityJob,
+  completeOpportunityJob, markOpportunityLost, reopenOpportunity,
   createOpportunity,
   getContracts,
   getDocumentTemplates,
@@ -86,4 +88,20 @@ it('does not request backend modules that are not mounted', async () => {
   });
   expect(api.get).not.toHaveBeenCalled();
   expect(api.post).not.toHaveBeenCalled();
+});
+
+
+it('uses mounted lifecycle commands with structured reason IDs', async () => {
+  await getOpportunityBookingReadiness(1);
+  expect(api.get).toHaveBeenCalledWith('/tenant/opportunities/1/booking-readiness/');
+  await bookOpportunityJob(1, { override_requirements: ['deposit'], override_reason: 'Approved exception', send_email: true });
+  expect(api.post).toHaveBeenLastCalledWith('/tenant/opportunities/1/book/', { override_requirements: ['deposit'], override_reason: 'Approved exception' });
+  await markOpportunityLost(1, { lost_reason_id: 4, note: 'Customer chose another mover' });
+  expect(api.post).toHaveBeenLastCalledWith('/tenant/opportunities/1/mark-lost/', { lost_reason_id: 4, note: 'Customer chose another mover' });
+  await cancelOpportunityJob(1, { cancellation_reason_id: 7, note: 'Move cancelled' });
+  expect(api.post).toHaveBeenLastCalledWith('/tenant/opportunities/1/cancel/', { cancellation_reason_id: 7, note: 'Move cancelled' });
+  for (const [command, action] of [[unbookOpportunityJob, 'unbook'], [completeOpportunityJob, 'complete'], [reopenOpportunity, 'reopen']]) {
+    await command(1, { reason: 'Office action' });
+    expect(api.post).toHaveBeenLastCalledWith(`/tenant/opportunities/1/${action}/`, { reason: 'Office action' });
+  }
 });
