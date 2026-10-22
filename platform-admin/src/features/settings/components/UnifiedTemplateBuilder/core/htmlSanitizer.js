@@ -207,6 +207,64 @@ export function scopeCss(css, scopeClass) {
   return result.trim();
 }
 
+export function getResponsiveHtmlLayoutCss(scopeClass) {
+  const scope = `.${scopeClass}`;
+
+  return `
+    ${scope} {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+      overflow-wrap: anywhere;
+      container-name: html-block;
+      container-type: inline-size;
+    }
+    ${scope} *,
+    ${scope} *::before,
+    ${scope} *::after {
+      box-sizing: border-box;
+      max-width: 100%;
+    }
+    ${scope} img,
+    ${scope} picture,
+    ${scope} video,
+    ${scope} canvas,
+    ${scope} svg {
+      height: auto;
+    }
+    ${scope} table {
+      max-width: 100%;
+      table-layout: fixed;
+    }
+    ${scope} th,
+    ${scope} td {
+      overflow-wrap: anywhere;
+    }
+    @container html-block (max-width: 640px) {
+      ${scope} [class],
+      ${scope} [style] {
+        flex-wrap: wrap;
+      }
+    }
+  `;
+}
+
+export function prepareHtmlWidget(item, scopeClass) {
+  const { cleanHtml, extractedCss } = sanitizeHtml(
+    item.htmlContent || item.content || ""
+  );
+  const customCss = [item.cssContent, extractedCss]
+    .filter((css) => typeof css === "string" && css.trim())
+    .join("\n");
+  const responsiveCss = getResponsiveHtmlLayoutCss(scopeClass);
+  const scopedCss = customCss
+    ? `${responsiveCss}\n${scopeCss(customCss, scopeClass)}`
+    : responsiveCss;
+
+  return { cleanHtml, scopedCss };
+}
+
 export function beautifyHtml(html) {
   if (!html) return "";
   const tab = "  ";

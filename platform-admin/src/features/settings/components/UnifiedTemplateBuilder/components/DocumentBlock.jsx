@@ -23,7 +23,13 @@ const SAMPLE_VARIABLES = {
   "company.name": "KargoFlow Moving",
   "company.phone": "(800) 555-0199",
   "company.email": "dispatch@kargoflow.example",
+  "company.website": "https://kargoflow.example",
+  "company.address": "100 Main Street, Vancouver, BC",
+  "company.logo_url": "https://kargoflow.example/logo.png",
   "branch.name": "Vancouver Branch",
+  "branch.phone": "(800) 555-0188",
+  "branch.email": "vancouver@kargoflow.example",
+  "branch.address": "100 Main Street, Vancouver, BC",
   "customer.full_name": "Alex Customer",
   "customer.first_name": "Alex",
   "customer.last_name": "Customer",
@@ -32,14 +38,16 @@ const SAMPLE_VARIABLES = {
   "opportunity.number": "OPP-0042",
   "opportunity.service_type": "Residential move",
   "opportunity.move_type": "Local",
+  "opportunity.binding_type": "Binding",
+  "opportunity.has_storage": false,
   "move.date": "June 15, 2026",
   "move.size": "3 bedroom home",
-  "move.estimated_weight": "3 bedroom home",
   "move.origin_address": "123 Main Street, Vancouver, BC",
   "move.destination_address": "456 Oak Avenue, Burnaby, BC",
   "move.distance_miles": "12",
   "sales_rep.name": "Jordan Lee",
   "sales_rep.email": "jordan.lee@kargoflow.example",
+  "sales_rep.phone": "(800) 555-0177",
   "estimate.number": "EST-00042",
   "estimate.binding_type": "Non-binding",
   "estimate.subtotal": "$1,475.00",
@@ -49,6 +57,7 @@ const SAMPLE_VARIABLES = {
   "estimate.grand_total": "$1,502.63",
   "estimate.deposit_amount": "$300.00",
   "estimate.deposit_due": "$300.00",
+  "estimate.portal_url": "https://example.com/estimates/EST-00042",
   "estimate.hourly_rate": "$185.00",
   "estimate.crew_size": "3",
   "estimate.truck_count": "1",
@@ -60,8 +69,8 @@ const SAMPLE_VARIABLES = {
   "invoice.due_at": "June 30, 2026",
   "invoice.subtotal": "$1,475.00",
   "invoice.discount": "$50.00",
-  "invoice.tax_amount": "$77.63",
   "invoice.tax": "$77.63",
+  "invoice.tax_amount": "$77.63",
   "invoice.total": "$1,502.63",
   "invoice.amount_paid": "$300.00",
   "invoice.balance_due": "$1,202.63",
@@ -79,6 +88,33 @@ const SAMPLE_CHARGES = [
   { name: "Moving truck", category: "Transportation", description: "Truck and fuel", quantity: "1", unit_price: "$350.00", total: "$350.00" },
   { name: "Packing materials", category: "Materials", description: "Boxes and wrapping", quantity: "1", unit_price: "$200.00", total: "$200.00" },
 ];
+
+function getChargeColumnWidths(columns) {
+  if (!columns.length) return [];
+
+  const requestedWidths = columns.map((column) => {
+    const width = Number(column.width);
+    return Number.isFinite(width) && width > 0 ? width : 1;
+  });
+  const descriptionIndex = columns.findIndex((column) =>
+    /^(description|desc|item)$/i.test(String(column.key || column.id || ""))
+  );
+  if (descriptionIndex < 0 || columns.length === 1) {
+    const total = requestedWidths.reduce((sum, width) => sum + width, 0);
+    return requestedWidths.map((width) => (width / total) * 100);
+  }
+
+  const descriptionWidth = Math.min(65, Math.max(52, requestedWidths[descriptionIndex]));
+  const otherTotal = requestedWidths.reduce(
+    (sum, width, index) => sum + (index === descriptionIndex ? 0 : width),
+    0
+  );
+  return requestedWidths.map((width, index) =>
+    index === descriptionIndex
+      ? descriptionWidth
+      : ((100 - descriptionWidth) * width) / otherTotal
+  );
+}
 const SAMPLE_INVENTORY = [
   { room: "Living room", item: "Sofa", quantity: "1", volume_cuft: "90", weight_lbs: "180" },
   { room: "Bedroom", item: "Queen bed", quantity: "1", volume_cuft: "65", weight_lbs: "140" },
@@ -118,21 +154,44 @@ const LEGACY_TOTAL_FIELD_KEYS = {
   balanceDue: "balance",
 };
 
-function getConfiguredField(props, key, label, value, sampleData, scope = {}, { amount = false } = {}) {
+function getConfiguredField(props, key, label, value, sampleData, scope = {}, { amount = false, allowCustom = true } = {}) {
   const field = (props?.custom_fields || props?.customFields)?.[key];
   const configuredLabel = field?.label || label;
-  const configuredValue = field?.mode === "custom"
-    ? String(field.customValue ?? (field.mode === "custom" ? field.value : "") ?? "")
-    : field?.dynamicValue || (field?.mode === "dynamic" ? field.value : "") || value;
-  const displayValue = field?.mode === "custom" && (amount || CURRENCY_AMOUNT_FIELDS.has(key))
+  const isCustom = field?.mode === "custom" && allowCustom;
+  const configuredValue = isCustom
+    ? String(field.customValue ?? field.value ?? "")
+    : field?.mode === "dynamic"
+      ? field.dynamicValue || field.value || value
+      : value;
+  const displayValue = isCustom && (amount || CURRENCY_AMOUNT_FIELDS.has(key))
     ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(configuredValue))
     : configuredValue;
   return {
     label: resolvePreviewText(configuredLabel, sampleData, scope),
-    value: field?.mode === "custom"
+    value: isCustom
       ? escapeHtml(displayValue)
       : resolvePreviewText(configuredValue, sampleData, scope),
   };
+}
+
+function getConfiguredHeading(props, key, label, sampleData, scope = {}) {
+  const field = props?.custom_fields?.[key] || {};
+  const configuredValue = field.mode === "dynamic"
+    ? field.dynamicValue || field.value || label
+    : field.label || label;
+  const token = String(configuredValue).match(/^\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}$/)?.[1];
+  const isPricingToken = token && /\.(subtotal|discount|tax|grand_total|deposit_amount|total|amount_paid|balance_due|payment_url)$/i.test(token);
+  return resolvePreviewText(isPricingToken ? label : configuredValue, sampleData, scope);
+}
+
+function getCrewTruckCell(props, key, fallback, sampleData, scope = {}) {
+  const field = props?.custom_fields?.[key] || {};
+  const configuredValue = field.mode === "custom"
+    ? field.customValue ?? field.value ?? fallback
+    : field.mode === "dynamic"
+      ? field.dynamicValue || field.value || fallback
+      : fallback;
+  return resolvePreviewText(configuredValue, sampleData, scope);
 }
 
 function ConfiguredCustomFields({ fields, sampleData, scope }) {
@@ -231,7 +290,45 @@ export function BackendWidgetPreview({ block, sampleData = true, scope = {}, cus
 
   if (block.type === "heading") {
     const HeadingTag = `h${Math.min(4, Math.max(1, Number(props.level) || 2))}`;
-    return <HeadingTag className="font-semibold text-slate-800" style={{ textAlign: props.align || "left" }}>{resolvePreviewText(props.text || "Heading", sampleData, scope)}</HeadingTag>;
+    const headingStyle = props.style || {};
+    const fontFamily = typeof headingStyle.font_family === "string"
+      && /^[A-Za-z0-9 _,'"-]{1,120}$/.test(headingStyle.font_family)
+      ? headingStyle.font_family
+      : undefined;
+    const fontSize = Number(headingStyle.font_size);
+    const fontWeight = Number(headingStyle.bold ? 700 : headingStyle.font_weight);
+    const letterSpacing = Number(headingStyle.letter_spacing);
+    const lineHeight = Number(headingStyle.line_height);
+    const color = typeof headingStyle.color === "string" && /^#[0-9a-f]{3,8}$/i.test(headingStyle.color)
+      ? headingStyle.color
+      : undefined;
+    const textDecoration = [
+      headingStyle.underline ? "underline" : "",
+      headingStyle.strikethrough ? "line-through" : "",
+    ].filter(Boolean).join(" ");
+    return (
+      <HeadingTag
+        className="font-semibold text-slate-800"
+        style={{
+          textAlign: ["left", "center", "right"].includes(props.align) ? props.align : "left",
+          fontFamily,
+          fontSize: Number.isFinite(fontSize) && fontSize >= 7 && fontSize <= 72 ? `${fontSize}px` : undefined,
+          fontWeight: Number.isFinite(fontWeight) && fontWeight >= 100 && fontWeight <= 900 ? fontWeight : undefined,
+          fontStyle: headingStyle.italic ? "italic" : undefined,
+          textDecoration: textDecoration || undefined,
+          textTransform: ["uppercase", "lowercase", "capitalize"].includes(headingStyle.text_transform)
+            ? headingStyle.text_transform
+            : undefined,
+          letterSpacing: Number.isFinite(letterSpacing) && letterSpacing >= -10 && letterSpacing <= 50
+            ? `${letterSpacing}px`
+            : undefined,
+          lineHeight: Number.isFinite(lineHeight) && lineHeight >= 0.8 && lineHeight <= 3 ? lineHeight : undefined,
+          color,
+        }}
+      >
+        {resolvePreviewText(props.text || "Heading", sampleData, scope)}
+      </HeadingTag>
+    );
   }
   if (block.type === "header") {
     const company = getConfiguredField(
@@ -346,7 +443,7 @@ export function BackendWidgetPreview({ block, sampleData = true, scope = {}, cus
   if (block.type === "move_details") {
     const rows = [
       ...(props.show_dates !== false ? [getConfiguredField(props, "move_date", "Move date", "{{move.date}}", sampleData, scope)] : []),
-      ...(props.show_move_size !== false ? [getConfiguredField(props, "move_size", "Move size", "{{move.estimated_weight}}", sampleData, scope)] : []),
+      ...(props.show_move_size !== false ? [getConfiguredField(props, "move_size", "Move size", "{{move.size}}", sampleData, scope)] : []),
       ...(props.show_stops !== false ? [
         getConfiguredField(props, "origin", "From", "{{move.origin_address}}", sampleData, scope),
         getConfiguredField(props, "destination", "To", "{{move.destination_address}}", sampleData, scope),
@@ -360,12 +457,18 @@ export function BackendWidgetPreview({ block, sampleData = true, scope = {}, cus
   }
   if (block.type === "crew_trucks") {
     const rows = [
-      ...(props.show_names !== false ? SAMPLE_CREW.map((member) => ({ type: member.role, name: member.name })) : []),
-      ...(props.show_trucks !== false ? SAMPLE_TRUCKS.map((truck) => ({ type: "Truck", name: `${truck.name} · ${truck.size}` })) : []),
+      ...(props.show_names !== false ? SAMPLE_CREW.map((member, index) => ({
+        type: getCrewTruckCell(props, `crew_member_${index}_role`, member.role, sampleData, scope),
+        name: getCrewTruckCell(props, `crew_member_${index}_name`, member.name, sampleData, scope),
+      })) : []),
+      ...(props.show_trucks !== false ? SAMPLE_TRUCKS.map((truck, index) => ({
+        type: getCrewTruckCell(props, `truck_${index}_label`, "Truck", sampleData, scope),
+        name: getCrewTruckCell(props, `truck_${index}_name`, `${truck.name} · ${truck.size}`, sampleData, scope),
+      })) : []),
     ];
     return <PreviewTable columns={[
-      { key: "type", label: getConfiguredField(props, "crew_title", "Crew / vehicle", "", sampleData, scope).label },
-      { key: "name", label: getConfiguredField(props, "truck_title", "Assignment", "", sampleData, scope).label },
+      { key: "type", label: getConfiguredHeading(props, "crew_title", "Crew / vehicle", sampleData, scope) },
+      { key: "name", label: getConfiguredHeading(props, "truck_title", "Assignment", sampleData, scope) },
     ]} rows={rows} />;
   }
   if (block.type === "charges" || block.type === "line_items") {
@@ -407,7 +510,7 @@ export function BackendWidgetPreview({ block, sampleData = true, scope = {}, cus
         <p className="text-xs font-semibold text-slate-700">{title}</p>
         <PreviewTable columns={[
           { key: "description", label: getConfiguredField(props, "description_label", "Description", "", sampleData, scope).label },
-          ...(props.show_quantity !== false && isCharges ? [{ key: "quantity", label: getConfiguredField(props, "quantity_label", "Qty", "", sampleData, scope).label }] : []),
+          ...(!isCharges || props.show_quantity !== false ? [{ key: "quantity", label: getConfiguredField(props, "quantity_label", "Qty", "", sampleData, scope).label }] : []),
           { key: "unit_price", label: getConfiguredField(props, "rate_label", "Rate", "", sampleData, scope).label },
           { key: "total", label: getConfiguredField(props, "amount_label", "Amount", "", sampleData, scope).label },
         ]} rows={rows} />
@@ -422,10 +525,10 @@ export function BackendWidgetPreview({ block, sampleData = true, scope = {}, cus
     const rows = [
       getConfiguredField(props, "subtotal", names.subtotal, isEstimate ? "{{estimate.subtotal}}" : "{{invoice.total}}", sampleData, scope),
       ...((props.show_discount !== false) ? [getConfiguredField(props, "discount", names.discount, isEstimate ? "{{estimate.discount}}" : "{{invoice.total}}", sampleData, scope)] : []),
-      ...((props.show_tax !== false) ? [getConfiguredField(props, "tax", names.tax, isEstimate ? "{{estimate.tax_amount}}" : "{{invoice.total}}", sampleData, scope)] : []),
-      getConfiguredField(props, "total", names.total, isEstimate ? "{{estimate.grand_total}}" : "{{invoice.total}}", sampleData, scope),
-      ...(isEstimate && props.show_deposit ? [getConfiguredField(props, "deposit", names.deposit, "{{estimate.deposit_due}}", sampleData, scope)] : []),
-      ...(!isEstimate && props.show_balance !== false ? [getConfiguredField(props, "balance", names.balance, "{{invoice.balance_due}}", sampleData, scope)] : []),
+      ...((props.show_tax !== false) ? [getConfiguredField(props, "tax", names.tax, isEstimate ? "{{estimate.tax}}" : "{{invoice.tax}}", sampleData, scope, { allowCustom: false })] : []),
+      getConfiguredField(props, "total", names.total, isEstimate ? "{{estimate.grand_total}}" : "{{invoice.total}}", sampleData, scope, { allowCustom: false }),
+      ...(isEstimate && props.show_deposit ? [getConfiguredField(props, "deposit", names.deposit, "{{estimate.deposit_amount}}", sampleData, scope)] : []),
+      ...(!isEstimate && props.show_balance !== false ? [getConfiguredField(props, "balance", names.balance, "{{invoice.balance_due}}", sampleData, scope, { allowCustom: false })] : []),
       ...(isEstimate && props.show_binding_note ? [{ label: "Estimate type", value: SAMPLE_VARIABLES["estimate.binding_type"] }] : []),
     ];
     return <PreviewTable columns={[{ key: "label", label: getConfiguredField(props, "section_title", block.label || (isEstimate ? "Estimate summary" : "Invoice totals"), "", sampleData, scope).label }, { key: "value", label: "Amount" }]} rows={rows} />;
@@ -650,6 +753,7 @@ export default function DocumentBlock({
 
       case "charges": {
         const cols = (item.columns || []).filter((c) => c.visible !== false);
+        const columnWidths = getChargeColumnWidths(cols);
         return (
           <div className="charge-table border border-slate-200 rounded-lg overflow-hidden w-full max-w-full min-w-0 box-border">
             <div className="bg-slate-100 text-slate-800 border-b border-slate-200 px-4 py-2 text-xs font-bold uppercase tracking-wider truncate">
@@ -672,6 +776,11 @@ export default function DocumentBlock({
                 className="w-full min-w-[500px] table-fixed"
                 style={{ fontSize: style.fontSize ? `${style.fontSize}px` : undefined }}
               >
+              <colgroup>
+                {columnWidths.map((width, index) => (
+                  <col key={cols[index].id || cols[index].key || index} style={{ width: `${width}%` }} />
+                ))}
+              </colgroup>
               <thead className="bg-slate-100 text-slate-700 border-b border-slate-200 font-semibold">
                 <tr>
                   {cols.map((col) => {
@@ -687,8 +796,8 @@ export default function DocumentBlock({
                     const configuredLabel = item.customFields?.[labelKeys[col.key]]?.label;
                     return (<th
                       key={col.id}
-                      style={{ width: col.width ? `${col.width}%` : undefined }}
-                      className={`p-2.5 text-${col.align || "left"} break-words overflow-visible align-top`}
+                      style={{ textAlign: col.align || "left" }}
+                      className="p-2.5 break-words overflow-visible align-top"
                     >
                       <InlineEdit
                         value={configuredLabel || col.label}
@@ -733,7 +842,8 @@ export default function DocumentBlock({
                       return (
                       <td
                         key={col.id}
-                        className={`p-2.5 text-${col.align || "left"} text-slate-700 break-words overflow-hidden [overflow-wrap:anywhere] [word-break:break-word]`}
+                        style={{ textAlign: col.align || "left" }}
+                        className="p-2.5 text-slate-700 align-top break-words overflow-hidden [overflow-wrap:anywhere] [word-break:normal]"
                       >
                         <InlineEdit
                           value={value}
@@ -1184,6 +1294,26 @@ export default function DocumentBlock({
       }
 
       case "builder_block": {
+        const headingProps = item.blockType === "heading"
+          ? {
+            ...(item.props || {}),
+            ...(style.align || style.textAlign ? { align: style.align || style.textAlign } : {}),
+            style: {
+              ...(item.props?.style || {}),
+              ...(style.fontFamily !== undefined ? { font_family: style.fontFamily } : {}),
+              ...(style.fontSize !== undefined ? { font_size: style.fontSize } : {}),
+              ...(style.fontWeight !== undefined ? { font_weight: style.fontWeight } : {}),
+              ...(style.bold !== undefined ? { bold: style.bold } : {}),
+              ...(style.italic !== undefined ? { italic: style.italic } : {}),
+              ...(style.underline !== undefined ? { underline: style.underline } : {}),
+              ...(style.strikethrough !== undefined ? { strikethrough: style.strikethrough } : {}),
+              ...(style.textTransform !== undefined ? { text_transform: style.textTransform } : {}),
+              ...(style.letterSpacing !== undefined ? { letter_spacing: style.letterSpacing } : {}),
+              ...(style.lineHeight !== undefined ? { line_height: style.lineHeight } : {}),
+              ...(style.color !== undefined ? { color: style.color } : {}),
+            },
+          }
+          : item.props;
         return (
           <div
             className="backend-widget-typography w-full py-1"
@@ -1196,7 +1326,7 @@ export default function DocumentBlock({
           >
             <BackendWidgetPreview
               key={`${item.id}-${item.props?.asset_id || ""}-${item.props?.block_id || ""}`}
-              block={{ type: item.blockType, label: item.label, props: item.props, children: item.children, condition: item.condition }}
+              block={{ type: item.blockType, label: item.label, props: headingProps, children: item.children, condition: item.condition }}
               sampleData={sampleData}
               customerPreview={preview}
             />

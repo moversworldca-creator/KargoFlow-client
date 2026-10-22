@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FileSignature, Plus, Search, Loader2, Copy, ChevronLeft, ChevronRight, FileText, Mail, Pencil, FileSpreadsheet, Trash2 } from 'lucide-react';
 import { usePlatformAuth } from '../../../auth/PlatformAuthContext';
@@ -8,10 +8,10 @@ import {
   startBuilderTemplateDraft, updateBuilderTemplate, archiveBuilderTemplate,
   activateBuilderTemplate, deactivateBuilderTemplate, duplicateBuilderTemplate, getApiErrorMessage,
 } from '../../../services/api';
-import UnifiedTemplateBuilder from './UnifiedTemplateBuilder/UnifiedTemplateBuilder';
 import GlobalTemplateCreateForm from './GlobalTemplateCreateForm';
 import ChooseTemplateTypeModal from './modals/ChooseTemplateTypeModal';
-import { fromGlobalDocument, getTemplateMode } from './UnifiedTemplateBuilder/core/globalTemplateAdapter';
+
+const UnifiedTemplateBuilder = lazy(() => import('./UnifiedTemplateBuilder/UnifiedTemplateBuilder'));
 
 const BASE = '/document-templates';
 const PAGE_SIZE = 50;
@@ -92,6 +92,8 @@ export default function DocumentTemplates({ builderRouteView = '', builderRouteI
         : template.draft_revision ? await getBuilderTemplateDraft(editingId)
         : await getBuilderTemplateRevision(editingId, template.published_revision.id);
       if (!active) return;
+      const { fromGlobalDocument, getTemplateMode } = await import('./UnifiedTemplateBuilder/core/globalTemplateAdapter');
+      if (!active) return;
       const mode = getTemplateMode(template);
       const content = fromGlobalDocument(draft.document, { name: template.name, mode });
       setEditor({ ...template, mode, content: { ...content, lock_version: draft.revision.lock_version },
@@ -126,14 +128,18 @@ export default function DocumentTemplates({ builderRouteView = '', builderRouteI
     finally { setBusy(false); }
   };
 
-  if (editingId && editor) return <UnifiedTemplateBuilder
-    key={editor.id} mode={editor.mode} template={editor} canSave={canManage} canPublish={canManage && canPublish}
-    onBack={back}
-    onSave={async (payload) => {
-      await updateBuilderTemplate(editor.id, { name: payload.name,
-        ...(payload.category ? { category: payload.category } : {}) });
-    }}
-  />;
+  if (editingId && editor) return (
+    <Suspense fallback={<div role="status" className="p-8 text-sm text-slate-500">Loading template editor...</div>}>
+      <UnifiedTemplateBuilder
+        key={editor.id} mode={editor.mode} template={editor} canSave={canManage} canPublish={canManage && canPublish}
+        onBack={back}
+        onSave={async (payload) => {
+          await updateBuilderTemplate(editor.id, { name: payload.name,
+            ...(payload.category ? { category: payload.category } : {}) });
+        }}
+      />
+    </Suspense>
+  );
 
   return <div className="max-w-7xl mx-auto space-y-4 pb-8">
     <nav aria-label="Global template categories" className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
@@ -180,7 +186,7 @@ export default function DocumentTemplates({ builderRouteView = '', builderRouteI
         : !items.length ? <p className="p-8 text-slate-500">No global templates found.</p>
         : <div className="overflow-x-auto rounded-xl border border-slate-200"><table className="w-full min-w-[1100px] table-fixed text-sm">
           <colgroup>
-            <col className="w-[30%]" /><col className="w-[10%]" /><col className="w-[12%]" />
+            <col className="w-[28%]" /><col className="w-[12%]" /><col className="w-[12%]" />
             <col className="w-[7%]" /><col className="w-[10%]" /><col className="w-[9%]" /><col className="w-[22%]" />
           </colgroup>
           <thead className="bg-sky-50 text-xs font-bold uppercase tracking-wider text-slate-700"><tr>
@@ -196,7 +202,7 @@ export default function DocumentTemplates({ builderRouteView = '', builderRouteI
               : item.kind === 'estimate_portal' ? 'Customer Portal' : 'Opportunity';
             return <tr key={item.id} className="border-t border-slate-100 hover:bg-slate-50/70">
             <td className="px-4 py-4 text-left"><div className="flex min-w-0 items-center gap-3"><span className="shrink-0 rounded-lg bg-indigo-50 p-2 text-indigo-600"><Icon size={18} /></span><div className="min-w-0"><p className="break-words font-bold leading-5 text-slate-900">{item.name}</p><p className="mt-0.5 break-words text-xs leading-4 text-slate-500">{item.description || 'Global template'}</p></div></div></td>
-            <td className="px-3 py-4 text-center"><span className="inline-block max-w-full whitespace-nowrap rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold tracking-wide text-slate-700">{typeLabel}</span></td>
+            <td className="px-3 py-4 text-center"><span title={typeLabel} className="block max-w-full truncate rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold leading-4 tracking-wide text-slate-700">{typeLabel}</span></td>
             <td className="px-3 py-4 text-center"><span className="inline-block max-w-full whitespace-nowrap rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">{appliesTo}</span></td>
             <td className="px-3 py-4 text-center text-slate-600">{item.published_revision ? `v${item.published_revision.revision_number}` : '—'}</td>
             <td className="px-3 py-4 text-center text-slate-600">Global</td>

@@ -72,6 +72,53 @@ describe("Phase 3: VersionHistoryModal Component", () => {
 });
 
 describe("Phase 3: PreviewModal Component with Print & Export", () => {
+  it("compiles legacy move-weight placeholders to the supported move-size field", () => {
+    const compiledHtml = compileDocumentToHtml({
+      settings: {},
+      items: [{
+        id: "shipment",
+        type: "shipment",
+        label: "Move details",
+        fields: [{ id: "weight", label: "Move Size", value: "{{move.estimated_weight}}" }],
+      }],
+    });
+
+    expect(compiledHtml).toContain("{{move.size}}");
+    expect(compiledHtml).not.toContain("move.estimated_weight");
+  });
+
+  it("keeps charge table columns aligned when configured widths exceed the page width", () => {
+    const compiledHtml = compileDocumentToHtml({
+      settings: {},
+      items: [{
+        id: "charges",
+        type: "charges",
+        label: "Charges",
+        columns: [
+          { id: "description", key: "description", label: "Item", width: 45, align: "left" },
+          { id: "quantity", key: "quantity", label: "Qty", width: 15, align: "right" },
+          { id: "rate", key: "rate", label: "Rate", width: 20, align: "right" },
+          { id: "tax", key: "tax", label: "Tax", width: 10, align: "center" },
+          { id: "amount", key: "amount", label: "Amount", width: 20, align: "right" },
+        ],
+        rows: [{
+          description: "Moving labour (3 movers + truck) 6.5 h at $185/h",
+          quantity: "6.5",
+          rate: "$185.00",
+          tax: "Yes",
+          amount: "$1,202.50",
+        }],
+      }],
+    });
+
+    expect(compiledHtml).toContain(
+      '<colgroup><col style="width: 52.00%;"><col style="width: 11.08%;"><col style="width: 14.77%;"><col style="width: 7.38%;"><col style="width: 14.77%;"></colgroup>'
+    );
+    expect(compiledHtml).toContain('text-align: right; border-bottom: 1px solid #e2e8f0; padding: 6px 8px;');
+    expect(compiledHtml).toContain('<table class="charges-table"');
+    expect(compiledHtml).toContain("Moving labour (3 movers + truck) 6.5 h at $185/h");
+  });
+
   it("renders zoom controls, tags, and export/print buttons", () => {
     const onExportJson = vi.fn();
     const sampleDoc = {
@@ -273,6 +320,10 @@ describe("Phase 3: Schema Validation Engine", () => {
     });
 
     expect(compiledHtml).toContain('class="kargoflow-block kargoflow-html-block html-doc-custom-html"');
+    expect(compiledHtml).toContain("@container html-block (max-width: 640px)");
+    expect(compiledHtml).toContain("max-width: 100%");
+    expect(compiledHtml).toContain(".html-doc-custom-html .flex-layout");
+    expect(compiledHtml).toContain("display: flex");
     expect(compiledHtml).toContain(".kargoflow-block:not(.kargoflow-html-block)");
     expect(compiledHtml).not.toContain("\n    table {");
     expect(compiledHtml).not.toContain("\n    th, td {");

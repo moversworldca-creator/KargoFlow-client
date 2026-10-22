@@ -3,7 +3,105 @@ import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import PreviewModal from "./PreviewModal";
 
+describe("PreviewModal server-rendered toolbar", () => {
+  it("provides working device, zoom, edit, sample data, export, print, and close controls", () => {
+    const onClose = vi.fn();
+    const onExportJson = vi.fn();
+    const onUseLocalPreview = vi.fn();
+    render(
+      <PreviewModal
+        isOpen
+        doc={{ name: "Server preview", settings: { pageSize: "Letter" }, items: [] }}
+        remotePreview={{ data: { html: "<html><body>Rendered document</body></html>" } }}
+        onClose={onClose}
+        onExportJson={onExportJson}
+        onUseLocalPreview={onUseLocalPreview}
+      />
+    );
+
+    const frame = screen.getByTitle("Server rendered sample preview");
+    expect(frame).toBeInTheDocument();
+    const frameFocus = vi.spyOn(frame.contentWindow, "focus").mockImplementation(() => {});
+    const framePrint = vi.spyOn(frame.contentWindow, "print").mockImplementation(() => {});
+    fireEvent.load(frame);
+    expect(screen.getByRole("button", { name: "Print preview" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Desktop preview" })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Tablet preview" }));
+    expect(frame).toHaveStyle({ width: "768px" });
+    expect(screen.getByRole("button", { name: "Tablet preview" })).toHaveAttribute("aria-pressed", "true");
+
+    const viewport = screen.getByTestId("preview-canvas-viewport");
+    Object.defineProperty(viewport, "clientWidth", { configurable: true, value: 900 });
+    Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 700 });
+    fireEvent.click(screen.getByTitle("Fit full page on screen"));
+    expect(screen.getByLabelText("Zoom level")).toHaveTextContent("58%");
+
+    const zoomBefore = Number.parseInt(screen.getByLabelText("Zoom level").textContent, 10);
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(Number.parseInt(screen.getByLabelText("Zoom level").textContent, 10)).toBe(zoomBefore + 10);
+    fireEvent.click(screen.getByTitle("Reset Zoom (100%)"));
+    expect(screen.getByLabelText("Zoom level")).toHaveTextContent("100%");
+
+    fireEvent.click(screen.getByRole("button", { name: /Edit & Drag Mode/i }));
+    expect(onUseLocalPreview).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Show raw variables" }));
+    expect(onUseLocalPreview).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole("button", { name: /Export JSON/i }));
+    expect(onExportJson).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Print preview" }));
+    expect(frameFocus).toHaveBeenCalledTimes(1);
+    expect(framePrint).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Close preview" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    frameFocus.mockRestore();
+    framePrint.mockRestore();
+  });
+
+  it("wraps narrow-screen controls while keeping print and close actions available", () => {
+    const onClose = vi.fn();
+    render(
+      <PreviewModal
+        isOpen
+        doc={{ name: "Narrow preview", settings: { pageSize: "Letter" }, items: [] }}
+        remotePreview={{ data: { html: "<html><body>Rendered document</body></html>" } }}
+        onClose={onClose}
+      />
+    );
+
+    const header = screen.getByRole("dialog").querySelector("header");
+    expect(header).toHaveClass("grid-cols-[minmax(0,1fr)_auto]", "sm:flex");
+    expect(screen.getByRole("button", { name: "Close preview" })).toBeInTheDocument();
+    const frame = screen.getByTitle("Server rendered sample preview");
+    vi.spyOn(frame.contentWindow, "focus").mockImplementation(() => {});
+    vi.spyOn(frame.contentWindow, "print").mockImplementation(() => {});
+    fireEvent.load(frame);
+    fireEvent.click(screen.getByRole("button", { name: "Print preview" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close preview" }));
+
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
 describe("PreviewModal widget editing", () => {
+  it("uses the selected paper dimensions for the printable iframe", () => {
+    render(
+      <PreviewModal
+        isOpen
+        doc={{ name: "Print test", settings: { pageSize: "Letter", orientation: "Portrait" }, items: [] }}
+        onClose={() => {}}
+      />
+    );
+
+    const frame = screen.getByTitle("Document Print Frame");
+    vi.spyOn(frame.contentWindow, "focus").mockImplementation(() => {});
+    vi.spyOn(frame.contentWindow, "print").mockImplementation(() => {});
+    fireEvent.click(screen.getByTitle("Save as PDF or Print document"));
+
+    expect(frame).not.toHaveClass("hidden");
+    expect(frame).toHaveStyle({ width: "816px", height: "1056px", display: "block" });
+  });
+
   it("applies a screen-only gutter after server styles so they cannot override it", () => {
     const html = "<!doctype html><html><head><title>Preview</title><style>body { padding: 0 !important; }</style></head><body><main>Document</main></body></html>";
     render(
@@ -17,6 +115,16 @@ describe("PreviewModal widget editing", () => {
 
     const iframe = screen.getByTitle("Server rendered sample preview");
     const srcdoc = iframe.getAttribute("srcdoc");
+    expect(srcdoc).toContain('margin: 0;');
+    expect(srcdoc).toContain('padding: 8mm !important;');
+    expect(srcdoc).toContain('html { padding: 0 !important; }');
+    expect(srcdoc).toContain('body { padding: 8mm !important; }');
+    expect(srcdoc).toContain('box-sizing: border-box !important;');
+    expect(srcdoc).toContain('size: A4 portrait;');
+    expect(srcdoc.indexOf('padding: 8mm !important;')).toBeGreaterThan(
+      srcdoc.indexOf('body { padding: 0 !important; }')
+    );
+    expect(srcdoc).toContain('max-width: 100% !important;');
     expect(srcdoc).toContain(
       "@media screen { html, body { width: 100%; max-width: 100%; overflow-x: hidden; } body { box-sizing: border-box; padding: 24px !important; } .kf-document { width: 100%; max-width: 860px; margin: 0 auto; } }"
     );
@@ -230,12 +338,18 @@ describe("PreviewModal widget editing", () => {
     expect(sheet).toHaveAttribute("data-page-orientation", "Landscape");
     expect(sheet).toHaveAttribute("data-page-width", "1123");
     expect(sheet).toHaveAttribute("data-page-height", "794");
+    expect(sheet.style.padding).toBe("30px");
     expect(screen.getByRole("button", { name: "Rotate page to Portrait" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByTitle("Mobile 375px View"));
     expect(sheet.style.width).toBe("375px");
+    expect(sheet.style.padding).toBe("24px 16px");
     expect(sheet).toHaveAttribute("data-page-orientation", "Landscape");
     expect(screen.getByText(/Mobile 375px/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle("Tablet 768px View"));
+    expect(sheet.style.width).toBe("768px");
+    expect(sheet.style.padding).toBe("32px");
   });
 
   it("fits landscape pages to the available preview width and recalculates on resize", () => {

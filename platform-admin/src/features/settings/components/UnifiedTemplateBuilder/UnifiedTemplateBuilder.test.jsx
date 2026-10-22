@@ -7,7 +7,12 @@ import {
   validateTemplateDocument,
 } from "./model/templateModel";
 import { analyzeSmsText } from "./core/smsCalculator";
-import { sanitizeHtml, scopeCss } from "./core/htmlSanitizer";
+import {
+  getResponsiveHtmlLayoutCss,
+  prepareHtmlWidget,
+  sanitizeHtml,
+  scopeCss,
+} from "./core/htmlSanitizer";
 import { buildLogicalGrid, insertRows } from "./core/tableOperations";
 
 describe("Unified Template Builder Core Tests", () => {
@@ -59,6 +64,28 @@ describe("Unified Template Builder Core Tests", () => {
     const scoped = scopeCss(css, "my-block-1");
     expect(scoped).toContain(".my-block-1 h1");
     expect(scoped).toContain(".my-block-1 .badge");
+  });
+
+  it("constrains custom HTML layout to the available width and wraps on narrow blocks", () => {
+    const layoutCss = getResponsiveHtmlLayoutCss("my-block-1");
+
+    expect(layoutCss).toContain(".my-block-1");
+    expect(layoutCss).toContain("max-width: 100%");
+    expect(layoutCss).toContain("table-layout: fixed");
+    expect(layoutCss).toContain("@container html-block (max-width: 640px)");
+    expect(layoutCss).toContain("flex-wrap: wrap");
+  });
+
+  it("uses embedded legacy HTML styles consistently with the widget stylesheet", () => {
+    const prepared = prepareHtmlWidget({
+      htmlContent: '<style>.estimate { display: grid; }</style><div class="estimate">Estimate</div>',
+      cssContent: ".estimate { color: #123456; }",
+    }, "html-doc-estimate");
+
+    expect(prepared.cleanHtml).not.toContain("<style>");
+    expect(prepared.scopedCss).toContain(".html-doc-estimate .estimate");
+    expect(prepared.scopedCss).toContain("display: grid");
+    expect(prepared.scopedCss).toContain("color: #123456");
   });
 
   it("manipulates 2D table grid accurately", () => {

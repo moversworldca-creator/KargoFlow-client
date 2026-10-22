@@ -1,13 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
-import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import UnifiedTemplateBuilder from "./UnifiedTemplateBuilder";
 import TopNavbar, { Logo } from "./components/TopNavbar";
 import LeftSidebar from "./components/LeftSidebar";
 import DocumentCanvas from "./components/DocumentCanvas";
 import DocumentBlock from "./components/DocumentBlock";
 import RightPropertiesPanel from "./components/RightPropertiesPanel";
-import CustomFieldModal from "./modals/CustomFieldModal";
 import * as storageService from "./core/storageService";
 
 describe("Phase 4: Reference UI Parity & Multi-Page Viewport Controls", () => {
@@ -66,18 +65,25 @@ describe("Phase 4: Reference UI Parity & Multi-Page Viewport Controls", () => {
 
   it("4. supports 3-way device preview switcher (desktop, tablet, mobile)", () => {
     const handleDeviceChange = vi.fn();
-    render(
-      <DocumentCanvas
-        items={[]}
-        pageSize="A4"
-        orientation="Portrait"
-        devicePreview="desktop"
-        onDevicePreviewChange={handleDeviceChange}
-        modeConfig={{ canvasType: "paged" }}
-      />
-    );
-    const tabletBtn = screen.getByTitle("Tablet view (768px)");
-    const mobileBtn = screen.getByTitle("Mobile view (375px)");
+    function StatefulCanvas() {
+      const [devicePreview, setDevicePreview] = React.useState("desktop");
+      return (
+        <DocumentCanvas
+          items={[]}
+          pageSize="A4"
+          orientation="Portrait"
+          devicePreview={devicePreview}
+          onDevicePreviewChange={(nextDevice) => {
+            handleDeviceChange(nextDevice);
+            setDevicePreview(nextDevice);
+          }}
+          modeConfig={{ canvasType: "paged" }}
+        />
+      );
+    }
+    render(<StatefulCanvas />);
+    const tabletBtn = screen.getByRole("button", { name: "Tablet preview" });
+    const mobileBtn = screen.getByRole("button", { name: "Mobile preview" });
     const desktopBtn = screen.getByTitle("Desktop view (Standard page)");
 
     expect(desktopBtn).toBeDefined();
@@ -86,9 +92,12 @@ describe("Phase 4: Reference UI Parity & Multi-Page Viewport Controls", () => {
 
     fireEvent.click(tabletBtn);
     expect(handleDeviceChange).toHaveBeenCalledWith("tablet");
+    expect(tabletBtn.className).toContain("bg-white");
+    expect(desktopBtn.className).toContain("text-slate-600");
 
     fireEvent.click(mobileBtn);
     expect(handleDeviceChange).toHaveBeenCalledWith("mobile");
+    expect(mobileBtn.className).toContain("bg-white");
   });
 
   it("4b. renders mobile viewport frame with .mobile-viewport class and unclipped height", () => {
@@ -543,37 +552,6 @@ describe("Phase 4: Reference UI Parity & Multi-Page Viewport Controls", () => {
     expect(handleDelete).toHaveBeenCalledWith("tpl-1");
   });
 
-  it("10. creates and submits custom field with label, value, and variable in CustomFieldModal", () => {
-    const handleAdd = vi.fn();
-    const handleClose = vi.fn();
-
-    render(
-      <CustomFieldModal
-        isOpen={true}
-        mode="estimate"
-        onClose={handleClose}
-        onAdd={handleAdd}
-      />
-    );
-
-    expect(screen.getByText("Add Custom Field")).toBeDefined();
-    const labelInput = screen.getByPlaceholderText(/Customer Reference/i);
-    const valueInput = screen.getByPlaceholderText(/PO-98421/i);
-
-    fireEvent.change(labelInput, { target: { value: "PO Number" } });
-    fireEvent.change(valueInput, { target: { value: "PO-778899" } });
-
-    const submitBtn = screen.getByRole("button", { name: /add field/i });
-    fireEvent.click(submitBtn);
-
-    expect(handleAdd).toHaveBeenCalledWith({
-      label: "PO Number",
-      value: "PO-778899",
-      variable: undefined,
-    });
-    expect(handleClose).toHaveBeenCalledTimes(1);
-  });
-
   it("11. sidebar widgets and variables are draggable with proper dataTransfer payload", async () => {
     render(
       <LeftSidebar
@@ -728,8 +706,10 @@ describe("Phase 4: Reference UI Parity & Multi-Page Viewport Controls", () => {
     expect(screen.getByDisplayValue("12")).toBeDefined(); // padding
     expect(screen.getByDisplayValue("Solid")).toBeDefined();
 
-    // Variable binding dropdown
-    expect(screen.getByText("Estimate Number ({{estimate.number}})")).toBeDefined();
+    const estimatePlaceholder = screen.getByLabelText("Estimate Ref CRM placeholder");
+    expect(within(estimatePlaceholder).getByRole("option", {
+      name: "Estimate Number ({{estimate.number}})",
+    })).toBeInTheDocument();
   });
 
   it("15. RightPropertiesPanel renders document settings with page size and orientation when no item selected", () => {
@@ -859,5 +839,41 @@ describe("Phase 4: Reference UI Parity & Multi-Page Viewport Controls", () => {
       />
     );
     expect(screen.getByText(/Tablet \(560px\)/i)).toBeDefined();
+  });
+
+  it("resolves supported SMS variables in the live bubble while keeping template tags in the editor", () => {
+    const onSmsTextChange = vi.fn();
+    const { rerender } = render(
+      <DocumentCanvas
+        mode="sms"
+        modeConfig={{ canvasType: "sms" }}
+        smsText="Hi {{customer_name}}, amount due: {{payment.amount_due}}. Pay: {{payment.link}}"
+        onSmsTextChange={onSmsTextChange}
+      />
+    );
+
+    expect(screen.getByText(
+      "Hi Alex Customer, amount due: $908.00. Pay: https://kargoflow.com/pay/inv-42"
+    )).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toHaveValue(
+      "Hi {{customer_name}}, amount due: {{payment.amount_due}}. Pay: {{payment.link}}"
+    );
+
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Hello {{customer.first_name}}, your move is {{move.date}}" },
+    });
+    expect(onSmsTextChange).toHaveBeenCalledWith(
+      "Hello {{customer.first_name}}, your move is {{move.date}}"
+    );
+
+    rerender(
+      <DocumentCanvas
+        mode="sms"
+        modeConfig={{ canvasType: "sms" }}
+        smsText="Hello {{customer.first_name}}, your move is {{move.date}}"
+        onSmsTextChange={onSmsTextChange}
+      />
+    );
+    expect(screen.getByText("Hello Alex, your move is June 15, 2026")).toBeInTheDocument();
   });
 });

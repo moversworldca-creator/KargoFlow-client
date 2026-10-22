@@ -5,8 +5,41 @@
  * with the strict backend Document specification (KargoFlow_Domain.tenant.builder.document).
  */
 
+import { normalizeLegacyMergeFieldAliases } from "../config/variableRegistry";
+import { prepareHtmlWidget } from "./htmlSanitizer";
+
 const VALID_PAGE_SIZES = ['Letter', 'Legal', 'A4'];
 const VALID_ORIENTATIONS = ['portrait', 'landscape'];
+const HEADING_STYLE_KEYS = {
+  fontFamily: 'font_family',
+  fontSize: 'font_size',
+  fontWeight: 'font_weight',
+  bold: 'bold',
+  italic: 'italic',
+  underline: 'underline',
+  strikethrough: 'strikethrough',
+  textTransform: 'text_transform',
+  letterSpacing: 'letter_spacing',
+  lineHeight: 'line_height',
+  color: 'color',
+};
+
+function toBackendHeadingStyle(style = {}, existing = {}) {
+  const result = { ...existing };
+  Object.entries(HEADING_STYLE_KEYS).forEach(([frontendKey, backendKey]) => {
+    if (style[frontendKey] !== undefined) result[backendKey] = style[frontendKey];
+  });
+  return result;
+}
+
+function fromBackendHeadingStyle(props = {}) {
+  const style = {};
+  Object.entries(HEADING_STYLE_KEYS).forEach(([frontendKey, backendKey]) => {
+    if (props.style?.[backendKey] !== undefined) style[frontendKey] = props.style[backendKey];
+  });
+  if (props.align) style.align = props.align;
+  return style;
+}
 
 const BLOCK_DEFAULTS = {
   columns: () => ({ count: 2, gap: 16 }),
@@ -19,7 +52,7 @@ const BLOCK_DEFAULTS = {
   text: () => ({ html: '<p>Enter text here.</p>' }),
   image: () => ({ asset_id: '', alt: '', width: 300, align: 'center' }),
   table: () => ({ columns: ['Item', 'Details'], rows: [] }),
-  variable: () => ({ token: 'company.name', format: 'text', label: '' }),
+  variable: () => ({ token: 'company.name', format: '', label: '' }),
   clause: () => ({ block_id: '' }),
   terms: () => ({ title: 'Terms and Conditions', html: '<p>Enter terms here.</p>' }),
   button: () => ({ label: 'Continue', url: 'https://example.com', align: 'center' }),
@@ -67,20 +100,102 @@ function createWidgetId() {
   return `${Date.now().toString(36)}_${backendWidgetSequence.toString(36)}`;
 }
 
+const VALID_VARIABLE_FORMATS = new Set([
+  '', 'money', 'date', 'datetime', 'phone', 'upper', 'lower', 'title', 'default',
+]);
+const VALID_SIGNER_ROLES = new Set(['customer', 'co_customer', 'company_rep', 'crew_lead']);
+const VALID_FIELD_KEY = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+const REQUIRED_BLOCK_PROPS = {
+  columns: ['count'],
+  spacer: ['height'],
+  conditional: ['rule_key'],
+  repeater: ['source'],
+  heading: ['text'],
+  text: ['html'],
+  image: ['asset_id'],
+  table: ['columns'],
+  variable: ['token'],
+  clause: ['block_id'],
+  terms: ['html'],
+  button: ['label', 'url'],
+  signature: ['field_key', 'signer_role'],
+  initial: ['field_key', 'signer_role'],
+  form_field: ['field_key', 'signer_role', 'field_type'],
+};
+
+function normalizeFieldKey(value, fallback) {
+  const candidate = String(value ?? '').trim();
+  if (VALID_FIELD_KEY.test(candidate)) return candidate;
+
+  const source = candidate || String(fallback || 'signature_field');
+  const sanitized = source.replace(/[^A-Za-z0-9_-]/g, '_');
+  const withLetterPrefix = /^[A-Za-z]/.test(sanitized) ? sanitized : `field_${sanitized}`;
+  const normalized = withLetterPrefix.slice(0, 64);
+  if (VALID_FIELD_KEY.test(normalized)) return normalized;
+
+  const sanitizedFallback = String(fallback || 'signature_field')
+    .replace(/[^A-Za-z0-9_-]/g, '_');
+  const fallbackWithPrefix = /^[A-Za-z]/.test(sanitizedFallback)
+    ? sanitizedFallback
+    : `field_${sanitizedFallback}`;
+  return fallbackWithPrefix.slice(0, 64);
+}
+
+function normalizeBlockProps(type, props, key, kind, label) {
+  const normalized = { ...(props || {}) };
+  const defaults = BLOCK_DEFAULTS[type]?.(key, kind, label) || {};
+  (REQUIRED_BLOCK_PROPS[type] || []).forEach((name) => {
+    if (normalized[name] === undefined && defaults[name] !== undefined && defaults[name] !== '') {
+      normalized[name] = defaults[name];
+    }
+  });
+  const integerRanges = {
+    count: [2, 4, 2],
+    gap: [0, 1000, 16],
+    height: [4, 400, 24],
+  };
+  Object.entries(integerRanges).forEach(([name, [minimum, maximum, fallback]]) => {
+    if (normalized[name] === undefined) return;
+    const value = Number(normalized[name]);
+    const hasDefault = defaults[name] !== undefined;
+    if (Number.isInteger(value) && value >= minimum && value <= maximum) normalized[name] = value;
+    else if (hasDefault) normalized[name] = fallback;
+    else delete normalized[name];
+  });
+  if (type === 'variable' && normalized.format !== undefined && !VALID_VARIABLE_FORMATS.has(normalized.format)) {
+    delete normalized.format;
+  }
+  if (['signature', 'initial', 'form_field'].includes(type)
+    && !VALID_SIGNER_ROLES.has(normalized.signer_role)) {
+    normalized.signer_role = 'customer';
+  }
+  if (['signature', 'initial', 'form_field'].includes(type)) {
+    normalized.field_key = normalizeFieldKey(normalized.field_key, `${type}_${key}`);
+  }
+  return normalized;
+}
+
 function toBackendBlock(item, index, kind) {
   if (item?.key && item?.props && !item.id) {
     return {
       ...item,
+      props: normalizeBlockProps(item.type, item.props, item.key, kind, item.label),
       ...(Array.isArray(item.children) ? { children: item.children.map((child, childIndex) => toBackendBlock(child, childIndex, kind)) } : {}),
     };
   }
   const key = String(item.id || `b_${index + 1}`).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 60);
   if (item.type === 'builder_block') {
+    const props = normalizeBlockProps(item.blockType, item.props, key, kind, item.label);
+    if (item.blockType === 'heading') {
+      const style = toBackendHeadingStyle(item.style, props.style);
+      if (Object.keys(style).length) props.style = style;
+      if (item.style?.align || item.style?.textAlign) props.align = item.style.align || item.style.textAlign;
+    }
     return {
       ...(item.backendBlock || {}),
       key,
       type: item.blockType,
-      props: item.props || {},
+      props,
       ...(Array.isArray(item.children)
         ? { children: item.children.map((child, childIndex) => toBackendBlock(child, childIndex, kind)) }
         : {}),
@@ -127,7 +242,7 @@ function toBackendBlock(item, index, kind) {
     return {
       key,
       type: blockType,
-      props: { ...props },
+      props: normalizeBlockProps(blockType, props, key, kind, item.label),
       ...(Array.isArray(item.backendChildren) && item.backendChildren.length
         ? { children: item.backendChildren.map((child, childIndex) => toBackendBlock(child, childIndex, kind)) }
         : {}),
@@ -135,11 +250,43 @@ function toBackendBlock(item, index, kind) {
     };
   }
 
-  if (type === 'heading') return { key, type, props: { text: String(item.text || item.title || item.content || 'Heading'), level: Number(item.level) || 1, align: item.align || 'left', ...customFieldProps } };
+  if (type === 'html') {
+    const scopeClass = `html-doc-${String(item.id || `html-${index + 1}`).replace(/[^A-Za-z0-9_-]/g, '_')}`;
+    const { cleanHtml, scopedCss } = prepareHtmlWidget(item, scopeClass);
+    return {
+      key,
+      type: 'text',
+      props: {
+        html: `<style>${scopedCss}</style><div class="${scopeClass}">${cleanHtml}</div>`,
+      },
+    };
+  }
+
+  if (type === 'heading') {
+    const props = {
+      text: String(item.text || item.title || item.content || 'Heading'),
+      level: Number(item.level) || 1,
+      align: item.style?.align || item.style?.textAlign || item.align || 'left',
+      ...customFieldProps,
+    };
+    const style = toBackendHeadingStyle(item.style);
+    if (Object.keys(style).length) props.style = style;
+    return { key, type, props };
+  }
   if (type === 'table') return { key, type, props: { columns: item.columns || ['Item', 'Amount'], rows: item.rows || item.tableRows || [] } };
   if (type === 'divider') return { key, type, props: { style: item.style?.borderStyle || 'solid', color: item.style?.borderColor || item.color || '#CBD5E1' } };
   if (type === 'spacer') return { key, type, props: { height: Math.max(4, Math.min(400, Number(item.height) || 20)) } };
-  if (type === 'signature') return { key, type, props: { field_key: item.field_key || `sig_${index + 1}`, signer_role: item.signer_role || 'customer', label: item.label || 'Customer Signature', required: item.required !== false, ...customFieldProps } };
+  if (type === 'signature') return {
+    key,
+    type,
+    props: normalizeBlockProps(type, {
+      field_key: item.field_key || `sig_${index + 1}`,
+      signer_role: item.signer_role || 'customer',
+      label: item.label || 'Customer Signature',
+      required: item.required !== false,
+      ...customFieldProps,
+    }, key, kind, item.label),
+  };
   if (type === 'charges' && ['estimate_portal', 'document'].includes(kind)) return { key, type, props: { group_by: item.group_by || 'none', show_tax: Boolean(item.show_tax), show_quantity: Boolean(item.show_quantity), ...customFieldProps } };
   if (type === 'estimate_summary' && ['estimate_portal', 'document'].includes(kind)) return { key, type, props: { show_discount: Boolean(item.show_discount), show_tax: Boolean(item.show_tax), show_deposit: Boolean(item.show_deposit), show_binding_note: Boolean(item.show_binding_note), ...customFieldProps } };
   if (type === 'move_details') return { key, type, props: { show_dates: true, show_stops: true, show_move_size: true, ...customFieldProps } };
@@ -165,6 +312,7 @@ export function normalizeOrientation(ori) {
  */
 export function toBackendDocument(doc, mode = 'contract') {
   if (!doc) return null;
+  doc = normalizeLegacyMergeFieldAliases(doc);
 
   // Determine backend kind
   let kind = 'document';
@@ -332,6 +480,7 @@ export function toBackendDocument(doc, mode = 'contract') {
  */
 export function fromBackendDocument(backendDoc, fallbackMeta = {}) {
   if (!backendDoc) return null;
+  backendDoc = normalizeLegacyMergeFieldAliases(backendDoc);
 
   const rawSettings = backendDoc.settings || {};
   const pageSize = normalizePageSize(rawSettings.page?.size);
@@ -357,7 +506,7 @@ export function fromBackendDocument(backendDoc, fallbackMeta = {}) {
         container: Array.isArray(block.children),
         column: block.column,
         backendSection: { ...section, blocks: undefined },
-        style: {},
+        style: block.type === 'heading' ? fromBackendHeadingStyle(block.props || {}) : {},
       });
     });
   });

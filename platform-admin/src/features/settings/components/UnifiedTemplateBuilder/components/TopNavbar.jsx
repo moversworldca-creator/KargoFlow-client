@@ -60,9 +60,9 @@ export default function TopNavbar({
   const [isMoreMenuOpen, setIsMoreMenuOpen] = React.useState(false);
 
   return (
-    <header className="h-14 border-b border-slate-200 bg-white px-2 sm:px-3 flex items-center justify-between gap-2 shadow-xs select-none">
+    <header className="min-h-14 border-b border-slate-200 bg-white px-2 sm:px-3 py-1 grid grid-cols-2 gap-x-2 gap-y-1 shadow-xs select-none xl:h-14 xl:flex xl:items-center xl:justify-between xl:gap-2 xl:py-0">
       {/* Left: Sidebar Toggle, Logo, Back & Title */}
-      <div className="flex items-center gap-1 sm:gap-2 min-w-0">
+      <div className="col-span-2 flex items-center gap-1 sm:gap-2 min-w-0 xl:col-span-1">
         <button
           type="button"
           onClick={onToggleSidebar}
@@ -107,7 +107,7 @@ export default function TopNavbar({
       </div>
 
       {/* Middle: Undo / Redo */}
-      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+      <div className="col-start-1 row-start-2 flex items-center gap-1.5 sm:gap-2 shrink-0 xl:col-auto xl:row-auto">
         <div className="flex items-center bg-slate-100 rounded-md p-0.5">
           <button
             type="button"
@@ -133,7 +133,7 @@ export default function TopNavbar({
       </div>
 
       {/* Right: Actions */}
-      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+      <div className="col-start-2 row-start-2 flex w-full min-w-0 flex-wrap items-center justify-end gap-1 sm:gap-2 xl:col-auto xl:row-auto xl:w-auto xl:flex-nowrap xl:shrink-0">
         {mode !== "sms" && (
           <button
             type="button"
@@ -224,17 +224,15 @@ export default function TopNavbar({
           <span className="hidden xl:inline">History</span>
         </button>
 
-        {mode !== "sms" && (
-          <button
-            type="button"
-            onClick={onPrint}
-            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition"
-            title="Direct Print or Save as PDF"
-          >
-            <Printer size={14} />
-            <span className="hidden md:inline">Print</span>
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={onPrint}
+          className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition"
+          title="Direct Print or Save as PDF"
+        >
+          <Printer size={14} />
+          <span className="hidden md:inline">Print</span>
+        </button>
 
         {/* Responsive More Actions Dropdown (Visible on viewports < 1024px) */}
         <div className="relative lg:hidden">
@@ -314,19 +312,17 @@ export default function TopNavbar({
                   <History size={14} className="text-slate-500" />
                   <span>Version History</span>
                 </button>
-                {mode !== "sms" && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsMoreMenuOpen(false);
-                      onPrint();
-                    }}
-                    className="w-full flex items-center gap-2 px-3.5 py-2 hover:bg-slate-100 text-slate-700 text-left sm:hidden"
-                  >
-                    <Printer size={14} className="text-slate-500" />
-                    <span>Print Document</span>
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMoreMenuOpen(false);
+                    onPrint();
+                  }}
+                  className="w-full flex items-center gap-2 px-3.5 py-2 hover:bg-slate-100 text-slate-700 text-left sm:hidden"
+                >
+                  <Printer size={14} className="text-slate-500" />
+                  <span>Print Document</span>
+                </button>
               </div>
             </>
           )}

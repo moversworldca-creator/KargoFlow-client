@@ -70,6 +70,32 @@ describe('Platform global templates page', () => {
     expect(status.closest('td')).toHaveClass('text-center');
   });
 
+  it('truncates long document types within the type column and exposes their full labels', async () => {
+    api.getBuilderTemplates.mockResolvedValue({ data: { count: 3, results: [
+      { ...template, id: 8, name: 'A long template name that wraps naturally across lines', kind: 'document', subtype: 'inventory_sheet' },
+      { ...template, id: 9, name: 'Credit card authorization', kind: 'document', subtype: 'cc_authorization' },
+      { ...template, id: 10, name: 'Valuation waiver', kind: 'document', subtype: 'valuation_waiver' },
+    ] } });
+    show();
+    await screen.findByText('A long template name that wraps naturally across lines');
+
+    const table = screen.getByRole('table');
+    const types = [...table.querySelectorAll('tbody tr td:nth-child(2) span')];
+    expect(types.map((badge) => badge.title)).toEqual([
+      'INVENTORY SHEET',
+      'CC AUTHORIZATION',
+      'VALUATION WAIVER',
+    ]);
+    types.forEach((badge) => {
+      expect(badge).toHaveClass('block', 'max-w-full', 'truncate');
+      expect(badge.closest('td').nextElementSibling).toHaveTextContent('Opportunity');
+    });
+    expect(table.querySelector('tbody tr td:first-child p')).toHaveTextContent(
+      'A long template name that wraps naturally across lines',
+    );
+    expect(screen.getByRole('button', { name: 'Edit A long template name that wraps naturally across lines' })).toBeInTheDocument();
+  });
+
   it('hydrates a direct email editor link from a global draft', async () => {
     show('/communication-templates/7/builder');
     expect(await screen.findByTestId('loaded-editor')).toHaveTextContent('email / editable');

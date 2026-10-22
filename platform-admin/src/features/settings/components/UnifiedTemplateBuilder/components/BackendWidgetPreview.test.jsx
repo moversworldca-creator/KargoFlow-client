@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { BackendWidgetPreview } from "./DocumentBlock";
 import { compileDocumentToHtml } from "../model/htmlCompiler";
 
@@ -41,6 +41,110 @@ describe("backend widget preview content", () => {
     expect(screen.getByText("$1,202.63")).toBeInTheDocument();
   });
 
+  it("renders applied Crew and Assignment heading labels", () => {
+    render(
+      <BackendWidgetPreview block={{
+        type: "crew_trucks",
+        props: {
+          custom_fields: {
+            crew_title: { label: "Team / vehicle" },
+            truck_title: { label: "Assigned resource" },
+          },
+        },
+      }} />
+    );
+
+    expect(screen.getByText("Team / vehicle")).toBeInTheDocument();
+    expect(screen.getByText("Assigned resource")).toBeInTheDocument();
+    expect(screen.getByText("Morgan Chen")).toBeInTheDocument();
+  });
+
+  it("uses edited Crew and Assignment headings in compiled preview HTML", () => {
+    const html = compileDocumentToHtml({
+      items: [{
+        id: "crew-trucks-html",
+        type: "builder_block",
+        blockType: "crew_trucks",
+        props: {
+          custom_fields: {
+            crew_title: { label: "Team / vehicle" },
+            truck_title: { label: "Assigned resource" },
+          },
+        },
+      }],
+    });
+
+    expect(html).toContain("Team / vehicle");
+    expect(html).toContain("Assigned resource");
+  });
+
+  it("resolves Crew and Assignment placeholders in live and compiled previews", () => {
+    const block = {
+      type: "crew_trucks",
+      props: {
+        custom_fields: {
+          crew_title: { label: "Crew / vehicle", mode: "dynamic", value: "{{customer.full_name}}" },
+          truck_title: { label: "Assignment", mode: "dynamic", dynamicValue: "{{company.name}}" },
+        },
+      },
+    };
+    const { container } = render(<BackendWidgetPreview block={block} />);
+    expect(container).toHaveTextContent("Alex Customer");
+    expect(container).toHaveTextContent("KargoFlow Moving");
+
+    const html = compileDocumentToHtml({
+      items: [{ id: "crew-trucks-dynamic-html", type: "builder_block", blockType: "crew_trucks", props: block.props }],
+    });
+    expect(html).toContain("Alex Customer");
+    expect(html).toContain("KargoFlow Moving");
+  });
+
+  it("does not render legacy pricing placeholders as Crew or Assignment headings", () => {
+    const props = { custom_fields: { crew_title: { label: "{{estimate.discount}}" } } };
+    const { container } = render(<BackendWidgetPreview block={{ type: "crew_trucks", props }} />);
+    expect(container).toHaveTextContent("Crew / vehicle");
+    expect(container).not.toHaveTextContent("$50.00");
+
+    const html = compileDocumentToHtml({
+      items: [{ id: "crew-trucks-legacy-pricing-html", type: "builder_block", blockType: "crew_trucks", props }],
+    });
+    expect(html).toContain("Crew / vehicle");
+    expect(html).not.toContain("$50.00");
+  });
+
+  it("updates live charge preview from custom rates while keeping calculated summary values", () => {
+    const { rerender } = render(
+      <BackendWidgetPreview block={{
+        type: "charges",
+        props: {
+          show_quantity: true,
+          custom_fields: {
+            charge_0_unit_price: { mode: "custom", customValue: 200, value: 200 },
+          },
+        },
+      }} />
+    );
+    const movingLaborRow = screen.getByText("Moving labor").closest("tr");
+    expect(within(movingLaborRow).getByText("$200.00")).toBeInTheDocument();
+    expect(within(movingLaborRow).getByText("$1,000.00")).toBeInTheDocument();
+
+    rerender(
+      <BackendWidgetPreview block={{
+        type: "estimate_summary",
+        props: {
+          custom_fields: {
+            tax: { mode: "custom", customValue: 1, value: 1 },
+            total: { mode: "custom", customValue: 2, value: 2 },
+          },
+        },
+      }} />
+    );
+    expect(screen.getByText("$77.63")).toBeInTheDocument();
+    expect(screen.getByText("$1,502.63")).toBeInTheDocument();
+    expect(screen.queryByText("$1.00")).not.toBeInTheDocument();
+    expect(screen.queryByText("$2.00")).not.toBeInTheDocument();
+  });
+
   it("keeps Move Details label and value columns aligned in preview and print HTML", () => {
     const { container } = render(
       <BackendWidgetPreview block={{ type: "move_details", props: {} }} />
@@ -66,6 +170,105 @@ describe("backend widget preview content", () => {
 
     rerender(<BackendWidgetPreview block={block} sampleData={false} />);
     expect(screen.getByText("Hello {{customer.first_name}}")).toBeInTheDocument();
+  });
+
+  it("applies and compiles saved heading typography", () => {
+    const block = {
+      type: "heading",
+      props: {
+        text: "Estimate title",
+        level: 1,
+        align: "center",
+        style: {
+          font_family: "Georgia, serif",
+          font_size: 24,
+          font_weight: 600,
+          italic: true,
+          underline: true,
+          strikethrough: true,
+          text_transform: "uppercase",
+          letter_spacing: 1,
+          line_height: 1.4,
+          color: "#336699",
+        },
+      },
+    };
+    const { getByRole } = render(<BackendWidgetPreview block={block} />);
+    expect(getByRole("heading", { name: "Estimate title" })).toHaveStyle({
+      fontFamily: "Georgia, serif",
+      fontSize: "24px",
+      fontWeight: "600",
+      fontStyle: "italic",
+      textDecoration: "underline line-through",
+      textTransform: "uppercase",
+      letterSpacing: "1px",
+      lineHeight: "1.4",
+      color: "#336699",
+      textAlign: "center",
+    });
+
+    const html = compileDocumentToHtml({
+      items: [{
+        id: "styled-heading",
+        type: "builder_block",
+        blockType: "heading",
+        props: { text: "Estimate title", level: 1, align: "center" },
+        style: {
+          fontFamily: "Georgia, serif",
+          fontSize: 24,
+          fontWeight: 600,
+          italic: true,
+          underline: true,
+          strikethrough: true,
+          textTransform: "uppercase",
+          letterSpacing: 1,
+          lineHeight: 1.4,
+          color: "#336699",
+          align: "center",
+        },
+      }],
+    });
+    expect(html).toContain("font-family: Georgia, serif");
+    expect(html).toContain("font-size: 24px");
+    expect(html).toContain("font-weight: 600");
+    expect(html).toContain("text-decoration: underline line-through");
+    expect(html).toContain("text-transform: uppercase");
+    expect(html).toContain("color: #336699");
+  });
+
+  it("compiles legacy heading text and styles into escaped print HTML", () => {
+    const html = compileDocumentToHtml({
+      items: [{
+        id: "legacy-heading",
+        type: "heading",
+        content: "<img src=x onerror=alert(1)>",
+        level: 3,
+        style: {
+          fontFamily: "Georgia, serif",
+          fontSize: 24,
+          fontWeight: 600,
+          italic: true,
+          underline: true,
+          strikethrough: true,
+          textTransform: "uppercase",
+          letterSpacing: 1,
+          lineHeight: 1.4,
+          color: "#336699",
+          align: "center",
+        },
+      }],
+    });
+
+    expect(html).toContain("<h3 style=");
+    expect(html).toContain("font-family: Georgia, serif");
+    expect(html).toContain("font-size: 24px");
+    expect(html).toContain("font-weight: 600");
+    expect(html).toContain("font-style: italic");
+    expect(html).toContain("text-decoration: underline line-through");
+    expect(html).toContain("text-transform: uppercase");
+    expect(html).toContain("text-align: center");
+    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
+    expect(html).not.toContain("<img src=x");
   });
 
   it("renders container children and honors sample conditional rules in customer preview", () => {
@@ -159,5 +362,39 @@ describe("backend widget preview content", () => {
     expect(html).toContain("Side entrance");
     expect(html).toContain("Alex Customer");
     expect(html).toContain("$1,800.00");
+  });
+
+  it("compiles custom charge rates and calculated totals but ignores calculated summary overrides", () => {
+    const html = compileDocumentToHtml({
+      items: [
+        {
+          id: "charges-custom-rate",
+          type: "builder_block",
+          blockType: "charges",
+          props: {
+            custom_fields: {
+              charge_0_unit_price: { mode: "custom", value: 200, customValue: 200 },
+            },
+          },
+        },
+        {
+          id: "summary-calculated",
+          type: "builder_block",
+          blockType: "estimate_summary",
+          props: {
+            custom_fields: {
+              tax: { mode: "custom", value: 1, customValue: 1 },
+              total: { mode: "custom", value: 2, customValue: 2 },
+            },
+          },
+        },
+      ],
+    });
+
+    expect(html).toContain("$200.00");
+    expect(html).toContain("$1,000.00");
+    expect(html).toContain("$77.63");
+    expect(html).toContain("$1,502.63");
+    expect(html).not.toContain("$2.00");
   });
 });

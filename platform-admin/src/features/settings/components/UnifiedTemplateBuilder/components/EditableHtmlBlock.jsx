@@ -15,7 +15,7 @@ import {
   Type,
   Code2,
 } from "lucide-react";
-import { sanitizeHtml, scopeCss } from "../core/htmlSanitizer";
+import { prepareHtmlWidget, sanitizeHtml } from "../core/htmlSanitizer";
 
 export default function EditableHtmlBlock({
   item,
@@ -46,13 +46,10 @@ export default function EditableHtmlBlock({
   });
 
   const scopeClass = `html-doc-${(item.id || "item").replace(/[^a-zA-Z0-9_-]/g, "_")}`;
-  const rawHtml = item.htmlContent || item.content || "";
-  const rawCss = item.cssContent || "";
-
-  const { cleanHtml } = useMemo(() => sanitizeHtml(rawHtml), [rawHtml]);
-  const scopedCss = useMemo(() => {
-    return rawCss ? scopeCss(rawCss, scopeClass) : "";
-  }, [rawCss, scopeClass]);
+  const { cleanHtml, scopedCss } = useMemo(
+    () => prepareHtmlWidget(item, scopeClass),
+    [item, scopeClass]
+  );
 
   const lastSyncedHtmlRef = useRef(cleanHtml);
 
@@ -399,7 +396,7 @@ export default function EditableHtmlBlock({
         ref={containerRef}
         contentEditable={!preview}
         suppressContentEditableWarning
-        className={`p-4 outline-none min-h-[60px] text-xs max-w-full overflow-x-auto [word-break:break-word] [&_img]:max-w-full [&_img]:h-auto [&_table]:max-w-full ${scopeClass} ${
+        className={`w-full min-w-0 box-border p-4 outline-none min-h-[60px] text-xs max-w-full overflow-x-auto [word-break:break-word] [&_img]:max-w-full [&_img]:h-auto [&_table]:max-w-full ${scopeClass} ${
           preview ? "cursor-default" : "cursor-text"
         }`}
         onInput={() => {

@@ -4,7 +4,11 @@
  * suitable for PDF generation, email distribution, and customer portals.
  */
 
-import { sanitizeHtml, scopeCss } from "../core/htmlSanitizer";
+import {
+  prepareHtmlWidget,
+  sanitizeHtml,
+} from "../core/htmlSanitizer";
+import { normalizeLegacyMergeFieldAliases } from "../config/variableRegistry";
 
 const BACKEND_PREVIEW_VALUES = {
   "company.name": "KargoFlow Moving",
@@ -46,6 +50,67 @@ function safeAlignment(value) {
   return ["left", "center", "right"].includes(value) ? value : "left";
 }
 
+function getChargeColumnWidths(columns) {
+  if (!columns.length) return [];
+
+  const requestedWidths = columns.map((column) => {
+    const width = Number(column.width);
+    return Number.isFinite(width) && width > 0 ? width : 1;
+  });
+  const descriptionIndex = columns.findIndex((column) =>
+    /^(description|desc|item)$/i.test(String(column.key || column.id || ""))
+  );
+  if (descriptionIndex < 0 || columns.length === 1) {
+    const total = requestedWidths.reduce((sum, width) => sum + width, 0);
+    return requestedWidths.map((width) => (width / total) * 100);
+  }
+
+  const descriptionWidth = Math.min(65, Math.max(52, requestedWidths[descriptionIndex]));
+  const otherTotal = requestedWidths.reduce(
+    (sum, width, index) => sum + (index === descriptionIndex ? 0 : width),
+    0
+  );
+  return requestedWidths.map((width, index) =>
+    index === descriptionIndex
+      ? descriptionWidth
+      : ((100 - descriptionWidth) * width) / otherTotal
+  );
+}
+
+function headingStyleCss(style = {}, align = style.align || style.textAlign) {
+  const declarations = [`text-align: ${safeAlignment(align)}`];
+  const fontFamily = typeof style.fontFamily === "string" && /^[A-Za-z0-9 _,'"-]{1,120}$/.test(style.fontFamily)
+    ? style.fontFamily
+    : "";
+  const fontSize = Number(style.fontSize);
+  const fontWeight = Number(style.bold ? 700 : style.fontWeight);
+  const letterSpacing = Number(style.letterSpacing);
+  const lineHeight = Number(style.lineHeight);
+  const color = typeof style.color === "string" && /^#[0-9a-f]{3,8}$/i.test(style.color)
+    ? style.color
+    : "";
+  if (fontFamily) declarations.push(`font-family: ${escapePreviewHtml(fontFamily)}`);
+  if (Number.isFinite(fontSize) && fontSize >= 7 && fontSize <= 72) declarations.push(`font-size: ${fontSize}px`);
+  if (Number.isFinite(fontWeight) && fontWeight >= 100 && fontWeight <= 900) declarations.push(`font-weight: ${fontWeight}`);
+  if (color) declarations.push(`color: ${color}`);
+  if (style.italic) declarations.push("font-style: italic");
+  const decorations = [
+    style.underline ? "underline" : "",
+    style.strikethrough ? "line-through" : "",
+  ].filter(Boolean);
+  if (decorations.length) declarations.push(`text-decoration: ${decorations.join(" ")}`);
+  if (["uppercase", "lowercase", "capitalize"].includes(style.textTransform)) {
+    declarations.push(`text-transform: ${style.textTransform}`);
+  }
+  if (Number.isFinite(letterSpacing) && letterSpacing >= -10 && letterSpacing <= 50) {
+    declarations.push(`letter-spacing: ${letterSpacing}px`);
+  }
+  if (Number.isFinite(lineHeight) && lineHeight >= 0.8 && lineHeight <= 3) {
+    declarations.push(`line-height: ${lineHeight}`);
+  }
+  return `${declarations.join("; ")};`;
+}
+
 function configuredField(props, key, label, fallback, { allowCustom = true, amount = false } = {}) {
   const field = props.custom_fields?.[key] || {};
   const isCustom = field.mode === "custom" && allowCustom;
@@ -64,7 +129,42 @@ function configuredField(props, key, label, fallback, { allowCustom = true, amou
   };
 }
 
+function configuredHeading(props, key, label) {
+  const field = props.custom_fields?.[key] || {};
+  const configuredValue = field.mode === "dynamic"
+    ? field.dynamicValue || field.value || label
+    : field.label || label;
+  const token = String(configuredValue).match(/^\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}$/)?.[1];
+  const isPricingToken = token && /\.(subtotal|discount|tax|grand_total|deposit_amount|total|amount_paid|balance_due|payment_url)$/i.test(token);
+  return previewMergeFields(isPricingToken ? label : configuredValue);
+}
+
 function compileBackendWidget(item) {
+  if (item.type === "builder_block" && item.blockType === "heading" && item.style) {
+    const style = item.style;
+    const backendStyle = {
+      ...(item.props?.style || {}),
+      ...(style.fontFamily !== undefined ? { font_family: style.fontFamily } : {}),
+      ...(style.fontSize !== undefined ? { font_size: style.fontSize } : {}),
+      ...(style.fontWeight !== undefined ? { font_weight: style.fontWeight } : {}),
+      ...(style.bold !== undefined ? { bold: style.bold } : {}),
+      ...(style.italic !== undefined ? { italic: style.italic } : {}),
+      ...(style.underline !== undefined ? { underline: style.underline } : {}),
+      ...(style.strikethrough !== undefined ? { strikethrough: style.strikethrough } : {}),
+      ...(style.textTransform !== undefined ? { text_transform: style.textTransform } : {}),
+      ...(style.letterSpacing !== undefined ? { letter_spacing: style.letterSpacing } : {}),
+      ...(style.lineHeight !== undefined ? { line_height: style.lineHeight } : {}),
+      ...(style.color !== undefined ? { color: style.color } : {}),
+    };
+    item = {
+      ...item,
+      props: {
+        ...item.props,
+        ...(style.align || style.textAlign ? { align: style.align || style.textAlign } : {}),
+        ...(Object.keys(backendStyle).length ? { style: backendStyle } : {}),
+      },
+    };
+  }
   const fields = item.props?.custom_fields || {};
   const customFields = Object.entries(fields)
     .filter(([key, field]) => key.startsWith("custom_") && field && typeof field === "object")
@@ -99,7 +199,21 @@ function compileBackendWidgetContent(item) {
   switch (type) {
     case "heading": {
       const level = Math.min(4, Math.max(1, Number(props.level) || 2));
-      return `<h${level} style="text-align:${safeAlignment(props.align)}">${escapePreviewHtml(previewMergeFields(props.text || "Heading"))}</h${level}>`;
+      const backendStyle = props.style || {};
+      const style = headingStyleCss({
+        fontFamily: backendStyle.font_family,
+        fontSize: backendStyle.font_size,
+        fontWeight: backendStyle.font_weight,
+        bold: backendStyle.bold,
+        italic: backendStyle.italic,
+        underline: backendStyle.underline,
+        strikethrough: backendStyle.strikethrough,
+        textTransform: backendStyle.text_transform,
+        letterSpacing: backendStyle.letter_spacing,
+        lineHeight: backendStyle.line_height,
+        color: backendStyle.color,
+      }, props.align);
+      return `<h${level} style="${style}">${escapePreviewHtml(previewMergeFields(props.text || "Heading"))}</h${level}>`;
     }
     case "header": {
       const customFields = props.custom_fields || {};
@@ -167,16 +281,35 @@ function compileBackendWidgetContent(item) {
         rows.map(({ label, value }) => [label, value]), ["20%", "80%"]);
     }
     case "crew_trucks":
-      return table(["Crew / vehicle", "Assignment"], [
-        ...(props.show_names !== false ? [["Crew lead", "Morgan Chen"], ["Mover", "Taylor Rivera"], ["Mover", "Riley Singh"]] : []),
-        ...(props.show_trucks !== false ? [["Truck", "Truck 12 · 26 ft"]] : []),
+      return table([
+        configuredHeading(props, "crew_title", "Crew / vehicle"),
+        configuredHeading(props, "truck_title", "Assignment"),
+      ], [
+        ...(props.show_names !== false ? [
+          [
+            configuredField(props, "crew_member_0_role", "Crew lead", "Crew lead").value,
+            configuredField(props, "crew_member_0_name", "Morgan Chen", "Morgan Chen").value,
+          ],
+          [
+            configuredField(props, "crew_member_1_role", "Mover", "Mover").value,
+            configuredField(props, "crew_member_1_name", "Taylor Rivera", "Taylor Rivera").value,
+          ],
+          [
+            configuredField(props, "crew_member_2_role", "Mover", "Mover").value,
+            configuredField(props, "crew_member_2_name", "Riley Singh", "Riley Singh").value,
+          ],
+        ] : []),
+        ...(props.show_trucks !== false ? [[
+          configuredField(props, "truck_0_label", "Truck", "Truck").value,
+          configuredField(props, "truck_0_name", "Truck 12 · 26 ft", "Truck 12 · 26 ft").value,
+        ]] : []),
       ]);
     case "charges":
     case "line_items":
       return table(
         [
           configuredField(props, "description_label", "Description", "Description").label,
-          ...(props.show_quantity !== false ? [configuredField(props, "quantity_label", "Qty", "Qty").label] : []),
+          ...(type === "line_items" || props.show_quantity !== false ? [configuredField(props, "quantity_label", "Qty", "Qty").label] : []),
           configuredField(props, "rate_label", "Rate", "Rate").label,
           configuredField(props, "amount_label", "Amount", "Amount").label,
         ],
@@ -201,7 +334,7 @@ function compileBackendWidgetContent(item) {
             : total;
           return [
             displayName,
-            ...(props.show_quantity !== false ? [quantity] : []),
+            ...(type === "line_items" || props.show_quantity !== false ? [quantity] : []),
             displayRate,
             calculatedTotal,
           ];
@@ -214,16 +347,16 @@ function compileBackendWidgetContent(item) {
         ? [
           configuredField(props, "subtotal", "Subtotal", "$1,475.00", { amount: true }),
           ...(props.show_discount !== false ? [configuredField(props, "discount", "Discount", "$50.00", { amount: true })] : []),
-          ...(props.show_tax !== false ? [configuredField(props, "tax", "Tax", "$77.63", { amount: true })] : []),
-          configuredField(props, "total", "Estimate total", "$1,502.63", { amount: true }),
+          ...(props.show_tax !== false ? [configuredField(props, "tax", "Tax", "$77.63", { amount: true, allowCustom: false })] : []),
+          configuredField(props, "total", "Estimate total", "$1,502.63", { amount: true, allowCustom: false }),
           ...(props.show_deposit ? [configuredField(props, "deposit", "Deposit due", "$300.00", { amount: true })] : []),
         ]
         : [
           configuredField(props, "subtotal", "Subtotal", "$1,475.00", { amount: true }),
           ...(props.show_discount !== false ? [configuredField(props, "discount", "Discount", "$50.00", { amount: true })] : []),
-          ...(props.show_tax !== false ? [configuredField(props, "tax", "Tax", "$77.63", { amount: true })] : []),
-          configuredField(props, "total", "Invoice total", "$1,502.63", { amount: true }),
-          ...(props.show_balance !== false ? [configuredField(props, "balance", "Balance due", "$1,202.63", { amount: true })] : []),
+          ...(props.show_tax !== false ? [configuredField(props, "tax", "Tax", "$77.63", { amount: true, allowCustom: false })] : []),
+          configuredField(props, "total", "Invoice total", "$1,502.63", { amount: true, allowCustom: false }),
+          ...(props.show_balance !== false ? [configuredField(props, "balance", "Balance due", "$1,202.63", { amount: true, allowCustom: false })] : []),
         ];
       return table([
         configuredField(props, "section_title", estimate ? "Estimate summary" : "Invoice totals", "").label,
@@ -248,11 +381,13 @@ function compileBackendWidgetContent(item) {
 }
 
 export function compileDocumentBodyToHtml(doc) {
+  doc = normalizeLegacyMergeFieldAliases(doc);
   return (doc?.items || []).filter((item) => item.visible !== false).map(compileItemToHtml).join('\n');
 }
 
 export function compileDocumentToHtml(doc, mode = "estimate", pageSize = "A4", orientation = "Portrait") {
   if (!doc) return "";
+  doc = normalizeLegacyMergeFieldAliases(doc);
 
   const effPageSize = doc.settings?.pageSize || pageSize || "A4";
   const effOrientation = doc.settings?.orientation || orientation || "Portrait";
@@ -353,11 +488,9 @@ function compileItemToHtml(item) {
 
   if (item.type === "html") {
     if (item.globalEmailBody && !item.cssContent) return item.htmlContent ?? item.content ?? '';
-    const scopeClass = `html-doc-${item.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
-    const scopedStyle = item.cssContent
-      ? `<style>${scopeCss(item.cssContent, scopeClass)}</style>`
-      : "";
-    return `<div class="kargoflow-block kargoflow-html-block ${scopeClass}">${scopedStyle}${item.htmlContent || item.content || ""}</div>`;
+    const scopeClass = `html-doc-${String(item.id || "item").replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+    const { cleanHtml, scopedCss } = prepareHtmlWidget(item, scopeClass);
+    return `<div class="kargoflow-block kargoflow-html-block ${scopeClass}"><style>${scopedCss}</style>${cleanHtml}</div>`;
   }
 
   if (item.type === "header") {
@@ -406,10 +539,11 @@ function compileItemToHtml(item) {
 
   if (item.type === "charges") {
     const cols = (item.columns || []).filter((c) => c.visible !== false);
+    const columnWidths = getChargeColumnWidths(cols);
     const headers = cols
       .map(
         (c) =>
-          `<th style="text-align: ${c.align || "left"}; background: #f8fafc; color: #334155; border-bottom: 2px solid #e2e8f0; font-weight: 700; font-size: 11px; text-transform: uppercase; word-break: break-word; overflow-wrap: anywhere; width: ${c.width ? c.width + '%' : 'auto'};">${c.label}</th>`
+          `<th style="text-align: ${safeAlignment(c.align)}; background: #f8fafc; color: #334155; border-bottom: 2px solid #e2e8f0; padding: 6px 8px; box-sizing: border-box; vertical-align: top; font-weight: 700; font-size: 11px; text-transform: uppercase; word-break: break-word; overflow-wrap: anywhere;">${c.label}</th>`
       )
       .join("");
 
@@ -418,7 +552,7 @@ function compileItemToHtml(item) {
         const cells = cols
           .map(
             (c) =>
-              `<td style="text-align: ${c.align || "left"}; border-bottom: 1px solid #e2e8f0; font-size: 12px; word-break: break-word; overflow-wrap: anywhere;">${r[c.key] || ""}</td>`
+              `<td style="text-align: ${safeAlignment(c.align)}; border-bottom: 1px solid #e2e8f0; padding: 6px 8px; box-sizing: border-box; vertical-align: top; font-size: 12px; word-break: normal; overflow-wrap: anywhere;">${r[c.key] || ""}</td>`
           )
           .join("");
         return `<tr>${cells}</tr>`;
@@ -429,7 +563,8 @@ function compileItemToHtml(item) {
     return `
       <div class="kargoflow-block">
         <h4 style="margin: 0 0 10px 0; font-size: 14px; text-transform: uppercase; color: #0b2948;">${item.label}</h4>
-        <table style="border: 1px solid #e2e8f0; width: 100%; table-layout: fixed; border-collapse: collapse; ${tableFontSize}">
+        <table class="charges-table" style="border: 1px solid #e2e8f0; width: 100%; max-width: 100%; table-layout: fixed; border-collapse: collapse; ${tableFontSize}">
+          <colgroup>${columnWidths.map((width) => `<col style="width: ${width.toFixed(2)}%;">`).join("")}</colgroup>
           <thead><tr>${headers}</tr></thead>
           <tbody>${rows}</tbody>
         </table>
@@ -549,14 +684,17 @@ function compileItemToHtml(item) {
   }
 
   if (item.type === "heading") {
-    const headingFontSize = item.style?.fontSize ? `${item.style.fontSize}px` : "20px";
-    const headingFontWeight = item.style?.bold ? "700" : (item.style?.fontWeight || "700");
-    const headingColor = item.style?.color || "#0b2948";
-    const headingFamily = item.style?.fontFamily ? `font-family: ${item.style.fontFamily};` : "";
-    const headingAlign = item.style?.textAlign ? `text-align: ${item.style.textAlign};` : "";
+    const level = Math.min(4, Math.max(1, Number(item.level) || 2));
+    const style = {
+      fontSize: 20,
+      fontWeight: 700,
+      color: "#0b2948",
+      ...(item.style || {}),
+    };
+    const text = escapePreviewHtml(previewMergeFields(item.content || item.label || "Section Heading"));
     return `
       <div class="kargoflow-block">
-        <h2 style="margin: 0; font-size: ${headingFontSize}; font-weight: ${headingFontWeight}; color: ${headingColor}; ${headingFamily} ${headingAlign}">${item.content || item.label || ""}</h2>
+        <h${level} style="margin: 0; ${headingStyleCss(style)}">${text}</h${level}>
       </div>
     `;
   }

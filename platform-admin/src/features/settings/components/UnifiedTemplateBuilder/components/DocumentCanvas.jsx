@@ -1,7 +1,9 @@
 import React, { useRef, useState, useEffect, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import DocumentBlock from "./DocumentBlock";
+import { getPageDimensions } from "../model/templateModel";
 import { analyzeSmsText } from "../core/smsCalculator";
+import { resolveSmsPreviewText } from "../core/smsPreview";
 import {
   Smartphone,
   Tablet,
@@ -33,7 +35,7 @@ import {
   Receipt,
 } from "lucide-react";
 
-function ScaledPageFrame({ width, zoom, minHeight, children }) {
+function ScaledPageFrame({ width, zoom, minHeight, showOverflowBoundary = false, children }) {
   const contentRef = useRef(null);
   const [contentHeight, setContentHeight] = useState(0);
   const scale = zoom / 100;
@@ -101,6 +103,18 @@ function ScaledPageFrame({ width, zoom, minHeight, children }) {
       >
         {children}
       </div>
+      {showOverflowBoundary && contentHeight > minHeight && (
+        <div
+          data-testid="page-overflow-boundary"
+          role="status"
+          className="pointer-events-none absolute left-0 right-0 z-20 border-t-2 border-dashed border-amber-500"
+          style={{ top: `${(minHeight * zoom) / 100}px` }}
+        >
+          <span className="absolute right-0 -top-6 rounded-t bg-amber-100 px-2 py-1 text-[10px] font-semibold text-amber-900">
+            Content continues beyond page
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -138,7 +152,6 @@ export default function DocumentCanvas({
   onAddWidgetClick = () => {},
   onInsertTable = () => {},
   onInsertLayout = () => {},
-  onOpenCustomFieldDialog = () => {},
   onDropInPage = () => {},
   onMoveItemUp = () => {},
   onMoveItemDown = () => {},
@@ -702,7 +715,9 @@ export default function DocumentCanvas({
                     }}
                     className="bg-blue-600 text-white p-3.5 rounded-2xl rounded-tr-xs shadow-xs leading-relaxed ml-auto break-words whitespace-pre-wrap"
                   >
-                    {smsText || "Compose your SMS message below or select merge tags to insert dynamic fields..."}
+                    {smsText
+                      ? resolveSmsPreviewText(smsText)
+                      : "Compose your SMS message below or select merge tags to insert dynamic fields..."}
                   </div>
                   <div className="text-right text-[10px] text-slate-400 mt-1 pr-1">Just now</div>
                 </div>
@@ -1194,11 +1209,8 @@ export default function DocumentCanvas({
   }
 
   // 3. Multi-Page Print Canvas (Letter / A4 / Legal)
-  const isLandscape = orientation?.toLowerCase() === "landscape";
-  const pageBaseWidth = pageSize === "Letter" ? 816 : pageSize === "Legal" ? 816 : 794;
-  const pageBaseHeight = pageSize === "Letter" ? 1056 : pageSize === "Legal" ? 1344 : 1123;
-  const pageWidth = isLandscape ? pageBaseHeight : pageBaseWidth;
-  const pageMinHeight = isLandscape ? pageBaseWidth : pageBaseHeight;
+  const isLandscape = String(orientation).toLowerCase() === "landscape";
+  const { width: pageWidth, height: pageMinHeight } = getPageDimensions(pageSize, orientation);
 
   // Normalized document pages stack
   const docPages =
@@ -1381,23 +1393,6 @@ export default function DocumentCanvas({
                       <div className="flex flex-col min-w-0">
                         <b className="text-xs font-semibold text-slate-800 group-hover:text-blue-700 leading-snug">Label and Value</b>
                         <small className="text-[10.5px] text-slate-400 truncate">Side-by-side label and data value</small>
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsAddMenuOpen(false);
-                        onOpenCustomFieldDialog();
-                      }}
-                      className="add-component-item highlight-action w-full flex items-center gap-3 px-3 py-2 bg-blue-50/60 border border-blue-200/80 hover:bg-blue-100/70 text-blue-800 transition rounded-lg text-left cursor-pointer my-1 group"
-                    >
-                      <div className="w-8 h-8 rounded-lg bg-blue-100 group-hover:bg-blue-200 text-blue-600 flex items-center justify-center shrink-0 transition">
-                        <Plus size={16} />
-                      </div>
-                      <div className="flex flex-col min-w-0">
-                        <b className="text-xs font-semibold text-blue-700 leading-snug">Custom Field...</b>
-                        <small className="text-[10.5px] text-blue-500 truncate">User-defined custom field & value</small>
                       </div>
                     </button>
 
@@ -1672,11 +1667,11 @@ export default function DocumentCanvas({
           <div className="flex flex-col items-center gap-16 min-w-fit m-auto" data-testid="document-page-stack">
             {docPages.map((page, pageIndex) => {
               const pageOrientation = page.orientation || orientation;
-              const pageIsLandscape = String(pageOrientation).toLowerCase() === "landscape";
-              const pageBaseWidth = page.pageSize === "Letter" ? 816 : 794;
-              const pageBaseHeight = page.pageSize === "Letter" ? 1056 : page.pageSize === "Legal" ? 1344 : 1123;
-              const currentPageWidth = pageIsLandscape ? pageBaseHeight : pageBaseWidth;
-              const currentPageHeight = pageIsLandscape ? pageBaseWidth : pageBaseHeight;
+              const effectivePageSize = page.pageSize || pageSize;
+              const { width: currentPageWidth, height: currentPageHeight } = getPageDimensions(
+                effectivePageSize,
+                pageOrientation
+              );
 
               return (
               <ScaledPageFrame
@@ -1684,6 +1679,7 @@ export default function DocumentCanvas({
                 width={currentPageWidth}
                 zoom={zoom}
                 minHeight={currentPageHeight + 30}
+                showOverflowBoundary
               >
                 {/* Page Sheet Header */}
                 <div className="page-sheet-header">
@@ -1692,7 +1688,7 @@ export default function DocumentCanvas({
                       {page.name || `Page ${pageIndex + 1}`}
                     </span>
                     <small className="page-subinfo">
-                      {page.pageSize || pageSize} · {pageOrientation} (Page {pageIndex + 1} of{" "}
+                      {effectivePageSize} · {pageOrientation} (Page {pageIndex + 1} of{" "}
                       {docPages.length})
                     </small>
                   </div>

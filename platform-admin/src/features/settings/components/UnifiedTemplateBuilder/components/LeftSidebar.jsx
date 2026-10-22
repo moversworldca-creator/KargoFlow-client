@@ -122,7 +122,6 @@ export default function LeftSidebar({
   onInsertTable,
   onInsertLayout,
   onInsertVariable,
-  onOpenCustomFieldDialog = () => {},
   templateSettings = {},
   onTemplateSettingsChange = () => {},
   branchId = null,
@@ -344,14 +343,14 @@ export default function LeftSidebar({
             )}
 
             {/* Standard Common Layout & Grid Widgets (Non-SMS Modes) */}
-            {mode !== "sms" && common.filter((w) => !["custom_field", "image", "logo"].includes(w.type) && filterItem(w.label)).length > 0 && (
+            {mode !== "sms" && common.filter((w) => !["image", "logo"].includes(w.type) && filterItem(w.label)).length > 0 && (
               <div>
                 <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2 px-1">
                   General & Layout
                 </h3>
                 <div className="grid grid-cols-1 gap-1.5">
                   {common
-                    .filter((w) => !["custom_field", "image", "logo"].includes(w.type) && filterItem(w.label))
+                    .filter((w) => !["image", "logo"].includes(w.type) && filterItem(w.label))
                     .map((widget) => (
                       <button
                         key={widget.id}
@@ -367,8 +366,6 @@ export default function LeftSidebar({
                             onInsertTable();
                           } else if (widget.type === "layout" && onInsertLayout) {
                             onInsertLayout();
-                          } else if (widget.type === "custom_field") {
-                            onOpenCustomFieldDialog();
                           } else {
                             onAddWidget(widget);
                           }

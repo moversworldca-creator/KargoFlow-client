@@ -9,8 +9,8 @@ import InsertLayoutDialog from "./modals/InsertLayoutDialog";
 import PreviewModal from "./modals/PreviewModal";
 import TransferModal from "./modals/TransferModal";
 import VersionHistoryModal from "./modals/VersionHistoryModal";
-import CustomFieldModal from "./modals/CustomFieldModal";
 import { getModeConfig } from "./config/modeRegistry";
+import { normalizeLegacyMergeFieldAliases } from "./config/variableRegistry";
 import {
   createInitialDocument,
   createBlankDocument,
@@ -24,6 +24,7 @@ import {
   deepClone,
 } from "./model/templateModel";
 import { compileDocumentToHtml } from "./model/htmlCompiler";
+import { createSmsPrintHtml, printHtmlInIsolatedFrame } from "./model/printUtils";
 import {
   saveDocument,
   saveLibrary,
@@ -91,6 +92,7 @@ export default function UnifiedTemplateBuilder({
         initial = createInitialDocument(mode);
       }
     }
+    initial = normalizeLegacyMergeFieldAliases(initial);
 
     // Ensure pages exist
     if (!initial.pages || !Array.isArray(initial.pages) || initial.pages.length === 0) {
@@ -201,7 +203,6 @@ export default function UnifiedTemplateBuilder({
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
-  const [isCustomFieldModalOpen, setIsCustomFieldModalOpen] = useState(false);
   const [snapshots, setSnapshots] = useState([]);
   const [toastMessage, setToastMessage] = useState("");
   const importInputRef = useRef(null);
@@ -292,6 +293,15 @@ export default function UnifiedTemplateBuilder({
 
   // Direct Print / PDF Trigger
   const handleDirectPrint = () => {
+    if (mode === "email") {
+      printHtmlInIsolatedFrame(compileDocumentToHtml(doc, mode, pageSize, orientation));
+      return;
+    }
+    if (mode === "sms") {
+      printHtmlInIsolatedFrame(createSmsPrintHtml(smsText));
+      return;
+    }
+
     let pageStyle = window.document.getElementById("kargoflow-print-page");
     if (!pageStyle) {
       pageStyle = window.document.createElement("style");
@@ -315,29 +325,30 @@ export default function UnifiedTemplateBuilder({
   // Push history on changes
   const updateDoc = useCallback(
     (newDoc, markDirty = true) => {
+      const normalizedDoc = normalizeLegacyMergeFieldAliases(newDoc);
       setHistory((prev) => {
         const next = prev.slice(0, historyIdx + 1);
-        next.push(deepClone(newDoc));
+        next.push(deepClone(normalizedDoc));
         return next;
       });
       setHistoryIdx((prev) => prev + 1);
-      setDoc(newDoc);
+      setDoc(normalizedDoc);
       if (markDirty) { editVersionRef.current += 1; setIsDirty(true); }
 
       if (onChange) {
-        const compiledHtml = compileDocumentToHtml(newDoc, mode);
+        const compiledHtml = compileDocumentToHtml(normalizedDoc, mode);
         onChange({
           ...(initialSource || {}),
-          name: newDoc.name,
-          content: newDoc,
+          name: normalizedDoc.name,
+          content: normalizedDoc,
           html_content: compiledHtml,
           body_html: compiledHtml,
           body_sms: smsText,
-          subject: newDoc.settings?.subject || initialSource?.subject || "",
-          template_key: newDoc.settings?.template_key || initialSource?.template_key || "",
-          branch: newDoc.settings?.branch || initialSource?.branch || branchId || null,
-          category: newDoc.settings?.category || initialSource?.category || null,
-          description: newDoc.settings?.description || initialSource?.description || "",
+          subject: normalizedDoc.settings?.subject || initialSource?.subject || "",
+          template_key: normalizedDoc.settings?.template_key || initialSource?.template_key || "",
+          branch: normalizedDoc.settings?.branch || initialSource?.branch || branchId || null,
+          category: normalizedDoc.settings?.category || initialSource?.category || null,
+          description: normalizedDoc.settings?.description || initialSource?.description || "",
         });
       }
     },
@@ -452,25 +463,12 @@ export default function UnifiedTemplateBuilder({
 
   // Widget Actions
   const handleAddWidget = (widgetConfig) => {
-    if (widgetConfig.type === "custom_field" || widgetConfig.id === "custom_field") {
-      setIsCustomFieldModalOpen(true);
-      return;
-    }
+    if (widgetConfig.type === "custom_field" || widgetConfig.id === "custom_field") return;
     const backendKind = ["estimate", "estimate_portal"].includes(mode) ? "estimate_portal" : mode === "invoice" ? "invoice" : "document";
     const newItem = widgetConfig.type === "builder_block"
       ? createBackendWidget({ ...widgetConfig, type: widgetConfig.block_type }, backendKind)
       : createWidget(widgetConfig.label || widgetConfig.type, widgetConfig);
     appendItemToTargetPage(newItem);
-  };
-
-  const handleInsertCustomField = ({ label, value: val, variable }) => {
-    const customItem = createWidget("Custom Field", {
-      fieldLabel: label,
-      value: val,
-      variable,
-    });
-    appendItemToTargetPage(customItem);
-    setToastMessage(`Added Custom Field: ${label}`);
   };
 
   const handleInsertTable = (rows, cols) => {
@@ -526,10 +524,7 @@ export default function UnifiedTemplateBuilder({
         widgetConfig = { label: widgetRaw, type: widgetRaw };
       }
 
-      if (widgetConfig.type === "custom_field" || widgetConfig.id === "custom_field") {
-        setIsCustomFieldModalOpen(true);
-        return;
-      }
+      if (widgetConfig.type === "custom_field" || widgetConfig.id === "custom_field") return;
       if (widgetConfig.type === "table") {
         setIsTablePopupOpen(true);
         return;
@@ -625,7 +620,10 @@ export default function UnifiedTemplateBuilder({
       };
       handleUpdateItem(updated);
     } else {
-      handleInsertCustomField({ label: "Variable", value: tag, variable: tag });
+      const textItem = createWidget("Text Block", { type: "text" });
+      textItem.content = tag;
+      textItem.htmlContent = tag;
+      appendItemToTargetPage(textItem);
     }
   };
 
@@ -1017,7 +1015,6 @@ export default function UnifiedTemplateBuilder({
             onInsertTable={() => setIsTablePopupOpen(true)}
             onInsertLayout={() => setIsLayoutDialogOpen(true)}
             onInsertVariable={handleInsertVariable}
-            onOpenCustomFieldDialog={() => setIsCustomFieldModalOpen(true)}
             templateSettings={{
               subject: doc.settings?.subject || "",
               template_key: doc.settings?.template_key || "",
@@ -1081,7 +1078,6 @@ export default function UnifiedTemplateBuilder({
           onAddWidgetClick={(w) => handleAddWidget(w)}
           onInsertTable={() => setIsTablePopupOpen(true)}
           onInsertLayout={() => setIsLayoutDialogOpen(true)}
-          onOpenCustomFieldDialog={() => setIsCustomFieldModalOpen(true)}
           onDropInPage={handleDropInPage}
           onMoveItemUp={(id) => handleMoveItem(id, "up")}
           onMoveItemDown={(id) => handleMoveItem(id, "down")}
@@ -1100,10 +1096,10 @@ export default function UnifiedTemplateBuilder({
         )}
 
         <div
-          className={`shrink-0 z-40 transition-transform duration-200 xl:translate-x-0 ${
+          className={`fixed right-0 top-14 bottom-0 shrink-0 z-40 transition-transform duration-200 xl:static xl:right-auto xl:top-auto xl:bottom-auto xl:translate-x-0 ${
             isPanelOpen
-              ? "absolute right-0 top-0 bottom-0 shadow-2xl xl:static xl:shadow-none translate-x-0"
-              : "absolute right-0 top-0 bottom-0 translate-x-full xl:static xl:translate-x-0"
+              ? "shadow-2xl xl:shadow-none translate-x-0"
+              : "translate-x-full xl:translate-x-0"
           }`}
         >
           <RightPropertiesPanel
@@ -1127,6 +1123,7 @@ export default function UnifiedTemplateBuilder({
             onClosePanel={() => setIsPanelOpen(false)}
             onModeChange={onModeChange}
             onSendTestEmail={onSendTestEmail}
+            onInsertPlaceholder={handleInsertVariable}
             isSendingTest={isSendingTest}
           />
         </div>
@@ -1210,6 +1207,7 @@ export default function UnifiedTemplateBuilder({
         smsText={smsText}
         onClose={() => setIsPreviewOpen(false)}
         onExportJson={handleExportJson}
+        onUseLocalPreview={() => setRemotePreview(null)}
         onUpdateDoc={handlePreviewDocUpdate}
         onUpdateItem={handleUpdateItem}
         onOpenHtmlEditor={(item) => {
@@ -1238,12 +1236,6 @@ export default function UnifiedTemplateBuilder({
         canRestore={canSave}
       />
 
-      <CustomFieldModal
-        isOpen={isCustomFieldModalOpen}
-        mode={mode}
-        onClose={() => setIsCustomFieldModalOpen(false)}
-        onAdd={handleInsertCustomField}
-      />
     </div>
   );
 }

@@ -65,6 +65,18 @@ describe('Global editor persistence', () => {
     expect(api.saveBuilderTemplateDraft.mock.calls[1][1].lock_version).toBe(6);
   });
 
+  it('saves through the Draft action and reports success', async () => {
+    showEditor();
+
+    fireEvent.click(screen.getByLabelText('Save Draft'));
+
+    await waitFor(() => expect(api.saveBuilderTemplateDraft).toHaveBeenCalledExactlyOnceWith(7, {
+      lock_version: 5,
+      document: { subject: '', body_html: '', body_text: 'Old reminder' },
+    }));
+    expect(await screen.findByText('Template draft saved successfully.')).toBeInTheDocument();
+  });
+
   it('aborts publication when draft saving conflicts', async () => {
     api.saveBuilderTemplateDraft.mockRejectedValue({ response: { status: 409, data: { detail: 'Draft changed elsewhere.' } } });
     const metadata = vi.fn();
@@ -164,5 +176,65 @@ describe('Global editor persistence', () => {
       document: { subject: '', body_html: '', body_text: 'Old reminder' }, format: 'both',
     });
     expect(api.saveBuilderTemplateDraft).not.toHaveBeenCalled();
+  });
+
+  it.each(['contract', 'estimate', 'invoice'])('uses valid signature fields for %s preview and PDF download', async (mode) => {
+    const signature = {
+      id: 'signature-one',
+      type: 'builder_block',
+      blockType: 'signature',
+      label: 'Customer signature',
+      props: { field_key: '9 invalid/key', signer_role: 'customer' },
+      children: [],
+    };
+    api.previewBuilderTemplate
+      .mockResolvedValueOnce({ data: { body_html: '<p>Preview</p>' } })
+      .mockResolvedValueOnce({ data: new Blob(['pdf']) });
+    const createObjectUrl = vi.fn().mockReturnValue('blob:test-pdf');
+    const revokeObjectUrl = vi.fn();
+    const originalCreateObjectUrl = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+    const originalRevokeObjectUrl = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
+    const clickLink = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    showEditor({ mode, items: [signature] });
+    fireEvent.click(screen.getByLabelText('Preview Template'));
+
+    await waitFor(() => expect(api.previewBuilderTemplate).toHaveBeenCalledWith(7, {
+      document: expect.objectContaining({
+        sections: [expect.objectContaining({
+        blocks: expect.arrayContaining([expect.objectContaining({
+            type: 'signature',
+            props: expect.objectContaining({ field_key: 'field_9_invalid_key' }),
+        })]),
+        })],
+      }),
+      format: 'both',
+    }));
+
+    fireEvent.click(screen.getByTitle('Direct Print or Save as PDF'));
+
+    await waitFor(() => expect(api.previewBuilderTemplate).toHaveBeenCalledWith(7, {
+      document: expect.objectContaining({
+        sections: [expect.objectContaining({
+        blocks: expect.arrayContaining([expect.objectContaining({
+            type: 'signature',
+            props: expect.objectContaining({ field_key: 'field_9_invalid_key' }),
+        })]),
+        })],
+      }),
+      format: 'pdf',
+    }));
+    expect(createObjectUrl).toHaveBeenCalledWith(expect.any(Blob));
+    expect(clickLink).toHaveBeenCalled();
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:test-pdf');
+
+    if (originalCreateObjectUrl) Object.defineProperty(URL, 'createObjectURL', originalCreateObjectUrl);
+    else delete URL.createObjectURL;
+    if (originalRevokeObjectUrl) Object.defineProperty(URL, 'revokeObjectURL', originalRevokeObjectUrl);
+    else delete URL.revokeObjectURL;
+    clickLink.mockRestore();
   });
 });

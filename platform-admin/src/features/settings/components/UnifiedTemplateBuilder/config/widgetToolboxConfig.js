@@ -18,7 +18,6 @@ export const WIDGET_CATEGORIES = {
     { id: "notes", label: "Notes", type: "notes", icon: "NotebookPen" },
     { id: "table", label: "Custom Table", type: "table", icon: "Table2" },
     { id: "layout", label: "Content Layout (Columns)", type: "layout", icon: "Columns" },
-    { id: "custom_field", label: "Custom Field...", type: "custom_field", icon: "Sliders" },
     { id: "html", label: "Custom HTML Block", type: "html", icon: "Code2" },
   ],
 

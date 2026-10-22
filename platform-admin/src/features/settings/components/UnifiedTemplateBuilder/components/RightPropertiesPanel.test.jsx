@@ -41,6 +41,520 @@ function SelectablePropertiesPanel({ item }) {
 }
 
 describe("RightPropertiesPanel widget fields", () => {
+  it("removes CRM field bindings while retaining editable builder widget settings", () => {
+    const onUpdate = vi.fn();
+    render(
+      <StatefulPropertiesPanel
+        initialItem={{
+          id: "heading-1",
+          type: "builder_block",
+          blockType: "heading",
+          props: { text: "Estimate" },
+          propsSchema: {
+            type: "object",
+            properties: { text: { type: "string" } },
+            required: ["text"],
+          },
+        }}
+        onUpdate={onUpdate}
+      />
+    );
+
+    expect(screen.queryByText("CRM field bindings")).not.toBeInTheDocument();
+    expect(screen.queryByText("CRM field (placeholder)")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/CRM field placeholder/i)).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/text \*/i), { target: { value: "Updated heading" } });
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      props: expect.objectContaining({ text: "Updated heading" }),
+    }));
+  });
+
+  it("shows a dismissible confirmation after applying builder block changes", () => {
+    const onUpdate = vi.fn();
+
+    render(
+      <StatefulPropertiesPanel
+        initialItem={{
+          id: "totals-1",
+          type: "builder_block",
+          blockType: "totals",
+          label: "Totals",
+          props: {},
+          propsSchema: { type: "object", properties: { total: { type: "number" } } },
+        }}
+        onUpdate={onUpdate}
+      />
+    );
+
+    expect(screen.queryByText("Changes applied")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply Changes" }));
+
+    expect(onUpdate).toHaveBeenCalledOnce();
+    expect(screen.getByRole("status")).toHaveTextContent("Changes applied");
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss changes applied notification" }));
+    expect(screen.queryByText("Changes applied")).not.toBeInTheDocument();
+  });
+
+  it("discards unapplied custom field edits when Cancel is clicked", () => {
+    const onUpdate = vi.fn();
+
+    render(
+      <StatefulPropertiesPanel
+        initialItem={{
+          id: "totals-1",
+          type: "builder_block",
+          blockType: "totals",
+          label: "Totals",
+          props: {},
+          propsSchema: { type: "object", properties: {} },
+        }}
+        onUpdate={onUpdate}
+      />
+    );
+
+    const customValue = screen.getByRole("spinbutton", { name: "Subtotal custom value" });
+    fireEvent.change(customValue, { target: { value: "125.50" } });
+    expect(customValue).toHaveValue(125.5);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(customValue).toHaveValue(null);
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it("applies added pricing field edits to builder block custom fields", () => {
+    const onUpdate = vi.fn();
+
+    render(
+      <StatefulPropertiesPanel
+        initialItem={{
+          id: "charges-1",
+          type: "builder_block",
+          blockType: "charges",
+          props: {},
+          propsSchema: { type: "object", properties: { enabled: { type: "boolean" } } },
+        }}
+        onUpdate={onUpdate}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Custom Pricing Field" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Pricing field 1 name" }), {
+      target: { value: "Fuel surcharge" },
+    });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Fuel surcharge current value" }), {
+      target: { value: "40.00" },
+    });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Fuel surcharge custom value" }), {
+      target: { value: "45.00" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply Changes" }));
+
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      id: "charges-1",
+      props: expect.objectContaining({
+        custom_fields: expect.objectContaining({
+          custom_1: expect.objectContaining({
+            label: "Fuel surcharge",
+            currentValue: 40,
+            value: 45,
+            customValue: 45,
+          }),
+        }),
+      }),
+    }));
+  });
+
+  it("uses prebuilt CRM placeholders for non-pricing widget data bindings", () => {
+    const onUpdate = vi.fn();
+    render(
+      <StatefulPropertiesPanel
+        initialItem={{
+          id: "move-details-1",
+          type: "builder_block",
+          blockType: "move_details",
+          label: "Move details",
+          props: {},
+          propsSchema: { type: "object", properties: { show_dates: { type: "boolean" } } },
+        }}
+        onUpdate={onUpdate}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: "Add Custom Field" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Custom field 1 name")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Move date CRM placeholder"), {
+      target: { value: "{{customer.full_name}}" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply Changes" }));
+
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      id: "move-details-1",
+      props: expect.objectContaining({
+        custom_fields: expect.objectContaining({
+          move_date: expect.objectContaining({
+            mode: "dynamic",
+            value: "{{customer.full_name}}",
+            dynamicValue: "{{customer.full_name}}",
+          }),
+        }),
+      }),
+    }));
+    expect(screen.getByText("Changes applied")).toBeInTheDocument();
+  });
+
+  it("applies Crew and Assignment column heading edits to builder widget props", () => {
+    const onUpdate = vi.fn();
+    render(
+      <StatefulPropertiesPanel
+        initialItem={{
+          id: "crew-trucks-1",
+          type: "builder_block",
+          blockType: "crew_trucks",
+          label: "Crew and trucks",
+          props: {},
+          propsSchema: {
+            type: "object",
+            properties: {
+              show_names: { type: "boolean" },
+              show_trucks: { type: "boolean" },
+            },
+          },
+        }}
+        onUpdate={onUpdate}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Crew column heading"), {
+      target: { value: "Team / vehicle" },
+    });
+    fireEvent.change(screen.getByLabelText("Assignment column heading"), {
+      target: { value: "Assigned resource" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply Changes" }));
+
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      id: "crew-trucks-1",
+      props: expect.objectContaining({
+        custom_fields: expect.objectContaining({
+          crew_title: expect.objectContaining({ label: "Team / vehicle" }),
+          truck_title: expect.objectContaining({ label: "Assigned resource" }),
+        }),
+      }),
+    }));
+  });
+
+  it("provides CRM placeholder selectors for both Crew and Assignment headings", () => {
+    const onUpdate = vi.fn();
+    render(
+      <StatefulPropertiesPanel
+        initialItem={{
+          id: "crew-trucks-placeholders",
+          type: "builder_block",
+          blockType: "crew_trucks",
+          label: "Crew and trucks",
+          props: {},
+          propsSchema: { type: "object", properties: {} },
+        }}
+        onUpdate={onUpdate}
+      />
+    );
+
+    const crewPlaceholder = screen.getByLabelText("Crew column heading CRM placeholder");
+    const assignmentPlaceholder = screen.getByLabelText("Assignment column heading CRM placeholder");
+    expect(crewPlaceholder).toHaveValue("");
+    expect(assignmentPlaceholder).toHaveValue("");
+    expect(screen.queryByRole("option", { name: "Choose CRM placeholder" })).not.toBeInTheDocument();
+
+    fireEvent.change(crewPlaceholder, { target: { value: "{{customer.full_name}}" } });
+    fireEvent.change(assignmentPlaceholder, { target: { value: "{{company.name}}" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply Changes" }));
+
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      props: expect.objectContaining({
+        custom_fields: expect.objectContaining({
+          crew_title: expect.objectContaining({
+            label: "Crew / vehicle",
+            mode: "dynamic",
+            value: "{{customer.full_name}}",
+            dynamicValue: "{{customer.full_name}}",
+          }),
+          truck_title: expect.objectContaining({
+            label: "Assignment",
+            mode: "dynamic",
+            value: "{{company.name}}",
+            dynamicValue: "{{company.name}}",
+          }),
+        }),
+      }),
+    }));
+    expect(Array.from(crewPlaceholder.options, (option) => option.value)).not.toContain("{{estimate.discount}}");
+  });
+
+  it("discards unapplied Crew and Assignment heading edits when canceled", () => {
+    const onUpdate = vi.fn();
+    render(
+      <StatefulPropertiesPanel
+        initialItem={{
+          id: "crew-trucks-cancel",
+          type: "builder_block",
+          blockType: "crew_trucks",
+          label: "Crew and trucks",
+          props: {},
+          propsSchema: { type: "object", properties: {} },
+        }}
+        onUpdate={onUpdate}
+      />
+    );
+
+    const crewHeading = screen.getByLabelText("Crew column heading");
+    fireEvent.change(crewHeading, { target: { value: "Team" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(crewHeading).toHaveValue("Crew / vehicle");
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it("discards unapplied CRM placeholder changes when Cancel is clicked", () => {
+    const onUpdate = vi.fn();
+    render(
+      <StatefulPropertiesPanel
+        initialItem={{
+          id: "move-details-dynamic",
+          type: "builder_block",
+          blockType: "move_details",
+          label: "Move details",
+          props: {
+            custom_fields: {
+              move_date: {
+                mode: "dynamic",
+                value: "{{legacy.move_date}}",
+                dynamicValue: "{{legacy.move_date}}",
+              },
+            },
+          },
+          propsSchema: { type: "object", properties: {} },
+        }}
+        onUpdate={onUpdate}
+      />
+    );
+
+    const placeholder = screen.getByLabelText("Move date CRM placeholder");
+    expect(placeholder).toHaveValue("{{legacy.move_date}}");
+    expect(screen.getByRole("option", {
+      name: "Existing binding: {{legacy.move_date}}",
+    })).toBeInTheDocument();
+    fireEvent.change(placeholder, { target: { value: "{{customer.full_name}}" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(placeholder).toHaveValue("{{legacy.move_date}}");
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it("keeps normal heading content editable without a custom-value field", () => {
+    const onUpdate = vi.fn();
+    render(
+      <StatefulPropertiesPanel
+        initialItem={{
+          id: "heading-2",
+          type: "builder_block",
+          blockType: "heading",
+          label: "Heading",
+          props: { text: "Estimate" },
+          propsSchema: { type: "object", properties: { text: { type: "string" } } },
+        }}
+        onUpdate={onUpdate}
+      />
+    );
+
+    expect(screen.queryByLabelText("Heading custom value")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("text"), { target: { value: "Updated estimate" } });
+
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      props: expect.objectContaining({ text: "Updated estimate" }),
+    }));
+  });
+
+  it("limits merge-field widget data binding to prebuilt CRM placeholders", () => {
+    const onUpdate = vi.fn();
+    render(
+      <StatefulPropertiesPanel
+        initialItem={{
+          id: "variable-1",
+          type: "builder_block",
+          blockType: "variable",
+          props: { token: "customer.full_name" },
+          propsSchema: { type: "object", properties: { token: { type: "string" } }, required: ["token"] },
+        }}
+        onUpdate={onUpdate}
+      />
+    );
+
+    const placeholder = screen.getByLabelText("token *");
+    expect(placeholder.tagName).toBe("SELECT");
+    expect(screen.queryByRole("textbox", { name: "token *" })).not.toBeInTheDocument();
+    fireEvent.change(placeholder, { target: { value: "customer.email" } });
+
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      props: expect.objectContaining({ token: "customer.email" }),
+    }));
+  });
+
+  it("uses CRM placeholders instead of static inputs for legacy header data fields", () => {
+    const onUpdate = vi.fn();
+    render(
+      <StatefulPropertiesPanel
+        initialItem={{
+          id: "header-legacy",
+          type: "header",
+          label: "Estimate Header",
+          fields: [
+            { id: "companyName", label: "Company", value: "{{company.name}}" },
+            { id: "estimateTitle", label: "Title", value: "Estimate" },
+            { id: "estimateNumber", label: "Number", value: "{{estimate.number}}" },
+          ],
+        }}
+        onUpdate={onUpdate}
+      />
+    );
+
+    const companyPlaceholder = screen.getByLabelText("Company CRM placeholder");
+    expect(companyPlaceholder.tagName).toBe("SELECT");
+    fireEvent.change(companyPlaceholder, { target: { value: "{{company.phone}}" } });
+
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      fields: expect.arrayContaining([
+        expect.objectContaining({ id: "companyName", value: "{{company.phone}}" }),
+      ]),
+    }));
+    expect(screen.getByDisplayValue("Estimate")).toBeInTheDocument();
+  });
+
+  it("inserts existing CRM placeholders into email subjects and body blocks", () => {
+    const onUpdateDocumentSettings = vi.fn();
+    const onInsertPlaceholder = vi.fn();
+    render(
+      <RightPropertiesPanel
+        selectedItem={null}
+        onUpdateItem={() => {}}
+        onDeleteItem={() => {}}
+        onDuplicateItem={() => {}}
+        documentSettings={{ subject: "Your estimate" }}
+        onUpdateDocumentSettings={onUpdateDocumentSettings}
+        mode="email"
+        onInsertPlaceholder={onInsertPlaceholder}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Insert Placeholder into email subject"), {
+      target: { value: "{{estimate.number}}" },
+    });
+    expect(onUpdateDocumentSettings).toHaveBeenCalledWith(expect.objectContaining({
+      subject: "Your estimate {{estimate.number}}",
+    }));
+
+    fireEvent.change(screen.getByLabelText("Insert Placeholder into email body"), {
+      target: { value: "{{customer.email}}" },
+    });
+    expect(onInsertPlaceholder).toHaveBeenCalledWith("{{customer.email}}");
+  });
+
+  it("inserts prebuilt CRM placeholders into SMS without introducing pricing controls", () => {
+    const onInsertPlaceholder = vi.fn();
+    render(
+      <RightPropertiesPanel
+        selectedItem={null}
+        onUpdateItem={() => {}}
+        onDeleteItem={() => {}}
+        onDuplicateItem={() => {}}
+        documentSettings={{}}
+        onUpdateDocumentSettings={() => {}}
+        mode="sms"
+        smsText="Hello"
+        onInsertPlaceholder={onInsertPlaceholder}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Insert Placeholder into SMS message"), {
+      target: { value: "{{move.pickup_date}}" },
+    });
+    expect(onInsertPlaceholder).toHaveBeenCalledWith("{{move.pickup_date}}");
+    expect(screen.queryByText("Pricing values")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add Custom Pricing Field" })).not.toBeInTheDocument();
+  });
+
+  it("does not allow custom overrides for calculated pricing fields", () => {
+    render(
+      <StatefulPropertiesPanel
+        initialItem={{
+          id: "summary-readonly",
+          type: "builder_block",
+          blockType: "estimate_summary",
+          label: "Summary",
+          props: {},
+          propsSchema: { type: "object", properties: {} },
+        }}
+      />
+    );
+
+    expect(screen.queryByLabelText("Tax (calculated) custom value")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Estimate total (calculated) custom value")).not.toBeInTheDocument();
+  });
+
+  it("does not expose custom-field creation for non-pricing blocks", () => {
+    const onUpdate = vi.fn();
+    render(
+      <StatefulPropertiesPanel
+        initialItem={{
+          id: "move-details-1",
+          type: "builder_block",
+          blockType: "move_details",
+          label: "Move details",
+          props: {},
+          propsSchema: { type: "object", properties: {} },
+        }}
+        onUpdate={onUpdate}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: "Add Custom Field" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Custom field 1 name")).not.toBeInTheDocument();
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it("discards added pricing field edits on Cancel", () => {
+    const onUpdate = vi.fn();
+
+    render(
+      <StatefulPropertiesPanel
+        initialItem={{
+          id: "charges-1",
+          type: "builder_block",
+          blockType: "charges",
+          props: {},
+          propsSchema: { type: "object", properties: {} },
+        }}
+        onUpdate={onUpdate}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Custom Pricing Field" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Pricing field 1 name" }), {
+      target: { value: "Fuel surcharge" },
+    });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Fuel surcharge custom value" }), {
+      target: { value: "45.00" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("textbox", { name: "Pricing field 1 name" })).not.toBeInTheDocument();
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
   it("focuses the widget label after selecting a backend widget", () => {
     render(
       <SelectablePropertiesPanel
@@ -57,10 +571,42 @@ describe("RightPropertiesPanel widget fields", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Select widget" }));
 
-    expect(screen.getByDisplayValue("Move details")).toHaveFocus();
+    expect(screen.getAllByDisplayValue("Move details")[0]).toHaveFocus();
   });
 
-  it("keeps the text editor focused while its value updates on each keystroke", () => {
+  it("edits heading text in the properties panel and focuses it from the edit action", () => {
+    const heading = {
+      id: "heading-editor",
+      type: "heading",
+      label: "Section title",
+      content: "Estimate",
+      style: {},
+    };
+    const onUpdate = vi.fn();
+    render(
+      <RightPropertiesPanel
+        selectedItem={heading}
+        selection={{ itemId: heading.id, part: "edit-content" }}
+        onUpdateItem={onUpdate}
+        onDeleteItem={() => {}}
+        onDuplicateItem={() => {}}
+        documentSettings={{}}
+        onUpdateDocumentSettings={() => {}}
+      />
+    );
+
+    const headingText = screen.getByRole("textbox", { name: "Heading Text" });
+    expect(headingText).toHaveValue("Estimate");
+    expect(headingText).toHaveFocus();
+
+    fireEvent.change(headingText, { target: { value: "Updated estimate" } });
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      id: heading.id,
+      content: "Updated estimate",
+    }));
+  });
+
+  it("shows plain text for HTML-backed content and keeps the editor focused while typing", () => {
     const item = {
       id: "text-1",
       type: "builder_block",
@@ -79,15 +625,38 @@ describe("RightPropertiesPanel widget fields", () => {
     render(<StatefulPropertiesPanel initialItem={item} />);
     const editor = screen.getByLabelText("html *");
 
+    expect(editor).toHaveValue("Existing content");
     editor.focus();
     expect(editor).toHaveFocus();
-    fireEvent.change(editor, { target: { value: "<p>Updated content</p>" } });
+    fireEvent.change(editor, { target: { value: "Updated content" } });
     expect(screen.getByLabelText("html *")).toBe(editor);
-    expect(editor).toHaveValue("<p>Updated content</p>");
+    expect(editor).toHaveValue("Updated content");
 
-    fireEvent.change(editor, { target: { value: "<p>Updated content again</p>" } });
+    fireEvent.change(editor, { target: { value: "Updated content again" } });
     expect(screen.getByLabelText("html *")).toBe(editor);
-    expect(editor).toHaveValue("<p>Updated content again</p>");
+    expect(editor).toHaveValue("Updated content again");
+    expect(item.props.html).toBe("<p>Existing content</p>");
+  });
+
+  it("escapes typed markup so text content cannot display HTML tags", () => {
+    const item = {
+      id: "text-escaped-1",
+      type: "builder_block",
+      blockType: "text",
+      label: "Text",
+      props: { html: "<p>Existing content</p>" },
+      propsSchema: { type: "object", properties: { html: { type: "string", format: "html" } } },
+    };
+    const onUpdate = vi.fn();
+    render(<StatefulPropertiesPanel initialItem={item} onUpdate={onUpdate} />);
+
+    const editor = screen.getByLabelText("html");
+    fireEvent.change(editor, { target: { value: "<strong>Plain content</strong>" } });
+
+    expect(editor).toHaveValue("<strong>Plain content</strong>");
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      props: expect.objectContaining({ html: "&lt;strong&gt;Plain content&lt;/strong&gt;" }),
+    }));
   });
 
   it("edits supported conditional rules without exposing internal keys or children JSON", () => {
@@ -141,7 +710,8 @@ describe("RightPropertiesPanel widget fields", () => {
     render(<StatefulPropertiesPanel initialItem={item} onUpdate={onUpdate} />);
 
     const content = screen.getByLabelText("Nested text content child-1");
-    fireEvent.change(content, { target: { value: "<p>Updated {{customer.first_name}}</p>" } });
+    expect(content).toHaveValue("Original {{customer.first_name}}");
+    fireEvent.change(content, { target: { value: "Updated {{customer.first_name}}" } });
 
     expect(onUpdate).toHaveBeenLastCalledWith({
       ...item,
@@ -149,7 +719,7 @@ describe("RightPropertiesPanel widget fields", () => {
         ...item.children[0],
         props: {
           ...item.children[0].props,
-          html: "<p>Updated {{customer.first_name}}</p>",
+          html: "Updated {{customer.first_name}}",
         },
       }],
     });

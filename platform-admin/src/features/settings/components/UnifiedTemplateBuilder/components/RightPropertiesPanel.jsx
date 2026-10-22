@@ -48,9 +48,42 @@ import {
   buildLogicalGrid,
 } from "../core/tableOperations";
 
-function SchemaField({ name, schema = {}, value, onChange }) {
-  const [jsonValue, setJsonValue] = useState(() => JSON.stringify(value ?? (schema.type === "array" ? [] : {}), null, 2));
+function htmlToPlainText(value) {
+  if (typeof value !== "string" || !value) return "";
+  if (!/<\/?[a-z][^>]*>|&(?:#\d+|#x[\da-f]+|[a-z]+);/i.test(value)) return value;
+  if (typeof window === "undefined" || typeof window.DOMParser === "undefined") {
+    return value.replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li|h[1-6]|tr)>/gi, "\n").replace(/<[^>]*>/g, "");
+  }
+  const parser = new window.DOMParser();
+  const parsed = parser.parseFromString(
+    value.replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li|h[1-6]|tr)>/gi, "\n"),
+    "text/html"
+  );
+  return (parsed.body.textContent || "").replace(/\u00a0/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function plainTextToHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\n/g, "<br>");
+}
+
+function SchemaField({ name, schema = {}, value, onChange, placeholderGroups = [] }) {
+  const currentJsonValue = JSON.stringify(value ?? (schema.type === "array" ? [] : {}), null, 2);
+  const [jsonValue, setJsonValue] = useState(currentJsonValue);
   const [jsonError, setJsonError] = useState("");
+  const lastCommittedJsonValue = useRef(currentJsonValue);
+
+  useEffect(() => {
+    if (currentJsonValue !== lastCommittedJsonValue.current) {
+      lastCommittedJsonValue.current = currentJsonValue;
+      setJsonValue(currentJsonValue);
+      setJsonError("");
+    }
+  }, [currentJsonValue]);
 
   const inputClass = "w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs focus:bg-white focus:ring-1 focus:ring-blue-500";
   if (schema.type === "boolean") {
@@ -74,7 +107,22 @@ function SchemaField({ name, schema = {}, value, onChange }) {
       <span className="text-[11px] font-medium text-slate-600">
         {name.replace(/_/g, " ")}{schema.required ? " *" : ""}
       </span>
-      {schema.enum ? (
+      {placeholderGroups.length > 0 ? (
+        <select className={inputClass} value={String(value || "").replace(/^\{\{|\}\}$/g, "")} onChange={(event) => onChange(event.target.value)}>
+          {placeholderGroups.map((group) => (
+            <optgroup key={group.group} label={group.group}>
+              {(group.items || []).map((variable) => (
+                <option
+                  key={`${group.group}:${variable.tag}`}
+                  value={variable.tag.replace(/^\{\{|\}\}$/g, "")}
+                >
+                  {variable.label}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      ) : schema.enum ? (
         <select className={inputClass} value={value ?? ""} onChange={(event) => onChange(event.target.value)}>
           {schema.enum.map((option) => <option key={option} value={option}>{option}</option>)}
         </select>
@@ -93,13 +141,27 @@ function SchemaField({ name, schema = {}, value, onChange }) {
             className={`${inputClass} min-h-20 font-mono`}
             value={jsonValue}
             onChange={(event) => {
-              setJsonValue(event.target.value);
+              const nextJsonValue = event.target.value;
+              setJsonValue(nextJsonValue);
               setJsonError("");
+              try {
+                const parsed = JSON.parse(nextJsonValue);
+                const isExpectedType = schema.type === "array"
+                  ? Array.isArray(parsed)
+                  : parsed && typeof parsed === "object" && !Array.isArray(parsed);
+                if (isExpectedType) {
+                  lastCommittedJsonValue.current = JSON.stringify(parsed, null, 2);
+                  onChange(parsed);
+                }
+              } catch {
+                // Keep the user's in-progress JSON draft until it becomes valid.
+              }
             }}
             onBlur={() => {
               try {
                 const parsed = JSON.parse(jsonValue);
                 if (schema.type === "array" ? Array.isArray(parsed) : parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                  lastCommittedJsonValue.current = JSON.stringify(parsed, null, 2);
                   onChange(parsed);
                   setJsonError("");
                 } else setJsonError(`Enter a JSON ${schema.type}.`);
@@ -111,11 +173,133 @@ function SchemaField({ name, schema = {}, value, onChange }) {
           {jsonError && <span role="alert" className="text-[10px] text-red-600">{jsonError}</span>}
         </>
       ) : schema.format === "html" || name === "html" ? (
-        <textarea className={`${inputClass} min-h-24`} value={value ?? ""} onChange={(event) => onChange(event.target.value)} />
+        <textarea
+          aria-label={`${name}${schema.required ? " *" : ""}`}
+          className={`${inputClass} min-h-24`}
+          list="builder-crm-placeholders"
+          value={htmlToPlainText(value)}
+          onChange={(event) => onChange(plainTextToHtml(event.target.value))}
+        />
       ) : (
-        <input className={inputClass} type="text" value={value ?? ""} onChange={(event) => onChange(event.target.value)} />
+        <input
+          className={inputClass}
+          type="text"
+          list="builder-crm-placeholders"
+          value={value ?? ""}
+          onChange={(event) => onChange(event.target.value)}
+        />
       )}
     </label>
+  );
+}
+
+function TableBlockContentEditor({ columns = [], rows = [], onChange }) {
+  const safeColumns = Array.isArray(columns) ? columns.map((column) => String(column ?? "")) : [];
+  const safeRows = Array.isArray(rows)
+    ? rows.map((row) => safeColumns.map((_column, index) => String(row?.[index] ?? "")))
+    : [];
+
+  const updateColumn = (columnIndex, value) => {
+    const nextColumns = [...safeColumns];
+    nextColumns[columnIndex] = value;
+    onChange(nextColumns, safeRows);
+  };
+
+  const updateCell = (rowIndex, columnIndex, value) => {
+    const nextRows = safeRows.map((row) => [...row]);
+    nextRows[rowIndex][columnIndex] = value;
+    onChange(safeColumns, nextRows);
+  };
+
+  const addColumn = () => onChange(
+    [...safeColumns, `Column ${safeColumns.length + 1}`],
+    safeRows.map((row) => [...row, ""]),
+  );
+
+  const removeColumn = (columnIndex) => {
+    if (safeColumns.length <= 1) return;
+    onChange(
+      safeColumns.filter((_column, index) => index !== columnIndex),
+      safeRows.map((row) => row.filter((_cell, index) => index !== columnIndex)),
+    );
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-semibold text-slate-700">Table content</span>
+        <button
+          type="button"
+          onClick={addColumn}
+          className="rounded border border-blue-200 px-2 py-1 text-[10px] font-semibold text-blue-700 hover:bg-blue-50"
+        >
+          Add column
+        </button>
+      </div>
+      <div className="overflow-x-auto rounded-md border border-slate-200">
+        <table className="w-full min-w-[360px] border-collapse">
+          <thead>
+            <tr className="bg-slate-50">
+              {safeColumns.map((column, columnIndex) => (
+                <th key={`column-${columnIndex}`} className="border-b border-r border-slate-200 p-1.5">
+                  <div className="flex min-w-0 items-center gap-1">
+                    <input
+                      aria-label={`Table column ${columnIndex + 1}`}
+                      className="h-8 min-w-0 flex-1 rounded border border-slate-200 bg-white px-2 text-xs font-medium"
+                      value={column}
+                      onChange={(event) => updateColumn(columnIndex, event.target.value)}
+                    />
+                    <button
+                      type="button"
+                      aria-label={`Remove table column ${columnIndex + 1}`}
+                      disabled={safeColumns.length <= 1}
+                      onClick={() => removeColumn(columnIndex)}
+                      className="rounded px-1.5 py-1 text-xs text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </th>
+              ))}
+              <th className="w-8 border-b border-slate-200" aria-label="Row actions" />
+            </tr>
+          </thead>
+          <tbody>
+            {safeRows.map((row, rowIndex) => (
+              <tr key={`row-${rowIndex}`}>
+                {safeColumns.map((_column, columnIndex) => (
+                  <td key={`cell-${rowIndex}-${columnIndex}`} className="border-b border-r border-slate-200 p-1.5">
+                    <input
+                      aria-label={`Table row ${rowIndex + 1} column ${columnIndex + 1}`}
+                      className="h-8 w-full min-w-0 rounded border border-slate-200 bg-white px-2 text-xs"
+                      value={row[columnIndex] ?? ""}
+                      onChange={(event) => updateCell(rowIndex, columnIndex, event.target.value)}
+                    />
+                  </td>
+                ))}
+                <td className="border-b border-slate-200 p-1">
+                  <button
+                    type="button"
+                    aria-label={`Remove table row ${rowIndex + 1}`}
+                    onClick={() => onChange(safeColumns, safeRows.filter((_item, index) => index !== rowIndex))}
+                    className="rounded px-1.5 py-1 text-xs text-slate-500 hover:bg-red-50 hover:text-red-600"
+                  >
+                    ×
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <button
+        type="button"
+        onClick={() => onChange(safeColumns, [...safeRows, safeColumns.map(() => "")])}
+        className="rounded border border-slate-200 px-2 py-1 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
+      >
+        Add row
+      </button>
+    </div>
   );
 }
 
@@ -149,6 +333,11 @@ function updateNestedEditableContent(blocks, path, property, value, depth = 0) {
   });
 }
 
+function getExistingBindingOption(value, variables) {
+  if (!value || variables.some((variable) => variable.tag === value)) return null;
+  return <option value={value}>Existing binding: {value}</option>;
+}
+
 const WIDGET_EDIT_FIELDS = {
   header: [
     { key: "company_name", label: "Company name", value: "{{company.name}}", source: "{{company.name}}", type: "text" },
@@ -158,14 +347,14 @@ const WIDGET_EDIT_FIELDS = {
   move_details: [
     { key: "section_title", label: "Section title", value: "Move details", source: "Move details", type: "text", labelOnly: true },
     { key: "move_date", label: "Move date", value: "June 15, 2026", source: "{{move.date}}", type: "date" },
-    { key: "move_size", label: "Move size", value: "3 bedroom home", source: "{{move.estimated_weight}}", type: "text" },
+    { key: "move_size", label: "Move size", value: "3 bedroom home", source: "{{move.size}}", type: "text" },
     { key: "origin", label: "From", value: "123 Main Street, Vancouver, BC", source: "{{move.origin_address}}", type: "text" },
     { key: "destination", label: "To", value: "456 Oak Avenue, Burnaby, BC", source: "{{move.destination_address}}", type: "text" },
   ],
   shipment: [
     { key: "section_title", label: "Section title", value: "Move details", source: "Move details", type: "text", labelOnly: true },
     { key: "move_date", label: "Move date", value: "June 15, 2026", source: "{{move.date}}", type: "date" },
-    { key: "move_size", label: "Move size", value: "3 bedroom home", source: "{{move.estimated_weight}}", type: "text" },
+    { key: "move_size", label: "Move size", value: "3 bedroom home", source: "{{move.size}}", type: "text" },
     { key: "origin", label: "From", value: "123 Main Street, Vancouver, BC", source: "{{move.origin_address}}", type: "text" },
     { key: "destination", label: "To", value: "456 Oak Avenue, Burnaby, BC", source: "{{move.destination_address}}", type: "text" },
   ],
@@ -173,15 +362,15 @@ const WIDGET_EDIT_FIELDS = {
     { key: "section_title", label: "Section title", value: "Estimate summary", source: "Estimate summary", type: "text", labelOnly: true },
     { key: "subtotal", label: "Subtotal", value: 1475, source: "{{estimate.subtotal}}", type: "currency", pricing: true },
     { key: "discount", label: "Discount", value: 50, source: "{{estimate.discount}}", type: "currency", pricing: true },
-    { key: "tax", label: "Tax (calculated)", value: 77.63, source: "{{estimate.tax_amount}}", type: "number", readOnly: true },
+    { key: "tax", label: "Tax (calculated)", value: 77.63, source: "{{estimate.tax}}", type: "number", readOnly: true },
     { key: "total", label: "Estimate total (calculated)", value: 1502.63, source: "{{estimate.grand_total}}", type: "number", readOnly: true },
-    { key: "deposit", label: "Deposit due", value: 300, source: "{{estimate.deposit_due}}", type: "currency", pricing: true },
+    { key: "deposit", label: "Deposit due", value: 300, source: "{{estimate.deposit_amount}}", type: "currency", pricing: true },
   ],
   totals: [
     { key: "section_title", label: "Section title", value: "Invoice totals", source: "Invoice totals", type: "text", labelOnly: true },
     { key: "subtotal", label: "Subtotal", value: 1475, source: "{{invoice.subtotal}}", type: "currency", pricing: true },
     { key: "discount", label: "Discount", value: 50, source: "{{invoice.discount}}", type: "currency", pricing: true },
-    { key: "tax", label: "Tax (calculated)", value: 77.63, source: "{{invoice.tax_amount}}", type: "number", readOnly: true },
+    { key: "tax", label: "Tax (calculated)", value: 77.63, source: "{{invoice.tax}}", type: "number", readOnly: true },
     { key: "total", label: "Invoice total (calculated)", value: 1502.63, source: "{{invoice.total}}", type: "number", readOnly: true },
     { key: "balance", label: "Balance due (calculated)", value: 1202.63, source: "{{invoice.balance_due}}", type: "number", readOnly: true },
   ],
@@ -230,12 +419,10 @@ const WIDGET_EDIT_FIELDS = {
   clause: [{ key: "block_id", label: "Saved clause ID", property: "block_id", value: "", type: "text" }],
   variable: [{ key: "merge_field", label: "Merge field value", value: "{{customer.full_name}}", source: "{{customer.full_name}}", type: "text" }],
   image: [
-    { key: "asset_id", label: "Image asset ID", property: "asset_id", value: "", type: "text", crmBindable: false },
+    { key: "asset_id", label: "Image asset ID", property: "asset_id", value: "", type: "text" },
     { key: "image_alt", label: "Alternative text", value: "", type: "text" },
     { key: "image_caption", label: "Caption", value: "", type: "text" },
   ],
-  signature: [{ key: "label", label: "Signature label", property: "label", value: "Customer signature", type: "text" }],
-  initial: [{ key: "label", label: "Initials label", property: "label", value: "Customer initials", type: "text" }],
   form_field: [
     { key: "label", label: "Field label", property: "label", value: "Enter a value", type: "text" },
     { key: "placeholder", label: "Placeholder", property: "placeholder", value: "", type: "text" },
@@ -270,6 +457,16 @@ const WIDGET_EDIT_FIELDS = {
 };
 
 const PRICING_BLOCKS = new Set(["charges", "line_items", "estimate_summary", "totals"]);
+const CREW_TRUCK_ROW_FIELDS = [
+  { key: "crew_member_0", fieldName: "Crew lead", currentValue: "Morgan Chen", labelKey: "crew_member_0_role", valueKey: "crew_member_0_name" },
+  { key: "crew_member_1", fieldName: "Mover", currentValue: "Taylor Rivera", labelKey: "crew_member_1_role", valueKey: "crew_member_1_name" },
+  { key: "crew_member_2", fieldName: "Mover", currentValue: "Riley Singh", labelKey: "crew_member_2_role", valueKey: "crew_member_2_name" },
+  { key: "truck_0", fieldName: "Truck", currentValue: "Truck 12 · 26 ft", labelKey: "truck_0_label", valueKey: "truck_0_name" },
+];
+const PRICING_PLACEHOLDER_PATTERN = /\.(subtotal|discount|tax|grand_total|deposit_amount|total|amount_paid|balance_due|payment_url)$/i;
+const isPricingPlaceholder = (tag) => PRICING_PLACEHOLDER_PATTERN.test(
+  String(tag || "").replace(/^\{\{|\}\}$/g, "")
+);
 const CUSTOM_VALUE_INPUT_CLASS = "w-full min-w-0 rounded border border-slate-200 bg-white px-2 py-1.5 text-xs focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-100";
 const NUMERIC_CUSTOM_VALUE_INPUT_CLASS = `${CUSTOM_VALUE_INPUT_CLASS} [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`;
 
@@ -332,6 +529,7 @@ export default function RightPropertiesPanel({
   onClosePanel = () => {},
   onModeChange,
   onSendTestEmail,
+  onInsertPlaceholder = () => {},
   isSendingTest = false,
 }) {
   const [insertCount, setInsertCount] = useState(1);
@@ -342,10 +540,17 @@ export default function RightPropertiesPanel({
   const [clauseLoadError, setClauseLoadError] = useState("");
   const [backendBlockMeta, setBackendBlockMeta] = useState({ kind: null, blocks: [], error: "" });
   const [customValueDrafts, setCustomValueDrafts] = useState({});
-  const [crmPlaceholderDrafts, setCrmPlaceholderDrafts] = useState({});
+  const [bindingDrafts, setBindingDrafts] = useState({});
+  const [fieldNameDrafts, setFieldNameDrafts] = useState({});
+  const [fieldValueDrafts, setFieldValueDrafts] = useState({});
+  const [widgetLabelDrafts, setWidgetLabelDrafts] = useState({});
+  const [widgetLabelBindingDrafts, setWidgetLabelBindingDrafts] = useState({});
+  const [crewTruckRowDrafts, setCrewTruckRowDrafts] = useState({});
   const [pricingFieldDrafts, setPricingFieldDrafts] = useState([]);
   const [removedPricingFieldKeys, setRemovedPricingFieldKeys] = useState([]);
+  const [showChangesAppliedNotice, setShowChangesAppliedNotice] = useState(false);
   const widgetLabelRef = useRef(null);
+  const headingTextRef = useRef(null);
   const widgetSettingsRef = useRef(null);
   const tableSettingsRef = useRef(null);
   const activeBuilderKind = ["estimate", "estimate_portal"].includes(mode) ? "estimate_portal" : mode === "invoice" ? "invoice" : "document";
@@ -360,6 +565,8 @@ export default function RightPropertiesPanel({
       widgetSettingsRef.current?.focus();
     } else if (selectedItem.type === "table") {
       tableSettingsRef.current?.focus();
+    } else if (selectedItem.type === "heading") {
+      headingTextRef.current?.focus();
     } else {
       widgetLabelRef.current?.focus();
     }
@@ -397,6 +604,11 @@ export default function RightPropertiesPanel({
   const widgetCustomFields = selectedItem?.type === "builder_block"
     ? selectedItem.props?.custom_fields || {}
     : selectedItem?.customFields || {};
+  const crmVariableGroups = getVariablesForMode(mode);
+  const crmVariables = crmVariableGroups.flatMap((group) => group.items || []);
+  const insertPlaceholderOptions = (
+    <option value="">Insert Placeholder</option>
+  );
   const schemaDefaults = Object.fromEntries(
     Object.entries(selectedBlockSchema?.properties || {})
       .filter(([, schema]) => ["string", "number", "integer"].includes(schema?.type))
@@ -425,36 +637,108 @@ export default function RightPropertiesPanel({
         : field.property,
     }));
   const supportsCustomPricing = PRICING_BLOCKS.has(widgetType);
-  const crmVariableGroups = getVariablesForMode(mode);
+  const pricingEditFields = effectiveWidgetEditFields.filter(
+    (field) => field.pricing && ["number", "currency"].includes(field.type)
+  );
+  const bindingEditFields = selectedItem?.type === "builder_block"
+    ? effectiveWidgetEditFields.filter(
+      (field) => widgetType !== "variable"
+        && !field.labelOnly
+        && (
+          /^\{\{[^{}]+\}\}$/.test(field.source || "")
+          || (supportsCustomPricing && field.pricing && ["number", "currency"].includes(field.type))
+        )
+        && (!field.pricing || supportsCustomPricing)
+    )
+    : [];
+  const widgetLabelEditFields = selectedItem?.type === "builder_block"
+    ? effectiveWidgetEditFields.filter((field) => field.labelOnly)
+    : [];
 
   useEffect(() => {
-    setCustomValueDrafts({});
-    setCrmPlaceholderDrafts({});
+    setCustomValueDrafts(Object.fromEntries(pricingEditFields.flatMap((field) => {
+      const configured = widgetCustomFields[field.key];
+      const existingValue = configured?.mode === "custom"
+        ? configured.customValue ?? configured.value
+        : "";
+      return existingValue === "" || existingValue === undefined || existingValue === null
+        ? []
+        : [[field.key, String(existingValue)]];
+    })));
+    setFieldNameDrafts(Object.fromEntries(effectiveWidgetEditFields.map((field) => [
+      field.key,
+      widgetCustomFields[field.key]?.fieldName ?? widgetCustomFields[field.key]?.label ?? field.label ?? "",
+    ])));
+    setWidgetLabelDrafts(Object.fromEntries(widgetLabelEditFields.map((field) => [
+      field.key,
+      widgetCustomFields[field.key]?.label && /^\{\{[^{}]+\}\}$/.test(widgetCustomFields[field.key].label)
+        ? field.value ?? ""
+        : widgetCustomFields[field.key]?.label ?? field.value ?? "",
+    ])));
+    setWidgetLabelBindingDrafts(Object.fromEntries(widgetLabelEditFields.map((field) => [
+      field.key,
+      (() => {
+        const configured = widgetCustomFields[field.key] || {};
+        const legacyBinding = /^\{\{[^{}]+\}\}$/.test(configured.label || "")
+          ? configured.label
+          : "";
+        const token = configured.mode === "dynamic"
+          ? configured.dynamicValue || configured.value || ""
+          : legacyBinding;
+        return isPricingPlaceholder(token) ? "" : token;
+      })(),
+    ])));
+    setBindingDrafts(Object.fromEntries(bindingEditFields.map((field) => [
+      field.key,
+      widgetCustomFields[field.key]?.mode === "dynamic"
+        ? widgetCustomFields[field.key]?.dynamicValue || widgetCustomFields[field.key]?.value || field.source
+        : widgetCustomFields[field.key]?.mode === "custom" && /^\{\{[^{}]+\}\}$/.test(widgetCustomFields[field.key]?.dynamicValue || "")
+          ? widgetCustomFields[field.key].dynamicValue
+        : /^\{\{[^{}]+\}\}$/.test(field.source || "") ? field.source : "",
+    ])));
+    setFieldValueDrafts(Object.fromEntries(bindingEditFields.map((field) => [
+      field.key,
+      String(widgetCustomFields[field.key]?.currentValue ?? (
+        widgetCustomFields[field.key]?.mode === "custom"
+          ? widgetCustomFields[field.key]?.customValue ?? widgetCustomFields[field.key]?.value
+          : field.value
+      ) ?? ""),
+    ])));
+    setCrewTruckRowDrafts(Object.fromEntries(CREW_TRUCK_ROW_FIELDS.map((row) => [
+      row.key,
+      {
+        fieldName: widgetCustomFields[row.labelKey]?.value
+          ?? widgetCustomFields[row.labelKey]?.customValue
+          ?? row.fieldName,
+        currentValue: widgetCustomFields[row.valueKey]?.value
+          ?? widgetCustomFields[row.valueKey]?.customValue
+          ?? row.currentValue,
+        currentValuePlaceholder: widgetCustomFields[row.valueKey]?.mode === "dynamic"
+          ? widgetCustomFields[row.valueKey]?.dynamicValue || widgetCustomFields[row.valueKey]?.value || ""
+          : "",
+      },
+    ])));
     setRemovedPricingFieldKeys([]);
+    setShowChangesAppliedNotice(false);
     setPricingFieldDrafts(
-      Object.entries(widgetCustomFields)
+      supportsCustomPricing ? Object.entries(widgetCustomFields)
         .filter(([key]) => key.startsWith("custom_"))
         .map(([key, field]) => ({
           key,
           label: field?.label || "",
-          currentValue: "",
-          value: "",
-          type: "currency",
+          currentValue: field?.currentValue ?? "",
+          placeholder: field?.dynamicValue && /^\{\{[^{}]+\}\}$/.test(field.dynamicValue)
+            ? field.dynamicValue
+            : "",
+          value: field?.mode === "custom"
+            ? field?.customValue ?? field?.value ?? ""
+            : "",
+          mode: field?.mode || "custom",
+          type: field?.type || "currency",
         }))
+        : []
     );
   }, [selectedItem?.id, widgetType]);
-
-  const getCrmPlaceholderValue = (field) => {
-    const configured = widgetCustomFields[field.key];
-    if (configured?.mode === "dynamic") return configured.dynamicValue || configured.value || "";
-    if (field.property) {
-      const current = selectedItem.type === "builder_block"
-        ? selectedItem.props?.[field.property]
-        : selectedItem[field.property];
-      return typeof current === "string" && current.startsWith("{{") ? current : "";
-    }
-    return "";
-  };
 
   const getWidgetFieldCurrentValue = (field) => {
     const configured = widgetCustomFields[field.key];
@@ -493,8 +777,84 @@ export default function RightPropertiesPanel({
     ) nextNumber += 1;
     setPricingFieldDrafts((current) => [
       ...current,
-      { key: `custom_${nextNumber}`, label: "", currentValue: "", value: "", type: "currency" },
+      { key: `custom_${nextNumber}`, label: "", currentValue: "", placeholder: "", value: "", type: "currency" },
     ]);
+  };
+
+  const cancelCustomValueChanges = () => {
+    setCustomValueDrafts({});
+    setFieldNameDrafts(Object.fromEntries(effectiveWidgetEditFields.map((field) => [
+      field.key,
+      widgetCustomFields[field.key]?.fieldName ?? widgetCustomFields[field.key]?.label ?? field.label ?? "",
+    ])));
+    setFieldValueDrafts(Object.fromEntries(bindingEditFields.map((field) => [
+      field.key,
+      String(widgetCustomFields[field.key]?.currentValue ?? (
+        widgetCustomFields[field.key]?.mode === "custom"
+          ? widgetCustomFields[field.key]?.customValue ?? widgetCustomFields[field.key]?.value
+          : field.value
+      ) ?? ""),
+    ])));
+    setWidgetLabelDrafts(Object.fromEntries(widgetLabelEditFields.map((field) => [
+      field.key,
+      widgetCustomFields[field.key]?.label && /^\{\{[^{}]+\}\}$/.test(widgetCustomFields[field.key].label)
+        ? field.value ?? ""
+        : widgetCustomFields[field.key]?.label ?? field.value ?? "",
+    ])));
+    setWidgetLabelBindingDrafts(Object.fromEntries(widgetLabelEditFields.map((field) => [
+      field.key,
+      (() => {
+        const configured = widgetCustomFields[field.key] || {};
+        const legacyBinding = /^\{\{[^{}]+\}\}$/.test(configured.label || "")
+          ? configured.label
+          : "";
+        const token = configured.mode === "dynamic"
+          ? configured.dynamicValue || configured.value || ""
+          : legacyBinding;
+        return isPricingPlaceholder(token) ? "" : token;
+      })(),
+    ])));
+    setCrewTruckRowDrafts(Object.fromEntries(CREW_TRUCK_ROW_FIELDS.map((row) => [
+      row.key,
+      {
+        fieldName: widgetCustomFields[row.labelKey]?.value
+          ?? widgetCustomFields[row.labelKey]?.customValue
+          ?? row.fieldName,
+        currentValue: widgetCustomFields[row.valueKey]?.value
+          ?? widgetCustomFields[row.valueKey]?.customValue
+          ?? row.currentValue,
+        currentValuePlaceholder: widgetCustomFields[row.valueKey]?.mode === "dynamic"
+          ? widgetCustomFields[row.valueKey]?.dynamicValue || widgetCustomFields[row.valueKey]?.value || ""
+          : "",
+      },
+    ])));
+    setBindingDrafts(Object.fromEntries(bindingEditFields.map((field) => [
+      field.key,
+      widgetCustomFields[field.key]?.mode === "dynamic"
+        ? widgetCustomFields[field.key]?.dynamicValue || widgetCustomFields[field.key]?.value || field.source
+        : widgetCustomFields[field.key]?.mode === "custom" && /^\{\{[^{}]+\}\}$/.test(widgetCustomFields[field.key]?.dynamicValue || "")
+          ? widgetCustomFields[field.key].dynamicValue
+          : /^\{\{[^{}]+\}\}$/.test(field.source || "") ? field.source : "",
+    ])));
+    setRemovedPricingFieldKeys([]);
+    setPricingFieldDrafts(
+      supportsCustomPricing ? Object.entries(widgetCustomFields)
+        .filter(([key]) => key.startsWith("custom_"))
+        .map(([key, field]) => ({
+          key,
+          label: field?.label || "",
+          currentValue: field?.currentValue ?? "",
+          placeholder: field?.dynamicValue && /^\{\{[^{}]+\}\}$/.test(field.dynamicValue)
+            ? field.dynamicValue
+            : "",
+          value: field?.mode === "custom"
+            ? field?.customValue ?? field?.value ?? ""
+            : "",
+          mode: field?.mode || "custom",
+          type: field?.type || "currency",
+        }))
+        : []
+    );
   };
 
   const applyCustomValues = () => {
@@ -505,75 +865,121 @@ export default function RightPropertiesPanel({
       delete customFields[key];
     });
     effectiveWidgetEditFields.forEach((field) => {
-      const value = String(customValueDrafts[field.key] ?? "").trim();
-      if (supportsCustomPricing) {
-        if (field.labelOnly) {
-          if (value) customFields[field.key] = { ...(customFields[field.key] || {}), label: value };
-          return;
-        }
-        if (!value) return;
-        const customValue = ["number", "currency"].includes(field.type) ? Number(value) : value;
-        customFields[field.key] = {
-          ...(customFields[field.key] || {}),
-          mode: "custom",
-          value: customValue,
-          customValue,
-          dynamicValue: field.source || field.value || "",
-        };
+      if (field.labelOnly) {
+        const value = String(widgetLabelDrafts[field.key] ?? "").trim();
+        const token = widgetLabelBindingDrafts[field.key] || "";
+        customFields[field.key] = token && !isPricingPlaceholder(token)
+          ? {
+            ...(customFields[field.key] || {}),
+            fieldName: String(fieldNameDrafts[field.key] ?? field.label ?? "").trim(),
+            label: value || field.value || "",
+            mode: "dynamic",
+            value: token,
+            dynamicValue: token,
+          }
+          : {
+            ...(customFields[field.key] || {}),
+            fieldName: String(fieldNameDrafts[field.key] ?? field.label ?? "").trim(),
+            label: value || field.value || "",
+          };
         return;
       }
-
-      const placeholder = String(crmPlaceholderDrafts[field.key] ?? getCrmPlaceholderValue(field)).trim();
-      if (!placeholder || field.crmBindable === false) return;
-      if (field.property) {
-        if (selectedItem.type === "builder_block") props[field.property] = placeholder;
-        else updatedLegacyItem[field.property] = placeholder;
-      } else if (field.labelOnly) {
-        customFields[field.key] = {
-          ...(customFields[field.key] || {}),
-          label: placeholder,
-        };
-      } else {
-        customFields[field.key] = {
-          ...(customFields[field.key] || {}),
-          mode: "dynamic",
-          value: placeholder,
-          dynamicValue: placeholder,
-        };
-      }
-    });
-
-    effectiveWidgetEditFields.forEach((field) => {
-      if (supportsCustomPricing) return;
+      if (!supportsCustomPricing || !field.pricing || !["number", "currency"].includes(field.type)) return;
+      if (field.readOnly) return;
       const value = String(customValueDrafts[field.key] ?? "").trim();
-      if (!value || field.readOnly) return;
-      if (field.property) {
-        const converted = field.type === "number" ? Number(value) : value;
-        if (selectedItem.type === "builder_block") props[field.property] = converted;
-        else updatedLegacyItem[field.property] = converted;
-      } else {
-        const existing = customFields[field.key] || {};
-        const customValue = ["number", "currency"].includes(field.type) ? Number(value) : value;
-        customFields[field.key] = {
-          ...existing,
-          ...(field.labelOnly
-            ? { label: value }
-            : {
-              mode: "custom",
-              value: customValue,
-              customValue,
-              dynamicValue: existing.dynamicValue || field.source || field.value || "",
-            }),
-        };
+      if (!value) return;
+      const customValue = field.type === "rich"
+        ? plainTextToHtml(value)
+        : ["number", "currency"].includes(field.type) ? Number(value) : value;
+      customFields[field.key] = {
+        ...(customFields[field.key] || {}),
+        mode: "custom",
+        value: customValue,
+        customValue,
+        dynamicValue: field.source || field.value || "",
+      };
+    });
+    if (widgetType === "crew_trucks") {
+      CREW_TRUCK_ROW_FIELDS.forEach((row) => {
+        const draft = crewTruckRowDrafts[row.key] || row;
+        const fieldName = String(draft.fieldName ?? "").trim();
+        const currentValue = String(draft.currentValue ?? "").trim();
+        const currentValuePlaceholder = String(draft.currentValuePlaceholder ?? "").trim();
+        if (fieldName === row.fieldName) {
+          delete customFields[row.labelKey];
+        } else {
+          customFields[row.labelKey] = { mode: "custom", value: fieldName };
+        }
+        if (currentValuePlaceholder) {
+          customFields[row.valueKey] = {
+            mode: "dynamic",
+            value: currentValuePlaceholder,
+            dynamicValue: currentValuePlaceholder,
+            label: currentValue,
+          };
+        } else if (currentValue === row.currentValue) {
+          delete customFields[row.valueKey];
+        } else {
+          customFields[row.valueKey] = { mode: "custom", value: currentValue };
+        }
+      });
+    }
+    bindingEditFields.forEach((field) => {
+      const value = bindingDrafts[field.key] || "";
+      const currentValue = fieldValueDrafts[field.key] ?? field.value ?? "";
+      const label = String(fieldNameDrafts[field.key] ?? field.label ?? "").trim();
+      const customValue = String(customValueDrafts[field.key] ?? "").trim();
+      const existingPricingOverride = customFields[field.key]?.mode === "custom"
+        && supportsCustomPricing && field.pricing
+        ? customFields[field.key].customValue ?? customFields[field.key].value
+        : "";
+      const currentValueEdited = String(currentValue).trim() !== String(field.value ?? "").trim();
+      const currentValueOverride = field.pricing && !field.readOnly && currentValueEdited
+        && (!value || value === field.source)
+        ? String(currentValue).trim()
+        : "";
+      const activeCustomValue = customValue
+        || (existingPricingOverride !== "" ? String(existingPricingOverride) : currentValueOverride);
+      const parsedCustomValue = activeCustomValue ? Number(activeCustomValue) : "";
+      const useCustomPricing = activeCustomValue && supportsCustomPricing && field.pricing;
+      const currentValueForSave = ["number", "currency"].includes(field.type) && currentValue !== ""
+        ? Number(currentValue)
+        : currentValue;
+      const nextField = {
+        ...(customFields[field.key] || {}),
+        ...(label ? { label } : {}),
+        currentValue: currentValueForSave,
+      };
+      const defaultValueWasEdited = String(currentValue).trim() !== String(field.value ?? "").trim();
+      const useStaticValue = !field.pricing && defaultValueWasEdited && value === (field.source || "");
+      if (useCustomPricing) {
+        Object.assign(nextField, {
+          mode: "custom",
+          value: parsedCustomValue,
+          customValue: parsedCustomValue,
+        });
+      } else if (value && !useStaticValue) {
+        Object.assign(nextField, { mode: "dynamic", value, dynamicValue: value });
+      } else if (useStaticValue) {
+        Object.assign(nextField, {
+          mode: "custom",
+          value: currentValue,
+          customValue: currentValue,
+          dynamicValue: value,
+        });
       }
+      customFields[field.key] = nextField;
     });
     pricingFieldDrafts.forEach((field) => {
       const label = String(field.label || "").trim();
       const currentValue = String(field.currentValue || "").trim();
       const value = String(field.value || "").trim();
-      if (!label || (!currentValue && !value)) return;
-      const activeValue = value || currentValue;
-      const parsedValue = field.type === "currency" ? Number(activeValue) : activeValue;
+      const placeholder = field.placeholder || "";
+      if (!supportsCustomPricing || !label || (!value && !placeholder)) return;
+      const activeValue = value;
+      const parsedValue = activeValue
+        ? (field.type === "currency" ? Number(activeValue) : activeValue)
+        : placeholder;
       const parsedCurrentValue = currentValue
         ? (field.type === "currency" ? Number(currentValue) : currentValue)
         : "";
@@ -581,9 +987,10 @@ export default function RightPropertiesPanel({
         ...(customFields[field.key] || {}),
         label,
         currentValue: parsedCurrentValue,
-        mode: "custom",
+        mode: activeValue ? "custom" : "dynamic",
         value: parsedValue,
-        customValue: parsedValue,
+        ...(activeValue ? { customValue: parsedValue } : {}),
+        dynamicValue: placeholder,
         ...(field.type === "currency" ? { type: "currency" } : {}),
       };
     });
@@ -591,8 +998,21 @@ export default function RightPropertiesPanel({
       ? { ...selectedItem, props: { ...props, custom_fields: customFields } }
       : { ...updatedLegacyItem, customFields };
     onUpdateItem(updatedItem);
+    setShowChangesAppliedNotice(true);
     setRemovedPricingFieldKeys([]);
     setCustomValueDrafts({});
+    setFieldNameDrafts(Object.fromEntries(effectiveWidgetEditFields.map((field) => [
+      field.key,
+      customFields[field.key]?.fieldName ?? customFields[field.key]?.label ?? field.label ?? "",
+    ])));
+    setFieldValueDrafts(Object.fromEntries(bindingEditFields.map((field) => [
+      field.key,
+      String(customFields[field.key]?.currentValue ?? field.value ?? ""),
+    ])));
+    setWidgetLabelBindingDrafts(Object.fromEntries(widgetLabelEditFields.map((field) => [
+      field.key,
+      widgetLabelBindingDrafts[field.key] || "",
+    ])));
     setPricingFieldDrafts((current) => current.map((field) => ({ ...field, value: "" })));
   };
 
@@ -685,7 +1105,55 @@ export default function RightPropertiesPanel({
                 placeholder="e.g. Your Move Quote #{{estimate_number}}"
                 className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-800 font-medium"
               />
-              <span className="text-[10px] text-slate-400 mt-0.5 block">Supports dynamic merge tags like {'{{customer_name}}'}</span>
+              <select
+                aria-label="Insert Placeholder into email subject"
+                value=""
+                onChange={(event) => {
+                  if (!event.target.value) return;
+                  const currentSubject = documentSettings?.subject || "";
+                  onUpdateDocumentSettings({
+                    ...documentSettings,
+                    subject: currentSubject ? `${currentSubject} ${event.target.value}` : event.target.value,
+                  });
+                }}
+                className="mt-1 w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-[11px] text-slate-600"
+              >
+                {insertPlaceholderOptions}
+                {crmVariableGroups.map((group) => (
+                  <optgroup key={group.group} label={group.group}>
+                    {(group.items || []).map((variable) => (
+                      <option key={`${group.group}:${variable.tag}`} value={variable.tag}>
+                        {variable.label} ({variable.tag})
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              <span className="text-[10px] text-slate-400 mt-0.5 block">Use the existing CRM placeholders from this dropdown.</span>
+            </div>
+
+            <div>
+              <label className="block text-slate-600 font-semibold mb-1">Email Body Placeholder</label>
+              <select
+                aria-label="Insert Placeholder into email body"
+                value=""
+                onChange={(event) => {
+                  if (event.target.value) onInsertPlaceholder(event.target.value);
+                }}
+                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-[11px] text-slate-600"
+              >
+                {insertPlaceholderOptions}
+                {crmVariableGroups.map((group) => (
+                  <optgroup key={group.group} label={group.group}>
+                    {(group.items || []).map((variable) => (
+                      <option key={`${group.group}:${variable.tag}`} value={variable.tag}>
+                        {variable.label} ({variable.tag})
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              <span className="mt-0.5 block text-[10px] text-slate-400">Inserts into the selected body block, or the first editable block.</span>
             </div>
 
             <div>
@@ -866,6 +1334,29 @@ export default function RightPropertiesPanel({
                 placeholder="e.g. SMS Notifications, Alerts"
                 className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs text-slate-700"
               />
+            </div>
+
+            <div>
+              <label className="block text-slate-600 font-semibold mb-1">SMS Message Placeholder</label>
+              <select
+                aria-label="Insert Placeholder into SMS message"
+                value=""
+                onChange={(event) => {
+                  if (event.target.value) onInsertPlaceholder(event.target.value);
+                }}
+                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-[11px] text-slate-600"
+              >
+                {insertPlaceholderOptions}
+                {crmVariableGroups.map((group) => (
+                  <optgroup key={group.group} label={group.group}>
+                    {(group.items || []).map((variable) => (
+                      <option key={`${group.group}:${variable.tag}`} value={variable.tag}>
+                        {variable.label} ({variable.tag})
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
             </div>
 
             {branches && branches.length > 0 && (
@@ -1276,7 +1767,7 @@ export default function RightPropertiesPanel({
   };
 
   return (
-    <aside className="w-80 max-w-[85vw] bg-white border-l border-slate-200 flex flex-col h-full min-h-0 select-none overflow-hidden">
+    <aside className="w-96 max-w-[85vw] bg-white border-l border-slate-200 flex flex-col h-full min-h-0 select-none overflow-hidden">
       {/* Inspector Header */}
       <div className="p-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
         <div className="min-w-0 pr-2">
@@ -1330,7 +1821,21 @@ export default function RightPropertiesPanel({
           />
         </div>
 
-        {selectedItem.type === "builder_block" && (
+        {selectedItem.type === "heading" && (
+          <div>
+            <label htmlFor="heading-text" className="block text-slate-600 font-semibold mb-1">Heading Text</label>
+            <textarea
+              id="heading-text"
+              ref={headingTextRef}
+              rows={2}
+              value={selectedItem.content || ""}
+              onChange={(event) => onUpdateItem({ ...selectedItem, content: event.target.value })}
+              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-800 focus:bg-white focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+        )}
+
+        {selectedItem.type !== "table" && (selectedItem.type === "builder_block" || bindingEditFields.length > 0) && (
           <section ref={widgetSettingsRef} tabIndex={-1} className="space-y-3 border-t border-slate-100 pt-3 focus:outline-none">
             <h4 className="font-bold uppercase tracking-wide text-[11px] text-slate-700">
               {selectedItem.blockType?.replace(/_/g, " ")} settings
@@ -1339,9 +1844,21 @@ export default function RightPropertiesPanel({
               {Object.entries(selectedBlockSchema?.properties || {}).length > 0
                 ? Object.entries(selectedBlockSchema.properties)
                 .filter(([name]) => name !== "custom_fields"
+                  && !(selectedItem.blockType === "heading" && name === "style")
                   && !(selectedItem.blockType === "conditional" && name === "rule_key"))
                 .map(([name, schema]) => (
-                  name === "block_id" && selectedItem.blockType === "clause" && savedClauses.length > 0 ? (
+                  selectedItem.blockType === "table" && name === "rows" ? null
+                  : selectedItem.blockType === "table" && name === "columns" ? (
+                    <TableBlockContentEditor
+                      key={`${selectedItem.id}-table-content`}
+                      columns={selectedItem.props?.columns || ["Item", "Details"]}
+                      rows={selectedItem.props?.rows || []}
+                      onChange={(columns, rows) => onUpdateItem({
+                        ...selectedItem,
+                        props: { ...(selectedItem.props || {}), columns, rows },
+                      })}
+                    />
+                  ) : name === "block_id" && selectedItem.blockType === "clause" && savedClauses.length > 0 ? (
                     <label key={name} className="block space-y-1">
                       <span className="text-[11px] font-medium text-slate-600">Saved clause *</span>
                       <select
@@ -1366,6 +1883,7 @@ export default function RightPropertiesPanel({
                       name={name}
                       schema={{ ...schema, required: schema.required || selectedBlockSchema.required?.includes(name) }}
                       value={selectedItem.props?.[name]}
+                      placeholderGroups={selectedItem.blockType === "variable" && name === "token" ? crmVariableGroups : []}
                       onChange={(value) => onUpdateItem({
                         ...selectedItem,
                         props: { ...(selectedItem.props || {}), [name]: value },
@@ -1398,111 +1916,323 @@ export default function RightPropertiesPanel({
           </section>
         )}
 
-        {selectedItem.type !== "table" && (effectiveWidgetEditFields.length > 0 || supportsCustomPricing) && (
-          <section className="space-y-3 border-t border-slate-100 pt-3">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <h4 className="font-bold uppercase tracking-wide text-[11px] text-slate-700">
-                  {supportsCustomPricing ? "Pricing values" : "CRM field bindings"}
-                </h4>
-              </div>
-            </div>
-            {supportsCustomPricing ? (
-              <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1fr)] gap-1.5 border-b border-slate-200 pb-1 text-[9px] font-semibold uppercase tracking-wide text-slate-500">
-                <span>Field name</span>
-                <span>Current value</span>
-                <span>Custom value</span>
-              </div>
-            ) : (
-              <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1fr)] gap-1.5 border-b border-slate-200 pb-1 text-[9px] font-semibold uppercase tracking-wide text-slate-500">
-                <span>Field name</span>
-                <span>Current value</span>
-                <span>CRM field (placeholder)</span>
-              </div>
+        {selectedItem.type === "builder_block" && (
+          <section className="space-y-2 border-t border-slate-100 pt-3">
+            {widgetLabelEditFields.some((field) => field.key === "section_title") && (
+              <label className="block space-y-1">
+                <span className="text-[10px] font-semibold text-slate-600">Section title</span>
+                <input
+                  aria-label="Section title"
+                  className={`${CUSTOM_VALUE_INPUT_CLASS} h-8`}
+                  value={widgetLabelDrafts.section_title ?? ""}
+                  onChange={(event) => setWidgetLabelDrafts((current) => ({
+                    ...current,
+                    section_title: event.target.value,
+                  }))}
+                />
+              </label>
             )}
-            {effectiveWidgetEditFields.map((field) => {
+            {supportsCustomPricing && (
+              <>
+                <h4 className="font-bold uppercase tracking-wide text-[11px] text-slate-700">
+                  Pricing
+                </h4>
+                <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-1.5 border-b border-slate-200 pb-1 text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+                  <span>Field name</span>
+                  <span>Current value</span>
+                  <span>CRM Field</span>
+                  <span>Custom value</span>
+                </div>
+              </>
+            )}
+            {supportsCustomPricing && pricingEditFields.map((field) => {
               const currentValue = getWidgetFieldCurrentValue(field);
-              const formatAsCurrency = field.pricing || field.readOnly || field.key.endsWith("_unit_price");
+              const formatAsCurrency = true;
+              const bindingVariables = field.pricing
+                ? crmVariables
+                : crmVariables.filter((variable) => !isPricingPlaceholder(variable.tag));
               const displayedCurrentValue = formatAsCurrency && Number.isFinite(Number(currentValue))
                 ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(currentValue))
                 : currentValue;
-              if (supportsCustomPricing) {
-                return (
-                  <div key={field.key} className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1fr)] items-start gap-1.5">
-                    <span className="break-words pt-1.5 text-[10px] font-medium text-slate-700">{field.label}</span>
-                    <span className="break-words pt-1.5 text-[10px] text-slate-500" title={String(displayedCurrentValue)}>
-                      {String(displayedCurrentValue || "—")}
-                    </span>
-                    {field.type === "rich" ? (
-                      <textarea
-                        aria-label={`${field.label} custom value`}
-                        rows={2}
-                        className={CUSTOM_VALUE_INPUT_CLASS}
-                        value={customValueDrafts[field.key] ?? ""}
-                        onChange={(event) => setCustomValueDrafts((current) => ({
-                          ...current,
-                          [field.key]: event.target.value,
-                        }))}
-                      />
-                    ) : (
-                      <input
-                        aria-label={`${field.label} custom value`}
-                        type={!field.labelOnly && ["number", "currency"].includes(field.type) ? "number" : "text"}
-                        step={!field.labelOnly && ["number", "currency"].includes(field.type) ? "0.01" : undefined}
-                        className={!field.labelOnly && ["number", "currency"].includes(field.type)
-                          ? NUMERIC_CUSTOM_VALUE_INPUT_CLASS
-                          : CUSTOM_VALUE_INPUT_CLASS}
-                        value={customValueDrafts[field.key] ?? ""}
-                        onChange={(event) => setCustomValueDrafts((current) => ({
-                          ...current,
-                          [field.key]: event.target.value,
-                        }))}
-                      />
-                    )}
-                  </div>
-                );
-              }
-              const currentPlaceholder = crmPlaceholderDrafts[field.key] ?? getCrmPlaceholderValue(field);
-              const currentPlaceholderIsAvailable = crmVariableGroups.some((group) =>
-                group.items.some((variable) => variable.tag === currentPlaceholder)
-              );
               return (
-                <div key={field.key} className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1fr)] items-start gap-1.5">
-                  <span className="break-words pt-1.5 text-[10px] font-medium text-slate-700">{field.label}</span>
-                  <span className="break-words pt-1.5 text-[10px] text-slate-500" title={String(displayedCurrentValue)}>
-                    {String(displayedCurrentValue || "—")}
-                  </span>
-                  {field.crmBindable === false ? (
-                    <span className="pt-1.5 text-[10px] text-slate-400">Not CRM-bindable</span>
-                  ) : (
-                    <select
-                      aria-label={`${field.label} CRM field placeholder`}
-                      className={CUSTOM_VALUE_INPUT_CLASS}
-                      value={currentPlaceholder}
-                      onChange={(event) => setCrmPlaceholderDrafts((current) => ({
-                        ...current,
-                        [field.key]: event.target.value,
-                      }))}
-                    >
-                      {currentPlaceholder && !currentPlaceholderIsAvailable && (
-                        <option value={currentPlaceholder}>{currentPlaceholder}</option>
-                      )}
-                      {crmVariableGroups.map((group) => (
-                        <optgroup key={group.group} label={group.group}>
-                          {group.items.map((variable) => (
-                            <option key={`${group.group}-${variable.tag}`} value={variable.tag}>
-                              {variable.tag}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ))}
-                    </select>
-                  )}
+                <div key={field.key} className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] items-start gap-1.5">
+                  <input
+                    aria-label={`${field.label} field name`}
+                    className={CUSTOM_VALUE_INPUT_CLASS}
+                    value={fieldNameDrafts[field.key] ?? field.label}
+                    onChange={(event) => setFieldNameDrafts((current) => ({
+                      ...current,
+                      [field.key]: event.target.value,
+                    }))}
+                  />
+                  <input
+                    aria-label={`${field.label} current value`}
+                    type={field.readOnly ? "text" : "number"}
+                    step={field.type === "currency" ? "0.01" : "any"}
+                    readOnly={field.readOnly}
+                    className={field.readOnly ? `${CUSTOM_VALUE_INPUT_CLASS} bg-slate-50 text-slate-500` : NUMERIC_CUSTOM_VALUE_INPUT_CLASS}
+                    value={fieldValueDrafts[field.key] ?? String(currentValue ?? "")}
+                    onChange={(event) => setFieldValueDrafts((current) => ({
+                      ...current,
+                      [field.key]: event.target.value,
+                    }))}
+                    title={String(displayedCurrentValue)}
+                  />
+                  <select
+                    aria-label={`${field.label} CRM placeholder`}
+                    className="w-full min-w-0 rounded border border-slate-200 bg-white px-1.5 py-1.5 text-[10px] focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-100"
+                    value={bindingDrafts[field.key] || ""}
+                    onChange={(event) => setBindingDrafts((current) => ({
+                      ...current,
+                      [field.key]: event.target.value,
+                    }))}
+                  >
+                    <option value="" hidden />
+                    {getExistingBindingOption(bindingDrafts[field.key], bindingVariables)}
+                    {(field.pricing ? crmVariableGroups : crmVariableGroups
+                      .map((group) => ({
+                        ...group,
+                        items: (group.items || []).filter((variable) => !isPricingPlaceholder(variable.tag)),
+                      }))
+                    ).filter((group) => group.items.length > 0).map((group) => (
+                      <optgroup key={group.group} label={group.group}>
+                        {(group.items || []).map((variable) => (
+                          <option key={`${group.group}:${variable.tag}`} value={variable.tag}>{variable.label}</option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <input
+                    aria-label={`${field.label} custom value`}
+                    type="number"
+                    step="0.01"
+                    className={NUMERIC_CUSTOM_VALUE_INPUT_CLASS}
+                    value={customValueDrafts[field.key] ?? ""}
+                    disabled={field.readOnly}
+                    onChange={(event) => setCustomValueDrafts((current) => ({
+                      ...current,
+                      [field.key]: event.target.value,
+                    }))}
+                  />
                 </div>
               );
             })}
+            {supportsCustomPricing && widgetLabelEditFields
+              .filter((field) => field.key !== "section_title")
+              .map((field) => (
+                <div key={field.key} className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-1.5">
+                  <input
+                    aria-label={`${field.label} field name`}
+                    className={`${CUSTOM_VALUE_INPUT_CLASS} h-8`}
+                    value={fieldNameDrafts[field.key] ?? field.label}
+                    onChange={(event) => setFieldNameDrafts((current) => ({
+                      ...current,
+                      [field.key]: event.target.value,
+                    }))}
+                  />
+                  <input
+                    aria-label={field.label}
+                    className={`${CUSTOM_VALUE_INPUT_CLASS} h-8`}
+                    value={widgetLabelDrafts[field.key] ?? field.value ?? ""}
+                    onChange={(event) => setWidgetLabelDrafts((current) => ({
+                      ...current,
+                      [field.key]: event.target.value,
+                    }))}
+                  />
+                  <input
+                    aria-label={`${field.label} CRM placeholder`}
+                    className={`${CUSTOM_VALUE_INPUT_CLASS} h-8`}
+                    value={widgetLabelBindingDrafts[field.key] || ""}
+                    onChange={(event) => setWidgetLabelBindingDrafts((current) => ({
+                      ...current,
+                      [field.key]: event.target.value,
+                    }))}
+                  />
+                  <input
+                    aria-label={`${field.label} custom value`}
+                    disabled
+                    className={`${CUSTOM_VALUE_INPUT_CLASS} h-8 bg-slate-50`}
+                    value=""
+                    readOnly
+                  />
+                </div>
+              ))}
+            {!supportsCustomPricing && (widgetLabelEditFields.some((field) => field.key !== "section_title")
+              || bindingEditFields.some((field) => !field.pricing)
+              || widgetType === "crew_trucks") && (
+              <div className="space-y-1.5">
+                <h4 className="font-bold uppercase tracking-wide text-[11px] text-slate-700">Fields</h4>
+                <div className="grid grid-cols-[minmax(0,0.95fr)_minmax(0,1fr)_minmax(0,1fr)] gap-2 border-b border-slate-200 pb-1 text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+                  <span>Field name</span>
+                  <span>Current value</span>
+                  <span>CRM Placeholder</span>
+                </div>
+              </div>
+            )}
+            {!supportsCustomPricing && widgetType === "crew_trucks" && widgetLabelEditFields
+              .filter((field) => field.key !== "section_title")
+              .map((field) => (
+              <div key={field.key} className="grid grid-cols-[minmax(0,0.95fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2">
+                <input
+                  aria-label={`${field.label} field name`}
+                  className={`${CUSTOM_VALUE_INPUT_CLASS} h-8`}
+                  value={fieldNameDrafts[field.key] ?? field.label}
+                  onChange={(event) => setFieldNameDrafts((current) => ({
+                    ...current,
+                    [field.key]: event.target.value,
+                  }))}
+                />
+                <input
+                  aria-label={field.label}
+                  className={`${CUSTOM_VALUE_INPUT_CLASS} h-8`}
+                  value={widgetLabelDrafts[field.key] ?? field.value ?? ""}
+                  onChange={(event) => setWidgetLabelDrafts((current) => ({
+                    ...current,
+                    [field.key]: event.target.value,
+                  }))}
+                />
+                <select
+                  aria-label={`${field.label} CRM placeholder`}
+                  className="h-8 w-full min-w-0 rounded border border-slate-200 bg-white px-1.5 text-[10px] focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-100"
+                  value={widgetLabelBindingDrafts[field.key] || ""}
+                  onChange={(event) => setWidgetLabelBindingDrafts((current) => ({
+                    ...current,
+                    [field.key]: event.target.value,
+                  }))}
+                >
+                  <option value="" hidden />
+                  {crmVariableGroups.map((group) => (
+                    <optgroup key={group.group} label={group.group}>
+                      {(group.items || []).filter((variable) => !isPricingPlaceholder(variable.tag)).map((variable) => (
+                        <option key={`${group.group}:${variable.tag}`} value={variable.tag}>{variable.label}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+            ))}
+            {!supportsCustomPricing && widgetLabelEditFields.some((field) => field.key !== "section_title") && widgetType !== "crew_trucks" && (
+              <div className="space-y-1">
+                {widgetLabelEditFields.filter((field) => field.key !== "section_title").map((field) => (
+                  <div key={field.key} className="grid grid-cols-[minmax(0,0.95fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2">
+                    <input
+                      aria-label={`${field.label} field name`}
+                      className={`${CUSTOM_VALUE_INPUT_CLASS} h-8`}
+                      value={fieldNameDrafts[field.key] ?? field.label}
+                      onChange={(event) => setFieldNameDrafts((current) => ({
+                        ...current,
+                        [field.key]: event.target.value,
+                      }))}
+                    />
+                    <input
+                      aria-label={field.label}
+                      type="text"
+                      className={`${CUSTOM_VALUE_INPUT_CLASS} h-8`}
+                      value={widgetLabelDrafts[field.key] ?? field.value ?? ""}
+                      onChange={(event) => setWidgetLabelDrafts((current) => ({
+                        ...current,
+                        [field.key]: event.target.value,
+                      }))}
+                    />
+                    <input
+                      aria-label={`${field.label} CRM placeholder`}
+                      className={`${CUSTOM_VALUE_INPUT_CLASS} h-8`}
+                      value={widgetLabelBindingDrafts[field.key] || ""}
+                      onChange={(event) => setWidgetLabelBindingDrafts((current) => ({
+                        ...current,
+                        [field.key]: event.target.value,
+                      }))}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+            {!supportsCustomPricing && bindingEditFields.some((field) => !field.pricing) && (
+              <div className="space-y-1">
+                {bindingEditFields.filter((field) => !field.pricing).map((field) => {
+                  const bindingVariables = crmVariables.filter(
+                    (variable) => !isPricingPlaceholder(variable.tag)
+                  );
+                  return (
+                    <div key={field.key} className="grid grid-cols-[minmax(0,0.95fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2">
+                      <input
+                        aria-label={`${field.label} field name`}
+                        className={`${CUSTOM_VALUE_INPUT_CLASS} h-8`}
+                        value={fieldNameDrafts[field.key] ?? field.label}
+                        onChange={(event) => setFieldNameDrafts((current) => ({
+                          ...current,
+                          [field.key]: event.target.value,
+                        }))}
+                      />
+                      <input
+                        aria-label={`${field.label} current value`}
+                        type="text"
+                        className={`${CUSTOM_VALUE_INPUT_CLASS} h-8`}
+                        value={fieldValueDrafts[field.key] ?? String(getWidgetFieldCurrentValue(field) ?? "")}
+                        onChange={(event) => setFieldValueDrafts((current) => ({
+                          ...current,
+                          [field.key]: event.target.value,
+                        }))}
+                      />
+                      <select
+                        aria-label={`${field.label} CRM placeholder`}
+                        className="h-8 w-full min-w-0 rounded border border-slate-200 bg-white px-1.5 text-[10px] focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-100"
+                        value={bindingDrafts[field.key] || ""}
+                        onChange={(event) => setBindingDrafts((current) => ({
+                          ...current,
+                          [field.key]: event.target.value,
+                        }))}
+                      >
+                        {getExistingBindingOption(bindingDrafts[field.key], bindingVariables)}
+                        {crmVariableGroups.map((group) => (
+                          <optgroup key={group.group} label={group.group}>
+                            {(group.items || []).filter((variable) => !isPricingPlaceholder(variable.tag)).map((variable) => (
+                              <option key={variable.tag} value={variable.tag}>{variable.label}</option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {!supportsCustomPricing && widgetType === "crew_trucks" && CREW_TRUCK_ROW_FIELDS.map((row) => (
+              <div key={row.key} className="grid grid-cols-[minmax(0,0.95fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2">
+                <input
+                  aria-label={`${row.key} field name`}
+                  className={`${CUSTOM_VALUE_INPUT_CLASS} h-8`}
+                  value={crewTruckRowDrafts[row.key]?.fieldName ?? row.fieldName}
+                  onChange={(event) => setCrewTruckRowDrafts((current) => ({
+                    ...current,
+                    [row.key]: { ...(current[row.key] || row), fieldName: event.target.value },
+                  }))}
+                />
+                <input
+                  aria-label={`${row.key} current value`}
+                  className={`${CUSTOM_VALUE_INPUT_CLASS} h-8`}
+                  value={crewTruckRowDrafts[row.key]?.currentValue ?? row.currentValue}
+                  onChange={(event) => setCrewTruckRowDrafts((current) => ({
+                    ...current,
+                    [row.key]: { ...(current[row.key] || row), currentValue: event.target.value },
+                  }))}
+                />
+                <input
+                  aria-label={`${row.key} CRM placeholder`}
+                  className={`${CUSTOM_VALUE_INPUT_CLASS} h-8`}
+                  value={crewTruckRowDrafts[row.key]?.currentValuePlaceholder || ""}
+                  onChange={(event) => setCrewTruckRowDrafts((current) => ({
+                    ...current,
+                    [row.key]: {
+                      ...(current[row.key] || row),
+                      currentValuePlaceholder: event.target.value,
+                    },
+                  }))}
+                />
+              </div>
+            ))}
             {supportsCustomPricing && pricingFieldDrafts.map((field, index) => (
-              <div key={field.key} className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1fr)] items-start gap-1.5">
+              <div key={field.key} className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] items-start gap-1.5">
                 <div className="flex min-w-0 items-start gap-1">
                   <input
                     aria-label={`Pricing field ${index + 1} name`}
@@ -1537,6 +2267,23 @@ export default function RightPropertiesPanel({
                     rowIndex === index ? { ...row, currentValue: event.target.value } : row
                   ))}
                 />
+                <select
+                  aria-label={`${field.label || `Pricing field ${index + 1}`} CRM placeholder`}
+                  className="w-full min-w-0 rounded border border-slate-200 bg-white px-1.5 py-1.5 text-[10px] focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-100"
+                  value={field.placeholder || ""}
+                  onChange={(event) => setPricingFieldDrafts((current) => current.map((row, rowIndex) =>
+                    rowIndex === index ? { ...row, placeholder: event.target.value } : row
+                  ))}
+                >
+                  <option value="" hidden />
+                  {crmVariableGroups.map((group) => (
+                    <optgroup key={group.group} label={group.group}>
+                      {(group.items || []).map((variable) => (
+                        <option key={`${group.group}:${variable.tag}`} value={variable.tag}>{variable.label}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
                 <input
                   aria-label={`${field.label || `Pricing field ${index + 1}`} custom value`}
                   type="number"
@@ -1558,14 +2305,41 @@ export default function RightPropertiesPanel({
                 Add Custom Pricing Field
               </button>
             )}
-            <div className="flex justify-end border-t border-slate-100 pt-2">
-              <button
-                type="button"
-                onClick={applyCustomValues}
-                className="rounded-md bg-blue-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-blue-700"
-              >
-                Apply Changes
-              </button>
+            <div className="sticky bottom-0 -mx-4 flex flex-col items-end gap-2 border-t border-slate-200 bg-white px-4 py-2 shadow-[0_-6px_12px_-12px_rgba(15,23,42,0.5)]">
+              {showChangesAppliedNotice && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[11px] font-medium text-emerald-700"
+                >
+                  <Check size={13} strokeWidth={2.5} aria-hidden="true" />
+                  <span>Changes applied</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowChangesAppliedNotice(false)}
+                    className="ml-1 rounded p-0.5 text-emerald-600 hover:bg-emerald-100 hover:text-emerald-800"
+                    aria-label="Dismiss changes applied notification"
+                  >
+                    <X size={12} aria-hidden="true" />
+                  </button>
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={cancelCustomValueChanges}
+                  className="rounded-md border border-slate-200 px-3 py-1.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={applyCustomValues}
+                  className="rounded-md bg-blue-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-blue-700"
+                >
+                  Apply Changes
+                </button>
+              </div>
             </div>
           </section>
         )}
@@ -1583,16 +2357,36 @@ export default function RightPropertiesPanel({
               <>
                 <label className="block space-y-1">
                   <span className="text-[11px] font-medium text-slate-600">Variable</span>
-                  <input
+                  <select
                     aria-label="Condition variable"
                     className="w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs"
                     value={selectedItem.condition?.var || ""}
-                    placeholder="customer.email"
                     onChange={(event) => onUpdateItem({
                       ...selectedItem,
                       condition: { ...(selectedItem.condition || {}), var: event.target.value },
                     })}
-                  />
+                  >
+                    {selectedItem.condition?.var && !crmVariables.some(
+                      (variable) => variable.tag.replace(/^\{\{|\}\}$/g, "") === selectedItem.condition.var
+                    ) && (
+                      <option value={selectedItem.condition.var}>
+                        Existing value: {selectedItem.condition.var}
+                      </option>
+                    )}
+                    <option value="">Choose CRM placeholder</option>
+                    {crmVariableGroups.map((group) => (
+                      <optgroup key={group.group} label={group.group}>
+                        {(group.items || []).map((variable) => (
+                          <option
+                            key={`${group.group}:${variable.tag}`}
+                            value={variable.tag.replace(/^\{\{|\}\}$/g, "")}
+                          >
+                            {variable.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
                 </label>
                 <label className="block space-y-1">
                   <span className="text-[11px] font-medium text-slate-600">Operator</span>
@@ -1640,9 +2434,6 @@ export default function RightPropertiesPanel({
 
         {selectedItem.type === "builder_block" && ["conditional", "repeater", "columns"].includes(selectedItem.blockType) && (
           <section className="space-y-3 border-t border-slate-100 pt-3">
-            <h4 className="font-bold uppercase tracking-wide text-[11px] text-slate-700">
-              Nested Content
-            </h4>
             {nestedEditableContent.length > 0 ? (
               nestedEditableContent.map((entry) => (
                 <label key={entry.path.join(".")} className="block space-y-1">
@@ -1652,14 +2443,14 @@ export default function RightPropertiesPanel({
                   <textarea
                     aria-label={`Nested ${entry.type} content ${entry.key}`}
                     className="min-h-20 w-full rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs focus:bg-white focus:ring-1 focus:ring-blue-500"
-                    value={entry.value}
+                    value={htmlToPlainText(entry.value)}
                     onChange={(event) => onUpdateItem({
                       ...selectedItem,
                       children: updateNestedEditableContent(
                         selectedItem.children,
                         entry.path,
                         entry.property,
-                        event.target.value
+                        plainTextToHtml(event.target.value)
                       ),
                     })}
                   />
@@ -2712,12 +3503,12 @@ export default function RightPropertiesPanel({
               <label className="block text-[11px] font-semibold text-slate-600 mb-1">Footer Message</label>
               <textarea
                 rows={3}
-                value={selectedItem.content || selectedItem.label || ""}
+                value={htmlToPlainText(selectedItem.content || selectedItem.label || "")}
                 onChange={(e) =>
                   onUpdateItem({
                     ...selectedItem,
-                    content: e.target.value,
-                    label: e.target.value,
+                    content: plainTextToHtml(e.target.value),
+                    label: plainTextToHtml(e.target.value),
                   })
                 }
                 placeholder="Footer disclaimer, copyright, or contact information..."
@@ -3137,22 +3928,54 @@ export default function RightPropertiesPanel({
                       </button>
                     </div>
 
-                    {/* Field Value Input */}
-                    <input
-                      type="text"
-                      value={f.value}
-                      onChange={(e) => {
-                        const newFields = [...selectedItem.fields];
-                        newFields[idx] = { ...f, value: e.target.value };
-                        onUpdateItem({ ...selectedItem, fields: newFields });
-                      }}
-                      className="w-full min-w-0 px-2 py-1 bg-white border border-slate-200 rounded text-xs text-slate-700 font-mono truncate focus:overflow-visible focus:text-clip"
-                    />
+                    {f.id === "estimateTitle" ? (
+                      <input
+                        type="text"
+                        aria-label={`${f.label || f.id} content`}
+                        value={f.value}
+                        onChange={(e) => {
+                          const newFields = [...selectedItem.fields];
+                          newFields[idx] = { ...f, value: e.target.value };
+                          onUpdateItem({ ...selectedItem, fields: newFields });
+                        }}
+                        className="w-full min-w-0 px-2 py-1 bg-white border border-slate-200 rounded text-xs text-slate-700 truncate"
+                      />
+                    ) : (
+                      <div className="space-y-1">
+                        <span className="block break-words px-1 text-[10px] text-slate-500">
+                          Current value: {f.value || "—"}
+                        </span>
+                        <select
+                          aria-label={`${f.label || f.id} CRM placeholder`}
+                          value={/^\{\{[^{}]+\}\}$/.test(f.value || "") ? f.value : ""}
+                          onChange={(event) => {
+                            if (!event.target.value) return;
+                            const newFields = [...selectedItem.fields];
+                            newFields[idx] = { ...f, value: event.target.value };
+                            onUpdateItem({ ...selectedItem, fields: newFields });
+                          }}
+                          className="w-full min-w-0 px-2 py-1 bg-white border border-slate-200 rounded text-[11px] text-slate-600 font-medium"
+                        >
+                          {getExistingBindingOption(f.value, allVars)}
+                          <option value="">Choose CRM placeholder</option>
+                          {varGroups.map((group) => (
+                            <optgroup key={group.group} label={group.group}>
+                              {(group.items || []).map((variable) => (
+                                <option key={`${group.group}:${variable.tag}`} value={variable.tag}>
+                                  {variable.label} ({variable.tag})
+                                </option>
+                              ))}
+                            </optgroup>
+                          ))}
+                        </select>
+                      </div>
+                    )}
 
                     {/* Bind Variable Dropdown */}
+                    {f.id !== "estimateTitle" && (
                     <div className="pt-0.5">
                       <select
-                        value={allVars.some((v) => v.tag === f.value) ? f.value : ""}
+                        value={/^\{\{[^{}]+\}\}$/.test(f.value || "") ? f.value : ""}
                         onChange={(e) => {
                           if (e.target.value) {
                             const newFields = [...selectedItem.fields];
@@ -3162,7 +3985,8 @@ export default function RightPropertiesPanel({
                         }}
                         className="w-full min-w-0 max-w-full px-2 py-1 bg-white border border-slate-200 rounded text-[11px] text-slate-600 font-medium truncate"
                       >
-                        <option value="">Bind Variable (Custom Value)</option>
+                        {getExistingBindingOption(f.value, allVars)}
+                        <option value="">Choose CRM placeholder</option>
                         {varGroups.map((group) => (
                           <optgroup key={group.group} label={group.group}>
                             {(group.items || []).map((v) => (
@@ -3174,6 +3998,7 @@ export default function RightPropertiesPanel({
                         ))}
                       </select>
                     </div>
+                    )}
                   </div>
                 );
               })}

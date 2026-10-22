@@ -9,49 +9,38 @@ export const MERGE_VARIABLES = {
     { label: "Customer First Name", tag: "{{customer.first_name}}" },
     { label: "Customer Phone", tag: "{{customer.phone}}" },
     { label: "Customer Email", tag: "{{customer.email}}" },
-    { label: "Company Name", tag: "{{customer.company}}" },
   ],
   move: [
     { label: "Move Date", tag: "{{move.date}}" },
     { label: "Origin Address", tag: "{{move.origin_address}}" },
     { label: "Destination Address", tag: "{{move.destination_address}}" },
     { label: "Opportunity Number", tag: "{{opportunity.number}}" },
-    { label: "Pickup Address", tag: "{{move.pickup_address}}" },
-    { label: "Pickup City, State", tag: "{{move.pickup_city_state}}" },
-    { label: "Delivery Address", tag: "{{move.delivery_address}}" },
-    { label: "Delivery City, State", tag: "{{move.delivery_city_state}}" },
-    { label: "Scheduled Move Date", tag: "{{move.pickup_date}}" },
-    { label: "Delivery Date", tag: "{{move.delivery_date}}" },
-    { label: "Estimated Weight / Cu.Ft", tag: "{{move.estimated_weight}}" },
-    { label: "Service Type", tag: "{{move.service_type}}" },
+    { label: "Move Size", tag: "{{move.size}}" },
+    { label: "Service Type", tag: "{{opportunity.service_type}}" },
   ],
   estimate: [
     { label: "Estimate Number", tag: "{{estimate.number}}" },
-    { label: "Issue Date", tag: "{{estimate.issue_date}}" },
-    { label: "Expiry Date", tag: "{{estimate.expiry_date}}" },
     { label: "Subtotal", tag: "{{estimate.subtotal}}" },
     { label: "Discounts Total", tag: "{{estimate.discount}}" },
-    { label: "Tax Amount", tag: "{{estimate.tax_amount}}" },
+    { label: "Tax Amount", tag: "{{estimate.tax}}" },
     { label: "Grand Total", tag: "{{estimate.grand_total}}" },
-    { label: "Deposit Required", tag: "{{estimate.deposit_due}}" },
-    { label: "Customer Portal Link", tag: "{{estimate.portal_url}}" },
+    { label: "Deposit Required", tag: "{{estimate.deposit_amount}}" },
+    { label: "Customer Portal Link", tag: "{{links.estimate_portal}}" },
   ],
   invoice: [
     { label: "Invoice Number", tag: "{{invoice.number}}" },
-    { label: "Invoice Issue Date", tag: "{{invoice.issue_date}}" },
-    { label: "Due Date", tag: "{{invoice.due_date}}" },
+    { label: "Invoice Issue Date", tag: "{{invoice.issued_at}}" },
+    { label: "Due Date", tag: "{{invoice.due_at}}" },
     { label: "Invoice Subtotal", tag: "{{invoice.subtotal}}" },
     { label: "Invoice Discount", tag: "{{invoice.discount}}" },
-    { label: "Invoice Tax", tag: "{{invoice.tax_amount}}" },
+    { label: "Invoice Tax", tag: "{{invoice.tax}}" },
     { label: "Total Billed", tag: "{{invoice.total}}" },
     { label: "Amount Paid", tag: "{{invoice.amount_paid}}" },
     { label: "Balance Due", tag: "{{invoice.balance_due}}" },
-    { label: "Online Payment Link", tag: "{{invoice.payment_url}}" },
+    { label: "Online Payment Link", tag: "{{links.pay_now}}" },
   ],
   carrier: [
     { label: "Branch / Carrier Name", tag: "{{company.name}}" },
-    { label: "Carrier DOT Number", tag: "{{company.dot_number}}" },
-    { label: "Carrier MC Number", tag: "{{company.mc_number}}" },
     { label: "Branch Phone", tag: "{{company.phone}}" },
     { label: "Branch Email", tag: "{{company.email}}" },
     { label: "Branch Address", tag: "{{company.address}}" },
@@ -63,6 +52,35 @@ export const MERGE_VARIABLES = {
   ],
 };
 
+const LEGACY_MERGE_FIELD_ALIASES = {
+  "move.estimated_weight": "move.size",
+  "move.pickup_date": "move.date",
+  "move.delivery_address": "move.destination_address",
+  "move.service_type": "opportunity.service_type",
+  "estimate.portal_url": "links.estimate_portal",
+  "invoice.issue_date": "invoice.issued_at",
+  "invoice.due_date": "invoice.due_at",
+  "invoice.payment_url": "links.pay_now",
+};
+
+export function normalizeLegacyMergeFieldAliases(value) {
+  if (typeof value === "string") {
+    return value.replace(/\{\{\s*([a-zA-Z0-9_.]+)(\s*\|[^}]*?\S)?\s*\}\}/g, (token, key, filters = "") => {
+      const replacement = LEGACY_MERGE_FIELD_ALIASES[key];
+      return replacement ? `{{${replacement}${filters}}}` : token;
+    });
+  }
+  if (Array.isArray(value)) {
+    return value.map(normalizeLegacyMergeFieldAliases);
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, normalizeLegacyMergeFieldAliases(entry)])
+    );
+  }
+  return value;
+}
+
 export function getVariablesForMode(mode = "estimate") {
   const common = [
     { group: "Customer Details", items: MERGE_VARIABLES.customer },
@@ -70,6 +88,11 @@ export function getVariablesForMode(mode = "estimate") {
   ];
 
   switch (mode) {
+    case "document":
+      return [
+        { group: "Move Logistics", items: MERGE_VARIABLES.move },
+        ...common,
+      ];
     case "estimate":
       return [
         { group: "Estimate Details", items: MERGE_VARIABLES.estimate },

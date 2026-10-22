@@ -22,35 +22,7 @@ import DocumentBlock from "../components/DocumentBlock";
 import RightPropertiesPanel from "../components/RightPropertiesPanel";
 import { getPageDimensions, getDocumentPages } from "../model/templateModel";
 import { compileDocumentToHtml } from "../model/htmlCompiler";
-
-const SAMPLE_SMS_MAP = {
-  "customer.full_name": "Alex Customer",
-  "customer.first_name": "Alex",
-  "customer.phone": "(555) 019-2834",
-  "customer.email": "alex.customer@example.com",
-  "move.pickup_date": "June 15, 2026",
-  "move.pickup_address": "123 Main St, Vancouver, BC",
-  "move.delivery_address": "456 Oak Ave, Burnaby, BC",
-  "estimate.number": "EST-00042",
-  "estimate.grand_total": "$1,008.00",
-  "invoice.balance_due": "$908.00",
-  "company.name": "KargoFlow",
-  "company.phone": "+1 800 555 0199",
-  "portal.action_url": "https://kargoflow.com/portal/est-42",
-  "tracking.short_url": "https://kargoflow.com/track/42",
-  branch_name: "KargoFlow Main",
-  customer_name: "Alex Customer",
-  move_date: "June 15, 2026",
-  quote_link: "https://kargoflow.com/portal/est-42",
-  balance_due: "$908.00",
-};
-
-const resolveSmsVariables = (text, resolve) => {
-  if (!resolve || !text) return text;
-  return text.replace(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g, (match, key) => {
-    return SAMPLE_SMS_MAP[key.trim()] || SAMPLE_SMS_MAP[key.trim().toLowerCase()] || match;
-  });
-};
+import { resolveSmsPreviewText } from "../core/smsPreview";
 
 function addScreenPreviewGutter(html) {
   if (!html) return "";
@@ -61,6 +33,36 @@ function addScreenPreviewGutter(html) {
   if (!headEnd) return `${html.slice(0, headMatch.index + headMatch[0].length)}${style}${html.slice(headMatch.index + headMatch[0].length)}`;
   const insertAt = headMatch.index + headMatch[0].length + headEnd.index;
   return `${html.slice(0, insertAt)}${style}${html.slice(insertAt)}`;
+}
+
+function suppressPrintBrowserHeaders(html, pageSize = "A4", orientation = "portrait") {
+  if (!html) return "";
+  const style = `<style media="print">
+    @page {
+      size: ${pageSize} ${String(orientation).toLowerCase()};
+      margin: 0;
+    }
+    html, body {
+      width: 100% !important;
+      min-width: 0 !important;
+      margin: 0 !important;
+      box-sizing: border-box !important;
+    }
+    html { padding: 0 !important; }
+    body { padding: 8mm !important; }
+    body > * { min-width: 0 !important; }
+    .kargoflow-doc-container table, .kf-document table {
+      max-width: 100% !important;
+    }
+    .kargoflow-doc-container img, .kf-document img {
+      max-width: 100% !important;
+    }
+  </style>`;
+  const closingHead = /<\/head\s*>/i.exec(html);
+  if (closingHead) {
+    return `${html.slice(0, closingHead.index)}${style}${html.slice(closingHead.index)}`;
+  }
+  return `${style}${html}`;
 }
 
 function ScaledPreviewPage({ width, minHeight, zoom, children }) {
@@ -142,6 +144,7 @@ export default function PreviewModal({
   onDeleteItem = () => {},
   onDuplicateItem = () => {},
   remotePreview = null,
+  onUseLocalPreview = () => {},
 }) {
   const [zoom, setZoom] = useState(() => {
     if (typeof window !== "undefined" && window.innerHeight) {
@@ -158,10 +161,39 @@ export default function PreviewModal({
   const [dragOverTarget, setDragOverTarget] = useState(null);
   const [selectedItemId, setSelectedItemId] = useState(null);
   const [selection, setSelection] = useState(null);
+  const [remoteFrameReady, setRemoteFrameReady] = useState(false);
+  const [remotePrintError, setRemotePrintError] = useState("");
   const previewViewportRef = useRef(null);
+  const remoteViewportRef = useRef(null);
+  const remotePreviewFrameRef = useRef(null);
   const hasDocument = Boolean(doc);
   const effectivePageSizeForFit = doc?.settings?.pageSize || pageSize || "A4";
   const effectiveOrientationForFit = doc?.settings?.orientation || orientation || "Portrait";
+  const remotePreviewWidth = ["email", "sms"].includes(mode)
+    ? mode === "sms"
+      ? devicePreview === "mobile" ? 340 : devicePreview === "tablet" ? 560 : 600
+      : devicePreview === "mobile" ? 360 : devicePreview === "tablet" ? 560 : 600
+    : devicePreview === "mobile"
+      ? 375
+      : devicePreview === "tablet"
+        ? 768
+        : getPageDimensions(effectivePageSizeForFit, effectiveOrientationForFit).width;
+
+  const fitRemotePreview = () => {
+    const viewport = remoteViewportRef.current;
+    if (!viewport) return;
+    const availableWidth = viewport.clientWidth - 32;
+    const availableHeight = viewport.clientHeight - 32;
+    if (availableWidth <= 0 || availableHeight <= 0) return;
+    const targetHeight = getPageDimensions(effectivePageSizeForFit, effectiveOrientationForFit).height;
+    setZoom(Math.min(
+      100,
+      Math.max(30, Math.round(Math.min(
+        (availableWidth / remotePreviewWidth) * 92,
+        (availableHeight / targetHeight) * 92,
+      ))),
+    ));
+  };
 
   useEffect(() => {
     if (!isOpen || !hasDocument || ["email", "sms"].includes(mode)) return undefined;
@@ -207,18 +239,209 @@ export default function PreviewModal({
     devicePreview,
   ]);
 
+  useEffect(() => {
+    if (!isOpen || !remotePreview || ["email", "sms"].includes(mode)) return undefined;
+    const viewport = remoteViewportRef.current;
+    if (!viewport) return undefined;
+
+    const observer = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(fitRemotePreview)
+      : null;
+    observer?.observe(viewport);
+    const resizeFrame = window.requestAnimationFrame(fitRemotePreview);
+    if (!observer) window.addEventListener("resize", fitRemotePreview);
+    return () => {
+      window.cancelAnimationFrame(resizeFrame);
+      observer?.disconnect();
+      if (!observer) window.removeEventListener("resize", fitRemotePreview);
+    };
+  }, [isOpen, remotePreview, mode, remotePreviewWidth, effectivePageSizeForFit, effectiveOrientationForFit]);
+
   if (!isOpen || !doc) return null;
 
-  if (remotePreview) return <div role="dialog" aria-label="Global template preview" className="fixed inset-0 z-50 bg-slate-900/60 p-5 flex items-center justify-center">
-    <div className="bg-white rounded-xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden">
-      <header className="flex justify-between items-center p-4 border-b"><h2 className="font-semibold">Sample preview</h2>
-        <button aria-label="Close preview" onClick={onClose}><X size={20} /></button></header>
-      {remotePreview.loading ? <p role="status" className="p-6">Rendering preview…</p>
-        : remotePreview.error ? <p role="alert" className="p-6 text-red-700">{remotePreview.error}</p>
-        : mode === 'sms' ? <pre className="p-6 whitespace-pre-wrap">{remotePreview.data?.body_text}</pre>
-        : <iframe title="Server rendered sample preview" sandbox="" srcDoc={addScreenPreviewGutter(remotePreview.data?.html || remotePreview.data?.body_html || '')} className="w-full flex-1 border-0" />}
-    </div>
-  </div>;
+  if (remotePreview) {
+    const previewScale = zoom / 100;
+    const remoteHtml = remotePreview.data?.html || remotePreview.data?.body_html || "";
+    const handleRemotePrint = () => {
+      const printWindow = remotePreviewFrameRef.current?.contentWindow;
+      if (!printWindow || !remoteFrameReady) return;
+      try {
+        printWindow.focus();
+        printWindow.print();
+        setRemotePrintError("");
+      } catch (error) {
+        console.error("Could not print the document preview:", error);
+        setRemotePrintError("Printing failed. Please try again or use your browser's print command.");
+      }
+    };
+    return (
+      <div role="dialog" aria-label="Global template preview" className="fixed inset-0 z-50 bg-slate-900/60 p-4 flex items-center justify-center no-print">
+        <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-6xl h-[94vh] flex flex-col overflow-hidden">
+          <header className="px-3 sm:px-6 py-2.5 sm:py-3 border-b border-slate-200 grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[auto_auto] gap-y-2 bg-slate-50 select-none shrink-0 sm:flex sm:items-center sm:justify-between sm:gap-y-0">
+            <div className="col-span-2 flex items-center gap-2 min-w-0 sm:col-span-1">
+              <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center shrink-0">
+                {mode === "sms" ? <MessageSquare size={18} /> : mode === "email" ? <Mail size={18} /> : <Eye size={18} />}
+              </div>
+              <h2 className="font-semibold text-sm text-slate-800 truncate">{doc.name || "Sample preview"}</h2>
+            </div>
+            <div className="col-span-2 flex w-full min-w-0 flex-wrap items-center justify-between gap-1 sm:col-span-1 sm:w-auto sm:flex-nowrap sm:justify-end sm:shrink-0">
+              <div className="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200">
+                {[
+                  ["desktop", Monitor, "Desktop"],
+                  ["tablet", Tablet, "Tablet"],
+                  ["mobile", Smartphone, "Mobile"],
+                ].map(([device, Icon, label]) => (
+                  <button
+                    key={device}
+                    type="button"
+                    onClick={() => {
+                      setDevicePreview(device);
+                      if (!["email", "sms"].includes(mode)) {
+                        const targetWidth = device === "mobile" ? 375 : device === "tablet" ? 768 : getPageDimensions(effectivePageSizeForFit, effectiveOrientationForFit).width;
+                        const viewport = remoteViewportRef.current;
+                        const availableWidth = (viewport?.clientWidth || 0) - 32;
+                        const availableHeight = (viewport?.clientHeight || 0) - 32;
+                        const targetHeight = getPageDimensions(effectivePageSizeForFit, effectiveOrientationForFit).height;
+                        if (availableWidth > 0 && availableHeight > 0) {
+                          setZoom(Math.min(100, Math.max(30, Math.round(Math.min((availableWidth / targetWidth) * 92, (availableHeight / targetHeight) * 92)))));
+                        }
+                      }
+                    }}
+                    className={`px-2 py-1 rounded text-xs flex items-center gap-1 font-medium transition ${
+                      devicePreview === device ? "bg-white text-blue-600 shadow-xs" : "text-slate-600 hover:text-slate-900"
+                    }`}
+                    title={`${label} preview`}
+                    aria-label={`${label} preview`}
+                    aria-pressed={devicePreview === device}
+                  >
+                    <Icon size={13} />
+                    <span className="hidden md:inline">{label}</span>
+                  </button>
+                ))}
+              </div>
+              {mode !== "sms" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsInteractivePreview(true);
+                    onUseLocalPreview();
+                  }}
+                  className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg border bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                  title="Switch to interactive preview to edit and reorder blocks"
+                >
+                  <Pencil size={13} />
+                  <span>Edit &amp; Drag Mode</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setResolveVariables((value) => !value);
+                  onUseLocalPreview();
+                }}
+                className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg border ${
+                  resolveVariables
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                    : "bg-white text-slate-600 border-slate-200"
+                }`}
+                title={resolveVariables ? "Showing sample data values" : "Showing raw merge tag variables"}
+                aria-label={resolveVariables ? "Show raw variables" : "Show sample data"}
+              >
+                <Database size={13} />
+                <span className="hidden lg:inline">{resolveVariables ? "Sample Data" : "Raw Variables"}</span>
+              </button>
+              <div className="flex items-center bg-white border border-slate-200 rounded-lg p-0.5 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => setZoom((value) => Math.max(30, value - 10))}
+                  className="p-1 sm:p-1.5 hover:bg-slate-100 rounded text-slate-600"
+                  title="Zoom Out"
+                  aria-label="Zoom out"
+                ><ZoomOut size={13} /></button>
+                <span aria-label="Zoom level" className="text-xs font-semibold text-slate-700 px-2 min-w-[42px] text-center">{zoom}%</span>
+                <button
+                  type="button"
+                  onClick={() => setZoom((value) => Math.min(180, value + 10))}
+                  className="p-1 sm:p-1.5 hover:bg-slate-100 rounded text-slate-600"
+                  title="Zoom In"
+                  aria-label="Zoom in"
+                ><ZoomIn size={13} /></button>
+                <button
+                  type="button"
+                  onClick={fitRemotePreview}
+                  className="px-2 py-1 text-[11px] font-medium text-slate-500 hover:text-slate-800 border-l border-slate-200"
+                  title="Fit full page on screen"
+                >Fit</button>
+                <button
+                  type="button"
+                  onClick={() => setZoom(100)}
+                  className="px-2 py-1 text-[11px] font-medium text-slate-500 hover:text-slate-800 border-l border-slate-200"
+                  title="Reset Zoom (100%)"
+                >100%</button>
+              </div>
+              {onExportJson && (
+                <button
+                  type="button"
+                  onClick={onExportJson}
+                  className="hidden xl:flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-white border border-blue-200 hover:bg-blue-50 rounded-lg shadow-2xs transition"
+                  title="Export template schema as JSON"
+                >
+                  <FileText size={14} />
+                  <span>Export JSON</span>
+                </button>
+              )}
+              {mode !== "sms" && (
+                <button
+                  type="button"
+                  onClick={handleRemotePrint}
+                  disabled={!remoteHtml || !remoteFrameReady || remotePreview.loading || Boolean(remotePreview.error)}
+                  className="flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 text-xs font-semibold text-slate-900 bg-orange-300 hover:bg-orange-400 disabled:opacity-50 rounded-lg shadow-xs transition"
+                  title="Save as PDF or Print document"
+                  aria-label="Print preview"
+                >
+                  <Printer size={14} />
+                  <span className="hidden md:inline">Print</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onClose}
+                className="p-1 sm:p-1.5 text-slate-400 hover:text-slate-600 rounded-lg ml-0.5 sm:ml-1 shrink-0"
+                title="Close preview"
+                aria-label="Close preview"
+              ><X size={18} /></button>
+            </div>
+          </header>
+          {remotePreview.loading ? <p role="status" className="p-6">Rendering preview…</p>
+            : remotePreview.error ? <p role="alert" className="p-6 text-red-700">{remotePreview.error}</p>
+            : mode === "sms" ? (
+              <div ref={remoteViewportRef} data-testid="preview-canvas-viewport" className="flex-1 min-h-0 overflow-auto bg-slate-200/70 p-4">
+                <pre className="mx-auto bg-white p-6 whitespace-pre-wrap shadow" style={{ width: `${remotePreviewWidth * previewScale}px` }}>
+                  {remotePreview.data?.body_text}
+                </pre>
+              </div>
+            ) : (
+              <div ref={remoteViewportRef} data-testid="preview-canvas-viewport" className="flex-1 min-h-0 overflow-auto bg-slate-200/70 p-4 flex justify-center">
+                <iframe
+                  ref={remotePreviewFrameRef}
+                  title="Server rendered sample preview"
+                  sandbox="allow-same-origin allow-modals"
+                  srcDoc={suppressPrintBrowserHeaders(
+                    addScreenPreviewGutter(remoteHtml),
+                    effectivePageSizeForFit,
+                    effectiveOrientationForFit,
+                  )}
+                  onLoad={() => setRemoteFrameReady(true)}
+                  className="shrink-0 border-0 bg-white shadow-lg"
+                  style={{ width: `${remotePreviewWidth}px`, zoom: previewScale, height: "100%", minHeight: "100%" }}
+                />
+              </div>
+            )}
+          {remotePrintError && <p role="alert" className="px-4 py-2 text-sm text-red-700 bg-red-50 border-t border-red-200">{remotePrintError}</p>}
+        </div>
+      </div>
+    );
+  }
 
   const effPageSize = doc.settings?.pageSize || pageSize || "A4";
   const effOrientation = doc.settings?.orientation || orientation || "Portrait";
@@ -314,25 +537,32 @@ export default function PreviewModal({
   };
 
   const handlePrint = () => {
-    // If hidden iframe exists, write clean document without about:srcdoc URL stamping
     let iframe = document.getElementById("preview-document-frame");
     if (!iframe) {
       iframe = document.createElement("iframe");
       iframe.id = "preview-document-frame";
-      iframe.style.position = "fixed";
-      iframe.style.right = "0";
-      iframe.style.bottom = "0";
-      iframe.style.width = "0";
-      iframe.style.height = "0";
-      iframe.style.border = "0";
       document.body.appendChild(iframe);
     }
+    iframe.classList.remove("hidden");
+    Object.assign(iframe.style, {
+      position: "fixed",
+      left: "-10000px",
+      top: "0",
+      right: "auto",
+      bottom: "auto",
+      width: `${pageDims.width}px`,
+      height: `${pageDims.height}px`,
+      border: "0",
+      display: "block",
+      visibility: "visible",
+      pointerEvents: "none",
+    });
 
     try {
       const docObj = iframe.contentWindow?.document || iframe.contentDocument;
       if (docObj) {
         docObj.open();
-        docObj.write(html);
+        docObj.write(suppressPrintBrowserHeaders(html, effPageSize, effOrientation));
         docObj.close();
 
         setTimeout(() => {
@@ -371,7 +601,7 @@ export default function PreviewModal({
           box-shadow: none !important;
           border: none !important;
           margin: 0 auto !important;
-          padding: 10mm 12mm !important;
+          padding: 8mm !important;
           page-break-after: always !important;
           break-after: page !important;
           width: 100% !important;
@@ -670,7 +900,7 @@ export default function PreviewModal({
                   }}
                   className="bg-blue-600 text-white p-4 rounded-2xl rounded-tr-xs shadow-xs leading-relaxed ml-auto break-words whitespace-pre-wrap"
                 >
-                  {resolveSmsVariables(smsText || "No SMS message text entered.", resolveVariables)}
+                  {resolveSmsPreviewText(smsText || "No SMS message text entered.", resolveVariables)}
                 </div>
                 <div className="text-right text-[10px] text-slate-400 mt-1.5 pr-1">Just now</div>
               </div>
@@ -693,7 +923,7 @@ export default function PreviewModal({
                 <div className="flex items-center gap-2">
                   <span className="text-slate-400 font-medium w-14">Subject:</span>
                   <span className="font-bold text-slate-800">
-                    {resolveSmsVariables(doc.settings?.subject || doc.name || "Notification", resolveVariables)}
+                    {resolveSmsPreviewText(doc.settings?.subject || doc.name || "Notification", resolveVariables)}
                   </span>
                 </div>
                 <div className="flex items-center gap-2 text-slate-500 text-[11px]">
@@ -850,7 +1080,7 @@ export default function PreviewModal({
                       style={{
                         width: isMobileFrame ? "375px" : isTabletFrame ? "768px" : `${pageDimensions.width}px`,
                         minHeight: `${pageDimensions.height}px`,
-                        padding: isMobileFrame ? "24px 16px 24px" : isTabletFrame ? "36px 32px 32px" : "58px 60px 42px",
+                        padding: isMobileFrame ? "24px 16px" : isTabletFrame ? "32px" : "30px",
                         boxSizing: "border-box",
                         backgroundColor: "#ffffff",
                         fontSize: doc.settings?.fontSize ? `${doc.settings.fontSize}px` : undefined,
@@ -949,7 +1179,7 @@ export default function PreviewModal({
             {/* Hidden iframe for print execution fallback */}
             <iframe
               id="preview-document-frame"
-              srcDoc={html}
+              srcDoc={suppressPrintBrowserHeaders(html, effPageSize, effOrientation)}
               title="Document Print Frame"
               className="hidden"
               tabIndex={-1}

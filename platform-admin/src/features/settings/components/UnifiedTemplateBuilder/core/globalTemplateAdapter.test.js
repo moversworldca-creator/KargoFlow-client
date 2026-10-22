@@ -38,6 +38,28 @@ describe('Global template document adapter', () => {
     }
   });
 
+  it.each(['contract', 'estimate'])('normalizes signature keys in %s preview and export payloads', (mode) => {
+    const native = {
+      settings: {},
+      header: [],
+      footer: [],
+      sections: [{
+        key: 'main',
+        title: 'Main',
+        blocks: [{ key: 'signature', type: 'signature', props: { field_key: '8 invalid/key', signer_role: 'customer' } }],
+      }],
+      rules: [],
+      attachments: [],
+    };
+
+    const doc = fromGlobalDocument(native, { mode, name: 'Template' });
+    const wire = toGlobalDocument(doc, mode);
+    const fieldKey = wire.sections[0].blocks[0].props.field_key;
+
+    expect(fieldKey).toBe('field_8_invalid_key');
+    expect(fieldKey).toMatch(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/);
+  });
+
   it('round-trips edited widget configuration without replacing computed or dynamic values', () => {
     const native = {
       settings: {},

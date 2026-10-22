@@ -127,6 +127,22 @@ describe("Live Demo: Editable Components Typography & Full Table CRUD Engine", (
           style: expect.objectContaining({ strikethrough: true }),
         })
       );
+
+      fireEvent.click(screen.getByText("Center"));
+      expect(handleUpdateItem).toHaveBeenCalledWith(
+        expect.objectContaining({
+          style: expect.objectContaining({ align: "center" }),
+        })
+      );
+
+      fireEvent.change(screen.getByTitle("Text Color").querySelector('input[type="color"]'), {
+        target: { value: "#336699" },
+      });
+      expect(handleUpdateItem).toHaveBeenCalledWith(
+        expect.objectContaining({
+          style: expect.objectContaining({ color: "#336699" }),
+        })
+      );
     });
 
     it("changes text alignment (Left, Center, Right) and Line Height", () => {

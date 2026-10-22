@@ -1,24 +1,22 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { usePlatformAuth } from './auth/PlatformAuthContext';
-import TenantPortal from './tenant/TenantPortal';
-
-import LoginPage from './auth/LoginPage';
 import PlatformShell from './layout/PlatformShell';
 
-import DashboardPage from './pages/DashboardPage';
-import TenantsPage from './pages/TenantsPage';
-import SubscriptionsPage from './pages/SubscriptionsPage';
-import PlansPage from './pages/PlansPage';
-import FeaturesPage from './pages/FeaturesPage';
-import EntitlementsPage from './pages/EntitlementsPage';
-import SupportPage from './pages/SupportPage';
-import CommunicationPage from './pages/CommunicationPage';
-import DocumentTemplatesPage from './pages/DocumentTemplatesPage';
-import AdminsPage from './pages/AdminsPage';
-import AuditPage from './pages/AuditPage';
-import ProfilePage from './pages/ProfilePage';
+const TenantPortal = lazy(() => import('./tenant/TenantPortal'));
+const LoginPage = lazy(() => import('./auth/LoginPage'));
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const TenantsPage = lazy(() => import('./pages/TenantsPage'));
+const SubscriptionsPage = lazy(() => import('./pages/SubscriptionsPage'));
+const PlansPage = lazy(() => import('./pages/PlansPage'));
+const EntitlementsPage = lazy(() => import('./pages/EntitlementsPage'));
+const SupportPage = lazy(() => import('./pages/SupportPage'));
+const CommunicationPage = lazy(() => import('./pages/CommunicationPage'));
+const DocumentTemplatesPage = lazy(() => import('./pages/DocumentTemplatesPage'));
+const AdminsPage = lazy(() => import('./pages/AdminsPage'));
+const AuditPage = lazy(() => import('./pages/AuditPage'));
+const ProfilePage = lazy(() => import('./pages/ProfilePage'));
 
 function RequireAuth() {
   const { isAuthenticated, isLoading } = usePlatformAuth();
@@ -42,31 +40,37 @@ function RequireAuth() {
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/tenant/*" element={<TenantPortal />} />
-      <Route path="/login" element={<LoginPage />} />
+    <Suspense fallback={
+      <div role="status" className="min-h-screen flex items-center justify-center gap-2 text-sm text-slate-500">
+        <Loader2 size={18} className="animate-spin" />
+        <span>Loading page...</span>
+      </div>
+    }>
+      <Routes>
+        <Route path="/tenant/*" element={<TenantPortal />} />
+        <Route path="/login" element={<LoginPage />} />
 
-      {/* Protected Routes */}
-      <Route element={<RequireAuth />}>
-        <Route element={<PlatformShell />}>
-          <Route path="/" element={<DashboardPage />} />
-          <Route path="/tenants" element={<TenantsPage />} />
-          <Route path="/subscriptions" element={<SubscriptionsPage />} />
-          <Route path="/plans" element={<PlansPage />} />
-          {/* <Route path="/features" element={<FeaturesPage />} /> */}
-          <Route path="/entitlements" element={<EntitlementsPage />} />
-          <Route path="/support" element={<SupportPage />} />
-          <Route path="/communication" element={<CommunicationPage />} />
-          <Route path="/document-templates" element={<DocumentTemplatesPage />} />
-          <Route path="/document-templates/*" element={<DocumentTemplatesPage />} />
-          <Route path="/estimate-portal-templates/*" element={<DocumentTemplatesPage />} />
-          <Route path="/communication-templates/*" element={<DocumentTemplatesPage />} />
-          <Route path="/admins" element={<AdminsPage />} />
-          <Route path="/audit" element={<AuditPage />} />
-          <Route path="/profile" element={<ProfilePage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+        {/* Protected Routes */}
+        <Route element={<RequireAuth />}>
+          <Route element={<PlatformShell />}>
+            <Route path="/" element={<DashboardPage />} />
+            <Route path="/tenants" element={<TenantsPage />} />
+            <Route path="/subscriptions" element={<SubscriptionsPage />} />
+            <Route path="/plans" element={<PlansPage />} />
+            <Route path="/entitlements" element={<EntitlementsPage />} />
+            <Route path="/support" element={<SupportPage />} />
+            <Route path="/communication" element={<CommunicationPage />} />
+            <Route path="/document-templates" element={<DocumentTemplatesPage />} />
+            <Route path="/document-templates/*" element={<DocumentTemplatesPage />} />
+            <Route path="/estimate-portal-templates/*" element={<DocumentTemplatesPage />} />
+            <Route path="/communication-templates/*" element={<DocumentTemplatesPage />} />
+            <Route path="/admins" element={<AdminsPage />} />
+            <Route path="/audit" element={<AuditPage />} />
+            <Route path="/profile" element={<ProfilePage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
         </Route>
-      </Route>
-    </Routes>
+      </Routes>
+    </Suspense>
   );
 }
