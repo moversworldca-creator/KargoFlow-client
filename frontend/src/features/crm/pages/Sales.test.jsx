@@ -225,6 +225,34 @@ describe('Sales DashboardPane', () => {
     </MemoryRouter>
   );
 
+  it('shows canonical lead and opportunity statuses separately from custom labels', async () => {
+    const lead = makeSalesQueueRow({
+      id: 801, name: 'Status Lead', system_state: 'in_progress',
+      workflow_stage: 'new_lead', workflow_stage_label: 'Stale lead stage',
+      custom_status_code: 91, custom_status_label: 'Needs COI',
+    });
+    const opportunity = makeSalesQueueRow({
+      id: 802, row_type: 'opportunity', opportunity_id: 802, lead_id: null,
+      name: 'Status Opportunity', system_state: 'cancelled',
+      workflow_stage: 'confirmed', workflow_stage_label: 'Stale opportunity stage',
+      custom_status_code: 92, custom_status_label: 'Waiting on Customer',
+    });
+    vi.mocked(getMyLeadsQueue).mockResolvedValue(makeSalesQueueResponse([lead, opportunity]));
+    render(<MemoryRouter initialEntries={[{ pathname: '/sales', state: { activeTab: 'all-leads' } }]}>
+      <Routes><Route path="/sales" element={<Sales />} /></Routes>
+    </MemoryRouter>);
+    await screen.findAllByText('Status Lead');
+    const table = screen.getByRole('table');
+    const leadRow = within(table).getByText('Status Lead').closest('tr');
+    const opportunityRow = within(table).getByText('Status Opportunity').closest('tr');
+    expect(within(leadRow).getByText('In Progress')).toBeInTheDocument();
+    expect(within(leadRow).getByText('Needs COI')).toHaveAttribute('title', 'Custom status');
+    expect(within(opportunityRow).getByText('Cancelled')).toBeInTheDocument();
+    expect(within(opportunityRow).getByText('Waiting on Customer')).toHaveAttribute('title', 'Custom status');
+    expect(within(table).queryByText('Stale lead stage')).not.toBeInTheDocument();
+    expect(within(table).queryByText('Stale opportunity stage')).not.toBeInTheDocument();
+  });
+
   it('renders dashboard metrics and scopes refreshes by selected user', async () => {
     renderSalesDashboard();
 

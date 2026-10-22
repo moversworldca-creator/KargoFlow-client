@@ -5250,16 +5250,16 @@ export default function EstimateView({
     };
 
     const estimateIsLocked = useMemo(() => {
-        const status = String(estimate?.status || '').toLowerCase();
+        const status = String(estimate?.lifecycle_state || estimate?.status || '').toLowerCase();
         const requiresReapproval = Boolean(estimate?.requires_reapproval);
         if (requiresReapproval) return false;
-        return status === 'voided';
-    }, [estimate?.requires_reapproval, estimate?.status]);
+        return ['cancelled', 'expired', 'superseded', 'voided'].includes(status);
+    }, [estimate?.requires_reapproval, estimate?.lifecycle_state, estimate?.status]);
 
     const estimateIsSigned = useMemo(() => {
-        const status = String(estimate?.status || '').toLowerCase();
-        return status === 'signed' || Boolean(estimate?.esigned);
-    }, [estimate?.esigned, estimate?.status]);
+        const status = String(estimate?.lifecycle_state || estimate?.status || '').toLowerCase();
+        return !estimate?.lifecycle_state && (status === 'signed' || Boolean(estimate?.esigned));
+    }, [estimate?.esigned, estimate?.lifecycle_state, estimate?.status]);
 
     const canModifyEstimate = canEditOpportunity && !estimateIsLocked;
 
