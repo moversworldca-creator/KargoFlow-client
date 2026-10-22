@@ -3640,6 +3640,7 @@ export default function EstimateView({
     sourceType = 'opportunity',
     isLoadingLinkedOpportunity = false,
     onRefresh,
+    onSendPortal,
     opportunityJobs = [],
     subJobServiceOptions = [],
     selectedSubJobId = '',
@@ -8194,6 +8195,10 @@ export default function EstimateView({
     };
 
     const handleSendEstimate = () => {
+        if (onSendPortal) {
+            onSendPortal();
+            return;
+        }
         if (!estimate?.id) return;
 
         // Pre-fill deposit info if available

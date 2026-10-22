@@ -1,3 +1,5 @@
+import InventoryPortalPanel from '../components/InventoryPortalPanel';
+import IssuedDocumentsPanel from '../components/IssuedDocumentsPanel';
 import { hasSendingMailbox, getComposerTemplates, getComposerTemplate } from '../leads/communicationSetupApi';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link, useLocation } from 'react-router-dom';
@@ -6633,8 +6635,8 @@ const SalesDetail = () => {
     if (!opportunity?.id || opportunity.id === 'new') return;
 
     if (actionKey === 'send_estimate') {
-      navigateToEstimateSubTab('charges');
-      setSendEstimateNonce((v) => v + 1);
+      setActiveTab('Documents');
+      navigateToDetailTab('Documents');
       return;
     }
 
@@ -8607,6 +8609,10 @@ const SalesDetail = () => {
 
             {activeTab === "Estimate" && (
                 <EstimateView
+                  onSendPortal={() => {
+                    setActiveTab('Documents');
+                    navigateToDetailTab('Documents');
+                  }}
                   onRefresh={fetchOpportunity}
                   opportunity={isLeadPath ? estimateOpportunity : opportunity}
                   sourceType={isLeadPath ? 'lead' : 'opportunity'}
@@ -8641,39 +8647,19 @@ const SalesDetail = () => {
             )}
 
             {activeTab === "Documents" && (
-                <EstimateView
-                  onRefresh={fetchOpportunity}
-                  opportunity={isLeadPath ? estimateOpportunity : opportunity}
-                  sourceType={isLeadPath ? 'lead' : 'opportunity'}
-                  isLoadingLinkedOpportunity={isLeadPath && isLoadingEstimateOpportunity}
-                  opportunityJobs={opportunityJobs}
-                  subJobServiceOptions={computedSubJobServiceOptions}
-                  selectedSubJobId={selectedEstimateJobId}
-                  onSelectedSubJobChange={setSelectedEstimateJobId}
-                  onCreateSubJob={createSubJobFromServiceType}
-                  onRefreshSubJobs={loadOpportunityJobs}
-                  onDeleteSelectedSubJob={deleteSelectedEstimateJob}
-                  onUpdateSelectedSubJob={updateSelectedEstimateJobPlanning}
-                  triggerSendEstimate={sendEstimateNonce}
-                  triggerViewEstimate={triggerViewEstimateNonce}
-                  view={view}
-                  initialSubTab="documents"
-                  onSubTabChange={(subTab) => {
-                    if (subTab === 'documents') {
-                      setActiveTab('Documents');
-                      navigateToDetailTab('Documents');
-                    } else if (subTab === 'payments') {
-                      setActiveTab('Payments');
-                      navigateToDetailTab('Payments');
-                    } else {
-                      setActiveTab('Estimate');
-                      navigateToEstimateSubTab(subTab);
-                    }
-                  }}
-                  isOpportunityLocked={isOpportunityLost}
-                  canCreateOpportunity={canCreateOpportunity()}
-                  canEditOpportunity={canEditOpportunity()}
-                />
+              <div className="space-y-5">
+              <InventoryPortalPanel
+                key={`inventory-${isLeadPath ? 'lead' : 'opportunity'}-${opportunity?.id}`}
+                leadId={isLeadPath ? opportunity?.id : null}
+                opportunityId={!isLeadPath ? opportunity?.id : null}
+                canEdit={isLeadPath ? hasPermission(PERMISSIONS.LEAD_EDIT) : !isOpportunityLost && canEditOpportunity()}
+              />
+              <IssuedDocumentsPanel
+                key={(isLeadPath ? estimateOpportunity : opportunity)?.id || 'none'}
+                opportunityId={(isLeadPath ? estimateOpportunity : opportunity)?.id}
+                canEdit={!isOpportunityLost && canEditOpportunity()}
+              />
+              </div>
             )}
 
             {activeTab === "Files & Photos" && (
@@ -9841,6 +9827,10 @@ const SalesDetail = () => {
 
             {activeTab === "Payments" && (
                 <EstimateView
+                  onSendPortal={() => {
+                    setActiveTab('Documents');
+                    navigateToDetailTab('Documents');
+                  }}
                   onRefresh={fetchOpportunity}
                   opportunity={isLeadPath ? estimateOpportunity : opportunity}
                   sourceType={isLeadPath ? 'lead' : 'opportunity'}

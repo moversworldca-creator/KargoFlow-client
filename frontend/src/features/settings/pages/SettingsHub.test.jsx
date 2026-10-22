@@ -54,6 +54,10 @@ vi.mock('../components/MoverSizeSettings', () => ({
   default: ({ branchId }) => <div data-testid="mover-size-settings-module">Move Sizes Settings: branch {branchId}</div>,
 }));
 
+vi.mock('../components/IntegrationSettings', () => ({
+  default: ({ view }) => <div data-testid="integration-settings-module">Integration Settings: {view}</div>,
+}));
+
 vi.mock('../components/InventoryWorkflowSettings', () => ({
   default: ({ branchId }) => <div data-testid="inventory-workflow-settings-module">Inventory Settings: branch {branchId}</div>,
 }));
@@ -61,6 +65,7 @@ vi.mock('../components/InventoryWorkflowSettings', () => ({
 describe('SettingsHub', () => {
   beforeEach(() => {
     navigate.mockClear();
+    permissions.canAny = () => true;
     routeState.params = { mainGroup: 'company', subTab: 'profile' };
   });
 
@@ -130,6 +135,34 @@ describe('SettingsHub', () => {
     expect(screen.getByRole('tab', { name: /Move Sizes/i })).toBeInTheDocument();
     expect(screen.getByTestId('mover-size-settings-module')).toHaveTextContent('Move Sizes Settings: branch 1');
   });
+
+it('exposes the payment gateway from the active settings navigation', () => {
+  render(<SettingsHub />);
+  fireEvent.click(screen.getByTitle('Integrations'));
+  expect(navigate).toHaveBeenCalledWith('/settings/integrations/payment-gateway');
+});
+
+it('opens Authorize.Net configuration on the payment gateway route', () => {
+  routeState.params = { mainGroup: 'integrations', subTab: 'payment-gateway' };
+  render(<SettingsHub />);
+  expect(screen.getByRole('tab', { name: /Payment Gateway/i })).toBeInTheDocument();
+  expect(screen.getByTestId('integration-settings-module')).toHaveTextContent('Integration Settings: gateways');
+});
+
+it('normalizes the existing integrations link to the gateway configuration', () => {
+  routeState.params = { mainGroup: 'integrations' };
+  render(<SettingsHub />);
+  expect(navigate).toHaveBeenCalledWith('/settings/integrations/payment-gateway', { replace: true });
+});
+
+it('hides the integration entry when settings view permission is missing', () => {
+  permissions.canAny = (required) => !required.includes('settings.view');
+  routeState.params = { mainGroup: 'company', subTab: 'profile' };
+  render(<SettingsHub />);
+  expect(screen.queryByTitle('Integrations')).not.toBeInTheDocument();
+  permissions.canAny = () => true;
+});
+
 
   it('redirects legacy inventory route to moves inventory tab', () => {
     routeState.params = { mainGroup: 'inventory', subTab: 'inventory' };
