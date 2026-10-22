@@ -78,17 +78,13 @@ export function isoToLocalInput(value) {
 
 export const humanize = (code) => String(code || '').replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 
-// Backend states, shown with their own names.
-export const REVISION_STATE_TONE = {
-  draft: 'slate', validated: 'blue', pending_approval: 'amber', approved: 'indigo', scheduled: 'violet',
-  published: 'green', retired: 'dark', rejected: 'rose',
-};
-export const TARIFF_STATE_TONE = { draft: 'slate', active: 'green', inactive: 'amber', archived: 'dark' };
-export const ESTIMATE_STATE_TONE = {
-  draft: 'slate', ready: 'blue', sent: 'indigo', viewed: 'violet', accepted: 'green',
-  reapproval_required: 'amber', superseded: 'dark', expired: 'rose', cancelled: 'rose',
-};
-export const CHANGE_ORDER_STATE_TONE = {
-  draft: 'slate', ready: 'blue', sent: 'indigo', viewed: 'violet', accepted: 'green', cancelled: 'rose', superseded: 'dark',
-};
-export const SEVERITY_TONE = { error: 'rose', warning: 'amber', info: 'blue' };
+
+/** A rate as sent ("120.0000" or "2.7500"), shown without trailing zeros beyond cents: "$120.00", "$2.75". */
+export function formatRate(value, currency = 'USD') {
+  if (value === null || value === undefined || value === '') return '—';
+  const text = String(value).trim();
+  if (!/^-?\d+\.\d+$/.test(text)) return formatMoney(text, currency);
+  const [whole, fraction] = text.split('.');
+  const trimmed = fraction.replace(/0+$/, '');
+  return formatMoney(`${whole}.${trimmed.length >= 2 ? trimmed : trimmed.padEnd(2, '0')}`, currency);
+}
