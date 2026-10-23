@@ -112,7 +112,7 @@ describe("backend widget preview content", () => {
     expect(html).not.toContain("$50.00");
   });
 
-  it("updates live charge preview from custom rates while keeping calculated summary values", () => {
+  it("ignores custom rates and summary overrides in the live preview", () => {
     const { rerender } = render(
       <BackendWidgetPreview block={{
         type: "charges",
@@ -125,8 +125,10 @@ describe("backend widget preview content", () => {
       }} />
     );
     const movingLaborRow = screen.getByText("Moving labor").closest("tr");
-    expect(within(movingLaborRow).getByText("$200.00")).toBeInTheDocument();
-    expect(within(movingLaborRow).getByText("$1,000.00")).toBeInTheDocument();
+    expect(within(movingLaborRow).getByText("$185.00")).toBeInTheDocument();
+    expect(within(movingLaborRow).getByText("$925.00")).toBeInTheDocument();
+    expect(within(movingLaborRow).queryByText("$200.00")).not.toBeInTheDocument();
+    expect(within(movingLaborRow).queryByText("$1,000.00")).not.toBeInTheDocument();
 
     rerender(
       <BackendWidgetPreview block={{
@@ -329,7 +331,7 @@ describe("backend widget preview content", () => {
     expect(html).not.toContain("text-align:left; color:red");
   });
 
-  it("compiles widget custom values, dynamic bindings, and custom subtotal overrides", () => {
+  it("compiles widget custom values and dynamic bindings but never a custom subtotal", () => {
     const html = compileDocumentToHtml({
       items: [
         {
@@ -350,7 +352,7 @@ describe("backend widget preview content", () => {
           blockType: "estimate_summary",
           props: {
             custom_fields: {
-              subtotal: { mode: "custom", value: 1800, customValue: 1800, dynamicValue: "{{estimate.subtotal}}" },
+              subtotal: { label: "Moving subtotal", mode: "custom", value: 1800, customValue: 1800, dynamicValue: "{{estimate.subtotal}}" },
             },
           },
         },
@@ -361,10 +363,12 @@ describe("backend widget preview content", () => {
     expect(html).toContain("Access note");
     expect(html).toContain("Side entrance");
     expect(html).toContain("Alex Customer");
-    expect(html).toContain("$1,800.00");
+    expect(html).toContain("Moving subtotal");
+    expect(html).toContain("$1,475.00");
+    expect(html).not.toContain("$1,800.00");
   });
 
-  it("compiles custom charge rates and calculated totals but ignores calculated summary overrides", () => {
+  it("compiles record charge rates and calculated totals, ignoring rate and summary overrides", () => {
     const html = compileDocumentToHtml({
       items: [
         {
@@ -391,8 +395,9 @@ describe("backend widget preview content", () => {
       ],
     });
 
-    expect(html).toContain("$200.00");
-    expect(html).toContain("$1,000.00");
+    expect(html).toContain("$185.00");
+    expect(html).toContain("$925.00");
+    expect(html).not.toContain("$1,000.00");
     expect(html).toContain("$77.63");
     expect(html).toContain("$1,502.63");
     expect(html).not.toContain("$2.00");

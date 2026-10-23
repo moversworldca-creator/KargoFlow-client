@@ -113,21 +113,20 @@ function headingStyleCss(style = {}, align = style.align || style.textAlign) {
   return `${declarations.join("; ")};`;
 }
 
-function configuredField(props, key, label, fallback, { allowCustom = true, amount = false } = {}) {
+function configuredField(props, key, label, fallback, { amount = false } = {}) {
   const field = props.custom_fields?.[key] || {};
-  const isCustom = field.mode === "custom" && allowCustom;
+  const configuredLabel = previewMergeFields(field.label || label);
+  // Money always comes from the record (matching the server renderer); only its label is configurable.
+  if (amount) return { label: configuredLabel, value: previewMergeFields(fallback) };
+  const isCustom = field.mode === "custom";
   const rawValue = isCustom
     ? field.customValue ?? field.value ?? fallback
     : field.mode === "dynamic"
       ? field.dynamicValue || field.value || fallback
       : fallback;
-  const resolvedValue = isCustom ? rawValue : previewMergeFields(rawValue);
-  const value = amount && isCustom && resolvedValue !== "" && Number.isFinite(Number(resolvedValue))
-    ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(resolvedValue))
-    : resolvedValue;
   return {
-    label: previewMergeFields(field.label || label),
-    value,
+    label: configuredLabel,
+    value: isCustom ? rawValue : previewMergeFields(rawValue),
   };
 }
 
@@ -316,8 +315,6 @@ function compileBackendWidgetContent(item) {
           configuredField(props, "amount_label", "Amount", "Amount").label,
         ],
         charges.map(([name, quantity, rate, total], index) => {
-          const customRate = props.custom_fields?.[`charge_${index}_unit_price`];
-          const rawRate = Number(customRate?.customValue ?? customRate?.value ?? rate.replace(/[$,]/g, ""));
           const displayRate = configuredField(
             props,
             `charge_${index}_unit_price`,
@@ -331,14 +328,11 @@ function compileBackendWidgetContent(item) {
             "Description",
             name,
           ).value;
-          const calculatedTotal = customRate?.mode === "custom" && Number.isFinite(rawRate)
-            ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(rawRate * Number(quantity))
-            : total;
           return [
             displayName,
             ...(type === "line_items" || props.show_quantity !== false ? [quantity] : []),
             displayRate,
-            calculatedTotal,
+            total,
           ];
         }),
       );
@@ -349,16 +343,16 @@ function compileBackendWidgetContent(item) {
         ? [
           configuredField(props, "subtotal", "Subtotal", "$1,475.00", { amount: true }),
           ...(props.show_discount !== false ? [configuredField(props, "discount", "Discount", "$50.00", { amount: true })] : []),
-          ...(props.show_tax !== false ? [configuredField(props, "tax", "Tax", "$77.63", { amount: true, allowCustom: false })] : []),
-          configuredField(props, "total", "Estimate total", "$1,502.63", { amount: true, allowCustom: false }),
+          ...(props.show_tax !== false ? [configuredField(props, "tax", "Tax", "$77.63", { amount: true })] : []),
+          configuredField(props, "total", "Estimate total", "$1,502.63", { amount: true }),
           ...(props.show_deposit ? [configuredField(props, "deposit", "Deposit due", "$300.00", { amount: true })] : []),
         ]
         : [
           configuredField(props, "subtotal", "Subtotal", "$1,475.00", { amount: true }),
           ...(props.show_discount !== false ? [configuredField(props, "discount", "Discount", "$50.00", { amount: true })] : []),
-          ...(props.show_tax !== false ? [configuredField(props, "tax", "Tax", "$77.63", { amount: true, allowCustom: false })] : []),
-          configuredField(props, "total", "Invoice total", "$1,502.63", { amount: true, allowCustom: false }),
-          ...(props.show_balance !== false ? [configuredField(props, "balance", "Balance due", "$1,202.63", { amount: true, allowCustom: false })] : []),
+          ...(props.show_tax !== false ? [configuredField(props, "tax", "Tax", "$77.63", { amount: true })] : []),
+          configuredField(props, "total", "Invoice total", "$1,502.63", { amount: true }),
+          ...(props.show_balance !== false ? [configuredField(props, "balance", "Balance due", "$1,202.63", { amount: true })] : []),
         ];
       return table([
         configuredField(props, "section_title", estimate ? "Estimate summary" : "Invoice totals", "").label,

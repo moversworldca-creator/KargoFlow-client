@@ -147,31 +147,24 @@ function resolvePreviewText(value, sampleData, scope = {}) {
 }
 
 const CURRENCY_AMOUNT_FIELDS = new Set(["subtotal", "discount", "tax", "total", "deposit", "balance"]);
-const LEGACY_TOTAL_FIELD_KEYS = {
-  subtotal: "subtotal",
-  discount: "discount",
-  tax: "tax",
-  grandTotal: "total",
-  depositDue: "deposit",
-  balanceDue: "balance",
-};
 
-function getConfiguredField(props, key, label, value, sampleData, scope = {}, { amount = false, allowCustom = true } = {}) {
+function getConfiguredField(props, key, label, value, sampleData, scope = {}, { amount = false } = {}) {
   const field = (props?.custom_fields || props?.customFields)?.[key];
-  const configuredLabel = field?.label || label;
-  const isCustom = field?.mode === "custom" && allowCustom;
+  const configuredLabel = resolvePreviewText(field?.label || label, sampleData, scope);
+  // Money always comes from the record (matching the server renderer); only its label is configurable.
+  if (amount || CURRENCY_AMOUNT_FIELDS.has(key)) {
+    return { label: configuredLabel, value: resolvePreviewText(value, sampleData, scope) };
+  }
+  const isCustom = field?.mode === "custom";
   const configuredValue = isCustom
     ? String(field.customValue ?? field.value ?? "")
     : field?.mode === "dynamic"
       ? field.dynamicValue || field.value || value
       : value;
-  const displayValue = isCustom && (amount || CURRENCY_AMOUNT_FIELDS.has(key))
-    ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(configuredValue))
-    : configuredValue;
   return {
-    label: resolvePreviewText(configuredLabel, sampleData, scope),
+    label: configuredLabel,
     value: isCustom
-      ? escapeHtml(displayValue)
+      ? escapeHtml(configuredValue)
       : resolvePreviewText(configuredValue, sampleData, scope),
   };
 }
@@ -531,10 +524,6 @@ function BackendWidgetPreview({ block, sampleData = true, scope = {}, customerPr
         scope,
         { amount: true },
       );
-      const rawRate = Number(props.custom_fields?.[`charge_${index}_unit_price`]?.customValue
-        ?? props.custom_fields?.[`charge_${index}_unit_price`]?.value
-        ?? row.unit_price);
-      const quantity = Number(row.quantity) || 0;
       return {
       description: getConfiguredField(
         props,
@@ -546,10 +535,7 @@ function BackendWidgetPreview({ block, sampleData = true, scope = {}, customerPr
       ).value,
       quantity: row.quantity,
       unit_price: rate.value,
-      total: props.custom_fields?.[`charge_${index}_unit_price`]?.mode === "custom"
-        && Number.isFinite(rawRate)
-        ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(rawRate * quantity)
-        : row.total,
+      total: row.total,
     };
     });
     return (
@@ -570,12 +556,12 @@ function BackendWidgetPreview({ block, sampleData = true, scope = {}, customerPr
       ? { subtotal: "Subtotal", discount: "Discount", tax: "Tax", total: "Estimate total", deposit: "Deposit due", balance: "Balance due" }
       : { subtotal: "Subtotal", discount: "Discount", tax: "Tax", total: "Invoice total", balance: "Balance due" };
     const rows = [
-      getConfiguredField(props, "subtotal", names.subtotal, isEstimate ? "{{estimate.subtotal}}" : "{{invoice.total}}", sampleData, scope),
-      ...((props.show_discount !== false) ? [getConfiguredField(props, "discount", names.discount, isEstimate ? "{{estimate.discount}}" : "{{invoice.total}}", sampleData, scope)] : []),
-      ...((props.show_tax !== false) ? [getConfiguredField(props, "tax", names.tax, isEstimate ? "{{estimate.tax}}" : "{{invoice.tax}}", sampleData, scope, { allowCustom: false })] : []),
-      getConfiguredField(props, "total", names.total, isEstimate ? "{{estimate.grand_total}}" : "{{invoice.total}}", sampleData, scope, { allowCustom: false }),
+      getConfiguredField(props, "subtotal", names.subtotal, isEstimate ? "{{estimate.subtotal}}" : "{{invoice.subtotal}}", sampleData, scope),
+      ...((props.show_discount !== false) ? [getConfiguredField(props, "discount", names.discount, isEstimate ? "{{estimate.discount}}" : "{{invoice.discount}}", sampleData, scope)] : []),
+      ...((props.show_tax !== false) ? [getConfiguredField(props, "tax", names.tax, isEstimate ? "{{estimate.tax}}" : "{{invoice.tax}}", sampleData, scope)] : []),
+      getConfiguredField(props, "total", names.total, isEstimate ? "{{estimate.grand_total}}" : "{{invoice.total}}", sampleData, scope),
       ...(isEstimate && props.show_deposit ? [getConfiguredField(props, "deposit", names.deposit, "{{estimate.deposit_amount}}", sampleData, scope)] : []),
-      ...(!isEstimate && props.show_balance !== false ? [getConfiguredField(props, "balance", names.balance, "{{invoice.balance_due}}", sampleData, scope, { allowCustom: false })] : []),
+      ...(!isEstimate && props.show_balance !== false ? [getConfiguredField(props, "balance", names.balance, "{{invoice.balance_due}}", sampleData, scope)] : []),
       ...(isEstimate && props.show_binding_note ? [{ label: "Estimate type", value: SAMPLE_VARIABLES["estimate.binding_type"] }] : []),
     ];
     return <PreviewTable columns={[{ key: "label", label: getConfiguredField(props, "section_title", block.label || (isEstimate ? "Estimate summary" : "Invoice totals"), "", sampleData, scope).label }, { key: "value", label: "Amount" }]} rows={rows} />;
@@ -878,14 +864,10 @@ function DocumentBlock({
                           ? "amount"
                           : col.key;
                       const configured = item.customFields?.[`charge_${rowIndex}_${normalizedKey}`];
-                      const customRate = item.customFields?.[`charge_${rowIndex}_unit_price`];
-                      const quantity = Number(row.quantity) || 0;
-                      const rate = Number(customRate?.customValue ?? customRate?.value);
-                      const value = normalizedKey === "amount" && customRate?.mode === "custom" && Number.isFinite(rate)
-                        ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(rate * quantity)
-                        : configured?.mode === "custom"
-                          ? configured.customValue ?? configured.value ?? row[col.key] ?? ""
-                          : row[col.key] || "";
+                      const isMoney = normalizedKey === "unit_price" || normalizedKey === "amount";
+                      const value = !isMoney && configured?.mode === "custom"
+                        ? configured.customValue ?? configured.value ?? row[col.key] ?? ""
+                        : row[col.key] || "";
                       return (
                       <td
                         key={col.id}
@@ -931,15 +913,7 @@ function DocumentBlock({
               className="totals w-72 max-w-full bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1.5 box-border"
             >
               {visibleFields.map((f) => {
-                const configuredField = item.customFields?.[LEGACY_TOTAL_FIELD_KEYS[f.id]];
-                const configuredValue = configuredField?.mode === "custom"
-                  ? configuredField.customValue ?? configuredField.value
-                  : configuredField?.mode === "dynamic"
-                    ? configuredField.dynamicValue || configuredField.value
-                    : f.value || "$0.00";
-                const displayValue = configuredField?.mode === "custom"
-                  ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(configuredValue))
-                  : configuredValue;
+                const displayValue = f.value || "$0.00";
                 return (
                 <div key={f.id} className="flex justify-between items-center py-0.5 gap-2 min-w-0">
                   <InlineEdit

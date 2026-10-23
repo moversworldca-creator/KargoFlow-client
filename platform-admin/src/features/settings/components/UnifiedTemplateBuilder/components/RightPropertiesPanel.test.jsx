@@ -124,6 +124,34 @@ describe("RightPropertiesPanel widget fields", () => {
     expect(onUpdate).not.toHaveBeenCalled();
   });
 
+  it("keeps record money values locked while their labels stay editable", () => {
+    const onUpdate = vi.fn();
+    render(
+      <StatefulPropertiesPanel
+        initialItem={{
+          id: "totals-locked",
+          type: "builder_block",
+          blockType: "totals",
+          label: "Totals",
+          props: { custom_fields: { subtotal: { mode: "custom", value: 1, customValue: 1 } } },
+          propsSchema: { type: "object", properties: {} },
+        }}
+        onUpdate={onUpdate}
+      />
+    );
+
+    expect(screen.getByRole("spinbutton", { name: "Subtotal custom value" })).toBeDisabled();
+    expect(screen.getByLabelText("Subtotal CRM placeholder")).toBeDisabled();
+    fireEvent.change(screen.getByRole("textbox", { name: "Subtotal field name" }), { target: { value: "Moving subtotal" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply Changes" }));
+
+    const subtotal = onUpdate.mock.calls.at(-1)[0].props.custom_fields.subtotal;
+    expect(subtotal.label).toBe("Moving subtotal");
+    expect(subtotal).not.toHaveProperty("mode");
+    expect(subtotal).not.toHaveProperty("customValue");
+    expect(subtotal).not.toHaveProperty("dynamicValue");
+  });
+
   it("applies added pricing field edits to builder block custom fields", () => {
     const onUpdate = vi.fn();
 

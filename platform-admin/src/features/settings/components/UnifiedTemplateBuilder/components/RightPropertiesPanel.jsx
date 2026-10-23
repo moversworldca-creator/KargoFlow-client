@@ -360,16 +360,16 @@ const WIDGET_EDIT_FIELDS = {
   ],
   estimate_summary: [
     { key: "section_title", label: "Section title", value: "Estimate summary", source: "Estimate summary", type: "text", labelOnly: true },
-    { key: "subtotal", label: "Subtotal", value: 1475, source: "{{estimate.subtotal}}", type: "currency", pricing: true },
-    { key: "discount", label: "Discount", value: 50, source: "{{estimate.discount}}", type: "currency", pricing: true },
+    { key: "subtotal", label: "Subtotal", value: 1475, source: "{{estimate.subtotal}}", type: "currency", pricing: true, readOnly: true },
+    { key: "discount", label: "Discount", value: 50, source: "{{estimate.discount}}", type: "currency", pricing: true, readOnly: true },
     { key: "tax", label: "Tax (calculated)", value: 77.63, source: "{{estimate.tax}}", type: "number", readOnly: true },
     { key: "total", label: "Estimate total (calculated)", value: 1502.63, source: "{{estimate.grand_total}}", type: "number", readOnly: true },
-    { key: "deposit", label: "Deposit due", value: 300, source: "{{estimate.deposit_amount}}", type: "currency", pricing: true },
+    { key: "deposit", label: "Deposit due", value: 300, source: "{{estimate.deposit_amount}}", type: "currency", pricing: true, readOnly: true },
   ],
   totals: [
     { key: "section_title", label: "Section title", value: "Invoice totals", source: "Invoice totals", type: "text", labelOnly: true },
-    { key: "subtotal", label: "Subtotal", value: 1475, source: "{{invoice.subtotal}}", type: "currency", pricing: true },
-    { key: "discount", label: "Discount", value: 50, source: "{{invoice.discount}}", type: "currency", pricing: true },
+    { key: "subtotal", label: "Subtotal", value: 1475, source: "{{invoice.subtotal}}", type: "currency", pricing: true, readOnly: true },
+    { key: "discount", label: "Discount", value: 50, source: "{{invoice.discount}}", type: "currency", pricing: true, readOnly: true },
     { key: "tax", label: "Tax (calculated)", value: 77.63, source: "{{invoice.tax}}", type: "number", readOnly: true },
     { key: "total", label: "Invoice total (calculated)", value: 1502.63, source: "{{invoice.total}}", type: "number", readOnly: true },
     { key: "balance", label: "Balance due (calculated)", value: 1202.63, source: "{{invoice.balance_due}}", type: "number", readOnly: true },
@@ -381,11 +381,11 @@ const WIDGET_EDIT_FIELDS = {
     { key: "rate_label", label: "Rate heading", value: "Rate", source: "Rate", type: "text", labelOnly: true },
     { key: "amount_label", label: "Amount heading", value: "Amount", source: "Amount", type: "text", labelOnly: true },
     { key: "charge_0_description", label: "Moving labor", value: "Moving labor", source: "Moving labor", type: "text", pricing: true },
-    { key: "charge_0_unit_price", label: "Moving labor rate", value: 185, source: "$185.00", type: "currency", pricing: true },
+    { key: "charge_0_unit_price", label: "Moving labor rate", value: 185, source: "$185.00", type: "currency", pricing: true, readOnly: true },
     { key: "charge_1_description", label: "Moving truck", value: "Moving truck", source: "Moving truck", type: "text", pricing: true },
-    { key: "charge_1_unit_price", label: "Moving truck rate", value: 350, source: "$350.00", type: "currency", pricing: true },
+    { key: "charge_1_unit_price", label: "Moving truck rate", value: 350, source: "$350.00", type: "currency", pricing: true, readOnly: true },
     { key: "charge_2_description", label: "Packing materials", value: "Packing materials", source: "Packing materials", type: "text", pricing: true },
-    { key: "charge_2_unit_price", label: "Packing materials rate", value: 200, source: "$200.00", type: "currency", pricing: true },
+    { key: "charge_2_unit_price", label: "Packing materials rate", value: 200, source: "$200.00", type: "currency", pricing: true, readOnly: true },
   ],
   line_items: [
     { key: "section_title", label: "Section title", value: "Invoice line items", source: "Invoice line items", type: "text", labelOnly: true },
@@ -394,11 +394,11 @@ const WIDGET_EDIT_FIELDS = {
     { key: "rate_label", label: "Rate heading", value: "Rate", source: "Rate", type: "text", labelOnly: true },
     { key: "amount_label", label: "Amount heading", value: "Amount", source: "Amount", type: "text", labelOnly: true },
     { key: "charge_0_description", label: "Moving labor", value: "Moving labor", source: "Moving labor", type: "text", pricing: true },
-    { key: "charge_0_unit_price", label: "Moving labor rate", value: 185, source: "$185.00", type: "currency", pricing: true },
+    { key: "charge_0_unit_price", label: "Moving labor rate", value: 185, source: "$185.00", type: "currency", pricing: true, readOnly: true },
     { key: "charge_1_description", label: "Moving truck", value: "Moving truck", source: "Moving truck", type: "text", pricing: true },
-    { key: "charge_1_unit_price", label: "Moving truck rate", value: 350, source: "$350.00", type: "currency", pricing: true },
+    { key: "charge_1_unit_price", label: "Moving truck rate", value: 350, source: "$350.00", type: "currency", pricing: true, readOnly: true },
     { key: "charge_2_description", label: "Packing materials", value: "Packing materials", source: "Packing materials", type: "text", pricing: true },
-    { key: "charge_2_unit_price", label: "Packing materials rate", value: 200, source: "$200.00", type: "currency", pricing: true },
+    { key: "charge_2_unit_price", label: "Packing materials rate", value: 200, source: "$200.00", type: "currency", pricing: true, readOnly: true },
   ],
   crew_trucks: [
     { key: "crew_title", label: "Crew column heading", value: "Crew / vehicle", source: "Crew / vehicle", type: "text", labelOnly: true },
@@ -952,7 +952,10 @@ export default function RightPropertiesPanel({
       };
       const defaultValueWasEdited = String(currentValue).trim() !== String(field.value ?? "").trim();
       const useStaticValue = !field.pricing && defaultValueWasEdited && value === (field.source || "");
-      if (useCustomPricing) {
+      if (field.readOnly) {
+        // Record money cannot be replaced by a custom value or another CRM field; only its label is kept.
+        ["mode", "value", "customValue", "dynamicValue"].forEach((key) => delete nextField[key]);
+      } else if (useCustomPricing) {
         Object.assign(nextField, {
           mode: "custom",
           value: parsedCustomValue,
@@ -1980,7 +1983,8 @@ export default function RightPropertiesPanel({
                   />
                   <select
                     aria-label={`${field.label} CRM placeholder`}
-                    className="w-full min-w-0 rounded border border-slate-200 bg-white px-1.5 py-1.5 text-[10px] focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-100"
+                    disabled={field.readOnly}
+                    className="w-full min-w-0 rounded border border-slate-200 bg-white px-1.5 py-1.5 text-[10px] focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400"
                     value={bindingDrafts[field.key] || ""}
                     onChange={(event) => setBindingDrafts((current) => ({
                       ...current,
