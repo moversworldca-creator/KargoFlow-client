@@ -38,6 +38,10 @@ export function chargeCategoryLabel(category) {
 }
 
 const PRIMARY = "#1E40AF";
+const INK = "#0F172A";
+const MUTED = "#64748B";
+const BORDER = "#E2E8F0";
+const SURFACE = "#F8FAFC";
 const DEFAULT_TITLES = { estimate: "Estimate", estimate_portal: "Estimate", invoice: "Invoice" };
 
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -55,15 +59,15 @@ const on = (props, key) => props?.[key] !== false;
 
 const kv = (pairs) => {
   const rows = pairs.filter(([, value]) => value).map(([label, value]) =>
-    `<tr><td style="color:#6b7280;padding:2px 10px 2px 0;white-space:nowrap;width:1%;vertical-align:top">${esc(label)}</td><td style="padding:2px 0;vertical-align:top">${esc(value)}</td></tr>`).join("");
-  return rows ? `<table style="width:100%;border-collapse:collapse;table-layout:auto;font-size:12px">${rows}</table>` : "";
+    `<tr><td style="color:${MUTED};padding:4px 12px 4px 0;width:36%;vertical-align:top;line-height:1.5">${esc(label)}</td><td style="padding:4px 0;vertical-align:top;font-weight:500;color:${INK};overflow-wrap:anywhere;line-height:1.5">${esc(value)}</td></tr>`).join("");
+  return rows ? `<table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px">${rows}</table>` : "";
 };
 const card = (title, body) => (body
-  ? `<div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:${PRIMARY};margin:0 0 6px">${esc(title)}</div>${body}`
+  ? `<div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:${PRIMARY};margin:0 0 10px;padding-bottom:9px;border-bottom:1px solid ${BORDER}">${esc(title)}</div>${body}`
   : "");
 const grid = (cells) => {
   const filled = cells.filter(Boolean);
-  const cell = (content, span) => `<td${span ? ' colspan="3"' : ""} style="vertical-align:top;border:1px solid #e5e7eb;border-radius:6px;padding:10px 12px">${content}</td>`;
+  const cell = (content, span) => `<td${span ? ' colspan="3"' : ""} style="vertical-align:top;border:1px solid ${BORDER};background:${SURFACE};border-radius:10px;padding:15px 16px">${content}</td>`;
   const rows = [];
   for (let index = 0; index < filled.length; index += 2) {
     const pair = filled.slice(index, index + 2);
@@ -71,10 +75,10 @@ const grid = (cells) => {
       ? `<tr>${cell(pair[0])}<td style="width:12px;border:none;padding:0"></td>${cell(pair[1])}</tr>`
       : `<tr>${cell(pair[0], true)}</tr>`);
   }
-  return rows.length ? `<table style="width:100%;border-collapse:separate;border-spacing:0 10px;table-layout:fixed">${rows.join("")}</table>` : "";
+  return rows.length ? `<table style="width:100%;border-collapse:separate;border-spacing:0 12px;table-layout:fixed">${rows.join("")}</table>` : "";
 };
 export const headingBar = (title) => (title
-  ? `<div style="font-size:12.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:${PRIMARY};border-bottom:2px solid ${PRIMARY};padding-bottom:4px;margin:12px 0 6px">${esc(merge(title))}</div>`
+  ? `<div style="font-size:14px;font-weight:700;letter-spacing:-.01em;color:${INK};border-bottom:1px solid ${BORDER};padding-bottom:10px;margin:18px 0 10px">${esc(merge(title))}</div>`
   : "");
 
 function header(props, mode) {
@@ -84,11 +88,12 @@ function header(props, mode) {
     contact.push([sample("company.phone"), sample("company.email"), sample("company.website")].filter(Boolean).join(" · "));
   }
   if (on(props, "show_license") && sample("company.state_license_number")) contact.push(`Licence #${sample("company.state_license_number")}`);
+  const initials = sample("company.name").split(/\s+/).filter(Boolean).slice(0, 2).map(word => word[0]).join("").toUpperCase();
   const logo = on(props, "show_logo")
-    ? `<div style="display:inline-block;margin-bottom:6px;padding:10px 14px;border:1px dashed #cbd5e1;border-radius:6px;color:#94a3b8;font-size:10px;font-weight:600;letter-spacing:.08em">YOUR LOGO</div>`
+    ? `<div style="display:inline-block;margin-bottom:10px;padding:9px 10px;border:1px solid ${BORDER};border-radius:9px;background:${SURFACE};color:${PRIMARY};font-size:13px;font-weight:700;letter-spacing:.04em">${esc(initials)}</div>`
     : "";
-  const left = `${logo}<div style="font-size:19px;font-weight:700;color:${PRIMARY}">${esc(sample("company.name"))}</div>`
-    + contact.filter(Boolean).map((line) => `<div style="color:#4b5563;font-size:11.5px;line-height:1.55">${esc(line)}</div>`).join("");
+  const left = `${logo}<div style="font-size:19px;line-height:1.3;font-weight:700;letter-spacing:-.02em;color:${INK};margin-bottom:6px">${esc(sample("company.name"))}</div>`
+    + contact.filter(Boolean).map((line) => `<div style="color:${MUTED};font-size:11px;line-height:1.65;overflow-wrap:anywhere">${esc(line)}</div>`).join("");
   const meta = [];
   // The canvas does not know the template kind; the server uses the real one. Infer it from the title.
   const title = merge(props?.title || DEFAULT_TITLES[mode] || "Agreement");
@@ -101,17 +106,17 @@ function header(props, mode) {
   }
   if (on(props, "show_customer")) meta.push(["Prepared for", sample("customer.full_name")]);
   const metaRows = meta.filter(([, value]) => value).map(([label, value]) =>
-    `<tr><td style="color:#6b7280;padding:2px 0 2px 14px;text-align:right">${esc(label)}</td><td style="padding:2px 0 2px 14px;text-align:right">${esc(value)}</td></tr>`).join("");
-  return `<table style="width:100%;border-collapse:collapse;table-layout:auto;border-bottom:3px solid ${PRIMARY}"><tr>`
-    + `<td style="vertical-align:top;padding:0 0 12px">${left}</td>`
-    + `<td style="vertical-align:top;padding:0 0 12px;text-align:right"><div style="font-size:24px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:${PRIMARY}">${esc(title)}</div>`
-    + (metaRows ? `<table style="width:auto;margin-left:auto;border-collapse:collapse;table-layout:auto;font-size:11.5px">${metaRows}</table>` : "")
+    `<tr><td style="color:${MUTED};padding:3px 10px 3px 0;text-align:right;vertical-align:top">${esc(label)}</td><td style="padding:3px 0;text-align:right;font-weight:600;vertical-align:top;color:${INK};overflow-wrap:anywhere">${esc(value)}</td></tr>`).join("");
+  return `<table style="width:100%;border-collapse:collapse;table-layout:fixed;border-top:4px solid ${PRIMARY};border-bottom:1px solid ${BORDER}"><tr>`
+    + `<td style="width:50%;vertical-align:top;padding:18px 24px 18px 0">${left}</td>`
+    + `<td style="vertical-align:top;padding:18px 0;text-align:right"><div style="font-size:25px;line-height:1.2;font-weight:700;letter-spacing:-.03em;color:${PRIMARY};margin-bottom:12px;overflow-wrap:anywhere">${esc(title)}</div>`
+    + (metaRows ? `<table style="width:auto;margin-left:auto;border-collapse:collapse;table-layout:auto;font-size:11px">${metaRows}</table>` : "")
     + "</td></tr></table>";
 }
 
 function stopCard(title, end, showAccess) {
   const address = sample(`move.${end}_address`);
-  const body = (address ? `<div style="font-weight:600;font-size:12.5px;margin-bottom:4px">${esc(address)}</div>` : "")
+  const body = (address ? `<div style="font-weight:600;font-size:13px;line-height:1.5;color:${INK};margin-bottom:9px;overflow-wrap:anywhere">${esc(address)}</div>` : "")
     + (showAccess ? kv([["Property", sample(`move.${end}_property_type`)], ["Stairs", sample(`move.${end}_stairs`)],
       ["Elevator", sample(`move.${end}_elevator`)], ["Parking", sample(`move.${end}_parking`)]]) : "");
   return card(title, body);
@@ -140,16 +145,16 @@ function moveOverview(props) {
 }
 
 function jobTimeline(props) {
-  const cell = (value) => `<td style="padding:6px 4px;border-bottom:1px solid #e5e7eb">${esc(value)}</td>`;
+  const cell = (value) => `<td style="padding:12px 10px;border-bottom:1px solid ${BORDER};vertical-align:top;color:${INK};overflow-wrap:anywhere">${esc(value)}</td>`;
   const head = ["Job", "Date", "Arrival window", "Start", "End"].map((label) =>
-    `<th style="text-align:left;padding:6px 4px;border-bottom:2px solid ${PRIMARY}">${label}</th>`).join("");
+    `<th style="text-align:left;padding:10px;background:#F1F5F9;color:${MUTED};font-size:10.5px;font-weight:600;border-bottom:1px solid ${BORDER}">${label}</th>`).join("");
   const row = `<tr>${cell("Moving day")}${cell(sample("move.date"))}${cell(sample("move.arrival_window"))}${cell(sample("move.start_time"))}${cell(sample("move.end_time"))}</tr>`;
   const facts = [];
   if (on(props, "show_crew")) facts.push(`${sample("estimate.crew_size")} movers`, `${sample("estimate.truck_count")} truck`);
   if (on(props, "show_hours")) facts.push(`${sample("estimate.estimated_hours")} hours estimated`, `${sample("estimate.travel_time_hours")} hour travel`);
   return headingBar(props?.title || "Schedule")
-    + `<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>${head}</tr></thead><tbody>${row}</tbody></table>`
-    + (facts.length ? `<p style="color:#6b7280;font-size:11.5px;margin:6px 0 0">${esc(facts.join(" · "))}</p>` : "");
+    + `<div style="border:1px solid ${BORDER};border-radius:10px;overflow:hidden"><table style="width:100%;table-layout:fixed;border-collapse:collapse;font-size:12px"><thead><tr>${head}</tr></thead><tbody>${row}</tbody></table></div>`
+    + (facts.length ? `<p style="color:${MUTED};font-size:11px;line-height:1.6;margin:10px 0 0;padding:9px 12px;background:${SURFACE};border:1px solid ${BORDER};border-radius:8px">${esc(facts.join(" · "))}</p>` : "");
 }
 
 function footer(props) {
@@ -160,12 +165,12 @@ function footer(props) {
     lines.push(esc([sample("company.name"), sample("company.phone"), sample("company.email"), sample("company.website")].filter(Boolean).join(" · ")));
   }
   if (on(props, "show_license") && sample("company.state_license_number")) lines.push(esc(`Licence #${sample("company.state_license_number")}`));
-  return `<div style="border-top:1px solid #d1d5db;padding-top:8px;font-size:11px;color:#6b7280;line-height:1.5;text-align:${align}">`
-    + lines.map((line) => `<div>${line}</div>`).join("") + "</div>";
+  return `<div style="border-top:1px solid ${BORDER};margin-top:24px;padding-top:14px;font-size:11px;color:${MUTED};line-height:1.7;text-align:${align}">`
+    + lines.map((line, index) => `<div${index === 0 ? ` style="font-weight:600;color:${INK};margin-bottom:3px"` : ""}>${line}</div>`).join("") + "</div>";
 }
 
 function paidStamp(props) {
-  return `<div style="text-align:right"><span style="display:inline-block;border:4px solid #16a34a;color:#16a34a;font-size:26px;font-weight:800;letter-spacing:.2em;padding:2px 18px;border-radius:8px;transform:rotate(-8deg);opacity:.85">${esc(props?.label || "PAID")}</span>`
+  return `<div style="text-align:right"><span style="display:inline-block;border:1px solid #A7F3D0;background:#ECFDF5;color:#047857;font-size:13px;font-weight:700;letter-spacing:.1em;padding:8px 16px;border-radius:999px">${esc(props?.label || "PAID")}</span>`
     + '<div style="color:#94a3b8;font-size:10px;margin-top:6px">Shown once the invoice has no balance due</div></div>';
 }
 
