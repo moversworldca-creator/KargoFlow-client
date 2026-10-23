@@ -44,7 +44,7 @@ describe("normalizeBuilderVariableGroups", () => {
       const tags = getVariablesForMode("contract").flatMap(({ items }) => items.map(({ tag }) => tag));
 
       expect(tags).toContain("{{move.size}}");
-      expect(tags).not.toContain("{{move.estimated_weight}}");
+      expect(tags).toContain("{{move.estimated_weight}}");
     });
 
     it("offers move placeholders in document mode", () => {
@@ -56,14 +56,14 @@ describe("normalizeBuilderVariableGroups", () => {
       expect(tags).toContain("{{move.destination_address}}");
     });
 
-    it("normalizes legacy merge tags recursively without changing custom text", () => {
+    it("normalizes address aliases without converting numeric weight into move size", () => {
       expect(normalizeLegacyMergeFieldAliases({
-        fields: [{ value: "{{move.estimated_weight}}" }],
-        html: "<p>{{ move.estimated_weight | upper }}</p>",
+        fields: [{ value: "{{move.estimated_weight}}" }, { value: "{{move.pickup_address}}" }],
+        html: "<p>{{ move.pickup_address | upper }}</p>",
         custom: "estimated_weight",
       })).toEqual({
-        fields: [{ value: "{{move.size}}" }],
-        html: "<p>{{move.size | upper}}</p>",
+        fields: [{ value: "{{move.estimated_weight}}" }, { value: "{{move.origin_address}}" }],
+        html: "<p>{{move.origin_address | upper}}</p>",
         custom: "estimated_weight",
       });
     });

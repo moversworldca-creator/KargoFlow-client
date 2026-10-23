@@ -1,5 +1,5 @@
 const LEGACY_MERGE_FIELD_ALIASES = {
-  "move.estimated_weight": "move.size",
+  "move.pickup_address": "move.origin_address",
   "move.pickup_date": "move.date",
   "move.delivery_address": "move.destination_address",
   "move.service_type": "opportunity.service_type",

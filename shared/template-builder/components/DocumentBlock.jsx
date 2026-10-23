@@ -43,6 +43,7 @@ const SAMPLE_VARIABLES = {
   "opportunity.has_storage": false,
   "move.date": "June 15, 2026",
   "move.size": "3 bedroom home",
+  "move.estimated_weight": "3,200",
   "move.origin_address": "123 Main Street, Vancouver, BC",
   "move.destination_address": "456 Oak Avenue, Burnaby, BC",
   "move.distance_miles": "12",

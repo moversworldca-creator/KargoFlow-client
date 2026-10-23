@@ -1,3 +1,5 @@
+import { getVariablesForMode as getNativeVariablesForMode } from '../../../../../../../shared/template-builder/config/variableRegistry.js';
+
 /**
  * Variable & Merge Tag Registry per Document Mode
  * Categorizes tags for Customer, Move, Estimate, Invoice, Carrier, Payment, etc.
@@ -22,7 +24,7 @@ export const MERGE_VARIABLES = {
     { label: "Delivery City, State", tag: "{{move.delivery_city_state}}" },
     { label: "Scheduled Move Date", tag: "{{move.pickup_date}}" },
     { label: "Delivery Date", tag: "{{move.delivery_date}}" },
-    { label: "Estimated Weight / Cu.Ft", tag: "{{move.estimated_weight}}" },
+    { label: "Estimated Weight (lbs)", tag: "{{move.estimated_weight}}" },
     { label: "Service Type", tag: "{{move.service_type}}" },
   ],
   estimate: [
@@ -61,6 +63,7 @@ export const MERGE_VARIABLES = {
 };
 
 export function getVariablesForMode(mode = "estimate") {
+  if (!["email", "sms"].includes(mode)) return getNativeVariablesForMode(mode);
   const common = [
     { group: "Customer Details", items: MERGE_VARIABLES.customer },
     { group: "Carrier / Branch", items: MERGE_VARIABLES.carrier },

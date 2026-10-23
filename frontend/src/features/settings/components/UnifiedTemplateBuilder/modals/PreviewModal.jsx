@@ -1,5 +1,6 @@
 import { getDocumentSurfaceStyle } from '../../../../../../../shared/template-builder/core/documentPresentation';
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import RecordDataPreview from '../components/RecordDataPreview';
 import {
   Eye,
   X,
@@ -131,6 +132,7 @@ export default function PreviewModal({
   onOpenHtmlEditor = () => {},
   onDeleteItem = () => {},
   onDuplicateItem = () => {},
+  onRenderRecordPreview,
 }) {
   const [zoom, setZoom] = useState(() => {
     if (typeof window !== "undefined" && window.innerHeight) {
@@ -604,6 +606,7 @@ export default function PreviewModal({
           </div>
         </div>
 
+        {!['email', 'sms'].includes(mode) && <RecordDataPreview key={mode} mode={mode} document={doc} onRender={onRenderRecordPreview} />}
         {/* Content Body Canvas */}
         <div className="flex flex-1 min-h-0 overflow-hidden">
         <div className="flex flex-1 flex-col min-w-0 min-h-0 overflow-hidden">

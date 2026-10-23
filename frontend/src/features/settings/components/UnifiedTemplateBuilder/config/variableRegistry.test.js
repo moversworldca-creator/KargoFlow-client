@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { normalizeBuilderVariableGroups } from "./variableRegistry";
+import { getVariablesForMode, normalizeBuilderVariableGroups } from "./variableRegistry";
+import { getVariablesForMode as globalVariables } from "../../../../../../../shared/template-builder/config/variableRegistry.js";
 
 describe("normalizeBuilderVariableGroups", () => {
+  it.each(['estimate', 'invoice', 'document', 'contract', 'bol', 'cc_auth'])(
+    'uses the same supported native tags as the platform for %s', (mode) => {
+      expect(getVariablesForMode(mode)).toEqual(globalVariables(mode));
+      const tags = getVariablesForMode(mode).flatMap(group => group.items.map(item => item.tag));
+      expect(tags).not.toContain('{{customer.company}}');
+      expect(tags).not.toContain('{{move.delivery_date}}');
+      expect(tags).not.toContain('{{estimate.expiry_date}}');
+    }
+  );
   it("maps the backend's grouped variables response to sidebar merge tags", () => {
     expect(
       normalizeBuilderVariableGroups([

@@ -36,6 +36,7 @@ import {
   publishBuilderTemplateDraft,
   discardBuilderTemplateDraft,
   validateBuilderTemplateDraft,
+  previewBuilderTemplate,
 } from "../../../../services/api";
 import {
   toBackendDocument,
@@ -1275,6 +1276,13 @@ export default function UnifiedTemplateBuilder({
         pageSize={pageSize}
         orientation={orientation}
         smsText={smsText}
+        onRenderRecordPreview={targetTemplateId ? async (source) => {
+          const kind = ['estimate', 'estimate_portal'].includes(mode) ? 'estimate_portal' : mode === 'invoice' ? 'invoice' : 'document';
+          const response = await previewBuilderTemplate(targetTemplateId, {
+            document: toBackendDocument(doc, kind), source, format: 'both', audience: 'customer',
+          });
+          return response.data?.data || response.data;
+        } : null}
         onClose={() => setIsPreviewOpen(false)}
         onExportJson={handleExportJson}
         onUpdateDoc={handlePreviewDocUpdate}

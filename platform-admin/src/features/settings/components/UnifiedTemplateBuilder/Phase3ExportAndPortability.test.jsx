@@ -72,7 +72,7 @@ describe("Phase 3: VersionHistoryModal Component", () => {
 });
 
 describe("Phase 3: PreviewModal Component with Print & Export", () => {
-  it("compiles legacy move-weight placeholders to the supported move-size field", () => {
+  it("preserves numeric weight placeholders without converting them into move size", () => {
     const compiledHtml = compileDocumentToHtml({
       settings: {},
       items: [{
@@ -83,8 +83,8 @@ describe("Phase 3: PreviewModal Component with Print & Export", () => {
       }],
     });
 
-    expect(compiledHtml).toContain("{{move.size}}");
-    expect(compiledHtml).not.toContain("move.estimated_weight");
+    expect(compiledHtml).toContain("{{move.estimated_weight}}");
+    expect(compiledHtml).not.toContain("{{move.size}}");
   });
 
   it("keeps charge table columns aligned when configured widths exceed the page width", () => {

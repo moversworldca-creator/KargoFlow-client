@@ -19,6 +19,7 @@ const BACKEND_PREVIEW_VALUES = {
   "customer.phone": "(555) 019-2834",
   "move.date": "June 15, 2026",
   "move.size": "3 bedroom home",
+  "move.estimated_weight": "3,200",
   "move.origin_address": "123 Main Street, Vancouver, BC",
   "move.destination_address": "456 Oak Avenue, Burnaby, BC",
   "estimate.number": "EST-00042",

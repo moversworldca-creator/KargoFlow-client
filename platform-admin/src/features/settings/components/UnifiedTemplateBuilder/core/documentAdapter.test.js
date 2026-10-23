@@ -88,9 +88,8 @@ describe("backend document widgets", () => {
     const loaded = fromBackendDocument(backendDocument);
     const saved = toBackendDocument(loaded, "contract");
 
-    expect(loaded.items[0].props.custom_fields.move_size.dynamicValue).toBe("{{move.size}}");
-    expect(saved.sections[0].blocks[0].props.custom_fields.move_size.dynamicValue).toBe("{{move.size}}");
-    expect(JSON.stringify(saved)).not.toContain("move.estimated_weight");
+    expect(loaded.items[0].props.custom_fields.move_size.dynamicValue).toBe("{{move.estimated_weight}}");
+    expect(saved.sections[0].blocks[0].props.custom_fields.move_size.dynamicValue).toBe("{{move.estimated_weight}}");
   });
 
   it("keeps custom HTML styling in the server-preview document payload", () => {
