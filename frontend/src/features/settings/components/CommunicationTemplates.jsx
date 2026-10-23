@@ -7,21 +7,27 @@ import Card from '../../../shared/ui/Card';
 import RichTextEditor from '../../../shared/ui/RichTextEditor';
 import EmailVisualBuilder from './EmailVisualBuilder';
 import API from '../../../services/api';
+import useCan from '../../../shared/auth/useCan';
 import { normalizePreviewHtml, replaceBranchPlaceholders, resolveRenderableUrl } from '../../crm/utils/emailPreview';
 import {
-  getCommunicationTemplates,
-  getCommunicationTemplate,
-  getCommunicationTemplateKeys,
-  getCommunicationTemplateVariables,
-  createCommunicationTemplate,
   updateCommunicationTemplate,
   updateAutomationStep,
-  deleteCommunicationTemplate,
   seedCommunicationTemplates,
   previewCommunicationTemplate,
   getCommunicationTemplateCategories,
   createCommunicationTemplateCategory,
   deleteCommunicationTemplateCategory,
+  getGeneralTemplates,
+  getGeneralTemplate,
+  getGeneralTemplateVariables,
+  createGeneralTemplate,
+  updateGeneralTemplate,
+  deleteGeneralTemplate,
+  getNotificationTemplates,
+  getNotificationTemplate,
+  createNotificationTemplate,
+  updateNotificationTemplate,
+  deleteNotificationTemplate,
 } from '../../../services/api';
 
 
@@ -338,21 +344,52 @@ const normalize = (payload) => {
   return [];
 };
 
-const fetchAllCommunicationTemplates = async (params = {}) => {
-  const merged = [];
-  let page = 1;
-  while (true) {
-    const response = await getCommunicationTemplates({ ...params, page });
-    const rows = normalize(response);
-    merged.push(...rows);
-    if (!response?.next || rows.length === 0) break;
-    page += 1;
-  }
-  return merged;
-};
+const normalizeNotificationTemplate = (template) => ({
+  ...template,
+  body: template.body_text || '',
+  branch: template.branch_id ?? null,
+  category: null,
+  is_active: template.is_active ?? template.state === 'active',
+  sort_order: 0,
+});
+
+const normalizeGeneralTemplate = (template) => ({
+  ...template,
+  body: template.body_text || '',
+  branch: template.branch_id ?? null,
+  category: null,
+  is_active: template.is_active ?? template.state === 'active',
+  sort_order: 0,
+});
+
+const toNotificationTemplatePayload = (template) => ({
+  name: template.name,
+  description: template.description || '',
+  channel: template.channel,
+  subject: template.channel === 'email' ? template.subject || '' : '',
+  body_html: template.channel === 'email' ? template.body_html || '' : '',
+  body_text: template.channel === 'sms'
+    ? template.sms_body || template.body || ''
+    : template.body || '',
+  branch_id: template.branch ? Number(template.branch) : null,
+  is_active: template.is_active !== false,
+});
+
+const toGeneralTemplatePayload = (template) => ({
+  name: template.name,
+  description: template.description || '',
+  channel: template.channel,
+  subject: template.channel === 'email' ? template.subject || '' : '',
+  body_html: template.channel === 'email' ? template.body_html || '' : '',
+  body_text: template.channel === 'sms'
+    ? template.sms_body || template.body || ''
+    : template.body || '',
+  branch_id: template.branch ? Number(template.branch) : null,
+  is_active: template.is_active !== false,
+});
 
 const parseVariablesFromBody = (text = '') => {
-  const matches = text.match(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g) || [];
+  const matches = text.match(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g) || [];
   const vars = new Set(matches.map((m) => m.replace(/[{}\s]/g, '')));
   return Array.from(vars);
 };
@@ -529,9 +566,13 @@ const CommunicationTemplates = ({
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
+  const { can } = useCan();
+  const canManageGeneralTemplates = can('communications.general_templates.update');
   const builderRouteContext = builderRouteState || location.state || {};
   const isAutomationBuilder = String(basePath || '').startsWith('/automation');
   const isAutomationNotificationEditor = isAutomationBuilder && Boolean(builderRouteContext?.automationStepId);
+  const isNotificationTemplateLibrary = isAutomationBuilder && !builderRouteContext?.automationStepId;
+  const isGeneralTemplateLibrary = !isNotificationTemplateLibrary;
   const [selectedId, setSelectedId] = useState(null);
   const [draft, setDraft] = useState(EMPTY_TEMPLATE);
   const [isSaving, setIsSaving] = useState(false);
@@ -543,7 +584,10 @@ const CommunicationTemplates = ({
   
   const { data: rawCategories = [] } = useQuery({
     queryKey: ['communicationTemplateCategories', branchFilter || 'all'],
-    queryFn: async () => normalize(await getCommunicationTemplateCategories(branchFilter ? { branch: branchFilter } : {})),
+    queryFn: async () => isNotificationTemplateLibrary || isGeneralTemplateLibrary
+      ? []
+      : normalize(await getCommunicationTemplateCategories(branchFilter ? { branch: branchFilter } : {})),
+    enabled: !isNotificationTemplateLibrary && !isGeneralTemplateLibrary,
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
@@ -552,12 +596,22 @@ const CommunicationTemplates = ({
   const categories = rawCategories;
 
   const { data: rawItems = [], isLoading } = useQuery({
-    queryKey: ['communicationTemplates', isAutomationBuilder ? 'automation' : branchFilter],
-    queryFn: async () => fetchAllCommunicationTemplates(
-      isAutomationBuilder
-        ? { include_seeded_notifications: true }
-        : (branchFilter ? { branch: branchFilter } : {})
-    ),
+    queryKey: [
+      'communicationTemplates',
+      isNotificationTemplateLibrary ? branchFilter || 'all' : isAutomationBuilder ? 'automation' : branchFilter,
+      isGeneralTemplateLibrary && canManageGeneralTemplates,
+    ],
+    queryFn: async () => {
+      if (isNotificationTemplateLibrary) {
+        const params = { include_inactive: true };
+        if (branchFilter) params.branch_id = Number(branchFilter);
+        const response = await getNotificationTemplates(params);
+        return normalize(response).map(normalizeNotificationTemplate);
+      }
+      const params = { include_inactive: canManageGeneralTemplates };
+      if (branchFilter) params.branch_id = Number(branchFilter);
+      return normalize(await getGeneralTemplates(params)).map(normalizeGeneralTemplate);
+    },
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
@@ -568,12 +622,14 @@ const CommunicationTemplates = ({
   const { data: rawVariables = [] } = useQuery({
     queryKey: ['communicationTemplateVariables', isAutomationBuilder ? 'automation' : branchFilter],
     queryFn: async () => {
-      const response = await getCommunicationTemplateVariables(
-        isAutomationBuilder
-          ? { include_seeded_notifications: true }
-          : (branchFilter ? { branch: branchFilter } : undefined)
-      );
-      return Array.isArray(response?.results) ? response.results : [];
+      if (isNotificationTemplateLibrary) return [];
+      const response = await getGeneralTemplateVariables();
+      const definitions = Array.isArray(response?.results) ? response.results : response || [];
+      return definitions.map((row) => ({
+        ...row,
+        key: String(row.token || '').replace(/^\{\{|\}\}$/g, ''),
+        sample: row.sample || '',
+      }));
     },
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
@@ -593,14 +649,8 @@ const CommunicationTemplates = ({
 
   const { data: rawTemplateKeys = [] } = useQuery({
     queryKey: ['communicationTemplateKeys', isAutomationBuilder ? 'automation' : branchFilter],
-    queryFn: async () => {
-      const response = await getCommunicationTemplateKeys(
-        isAutomationBuilder
-          ? { include_seeded_notifications: true }
-          : (branchFilter ? { branch: branchFilter } : undefined)
-      );
-      return Array.isArray(response?.results) ? response.results : [];
-    },
+    queryFn: async () => [],
+    enabled: false,
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
@@ -847,16 +897,6 @@ const CommunicationTemplates = ({
     });
   }, [availableTemplateKeys, draft.channel]);
 
-  const activeAutomationTemplateKey = useMemo(() => {
-    if (!isAutomationBuilder) return String(draft.template_key || '').trim();
-    if (automationMessageMode === 'sms_only') return String(draft.sms_template_key || '').trim();
-    if (automationMessageMode === 'email_sms') {
-      if (automationEditorTab === 'sms') return String(draft.sms_template_key || '').trim();
-      return String(draft.email_template_key || '').trim();
-    }
-    return String(draft.template_key || draft.email_template_key || '').trim();
-  }, [automationEditorTab, automationMessageMode, draft.email_template_key, draft.sms_template_key, draft.template_key, isAutomationBuilder]);
-
   const getTemplateResponseData = (response) => response?.data || response || null;
 
   const automationModeOptions = [
@@ -864,11 +904,6 @@ const CommunicationTemplates = ({
     { key: 'sms_only', label: 'SMS Only' },
     { key: 'email_sms', label: 'Email & SMS' },
   ];
-
-  const selectedTemplateKeyMeta = useMemo(
-    () => filteredTemplateKeyOptions.find((row) => row.key === activeAutomationTemplateKey) || null,
-    [filteredTemplateKeyOptions, activeAutomationTemplateKey]
-  );
 
   const automationSmsBody = String(draft.sms_body || '').trim() ? draft.sms_body : draft.body || '';
   const resolveBranchLogoUrl = (branch) => {
@@ -882,7 +917,7 @@ const CommunicationTemplates = ({
     if (!candidate) return '';
     return resolveRenderableUrl(candidate);
   };
-  const canSortTemplates = !searchTerm.trim();
+  const canSortTemplates = !isNotificationTemplateLibrary && !isGeneralTemplateLibrary && !searchTerm.trim();
   const groupedTemplates = useMemo(() => {
     const groups = {};
     groups['uncategorized'] = {
@@ -1060,12 +1095,20 @@ const CommunicationTemplates = ({
       try {
         const detail = await queryClient.fetchQuery({
           queryKey: ['communicationTemplate', template.id],
-          queryFn: () => getCommunicationTemplate(template.id),
+          queryFn: async () => {
+            const response = isNotificationTemplateLibrary
+              ? await getNotificationTemplate(template.id)
+            : await getGeneralTemplate(template.id);
+            const data = response?.data || response;
+            return isNotificationTemplateLibrary
+              ? normalizeNotificationTemplate(data)
+            : normalizeGeneralTemplate(data);
+          },
           staleTime: 5 * 60 * 1000,
           gcTime: 10 * 60 * 1000,
         });
         if (detail) {
-          fullTemplate = detail.data || detail;
+          fullTemplate = detail;
         }
       } catch (err) {
         console.error('Failed to load full template details', err);
@@ -1311,11 +1354,11 @@ const CommunicationTemplates = ({
     const selectedBranch = draft.branch || branchFilter || branches[0]?.id || null;
     const errors = {};
 
-    if (!selectedBranch) errors.branch = 'Select a branch for this template.';
-    if (!isAutomationBuilder || channel !== 'email_sms') {
-      if (!templateKey) {
+    if (!selectedBranch && !isGeneralTemplateLibrary) errors.branch = 'Select a branch for this template.';
+    if (!isNotificationTemplateLibrary && (!isAutomationBuilder || channel !== 'email_sms')) {
+      if (!isGeneralTemplateLibrary && !templateKey) {
         errors.template_key = 'Template key is required.';
-      } else if (!TEMPLATE_KEY_RE.test(templateKey)) {
+      } else if (!isGeneralTemplateLibrary && !TEMPLATE_KEY_RE.test(templateKey)) {
         errors.template_key = 'Use letters, numbers, underscore, dash, dot, or colon only.';
       }
     } else {
@@ -1388,6 +1431,19 @@ const CommunicationTemplates = ({
         })?.id
         || null
       );
+      const saveTemplate = (templateId, templatePayload) => {
+        if (isNotificationTemplateLibrary) {
+          const notificationPayload = toNotificationTemplatePayload(templatePayload);
+          return templateId
+            ? updateNotificationTemplate(templateId, notificationPayload)
+            : createNotificationTemplate(notificationPayload);
+        }
+        const generalPayload = toGeneralTemplatePayload(templatePayload);
+        return (templateId
+          ? updateGeneralTemplate(templateId, generalPayload)
+          : createGeneralTemplate(generalPayload))
+          .then(normalizeGeneralTemplate);
+      };
 
       let saved;
       if (isAutomationBuilder && automationMessageMode === 'email_sms') {
@@ -1410,12 +1466,8 @@ const CommunicationTemplates = ({
         };
         const resolvedEmailTemplateId = resolveTemplateId(draft.email_template_id, 'email', emailPayload.template_key);
         const resolvedSmsTemplateId = resolveTemplateId(draft.sms_template_id, 'sms', smsPayload.template_key);
-        const emailResult = resolvedEmailTemplateId
-          ? await updateCommunicationTemplate(resolvedEmailTemplateId, emailPayload)
-          : await createCommunicationTemplate(emailPayload);
-        const smsResult = resolvedSmsTemplateId
-          ? await updateCommunicationTemplate(resolvedSmsTemplateId, smsPayload)
-          : await createCommunicationTemplate(smsPayload);
+        const emailResult = await saveTemplate(resolvedEmailTemplateId, emailPayload);
+        const smsResult = await saveTemplate(resolvedSmsTemplateId, smsPayload);
         const emailSaved = getTemplateResponseData(emailResult);
         const smsSaved = getTemplateResponseData(smsResult);
         saved = emailSaved || smsSaved;
@@ -1442,9 +1494,7 @@ const CommunicationTemplates = ({
         }
       } else {
         const resolvedTemplateId = resolveTemplateId(draft.id, payload.channel, payload.template_key);
-        saved = resolvedTemplateId
-          ? await updateCommunicationTemplate(resolvedTemplateId, payload)
-          : await createCommunicationTemplate(payload);
+        saved = await saveTemplate(resolvedTemplateId, payload);
         if (isAutomationBuilder && builderRouteContext?.automationStepId) {
           const nextStepType = values.channel === 'sms' ? 'send_sms' : 'send_email';
           const nextStepConfig = {
@@ -1569,7 +1619,11 @@ const CommunicationTemplates = ({
   const handleDelete = async (id) => {
     setIsDeleting(true);
     try {
-      await deleteCommunicationTemplate(id);
+      if (isNotificationTemplateLibrary) {
+        await deleteNotificationTemplate(id);
+      } else {
+        await deleteGeneralTemplate(id);
+      }
       await queryClient.invalidateQueries({ queryKey: ['communicationTemplates'] });
       flashMessage('success', 'Template deleted.');
     } catch (err) {
@@ -1583,7 +1637,16 @@ const CommunicationTemplates = ({
     setIsSaving(true);
     try {
       const payload = { ...template, is_active: !template.is_active };
-      const updated = await updateCommunicationTemplate(template.id, payload);
+      const updated = isNotificationTemplateLibrary
+        ? normalizeNotificationTemplate(
+            await updateNotificationTemplate(
+              template.id,
+              toNotificationTemplatePayload(payload)
+            )
+          )
+        : normalizeGeneralTemplate(
+            await updateGeneralTemplate(template.id, toGeneralTemplatePayload(payload))
+          );
       await invalidateCommunicationTemplateQueries();
       flashMessage('success', `Template ${updated.is_active ? 'activated' : 'deactivated'}.`);
     } catch (err) {
@@ -1603,19 +1666,23 @@ const CommunicationTemplates = ({
           <p className="text-sm text-muted">Manage Email and SMS templates for automation.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          <button
-            onClick={handleSeedDefaults}
-            disabled={isSeeding}
-            className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-border text-body rounded-xl text-xs sm:text-sm font-bold hover:bg-border transition-all whitespace-nowrap"
-          >
-            {isSeeding ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />} Load Starter
-          </button>
-          <button
-            onClick={() => setShowCategoryModal(true)}
-            className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-border text-body rounded-xl text-xs sm:text-sm font-bold hover:bg-border/80 transition-all border border-subtle whitespace-nowrap"
-          >
-            Manage Categories
-          </button>
+          {!isNotificationTemplateLibrary && !isGeneralTemplateLibrary && (
+            <>
+              <button
+                onClick={handleSeedDefaults}
+                disabled={isSeeding}
+                className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-border text-body rounded-xl text-xs sm:text-sm font-bold hover:bg-border transition-all whitespace-nowrap"
+              >
+                {isSeeding ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />} Load Starter
+              </button>
+              <button
+                onClick={() => setShowCategoryModal(true)}
+                className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-border text-body rounded-xl text-xs sm:text-sm font-bold hover:bg-border/80 transition-all border border-subtle whitespace-nowrap"
+              >
+                Manage Categories
+              </button>
+            </>
+          )}
           <div className="relative">
             <button
               onClick={() => setShowTypeSelectionModal(!showTypeSelectionModal)}
@@ -1633,7 +1700,11 @@ const CommunicationTemplates = ({
                   <button
                     onClick={() => {
                       setShowTypeSelectionModal(false);
-                      setShowDefaultTemplateModal(true);
+                      if (isNotificationTemplateLibrary || isGeneralTemplateLibrary) {
+                        handleOpenModal(null, 'email');
+                      } else {
+                        setShowDefaultTemplateModal(true);
+                      }
                     }}
                     className="flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors border-b border-border"
                   >
@@ -1708,11 +1779,16 @@ const CommunicationTemplates = ({
 
       {filteredItems.length === 0 ? (
         <Card className="overflow-hidden border-none shadow-xl bg-card rounded-2xl p-12 text-center text-muted">
-          No templates found. Create a new one or click "Load Starter".
+          {isNotificationTemplateLibrary
+            ? 'No notification templates found. Add an Email or SMS template to get started.'
+            : isGeneralTemplateLibrary
+              ? 'No General templates found. Create an Email or SMS template to get started.'
+              : 'No templates found. Create a new one or click "Load Starter".'}
         </Card>
       ) : (
         <div className="space-y-6">
           {/* Category Tabs */}
+          {!isGeneralTemplateLibrary && (
           <div className="flex flex-wrap gap-2 border-b border-border pb-4">
             {groupedTemplates.map((group) => {
               const tabId = String(group.category.id || 'uncategorized');
@@ -1730,6 +1806,7 @@ const CommunicationTemplates = ({
               );
             })}
           </div>
+          )}
 
           <div className="space-y-8">
             {groupedTemplates
@@ -1759,7 +1836,9 @@ const CommunicationTemplates = ({
                       <tr className="bg-subtle/50 border-b border-border">
                         <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Template</th>
                         <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Channel</th>
-                        <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Order</th>
+                        {!isGeneralTemplateLibrary && (
+                          <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Order</th>
+                        )}
                         <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Status</th>
                         <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted text-right">Actions</th>
                       </tr>
@@ -1792,7 +1871,9 @@ const CommunicationTemplates = ({
                               </button>
                               <div className="flex flex-col">
                                 <span className="text-sm font-bold text-body">{item.name}</span>
-                                <span className="text-[0.625rem] font-mono text-muted uppercase">{item.template_key}</span>
+                                {!isGeneralTemplateLibrary && (
+                                  <span className="text-[0.625rem] font-mono text-muted uppercase">{item.template_key}</span>
+                                )}
                               </div>
                             </div>
                           </td>
@@ -1825,11 +1906,13 @@ const CommunicationTemplates = ({
                               );
                             })()}
 	                          </td>
-                          <td className="px-6 py-4">
-                            <span className="inline-flex items-center rounded-full bg-subtle px-2.5 py-1 text-[0.625rem] font-bold uppercase tracking-wider text-body">
-                              #{Number(item.sort_order ?? 0)}
-                            </span>
-                          </td>
+                          {!isGeneralTemplateLibrary && (
+                            <td className="px-6 py-4">
+                              <span className="inline-flex items-center rounded-full bg-subtle px-2.5 py-1 text-[0.625rem] font-bold uppercase tracking-wider text-body">
+                                #{Number(item.sort_order ?? 0)}
+                              </span>
+                            </td>
+                          )}
                           <td className="px-6 py-4">
                             <button
                               type="button"
@@ -1950,7 +2033,7 @@ const CommunicationTemplates = ({
                         aria-invalid={Boolean(formErrors.name)}
                       />
                     </Field>
-                    {!isAutomationBuilder && (
+                    {!isAutomationBuilder && !isGeneralTemplateLibrary && (
                       <Field label="Branch" error={formErrors.branch}>
                         <div className="relative">
                           <button
@@ -2111,7 +2194,8 @@ const CommunicationTemplates = ({
 
 
                   {/* Testing Group */}
-                    {(isAutomationBuilder ? automationEditorTab === 'email' : draft.channel === 'email') && (
+                    {!isNotificationTemplateLibrary &&
+                      (isAutomationBuilder ? automationEditorTab === 'email' : draft.channel === 'email') && (
                     <div className="space-y-4">
                       <h4 className="text-xs font-black uppercase tracking-wider text-heading flex items-center gap-2 pb-2 border-b border-border">
                         <Mail size={16} className="text-primary"/> Testing

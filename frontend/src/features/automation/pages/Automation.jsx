@@ -14,17 +14,17 @@ import {
   AlertCircle,
   CheckCircle2,
   Clock,
-  Settings,
   RefreshCw,
   Search,
   MessageSquare,
   Building,
-  Filter,
+  Settings2,
 } from 'lucide-react';
 import {
   getBranchNotifications,
   updateBranchNotification,
   getCustomAutomations,
+  getCustomAutomation,
   updateCustomAutomation,
   deactivateCustomAutomation,
   createCustomAutomation,
@@ -44,11 +44,14 @@ const Automation = () => {
   // Standard Notifications State
   const [notifications, setNotifications] = useState([]);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
-  const [configuringNotification, setConfiguringNotification] = useState(null);
+  const [togglingNotificationKeys, setTogglingNotificationKeys] = useState(() => new Set());
+  const [notificationToConfigure, setNotificationToConfigure] = useState(null);
 
   // Custom Automations State
   const [customAutomations, setCustomAutomations] = useState([]);
   const [automationsLoading, setAutomationsLoading] = useState(false);
+  const [togglingAutomationIds, setTogglingAutomationIds] = useState(() => new Set());
+  const [loadingAutomationId, setLoadingAutomationId] = useState(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardInitial, setWizardInitial] = useState(null);
 
@@ -69,10 +72,21 @@ const Automation = () => {
   const canManageAutomations = can('communications.automations.manage');
   const canUpdateBranchNotifications = can('communications.branch_settings.update');
 
+  const formatTriggerLabel = (event) => {
+    const eventName = String(event || '').split('.').slice(1).join('.') || event || 'changes';
+    const triggerName = {
+      created: 'create',
+      updated: 'update',
+      status_changed: 'status change',
+      status_change: 'status change',
+    }[eventName] || String(eventName).replaceAll('_', ' ');
+    return `On ${triggerName}`;
+  };
+
   const tabs = [
-    { id: 'notifications', label: 'Standard Notifications', icon: Mail },
-    { id: 'rules', label: 'Custom Automations', icon: Zap },
-    { id: 'logs', label: 'Automation Runs & Logs', icon: Clock3 },
+    { id: 'notifications', label: 'Notifications', icon: Mail },
+    { id: 'rules', label: 'Automations', icon: Zap },
+    { id: 'logs', label: 'Automation Logs', icon: Clock3 },
   ];
 
   // 1. Initial Branches Loading
@@ -121,12 +135,7 @@ const Automation = () => {
       const list = Array.isArray(res) ? res : res?.results || [];
       setCustomAutomations(list);
 
-      // Pre-select first automation for logs if none selected or no longer present
-      if (list.length > 0) {
-        if (!selectedAutomationForLogs || !list.some((a) => String(a.id) === String(selectedAutomationForLogs))) {
-          setSelectedAutomationForLogs(String(list[0].id));
-        }
-      } else {
+      if (selectedAutomationForLogs && !list.some((automation) => String(automation.id) === String(selectedAutomationForLogs))) {
         setSelectedAutomationForLogs('');
       }
     } catch (err) {
@@ -139,14 +148,38 @@ const Automation = () => {
 
   // 4. Fetch Runs for selected Custom Automation
   const loadRuns = async (automationId = selectedAutomationForLogs) => {
-    if (!automationId) {
+    const automations = automationId
+      ? customAutomations.filter((automation) => String(automation.id) === String(automationId))
+      : customAutomations;
+    if (!automations.length) {
       setRuns([]);
       return;
     }
     setRunsLoading(true);
     try {
-      const res = await getCustomAutomationRuns(automationId);
-      setRuns(Array.isArray(res) ? res : res?.results || []);
+      const runsByAutomation = await Promise.all(
+        automations.map(async (automation) => {
+          const res = await getCustomAutomationRuns(automation.id);
+          const automationRuns = Array.isArray(res) ? res : res?.results || [];
+          return automationRuns.map((run) => {
+            const stepIndex = (automation.steps || []).findIndex(
+              (step) => String(step.id) === String(run.step_id)
+            );
+            const step = stepIndex >= 0 ? automation.steps[stepIndex] : null;
+            return {
+              ...run,
+              workflow_name: automation.name,
+              step_type: step ? `send_${step.channel}` : 'send_email',
+              step_order: stepIndex >= 0 ? stepIndex : 0,
+            };
+          });
+        })
+      );
+      setRuns(
+        runsByAutomation
+          .flat()
+          .sort((left, right) => new Date(right.scheduled_for || 0) - new Date(left.scheduled_for || 0))
+      );
     } catch (err) {
       console.error('Failed to load runs:', err);
       setRuns([]);
@@ -162,79 +195,139 @@ const Automation = () => {
     } else if (activeTab === 'rules') {
       loadCustomAutomations(selectedBranchId);
     } else if (activeTab === 'logs') {
-      if (customAutomations.length === 0) {
-        loadCustomAutomations(selectedBranchId);
-      } else if (selectedAutomationForLogs) {
-        loadRuns(selectedAutomationForLogs);
-      }
+      loadCustomAutomations(selectedBranchId);
     }
   }, [activeTab, selectedBranchId]);
 
   useEffect(() => {
-    if (activeTab === 'logs' && selectedAutomationForLogs) {
+    if (activeTab === 'logs') {
       loadRuns(selectedAutomationForLogs);
     }
-  }, [selectedAutomationForLogs]);
+  }, [activeTab, customAutomations, selectedAutomationForLogs]);
 
   // Master toggle for Standard Notification
   const handleToggleNotification = async (notification) => {
     if (!canUpdateBranchNotifications) return;
+    if (togglingNotificationKeys.has(notification.key)) return;
 
     const nextEnabled = !notification.enabled;
-
-    // Validation: if enabling, verify at least one channel has a template
-    if (nextEnabled) {
-      const hasConfiguredChannel =
-        (notification.channels?.email?.enabled && notification.channels?.email?.template_id) ||
-        (notification.channels?.sms?.enabled && notification.channels?.sms?.template_id);
-
-      if (!hasConfiguredChannel) {
-        // Open modal instead to let user choose template
-        setConfiguringNotification(notification);
-        return;
+    const supportedChannels = notification.supported_channels || Object.keys(notification.channels || {});
+    const availableChannels = supportedChannels.filter((channel) =>
+      channel === 'in_app' ? Boolean(notification.channels?.in_app) : Boolean(notification.channels?.[channel]?.template_id)
+    );
+    if (nextEnabled && availableChannels.length === 0) {
+      setErrorBanner(null);
+      const firstCustomerChannel = supportedChannels.find(
+        (channel) => channel === 'email' || channel === 'sms'
+      );
+      const channels = { ...(notification.channels || {}) };
+      if (firstCustomerChannel) {
+        channels[firstCustomerChannel] = {
+          ...channels[firstCustomerChannel],
+          enabled: true,
+        };
       }
+      setNotificationToConfigure({ ...notification, enabled: true, channels });
+      return;
     }
 
-    try {
-      const payload = {
-        enabled: nextEnabled,
-        channels: {
-          email: {
-            enabled: notification.channels?.email?.enabled,
-            template_id: notification.channels?.email?.template_id,
-          },
-          sms: {
-            enabled: notification.channels?.sms?.enabled,
-            template_id: notification.channels?.sms?.template_id,
-          },
-        },
-      };
+    const payload = { enabled: nextEnabled };
+    if (nextEnabled) {
+      const enabledChannels = availableChannels.filter(
+        (channel) => notification.channels?.[channel]?.enabled
+      );
+      const channelToEnable =
+        enabledChannels.length === 0 ? availableChannels[0] : null;
+      payload.channels = Object.fromEntries(
+        supportedChannels.map((channel) => {
+          const current = notification.channels?.[channel] || {};
+          const channelEnabled = channelToEnable
+            ? channel === channelToEnable
+            : Boolean(current.enabled);
+          return [
+            channel,
+            channel === 'in_app'
+              ? { enabled: channelEnabled }
+              : { enabled: channelEnabled, template_id: current.template_id || null },
+          ];
+        })
+      );
+    }
 
+    setErrorBanner(null);
+    setTogglingNotificationKeys((prev) => new Set(prev).add(notification.key));
+    try {
       const updated = await updateBranchNotification(selectedBranchId, notification.key, payload);
       setNotifications((prev) =>
         prev.map((item) => (item.key === notification.key ? { ...item, ...updated } : item))
       );
     } catch (err) {
       console.error('Failed to toggle notification:', err);
-      loadNotifications(selectedBranchId);
+      setErrorBanner(
+        err?.response?.data?.detail ||
+          err?.response?.data?.error ||
+          'Failed to update this notification. Please try again.'
+      );
+    } finally {
+      setTogglingNotificationKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(notification.key);
+        return next;
+      });
     }
   };
 
   // Master toggle for Custom Automation
   const handleToggleAutomation = async (wf) => {
     if (!canManageAutomations) return;
-    const nextIsActive = !wf.is_active;
+    if (togglingAutomationIds.has(wf.id)) return;
 
-    // Optimistic UI update
-    setCustomAutomations((prev) =>
-      prev.map((item) => (item.id === wf.id ? { ...item, is_active: nextIsActive } : item))
-    );
+    const nextIsActive = !wf.is_active;
+    setTogglingAutomationIds((prev) => new Set(prev).add(wf.id));
 
     try {
-      await updateCustomAutomation(wf.id, { is_active: nextIsActive });
+      const updated = await updateCustomAutomation(wf.id, { is_active: nextIsActive });
+      setCustomAutomations((prev) =>
+        prev.map((item) =>
+          item.id === wf.id
+            ? { ...item, ...updated, is_active: updated?.is_active ?? nextIsActive }
+            : item
+        )
+      );
     } catch (err) {
       console.error('Failed to toggle automation:', err);
-      loadCustomAutomations(selectedBranchId);
+      setErrorBanner(
+        err?.response?.data?.detail ||
+          err?.response?.data?.error ||
+          `Failed to ${nextIsActive ? 'enable' : 'disable'} "${wf.name}". Please try again.`
+      );
+    } finally {
+      setTogglingAutomationIds((prev) => {
+        const next = new Set(prev);
+        next.delete(wf.id);
+        return next;
+      });
+    }
+  };
+
+  const handleEditAutomation = async (wf) => {
+    if (!canManageAutomations || loadingAutomationId !== null) return;
+
+    setLoadingAutomationId(wf.id);
+    setErrorBanner(null);
+    try {
+      const response = await getCustomAutomation(wf.id);
+      setWizardInitial(response?.data || response);
+      setWizardOpen(true);
+    } catch (err) {
+      console.error('Failed to load custom automation details:', err);
+      setErrorBanner(
+        err?.response?.data?.detail ||
+          err?.response?.data?.error ||
+          `Failed to load "${wf.name}". Please try again.`
+      );
+    } finally {
+      setLoadingAutomationId(null);
     }
   };
 
@@ -286,9 +379,40 @@ const Automation = () => {
       (n) =>
         String(n.name || '').toLowerCase().includes(q) ||
         String(n.description || '').toLowerCase().includes(q) ||
-        String(n.event || '').toLowerCase().includes(q)
+        String(n.event || '').toLowerCase().includes(q) ||
+        String(n.category || '').toLowerCase().includes(q)
     );
   }, [notifications, search]);
+
+  const notificationGroups = useMemo(() => {
+    const groups = new Map();
+    filteredNotifications.forEach((notification) => {
+      const explicitGroup =
+        notification.audience || notification.recipient_group || notification.group;
+      const inferredGroup = String(notification.key || '').toLowerCase().includes('sales_person')
+        ? 'Sales Person'
+        : 'Customer';
+      const groupName = explicitGroup
+        ? String(explicitGroup)
+            .replace(/_/g, ' ')
+            .replace(/\b\w/g, (character) => character.toUpperCase())
+        : inferredGroup;
+      if (!groups.has(groupName)) groups.set(groupName, new Map());
+      const categories = groups.get(groupName);
+      const categoryName = String(notification.category || 'other')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, (character) => character.toUpperCase());
+      if (!categories.has(categoryName)) categories.set(categoryName, []);
+      categories.get(categoryName).push(notification);
+    });
+    return Array.from(groups, ([name, categories]) => ({
+      name,
+      categories: Array.from(categories, ([categoryName, items]) => ({
+        name: categoryName,
+        items,
+      })),
+    }));
+  }, [filteredNotifications]);
 
   const filteredAutomations = useMemo(() => {
     const q = String(search || '').toLowerCase().trim();
@@ -312,6 +436,7 @@ const Automation = () => {
   const statusTone = (status) => {
     const s = String(status || '').toLowerCase();
     if (s === 'completed') return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+    if (s === 'success') return 'bg-emerald-100 text-emerald-800 border-emerald-200';
     if (s === 'failed') return 'bg-rose-100 text-rose-800 border-rose-200';
     if (s === 'running') return 'bg-amber-100 text-amber-800 border-amber-200';
     if (s === 'skipped') return 'bg-slate-200 text-slate-700 border-slate-300';
@@ -330,28 +455,28 @@ const Automation = () => {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-primary/10 text-primary rounded-xl">
-            <Bot size={26} />
+          <div className="p-2 sm:p-2.5 bg-blue-100 text-blue-600 rounded-xl shrink-0">
+            <Bot size={24} className="h-5 w-5 sm:h-[26px] sm:w-[26px]" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-heading">Automations & Notifications</h1>
-            <p className="text-sm text-content-sec">
-              Configure branch notifications, custom multi-step rules, and monitor runs
+            <h1 className="text-xl sm:text-2xl font-bold text-heading">Automation Hub</h1>
+            <p className="text-xs sm:text-sm text-content-sec">
+              Manage automated workflows and communication templates
             </p>
           </div>
         </div>
 
         {/* Global Controls */}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           {branches.length > 0 && (
-            <div className="flex items-center space-x-2 bg-subtle rounded-xl p-1.5 border border-brand-border">
-              <span className="text-xs font-bold text-muted pl-2 uppercase tracking-wide flex items-center gap-1">
-                <Building size={14} /> Branch:
+            <div className="flex min-w-0 items-center space-x-1.5 sm:space-x-2 bg-subtle rounded-xl p-1.5 border border-brand-border">
+              <span className="text-[10px] sm:text-xs font-bold text-muted pl-1 sm:pl-2 uppercase tracking-wide flex items-center gap-1">
+                <Building size={14} className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" /> Branch:
               </span>
               <select
-                className="bg-transparent text-sm font-semibold text-heading border-none focus:ring-0 cursor-pointer pl-1 pr-6 py-1"
+                className="max-w-[150px] sm:max-w-none bg-transparent text-xs sm:text-sm font-semibold text-heading border-none focus:ring-0 cursor-pointer pl-1 pr-5 sm:pr-6 py-1"
                 value={selectedBranchId}
                 onChange={(e) => setSelectedBranchId(e.target.value)}
               >
@@ -372,16 +497,16 @@ const Automation = () => {
                 setWizardInitial(null);
                 setWizardOpen(true);
               }}
-              className="px-4 py-2 bg-primary text-white rounded-xl text-sm font-bold shadow-md hover:bg-[#003d2f] transition-all inline-flex items-center gap-2"
+              className="px-3 sm:px-4 py-2 bg-gradient-to-r from-orange-300 to-rose-200 text-heading rounded-xl text-xs sm:text-sm font-bold shadow-sm hover:brightness-95 transition-all inline-flex items-center gap-1.5 sm:gap-2"
             >
-              <Plus size={16} /> Create Automation
+              <Plus size={16} className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" /> Create Automation
             </button>
           )}
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-brand-border">
+      <div className="flex overflow-x-auto border-b border-brand-border">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -392,13 +517,14 @@ const Automation = () => {
                 setActiveTab(tab.id);
                 setSearch('');
               }}
-              className={`flex items-center gap-2.5 px-6 py-4 text-sm font-semibold transition-colors relative cursor-pointer ${
-                isActive ? 'text-primary' : 'text-content-sec hover:text-content-main'
+              className={`flex shrink-0 items-center gap-2 px-3 sm:gap-2.5 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold transition-colors relative cursor-pointer ${
+                isActive
+                  ? 'text-heading bg-gradient-to-r from-orange-300 to-rose-200 rounded-t-xl'
+                  : 'text-content-sec hover:text-content-main'
               }`}
             >
-              <Icon size={18} />
+              <Icon size={16} className="h-4 w-4 sm:h-[18px] sm:w-[18px] shrink-0" />
               {tab.label}
-              {isActive && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />}
             </button>
           );
         })}
@@ -422,488 +548,413 @@ const Automation = () => {
       )}
 
       {/* Main Content Area */}
-      <div className="bg-white rounded-2xl border border-brand-border p-6 shadow-xs">
+      <div className="bg-white rounded-2xl border border-brand-border p-3 sm:p-5 shadow-xs">
         {/* Search Bar for Notifications / Automations */}
         {activeTab !== 'logs' && (
-          <div className="flex items-center justify-between gap-3 mb-6">
+          <div className="flex items-center justify-between gap-3 mb-4 sm:mb-6">
             <div className="relative w-full max-w-md">
               <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" />
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder={
-                  activeTab === 'notifications'
-                    ? 'Search standard notifications...'
-                    : 'Search custom automations...'
-                }
-                className="w-full pl-10 pr-4 py-2 bg-subtle rounded-xl text-sm border border-transparent focus:border-brand-border outline-none transition-all"
+                placeholder="Search automations..."
+                className="w-full pl-10 pr-4 py-2 bg-subtle rounded-xl text-xs sm:text-sm border border-transparent focus:border-brand-border outline-none transition-all"
               />
-            </div>
-            <div className="text-xs text-muted font-medium">
-              Showing {activeTab === 'notifications' ? filteredNotifications.length : filteredAutomations.length} items
             </div>
           </div>
         )}
 
         {/* TAB 1: STANDARD NOTIFICATIONS */}
         {activeTab === 'notifications' && (
-          <div className="space-y-4">
-            <div className="p-3 bg-slate-50 border border-brand-border rounded-xl flex items-center justify-between text-xs text-slate-600">
-              <div className="flex items-center gap-2">
-                <Building size={15} className="text-primary shrink-0" />
-                <span>
-                  Showing definitions for branch: <strong>{selectedBranchName || `#${selectedBranchId}`}</strong>. Changes only apply to this branch.
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => loadNotifications(selectedBranchId)}
-                className="inline-flex items-center gap-1 font-semibold text-primary hover:underline"
-              >
-                <RefreshCw size={12} /> Refresh
-              </button>
+          <div className="border border-border rounded-2xl overflow-hidden">
+            <div className="grid grid-cols-12 gap-3 px-4 sm:px-5 py-3 bg-subtle text-[0.6875rem] font-bold uppercase tracking-widest text-muted">
+              <div className="col-span-8 sm:col-span-7">Workflow</div>
+              <div className="hidden sm:block sm:col-span-3">Channel</div>
+              <div className="col-span-4 sm:col-span-2 text-right">Actions</div>
             </div>
 
-            <div className="border border-border rounded-2xl overflow-hidden divide-y divide-border">
-              <div className="grid grid-cols-12 gap-3 px-5 py-3.5 bg-subtle text-[0.6875rem] font-bold uppercase tracking-widest text-muted">
-                <div className="col-span-5">Notification & Trigger</div>
-                <div className="col-span-4">Delivery Channels</div>
-                <div className="col-span-3 text-right">Actions & Status</div>
+            {notificationsLoading ? (
+              <div className="p-8 text-center text-sm text-muted">
+                <RefreshCw size={24} className="animate-spin mx-auto text-primary mb-2" />
+                Loading notifications...
               </div>
-
-              {notificationsLoading ? (
-                <div className="p-8 text-center text-sm text-muted">
-                  <RefreshCw size={24} className="animate-spin mx-auto text-primary mb-2" />
-                  Loading notifications...
-                </div>
-              ) : filteredNotifications.length > 0 ? (
-                filteredNotifications.map((n) => (
-                  <div
-                    key={n.key}
-                    className="grid grid-cols-12 gap-3 px-5 py-4 items-center hover:bg-slate-50/50 transition-colors"
-                  >
-                    {/* Column 1: Info & Event */}
-                    <div className="col-span-5 pr-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold text-heading">{n.name}</span>
-                        {n.trigger_ready ? (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            Trigger Ready
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                            Pending Emission
-                          </span>
-                        )}
-                      </div>
-                      {n.description && (
-                        <p className="text-xs text-muted mt-1 leading-relaxed">{n.description}</p>
-                      )}
-                      <div className="flex items-center gap-2 mt-2">
-                        <span className="text-[11px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-                          Event: {n.event}
-                        </span>
-                        <span className="text-[11px] font-mono uppercase text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-                          Target: {n.target}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Column 2: Channels */}
-                    <div className="col-span-4 space-y-1.5">
-                      {/* Email Status */}
-                      <div className="flex items-center gap-2 text-xs">
-                        <Mail
-                          size={14}
-                          className={n.channels?.email?.enabled ? 'text-primary' : 'text-slate-300'}
-                        />
-                        <span className="font-semibold text-slate-700">Email:</span>
-                        {n.channels?.email?.enabled ? (
-                          <span className="text-emerald-700 font-medium truncate max-w-[200px]" title={n.channels.email.template_name || ''}>
-                            {n.channels.email.template_name || `Template #${n.channels.email.template_id}`}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">Disabled</span>
-                        )}
-                      </div>
-
-                      {/* SMS Status */}
-                      <div className="flex items-center gap-2 text-xs">
-                        <MessageSquare
-                          size={14}
-                          className={n.channels?.sms?.enabled ? 'text-primary' : 'text-slate-300'}
-                        />
-                        <span className="font-semibold text-slate-700">SMS:</span>
-                        {n.channels?.sms?.enabled ? (
-                          <span className="text-emerald-700 font-medium truncate max-w-[200px]" title={n.channels.sms.template_name || ''}>
-                            {n.channels.sms.template_name || `Template #${n.channels.sms.template_id}`}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">Disabled</span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Column 3: Actions & Master Switch */}
-                    <div className="col-span-3 flex items-center justify-end gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setConfiguringNotification(n)}
-                        disabled={!canUpdateBranchNotifications}
-                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        <Settings size={14} /> Configure
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleToggleNotification(n)}
-                        disabled={!canUpdateBranchNotifications}
-                        className="p-1 rounded-lg hover:bg-subtle transition-colors"
-                        title={n.enabled ? 'Click to disable' : 'Click to enable'}
-                      >
-                        {n.enabled ? (
-                          <ToggleRight size={32} className="text-primary" />
-                        ) : (
-                          <ToggleLeft size={32} className="text-slate-300" />
-                        )}
-                      </button>
-                    </div>
+            ) : notificationGroups.length > 0 ? (
+              notificationGroups.map((group) => (
+                <section key={group.name} aria-label={`${group.name} notifications`}>
+                  <div className="px-4 sm:px-5 py-2.5 bg-slate-100 text-[0.6875rem] font-bold uppercase tracking-widest text-slate-600">
+                    {group.name}
                   </div>
-                ))
-              ) : (
-                <div className="p-12 text-center text-sm text-muted">
-                  No standard notifications found.
-                </div>
-              )}
-            </div>
+                  {group.categories.map((category) => (
+                    <section key={category.name} aria-label={`${category.name} notifications`}>
+                      <div className="px-4 sm:px-5 py-2 bg-slate-50 text-[0.625rem] font-bold uppercase tracking-widest text-slate-500 border-t border-slate-100">
+                        {category.name}
+                      </div>
+                      {category.items.map((notification) => {
+                        const activeChannels = ['in_app', 'email', 'sms'].filter(
+                          (channel) =>
+                            notification.channels?.[channel]?.enabled &&
+                            (channel === 'in_app' || notification.channels?.[channel]?.template_id)
+                        );
+                        const channelLabel = activeChannels.length
+                          ? activeChannels.map((channel) => ({
+                              in_app: 'In-app',
+                              email: 'Email',
+                              sms: 'SMS',
+                            }[channel])).join(' & ')
+                          : 'Not configured';
+
+                        return (
+                          <div
+                            key={notification.key}
+                            className="grid grid-cols-12 gap-3 px-4 sm:px-5 py-3.5 items-center border-t border-slate-100 hover:bg-slate-50/70 transition-colors"
+                          >
+                            <div className="col-span-8 sm:col-span-7 min-w-0">
+                              <button
+                                type="button"
+                                onClick={() => navigate('/automation/templates')}
+                                className="text-left text-sm font-bold text-heading hover:text-primary hover:underline"
+                                aria-label={`Open templates for ${notification.name}`}
+                              >
+                                {notification.name}
+                              </button>
+                              {notification.description && (
+                                <p className="text-xs text-muted mt-0.5 leading-relaxed">
+                                  {notification.description}
+                                </p>
+                              )}
+                              <p className="sm:hidden text-[0.6875rem] text-primary font-semibold mt-1">
+                                {channelLabel}
+                              </p>
+                            </div>
+                            <div className="hidden sm:block sm:col-span-3">
+                              <span className="inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-[0.6875rem] font-bold text-blue-600">
+                                {channelLabel}
+                              </span>
+                            </div>
+                            <div className="col-span-4 sm:col-span-2 flex justify-end">
+                              <button
+                                type="button"
+                                onClick={() => setNotificationToConfigure(notification)}
+                                disabled={!canUpdateBranchNotifications || !selectedBranchId}
+                                aria-label={`Configure ${notification.name}`}
+                                title="Configure notification channels and templates"
+                                className="inline-flex items-center justify-center rounded-md p-1 text-slate-500 transition-colors hover:bg-slate-100 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
+                              >
+                                <Settings2 className="h-5 w-5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleToggleNotification(notification)}
+                                disabled={
+                                  !canUpdateBranchNotifications ||
+                                  !selectedBranchId ||
+                                  togglingNotificationKeys.has(notification.key)
+                                }
+                                aria-label={`${notification.enabled ? 'Disable' : 'Enable'} ${notification.name}`}
+                                aria-pressed={Boolean(notification.enabled)}
+                                aria-busy={togglingNotificationKeys.has(notification.key)}
+                                title={
+                                  togglingNotificationKeys.has(notification.key)
+                                    ? 'Updating notification'
+                                    : notification.enabled
+                                      ? 'Turn off this workflow; keep its channel and template settings'
+                                      : 'Turn on this workflow'
+                                }
+                                className="inline-flex items-center justify-center rounded-md p-1 transition-all duration-200 hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-50"
+                              >
+                                {notification.enabled ? (
+                                  <ToggleRight className="w-8 h-8 text-blue-500 drop-shadow-sm" />
+                                ) : (
+                                  <ToggleLeft className="w-8 h-8 text-slate-400" />
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </section>
+                  ))}
+                </section>
+              ))
+            ) : (
+              <div className="p-12 text-center text-sm text-muted">
+                No standard notifications found.
+              </div>
+            )}
           </div>
         )}
 
         {/* TAB 2: CUSTOM AUTOMATIONS */}
         {activeTab === 'rules' && (
-          <div className="space-y-4">
-            <div className="border border-border rounded-2xl overflow-hidden divide-y divide-border">
-              <div className="grid grid-cols-12 gap-3 px-5 py-3.5 bg-subtle text-[0.6875rem] font-bold uppercase tracking-widest text-muted">
-                <div className="col-span-4">Automation & Event</div>
-                <div className="col-span-4">Execution Steps</div>
-                <div className="col-span-2">Scope & Filter</div>
-                <div className="col-span-2 text-right">Status & Actions</div>
-              </div>
+          <div className="border border-border rounded-2xl overflow-x-auto">
+            <table className="w-full min-w-[1120px] table-fixed border-collapse text-left">
+              <colgroup>
+                <col className="w-[22%]" />
+                <col className="w-[38%]" />
+                <col className="w-[15%]" />
+                <col className="w-[25%]" />
+              </colgroup>
+              <thead>
+                <tr className="bg-subtle text-[0.625rem] sm:text-[0.6875rem] font-bold uppercase tracking-widest text-muted">
+                  <th scope="col" className="px-4 sm:px-5 py-3">Trigger</th>
+                  <th scope="col" className="px-4 sm:px-5 py-3">Workflow</th>
+                  <th scope="col" className="px-4 sm:px-5 py-3">Filters</th>
+                  <th scope="col" className="px-4 sm:px-5 py-3">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-xs sm:text-sm">
+                {automationsLoading ? (
+                  <tr>
+                    <td colSpan={4} className="p-8 text-center text-sm text-muted">
+                      <RefreshCw size={24} className="animate-spin mx-auto text-primary mb-2" />
+                      Loading custom automations...
+                    </td>
+                  </tr>
+                ) : filteredAutomations.length > 0 ? (
+                  filteredAutomations.map((wf) => {
+                    const allCount = (wf.conditions?.all || []).length;
+                    const anyCount = (wf.conditions?.any || []).length;
+                    const totalConditions = allCount + anyCount;
 
-              {automationsLoading ? (
-                <div className="p-8 text-center text-sm text-muted">
-                  <RefreshCw size={24} className="animate-spin mx-auto text-primary mb-2" />
-                  Loading custom automations...
-                </div>
-              ) : filteredAutomations.length > 0 ? (
-                filteredAutomations.map((wf) => {
-                  const allCount = (wf.conditions?.all || []).length;
-                  const anyCount = (wf.conditions?.any || []).length;
-                  const totalConditions = allCount + anyCount;
-
-                  return (
-                    <div
-                      key={wf.id}
-                      className="grid grid-cols-12 gap-3 px-5 py-4 items-center hover:bg-slate-50/50 transition-colors"
-                    >
-                      {/* Name & Event */}
-                      <div className="col-span-4 pr-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-bold text-heading">{wf.name}</span>
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-primary/10 text-primary font-bold">
-                            {wf.event}
-                          </span>
-                        </div>
-                        {wf.description && (
-                          <p className="text-xs text-muted mt-1 leading-relaxed">{wf.description}</p>
-                        )}
-                        <div className="text-[11px] text-slate-500 mt-1.5 flex items-center gap-2">
-                          <span className="font-mono uppercase bg-slate-100 px-1.5 py-0.5 rounded">
-                            Target: {wf.target}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Steps sequence */}
-                      <div className="col-span-4">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {(wf.steps || []).map((s, idx) => (
-                            <React.Fragment key={idx}>
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 rounded-lg text-xs font-medium text-slate-700 border border-slate-200">
-                                {s.channel === 'sms' ? (
-                                  <MessageSquare size={12} className="text-primary" />
-                                ) : (
-                                  <Mail size={12} className="text-primary" />
-                                )}
-                                <span className="font-bold">{s.channel.toUpperCase()}</span>
-                                <span className="text-muted text-[11px]">
-                                  {s.delay_minutes === 0 ? '(0m)' : `(+${s.delay_minutes}m)`}
-                                </span>
+                    return (
+                      <tr key={wf.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-4 sm:px-5 py-3.5 text-xs sm:text-sm font-medium text-heading">
+                          {formatTriggerLabel(wf.event)}
+                        </td>
+                        <td className="px-4 sm:px-5 py-3.5 min-w-0">
+                          <div className="text-xs sm:text-sm font-bold text-heading truncate">{wf.name}</div>
+                          {wf.description && (
+                            <p className="text-[0.6875rem] sm:text-xs text-muted truncate">{wf.description}</p>
+                          )}
+                          <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[0.6875rem] sm:text-xs text-muted">
+                            {(wf.steps || []).map((step, index) => (
+                              <span className="inline-flex items-center gap-0.5 bg-slate-100 px-1.5 py-0.5 rounded-md" key={`${step.id || step.channel}-${index}`}>
+                                {step.channel === 'sms' ? 'Send SMS' : 'Send email'}
+                                {step.delay_minutes > 0 ? ` · +${step.delay_minutes}m` : ''}
                               </span>
-                              {idx < (wf.steps || []).length - 1 && (
-                                <span className="text-slate-400 text-xs">→</span>
-                              )}
-                            </React.Fragment>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Scope & Conditions */}
-                      <div className="col-span-2 text-xs space-y-1">
-                        <div>
-                          {wf.branch_id ? (
-                            <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-                              Branch #{wf.branch_id}
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-purple-50 text-purple-700 border border-purple-200">
-                              Company-Wide
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-slate-500 text-[11px] flex items-center gap-1">
-                          <Filter size={12} />
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-4 sm:px-5 py-3.5 text-xs sm:text-sm text-heading">
                           {totalConditions === 0
-                            ? 'No conditions'
-                            : `${totalConditions} rule${totalConditions > 1 ? 's' : ''}`}
-                        </div>
-                      </div>
-
-                      {/* Status & Actions */}
-                      <div className="col-span-2 flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleAutomation(wf)}
-                          disabled={!canManageAutomations}
-                          className="p-1 rounded-lg hover:bg-subtle transition-colors"
-                          title={wf.is_active ? 'Active (Click to pause)' : 'Paused (Click to activate)'}
-                        >
-                          {wf.is_active ? (
-                            <ToggleRight size={30} className="text-primary" />
-                          ) : (
-                            <ToggleLeft size={30} className="text-slate-300" />
-                          )}
-                        </button>
-
-                        {canManageAutomations && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setWizardInitial(wf);
-                                setWizardOpen(true);
-                              }}
-                              className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
-                              title="Edit Automation"
+                            ? 'No filters'
+                            : `${totalConditions} ${totalConditions === 1 ? 'filter' : 'filters'}`}
+                        </td>
+                        <td className="px-4 sm:px-5 py-3.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span
+                              className={`inline-flex shrink-0 rounded-full px-2 py-1 sm:px-2.5 text-[0.625rem] sm:text-[0.6875rem] font-bold ${
+                                wf.is_active ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'
+                              }`}
                             >
-                              <Pencil size={15} />
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => handleDuplicateAutomation(wf)}
-                              className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
-                              title="Duplicate"
-                            >
-                              <Copy size={15} />
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteAutomation(wf)}
-                              className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
-                              title="Deactivate / Delete"
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="p-12 text-center text-sm text-muted">
-                  No custom automations created yet. Click "Create Automation" above to define your first sequence.
-                </div>
-              )}
-            </div>
+                              {wf.is_active ? 'Active' : 'Inactive'}
+                            </span>
+                            <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleEditAutomation(wf)}
+                                disabled={!canManageAutomations || loadingAutomationId !== null}
+                                aria-label={`Edit ${wf.name}`}
+                                title={loadingAutomationId === wf.id ? 'Loading automation' : 'Edit automation'}
+                                className="inline-flex h-8 w-8 items-center justify-center text-slate-700 hover:text-primary rounded-lg transition-colors disabled:opacity-40"
+                              >
+                                {loadingAutomationId === wf.id
+                                  ? <RefreshCw size={16} className="animate-spin" />
+                                  : <Pencil size={18} />}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDuplicateAutomation(wf)}
+                                disabled={!canManageAutomations}
+                                aria-label={`Duplicate ${wf.name}`}
+                                title="Duplicate automation"
+                                className="inline-flex h-8 w-8 items-center justify-center text-slate-700 hover:text-primary rounded-lg transition-colors disabled:opacity-40"
+                              >
+                                <Copy size={18} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleToggleAutomation(wf)}
+                                disabled={!canManageAutomations || togglingAutomationIds.has(wf.id)}
+                                aria-label={`${wf.is_active ? 'Disable' : 'Enable'} ${wf.name}`}
+                                aria-pressed={Boolean(wf.is_active)}
+                                aria-checked={Boolean(wf.is_active)}
+                                title={wf.is_active ? 'Disable automation' : 'Enable automation'}
+                                aria-busy={togglingAutomationIds.has(wf.id)}
+                                role="switch"
+                                className={`relative inline-flex h-[22px] w-[38px] shrink-0 items-center rounded-full border-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+                                  wf.is_active ? 'border-blue-500 bg-white' : 'border-slate-300 bg-slate-300'
+                                }`}
+                              >
+                                <span
+                                  className={`absolute top-1/2 h-[14px] w-[14px] -translate-y-1/2 rounded-full transition-[left,background-color,border-color] ${
+                                    wf.is_active
+                                      ? 'left-[18px] border-2 border-blue-500 bg-white'
+                                      : 'left-[2px] border border-white bg-white'
+                                  }`}
+                                />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteAutomation(wf)}
+                                disabled={!canManageAutomations}
+                                aria-label={`Deactivate ${wf.name}`}
+                                title="Deactivate automation"
+                                className="inline-flex h-8 w-8 items-center justify-center text-rose-700 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-40"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={4} className="p-12 text-center text-sm text-muted">
+                      No custom automations created yet. Click "Create Automation" above to define your first sequence.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         )}
 
         {/* TAB 3: RUNS & LOGS */}
         {activeTab === 'logs' && (
-          <div className="space-y-4">
-            {/* Filter toolbar */}
-            <div className="p-4 bg-slate-50 border border-brand-border rounded-xl flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-3">
-                {/* Automation Selector */}
-                <div>
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
-                    Select Automation
-                  </label>
-                  <select
-                    value={selectedAutomationForLogs}
-                    onChange={(e) => setSelectedAutomationForLogs(e.target.value)}
-                    className="px-3 py-2 bg-white rounded-xl text-xs font-semibold border border-brand-border outline-none focus:border-primary min-w-[200px]"
-                  >
-                    <option value="">Select an automation...</option>
-                    {customAutomations.map((w) => (
-                      <option key={w.id} value={w.id}>
-                        {w.name} (#{w.id})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Status Filter */}
-                <div>
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
-                    Status
-                  </label>
-                  <select
-                    value={runFilters.status}
-                    onChange={(e) => setRunFilters((prev) => ({ ...prev, status: e.target.value }))}
-                    className="px-3 py-2 bg-white rounded-xl text-xs font-semibold border border-brand-border outline-none focus:border-primary"
-                  >
-                    <option value="">All Statuses</option>
-                    <option value="pending">Pending</option>
-                    <option value="running">Running</option>
-                    <option value="completed">Completed</option>
-                    <option value="failed">Failed</option>
-                    <option value="skipped">Skipped</option>
-                  </select>
-                </div>
-
-                {/* Target Type Filter */}
-                <div>
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
-                    Target
-                  </label>
-                  <select
-                    value={runFilters.target_type}
-                    onChange={(e) => setRunFilters((prev) => ({ ...prev, target_type: e.target.value }))}
-                    className="px-3 py-2 bg-white rounded-xl text-xs font-semibold border border-brand-border outline-none focus:border-primary"
-                  >
-                    <option value="">All Targets</option>
-                    <option value="lead">Lead</option>
-                    <option value="opportunity">Opportunity</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex items-end">
-                <button
-                  type="button"
-                  onClick={() => loadRuns(selectedAutomationForLogs)}
-                  disabled={!selectedAutomationForLogs || runsLoading}
-                  className="px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold hover:bg-[#003d2f] transition-all flex items-center gap-1.5 disabled:opacity-50"
-                >
-                  <RefreshCw size={14} className={runsLoading ? 'animate-spin' : ''} /> Refresh Runs
-                </button>
-              </div>
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2.5">
+              <select
+                value={selectedAutomationForLogs}
+                onChange={(e) => setSelectedAutomationForLogs(e.target.value)}
+                aria-label="Filter by workflow"
+                className="w-full sm:w-[400px] px-3 py-2 bg-white rounded-xl text-sm font-medium border border-brand-border outline-none focus:border-primary"
+              >
+                <option value="">All workflows</option>
+                {customAutomations.map((workflow) => (
+                  <option key={workflow.id} value={workflow.id}>
+                    {workflow.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={runFilters.status}
+                onChange={(e) => setRunFilters((prev) => ({ ...prev, status: e.target.value }))}
+                aria-label="Filter by status"
+                className="w-full sm:w-[120px] px-3 py-2 bg-white rounded-xl text-sm font-medium border border-brand-border outline-none focus:border-primary"
+              >
+                <option value="">All statuses</option>
+                <option value="pending">Pending</option>
+                <option value="running">Running</option>
+                <option value="completed">Queued (send accepted)</option>
+                <option value="failed">Failed</option>
+                <option value="skipped">Skipped</option>
+              </select>
+              <select
+                value={runFilters.target_type}
+                onChange={(e) => setRunFilters((prev) => ({ ...prev, target_type: e.target.value }))}
+                aria-label="Filter by target"
+                className="w-full sm:w-[125px] px-3 py-2 bg-white rounded-xl text-sm font-medium border border-brand-border outline-none focus:border-primary"
+              >
+                <option value="">All targets</option>
+                <option value="lead">Lead</option>
+                <option value="opportunity">Opportunity</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => loadRuns(selectedAutomationForLogs)}
+                disabled={runsLoading || customAutomations.length === 0}
+                className="w-full sm:w-auto px-4 py-2 bg-gradient-to-r from-orange-300 to-rose-200 text-heading rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                <RefreshCw size={14} className={runsLoading ? 'animate-spin' : ''} /> Refresh Logs
+              </button>
             </div>
 
-            {/* Runs Table */}
-            <div className="border border-border rounded-2xl overflow-hidden divide-y divide-border">
-              <div className="grid grid-cols-12 gap-3 px-5 py-3.5 bg-subtle text-[0.6875rem] font-bold uppercase tracking-widest text-muted">
-                <div className="col-span-2">Run & Step ID</div>
-                <div className="col-span-2">Target Record</div>
-                <div className="col-span-2">Status</div>
-                <div className="col-span-2">Scheduled For</div>
-                <div className="col-span-2">Executed At</div>
-                <div className="col-span-2">Message State</div>
-              </div>
-
-              {runsLoading ? (
-                <div className="p-8 text-center text-sm text-muted">
-                  <RefreshCw size={24} className="animate-spin mx-auto text-primary mb-2" />
-                  Loading runs...
-                </div>
-              ) : !selectedAutomationForLogs ? (
-                <div className="p-12 text-center text-sm text-muted">
-                  Please select a custom automation above to view its recent execution runs.
-                </div>
-              ) : filteredRuns.length > 0 ? (
-                filteredRuns.map((run) => (
-                  <div
-                    key={run.id}
-                    className="grid grid-cols-12 gap-3 px-5 py-4 items-start hover:bg-slate-50/50 transition-colors text-xs"
-                  >
-                    {/* Run & Step */}
-                    <div className="col-span-2">
-                      <div className="font-bold text-heading">Run #{run.id}</div>
-                      <div className="text-muted mt-0.5">Step #{run.step_id}</div>
-                    </div>
-
-                    {/* Target Record */}
-                    <div className="col-span-2">
-                      <span className="font-mono uppercase bg-slate-100 px-2 py-0.5 rounded font-semibold text-slate-700">
-                        {run.target_type} #{run.target_id}
-                      </span>
-                    </div>
-
-                    {/* Status */}
-                    <div className="col-span-2">
-                      <span
-                        className={`inline-flex px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wide text-[10px] border ${statusTone(
-                          run.status
-                        )}`}
-                      >
-                        {run.status}
-                      </span>
-                      {run.error && (
-                        <div className="text-rose-600 mt-1 text-[11px] leading-tight">
-                          {run.error}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Scheduled */}
-                    <div className="col-span-2 text-slate-600">
-                      {fmtDateTime(run.scheduled_for)}
-                    </div>
-
-                    {/* Executed */}
-                    <div className="col-span-2 text-slate-600">
-                      {fmtDateTime(run.executed_at)}
-                    </div>
-
-                    {/* Message State */}
-                    <div className="col-span-2">
-                      {run.message_id ? (
-                        <div>
-                          <div className="font-semibold text-heading">Msg #{run.message_id}</div>
-                          <div className="text-[11px] text-muted capitalize">
-                            State: {run.message_state || 'queued'}
+            <div className="border border-border rounded-2xl overflow-x-auto">
+              <table className="w-full min-w-[1100px] table-fixed border-collapse text-left">
+                <colgroup>
+                  <col className="w-[26%]" />
+                  <col className="w-[16%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[16%]" />
+                  <col className="w-[17%]" />
+                  <col className="w-[17%]" />
+                </colgroup>
+                <thead>
+                  <tr className="bg-subtle text-[0.6875rem] font-bold uppercase tracking-widest text-muted">
+                    <th scope="col" className="px-4 sm:px-5 py-3">Workflow</th>
+                    <th scope="col" className="px-4 sm:px-5 py-3">Step</th>
+                    <th scope="col" className="px-4 sm:px-5 py-3">Target</th>
+                    <th scope="col" className="px-4 sm:px-5 py-3">Status</th>
+                    <th scope="col" className="px-4 sm:px-5 py-3">Scheduled</th>
+                    <th scope="col" className="px-4 sm:px-5 py-3">Executed</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-sm">
+                  {runsLoading ? (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-sm text-muted">
+                        <RefreshCw size={24} className="animate-spin mx-auto text-primary mb-2" />
+                        Loading runs...
+                      </td>
+                    </tr>
+                  ) : filteredRuns.length > 0 ? (
+                    filteredRuns.map((run) => (
+                      <tr key={run.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-4 sm:px-5 py-3.5">
+                          <div className="font-bold text-heading truncate">
+                            {run.workflow_name || customAutomations.find((automation) => String(automation.id) === String(selectedAutomationForLogs))?.name || `Workflow #${selectedAutomationForLogs}`}
                           </div>
-                        </div>
-                      ) : (
-                        <span className="text-slate-400">—</span>
-                      )}
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="p-12 text-center text-sm text-muted">
-                  No step execution runs recorded for this automation yet.
-                </div>
-              )}
+                          <div className="text-xs text-muted mt-0.5">Run #{run.id}</div>
+                        </td>
+                        <td className="px-4 sm:px-5 py-3.5">
+                          <div className="font-medium text-heading">{run.step_type || run.channel || 'send_email'}</div>
+                          <div className="text-xs text-muted">Order {run.step_order ?? run.order ?? 0}</div>
+                        </td>
+                        <td className="px-4 sm:px-5 py-3.5">
+                          <div className="font-medium text-heading">{run.target_type}</div>
+                          <div className="text-xs text-muted">#{run.target_id}</div>
+                        </td>
+                        <td className="px-4 sm:px-5 py-3.5">
+                          <span className={`inline-flex px-2.5 py-1 rounded-full font-bold text-[0.6875rem] ${statusTone(run.status)}`}>
+                            {run.status === 'completed' ? 'queued' : run.status}
+                          </span>
+                          {run.status === 'completed' && (
+                            <div className="mt-1 text-xs text-muted">
+                              Send accepted{run.message_state ? ` · Message ${run.message_state}` : ''}
+                            </div>
+                          )}
+                          {run.error && (
+                            <div className="text-rose-600 mt-1 text-xs leading-tight" title={run.error}>
+                              {run.error}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 sm:px-5 py-3.5 text-slate-700 text-xs whitespace-nowrap">
+                          {fmtDateTime(run.scheduled_for)}
+                        </td>
+                        <td className="px-4 sm:px-5 py-3.5 text-slate-700 text-xs whitespace-nowrap">
+                          {fmtDateTime(run.executed_at)}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={6} className="p-12 text-center text-sm text-muted">
+                        {selectedAutomationForLogs
+                          ? 'No step execution runs recorded for this workflow yet.'
+                          : 'No automation runs found.'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
       </div>
-
-      {/* Modal 1: Standard Notification Configuration */}
-      <NotificationConfigModal
-        open={Boolean(configuringNotification)}
-        onClose={() => setConfiguringNotification(null)}
-        notification={configuringNotification}
-        branchId={selectedBranchId}
-        branchName={selectedBranchName}
-        onSaved={() => loadNotifications(selectedBranchId)}
-      />
 
       {/* Modal 2: Custom Automation Wizard */}
       <AutomationWizardModal
@@ -912,6 +963,19 @@ const Automation = () => {
         onSaved={() => loadCustomAutomations(selectedBranchId)}
         initialValue={wizardInitial}
         branches={branches}
+      />
+      <NotificationConfigModal
+        open={Boolean(notificationToConfigure)}
+        onClose={() => setNotificationToConfigure(null)}
+        notification={notificationToConfigure}
+        branchId={selectedBranchId}
+        branchName={branches.find((branch) => String(branch.id) === String(selectedBranchId))?.name}
+        onSaved={(updated) => {
+          setNotifications((previous) =>
+            previous.map((item) => item.key === updated.key ? { ...item, ...updated } : item)
+          );
+          setNotificationToConfigure(null);
+        }}
       />
     </div>
   );

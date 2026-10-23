@@ -13,11 +13,13 @@ export default function NotificationConfigModal({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [templatesError, setTemplatesError] = useState('');
 
   const [emailTemplates, setEmailTemplates] = useState([]);
   const [smsTemplates, setSmsTemplates] = useState([]);
 
   const [enabled, setEnabled] = useState(false);
+  const [inAppEnabled, setInAppEnabled] = useState(false);
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [emailTemplateId, setEmailTemplateId] = useState('');
   const [smsEnabled, setSmsEnabled] = useState(false);
@@ -27,7 +29,12 @@ export default function NotificationConfigModal({
     if (!open || !notification) return;
 
     setError(null);
+    setTemplatesError('');
+    setLoading(false);
     setEnabled(Boolean(notification.enabled));
+
+    const inAppConfig = notification.channels?.in_app || {};
+    setInAppEnabled(Boolean(inAppConfig.enabled));
 
     const emailConfig = notification.channels?.email || {};
     setEmailEnabled(Boolean(emailConfig.enabled));
@@ -37,13 +44,28 @@ export default function NotificationConfigModal({
     setSmsEnabled(Boolean(smsConfig.enabled));
     setSmsTemplateId(smsConfig.template_id ? String(smsConfig.template_id) : '');
 
+    let cancelled = false;
     const fetchTemplates = async () => {
+      const supportedChannels = notification.supported_channels || Object.keys(notification.channels || {});
+      if (!supportedChannels.some((channel) => channel === 'email' || channel === 'sms')) {
+        setEmailTemplates([]);
+        setSmsTemplates([]);
+        return;
+      }
+      if (!branchId) {
+        setTemplatesError('Select a branch before configuring notification templates.');
+        setEmailTemplates([]);
+        setSmsTemplates([]);
+        return;
+      }
+
       setLoading(true);
       try {
         const [emailRes, smsRes] = await Promise.all([
-          getNotificationTemplates({ channel: 'email' }),
-          getNotificationTemplates({ channel: 'sms' }),
+          getNotificationTemplates({ channel: 'email', branch_id: Number(branchId) }),
+          getNotificationTemplates({ channel: 'sms', branch_id: Number(branchId) }),
         ]);
+        if (cancelled) return;
         const filterActive = (list) =>
           (list || []).filter((t) => {
             if (t.state && t.state !== 'active') return false;
@@ -55,46 +77,55 @@ export default function NotificationConfigModal({
         setSmsTemplates(filterActive(smsRes?.results || smsRes || []));
       } catch (err) {
         console.error('Failed to load notification templates:', err);
-        setError('Failed to load notification templates. Please try again.');
+        if (!cancelled) {
+          setEmailTemplates([]);
+          setSmsTemplates([]);
+          setTemplatesError(
+            err?.response?.data?.detail ||
+              err?.response?.data?.error ||
+              err?.message ||
+              'Failed to load notification templates. Close and reopen this dialog to retry.'
+          );
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     fetchTemplates();
-  }, [open, notification]);
+    return () => {
+      cancelled = true;
+    };
+  }, [open, notification, branchId]);
 
   if (!open || !notification) return null;
+  const supportedChannels = notification.supported_channels || Object.keys(notification.channels || {});
 
   const validate = () => {
+    const supportedChannels = notification.supported_channels || Object.keys(notification.channels || {});
+    if (supportedChannels.includes('in_app')) {
+      if (enabled && !inAppEnabled) return 'Enable in-app delivery before enabling this notification.';
+      return null;
+    }
+    if (loading) return 'Notification templates are still loading.';
+    if (templatesError) return 'Notification templates could not be loaded. Close and reopen this dialog to retry.';
+    if (emailTemplateId && !emailTemplates.some((t) => String(t.id) === String(emailTemplateId))) {
+      return 'The selected Email template is inactive or unavailable. Choose an active template or clear the selection.';
+    }
+    if (smsTemplateId && !smsTemplates.some((t) => String(t.id) === String(smsTemplateId))) {
+      return 'The selected SMS template is inactive or unavailable. Choose an active template or clear the selection.';
+    }
     if (enabled) {
-      if (!emailEnabled && !smsEnabled) {
-        return 'When notification is enabled, at least one channel (Email or SMS) must be enabled.';
+      const emailSupported = supportedChannels.includes('email');
+      const smsSupported = supportedChannels.includes('sms');
+      if ((!emailSupported || !emailEnabled) && (!smsSupported || !smsEnabled)) {
+        return 'When notification is enabled, at least one supported channel must be enabled.';
       }
-      if (emailEnabled) {
+      if (emailSupported && emailEnabled) {
         if (!emailTemplateId) return 'Please select a template for the Email channel before saving.';
-        if (emailTemplates.length > 0 && !emailTemplates.some((t) => String(t.id) === String(emailTemplateId))) {
-          return 'The selected Email template is inactive or unavailable. Please choose an active template.';
-        }
       }
-      if (smsEnabled) {
+      if (smsSupported && smsEnabled) {
         if (!smsTemplateId) return 'Please select a template for the SMS channel before saving.';
-        if (smsTemplates.length > 0 && !smsTemplates.some((t) => String(t.id) === String(smsTemplateId))) {
-          return 'The selected SMS template is inactive or unavailable. Please choose an active template.';
-        }
-      }
-    } else {
-      if (emailEnabled) {
-        if (!emailTemplateId) return 'Please select a template for the Email channel.';
-        if (emailTemplates.length > 0 && !emailTemplates.some((t) => String(t.id) === String(emailTemplateId))) {
-          return 'The selected Email template is inactive or unavailable. Please choose an active template.';
-        }
-      }
-      if (smsEnabled) {
-        if (!smsTemplateId) return 'Please select a template for the SMS channel.';
-        if (smsTemplates.length > 0 && !smsTemplates.some((t) => String(t.id) === String(smsTemplateId))) {
-          return 'The selected SMS template is inactive or unavailable. Please choose an active template.';
-        }
       }
     }
     return null;
@@ -111,19 +142,24 @@ export default function NotificationConfigModal({
     setSaving(true);
     setError(null);
 
-    const payload = {
-      enabled,
-      channels: {
-        email: {
+    const supportedChannels = notification.supported_channels || Object.keys(notification.channels || {});
+    const channels = {};
+    if (supportedChannels.includes('in_app')) {
+      channels.in_app = { enabled: inAppEnabled };
+    }
+    if (supportedChannels.includes('email')) {
+      channels.email = {
           enabled: emailEnabled,
           template_id: emailTemplateId ? Number(emailTemplateId) : null,
-        },
-        sms: {
+      };
+    }
+    if (supportedChannels.includes('sms')) {
+      channels.sms = {
           enabled: smsEnabled,
           template_id: smsTemplateId ? Number(smsTemplateId) : null,
-        },
-      },
-    };
+      };
+    }
+    const payload = { enabled, channels };
 
     try {
       const updated = await updateBranchNotification(branchId, notification.key, payload);
@@ -190,6 +226,12 @@ export default function NotificationConfigModal({
               <div className="flex-1 leading-snug">{error}</div>
             </div>
           )}
+          {templatesError && (
+            <div role="alert" className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-700 text-sm">
+              <AlertCircle size={18} className="shrink-0 mt-0.5" />
+              <div className="flex-1 leading-snug">{templatesError}</div>
+            </div>
+          )}
 
           {/* Info Card */}
           <div className="p-4 bg-subtle rounded-xl border border-brand-border">
@@ -202,13 +244,10 @@ export default function NotificationConfigModal({
             {notification.description && (
               <p className="text-xs text-muted mt-1 leading-relaxed">{notification.description}</p>
             )}
-            {!notification.trigger_ready && (
-              <div className="mt-2 text-xs bg-amber-50 text-amber-800 border border-amber-200 rounded-lg p-2 flex items-center gap-2">
-                <AlertCircle size={14} className="shrink-0 text-amber-600" />
-                <span>
-                  This notification trigger is not ready yet in the current version. Configuring it will save your preferences for when the event is emitted.
-                </span>
-              </div>
+            {notification.recipient_rule && (
+              <p className="text-xs text-muted mt-1">
+                Recipient: {notification.recipient_rule}
+              </p>
             )}
           </div>
 
@@ -237,7 +276,34 @@ export default function NotificationConfigModal({
               Delivery Channels
             </div>
 
+            {supportedChannels.includes('in_app') && (
+              <div className={`p-4 rounded-xl border transition-all ${inAppEnabled ? 'border-primary/40 bg-primary/5' : 'border-brand-border bg-white'}`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className={`p-2 rounded-lg ${inAppEnabled ? 'bg-primary/10 text-primary' : 'bg-slate-100 text-slate-500'}`}>
+                      <CheckCircle size={18} />
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-heading">In-app notification</div>
+                      <div className="text-xs text-muted">Delivered to the assigned salesperson’s notification center</div>
+                    </div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={inAppEnabled}
+                      onChange={(e) => setInAppEnabled(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                  </label>
+                </div>
+                <p className="text-[11px] text-muted mt-2">No notification is created when the record has no active assigned salesperson.</p>
+              </div>
+            )}
+
             {/* Email Channel */}
+            {supportedChannels.includes('email') && (
             <div className={`p-4 rounded-xl border transition-all ${emailEnabled ? 'border-primary/40 bg-primary/5' : 'border-brand-border bg-white'}`}>
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2.5">
@@ -289,8 +355,10 @@ export default function NotificationConfigModal({
                 )}
               </div>
             </div>
+            )}
 
             {/* SMS Channel */}
+            {supportedChannels.includes('sms') && (
             <div className={`p-4 rounded-xl border transition-all ${smsEnabled ? 'border-primary/40 bg-primary/5' : 'border-brand-border bg-white'}`}>
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2.5">
@@ -342,6 +410,7 @@ export default function NotificationConfigModal({
                 )}
               </div>
             </div>
+            )}
           </div>
 
           {/* Action Buttons */}

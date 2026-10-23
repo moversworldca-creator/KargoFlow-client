@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, Plus, Trash2, ArrowUp, ArrowDown, Zap, Mail, MessageSquare, Clock, Filter, AlertCircle, CheckCircle2, ChevronRight, HelpCircle } from 'lucide-react';
+import { X, Plus, Trash2, ArrowUp, ArrowDown, AlertCircle, CheckCircle2, ChevronRight } from 'lucide-react';
 import {
   createCustomAutomation,
   updateCustomAutomation,
@@ -70,12 +70,13 @@ export default function AutomationWizardModal({
 }) {
   const [activeStep, setActiveStep] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
+  const [metadataLoading, setMetadataLoading] = useState(false);
+  const [metadataError, setMetadataError] = useState('');
   const [error, setError] = useState(null);
 
   const [events, setEvents] = useState([]);
   const [generalEmailTemplates, setGeneralEmailTemplates] = useState([]);
   const [generalSmsTemplates, setGeneralSmsTemplates] = useState([]);
-  const [loadingMeta, setLoadingMeta] = useState(false);
 
   const [formData, setFormData] = useState(initialAutomationState);
 
@@ -84,10 +85,12 @@ export default function AutomationWizardModal({
     if (!open) return;
 
     setError(null);
+    setMetadataError('');
+    setMetadataLoading(true);
     setActiveStep(0);
+    let cancelled = false;
 
     const loadMetadata = async () => {
-      setLoadingMeta(true);
       try {
         const [eventsRes, emailTemplatesRes, smsTemplatesRes] = await Promise.all([
           getCustomAutomationEvents(),
@@ -95,6 +98,7 @@ export default function AutomationWizardModal({
           getGeneralTemplates({ channel: 'sms' }),
         ]);
 
+        if (cancelled) return;
         const eventList = eventsRes?.results || eventsRes || [];
         setEvents(eventList);
 
@@ -112,8 +116,20 @@ export default function AutomationWizardModal({
         setGeneralSmsTemplates(smsList);
       } catch (err) {
         console.error('Failed to load automation metadata:', err);
+        if (!cancelled) {
+          const data = err?.response?.data;
+          setMetadataError(
+            data?.detail ||
+              data?.error ||
+              err?.message ||
+              'Could not load automation events and active General templates. Try again before saving.'
+          );
+          setEvents([]);
+          setGeneralEmailTemplates([]);
+          setGeneralSmsTemplates([]);
+        }
       } finally {
-        setLoadingMeta(false);
+        if (!cancelled) setMetadataLoading(false);
       }
     };
 
@@ -174,6 +190,10 @@ export default function AutomationWizardModal({
     } else {
       setFormData(initialAutomationState());
     }
+
+    return () => {
+      cancelled = true;
+    };
   }, [open, initialValue]);
 
   if (!open) return null;
@@ -182,7 +202,15 @@ export default function AutomationWizardModal({
   const targetType = currentEventMeta?.target || (formData.event.startsWith('lead.') ? 'lead' : 'opportunity');
 
   // Steps for the stepper
-  const stepLabels = ['Trigger & Scope', 'Conditions', 'Communication Steps', 'Review & Save'];
+  const stepLabels = ['Trigger', 'Action', 'Target', 'Filters'];
+  const triggerEvents = events;
+  const targetOptions = Array.from(new Set([
+    targetType,
+    ...triggerEvents.map((event) => event.target).filter(Boolean),
+  ]));
+  const branchName = branches.find((branch) => String(branch.id) === String(formData.branch_id))?.name;
+  const allConditionsCount = (formData.conditions.all || []).length;
+  const anyConditionsCount = (formData.conditions.any || []).length;
 
   // Add condition rule
   const addConditionRule = (group) => {
@@ -276,6 +304,15 @@ export default function AutomationWizardModal({
 
   // Validation
   const validateForm = () => {
+    if (metadataLoading) {
+      return 'Automation events and templates are still loading.';
+    }
+    if (metadataError) {
+      return 'Automation metadata could not be loaded. Retry by closing and reopening the editor.';
+    }
+    if (triggerEvents.length === 0) {
+      return 'No automation events are available.';
+    }
     const trimmedName = String(formData.name || '').trim();
     if (!trimmedName) {
       return 'Automation name is required.';
@@ -315,11 +352,11 @@ export default function AutomationWizardModal({
         return `Step ${i + 1} (${s.channel.toUpperCase()}) requires a template.`;
       }
       const pool = s.channel === 'sms' ? generalSmsTemplates : generalEmailTemplates;
-      if (pool.length > 0) {
-        const activeMatch = pool.find((t) => String(t.id) === String(s.template_id));
-        if (!activeMatch) {
-          return `Step ${i + 1} (${s.channel.toUpperCase()}) must use an active, usable General template.`;
-        }
+      const activeMatch = pool.find((t) => String(t.id) === String(s.template_id));
+      if (!activeMatch) {
+        return pool.length === 0
+          ? `No active General ${s.channel.toUpperCase()} templates are available for step ${i + 1}.`
+          : `Step ${i + 1} (${s.channel.toUpperCase()}) must use an active, usable General template.`;
       }
       if (s.delay_minutes < 0 || s.delay_minutes > 525600) {
         return `Step ${i + 1} delay must be between 0 and 525,600 minutes (365 days).`;
@@ -433,34 +470,104 @@ export default function AutomationWizardModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[92vh] border border-brand-border shadow-2xl overflow-hidden flex flex-col">
+      <div className="bg-white rounded-xl w-full max-w-6xl max-h-[94vh] border border-brand-border shadow-2xl overflow-hidden flex flex-col">
         {/* Modal Header */}
-        <div className="p-4 px-6 border-b border-brand-border flex items-center justify-between shrink-0 bg-slate-50/70">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-primary/10 text-primary rounded-xl">
-              <Zap size={20} />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-heading">
-                {formData.id ? 'Edit Custom Automation' : 'Create Custom Automation'}
-              </h2>
-              <p className="text-xs text-muted">
-                Define automated multi-channel sequences triggered by business events
-              </p>
-            </div>
-          </div>
+        <div className="px-5 py-3 border-b border-brand-border flex items-center justify-between shrink-0">
+          <h2 className="text-base font-bold text-heading">
+            {formData.id ? 'Edit Automation' : 'Create Automation'}
+          </h2>
           <button
             type="button"
             onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+            aria-label="Close automation editor"
+            className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
+        <div className="px-5 py-3 border-b border-brand-border shrink-0 space-y-2.5">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+            <div className="md:col-span-6">
+              <label className="block text-[11px] font-bold uppercase tracking-widest text-muted mb-1">
+                Name <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="text"
+                maxLength={160}
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder="Automation name"
+                className="w-full px-3 py-2 bg-subtle rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-[11px] font-bold uppercase tracking-widest text-muted mb-1">
+                Target
+              </label>
+              <select
+                value={targetType}
+                onChange={(e) => {
+                  const matchingEvent = triggerEvents.find((event) => event.target === e.target.value);
+                  if (matchingEvent) setFormData({ ...formData, event: matchingEvent.event });
+                }}
+                className="w-full px-3 py-2 bg-subtle rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/20"
+              >
+                {targetOptions.map((target) => (
+                  <option key={target} value={target}>
+                    {target.charAt(0).toUpperCase() + target.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="md:col-span-3">
+              <label className="block text-[11px] font-bold uppercase tracking-widest text-muted mb-1">
+                Branch
+              </label>
+              <select
+                value={formData.branch_id || ''}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    branch_id: e.target.value ? Number(e.target.value) : null,
+                  })
+                }
+                className="w-full px-3 py-2 bg-subtle rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/20"
+              >
+                <option value="">All branches</option>
+                {branches.map((branch) => (
+                  <option key={branch.id} value={branch.id}>{branch.name}</option>
+                ))}
+              </select>
+            </div>
+            <label className="md:col-span-1 flex items-center gap-2 text-sm text-heading pb-2">
+              <input
+                type="checkbox"
+                checked={formData.is_active}
+                onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+                className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+              />
+              <span>Enabled</span>
+            </label>
+          </div>
+          <div>
+            <label className="block text-[11px] font-bold uppercase tracking-widest text-muted mb-1">
+              Description (optional)
+            </label>
+            <textarea
+              rows={1}
+              maxLength={2000}
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              placeholder="Describe what this automation does"
+              className="w-full px-3 py-2 bg-subtle rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/20 resize-y"
+            />
+          </div>
+        </div>
+
         {/* Stepper Header */}
-        <div className="px-6 py-3 border-b border-brand-border bg-subtle/30 shrink-0">
-          <div className="flex items-center justify-between max-w-3xl mx-auto">
+        <div className="px-5 py-2.5 border-b border-brand-border shrink-0 overflow-x-auto">
+          <div className="flex items-center justify-between min-w-[520px]">
             {stepLabels.map((label, idx) => {
               const isActive = activeStep === idx;
               const isPast = activeStep > idx;
@@ -469,15 +576,16 @@ export default function AutomationWizardModal({
                   <button
                     type="button"
                     onClick={() => setActiveStep(idx)}
+                    disabled={metadataLoading || Boolean(metadataError)}
                     className="flex items-center gap-2 group cursor-pointer focus:outline-none"
                   >
                     <div
                       className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
                         isActive
-                          ? 'bg-primary text-white ring-4 ring-primary/20'
+                          ? 'bg-blue-50 text-primary border border-primary'
                           : isPast
-                          ? 'bg-emerald-600 text-white'
-                          : 'bg-slate-200 text-slate-600 group-hover:bg-slate-300'
+                          ? 'bg-orange-200 text-heading'
+                          : 'bg-slate-100 text-slate-600 group-hover:bg-slate-200'
                       }`}
                     >
                       {isPast ? <CheckCircle2 size={15} /> : idx + 1}
@@ -507,143 +615,73 @@ export default function AutomationWizardModal({
 
         {/* Error notification */}
         {error && (
-          <div className="m-6 mb-0 p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-700 text-sm shrink-0">
+          <div className="mx-5 mt-3 p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-700 text-sm shrink-0">
             <AlertCircle size={18} className="shrink-0 mt-0.5" />
             <div className="flex-1 leading-snug">{error}</div>
           </div>
         )}
+        {metadataError && (
+          <div role="alert" className="mx-5 mt-3 p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-700 text-sm shrink-0">
+            <AlertCircle size={18} className="shrink-0 mt-0.5" />
+            <div className="flex-1 leading-snug">
+              <span className="font-bold">Could not load automation setup data.</span>{' '}
+              {metadataError}
+            </div>
+          </div>
+        )}
+        {metadataLoading && (
+          <div role="status" className="mx-5 mt-3 p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-800 text-sm shrink-0">
+            Loading automation events and active General templates...
+          </div>
+        )}
 
         {/* Step Content */}
-        <div className="flex-1 overflow-y-auto p-6 min-h-0">
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          <div className="flex-1 min-w-0 overflow-y-auto p-5">
           {/* STEP 0: Trigger & Scope */}
           {activeStep === 0 && (
             <div className="space-y-6 max-w-3xl mx-auto">
               <div>
-                <h3 className="text-base font-bold text-heading">1. General Information & Trigger</h3>
+                <h3 className="text-xl font-bold text-heading">When should this automation trigger?</h3>
                 <p className="text-xs text-muted mt-0.5">
-                  Name your automation and select the event that triggers it.
+                  Choose the event that will start this automation.
                 </p>
               </div>
 
-              <div className="space-y-4 bg-slate-50/50 p-5 rounded-2xl border border-brand-border">
-                <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <label className="text-xs font-bold uppercase tracking-wider text-muted">
-                      Automation Name <span className="text-rose-500">*</span>
-                    </label>
-                    <span className="text-[11px] text-muted">{formData.name.length}/160</span>
-                  </div>
-                  <input
-                    type="text"
-                    maxLength={160}
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="e.g. Lead Follow-Up Sequence"
-                    className="w-full px-3.5 py-2.5 bg-white rounded-xl text-sm border border-brand-border outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                  />
-                  <p className="text-[11px] text-muted mt-1">
-                    Names beginning with <code className="bg-slate-200 px-1 py-0.5 rounded">notification:</code> are reserved.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-1">
-                    Description (Optional)
+              <div className="rounded-xl border border-brand-border p-4 space-y-3">
+                <div className="text-sm font-bold text-heading">Configure Trigger</div>
+                <div className="max-w-md">
+                  <label className="block text-[11px] font-bold uppercase tracking-widest text-muted mb-1">
+                    Event
                   </label>
-                  <textarea
-                    rows={2}
-                    maxLength={2000}
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    placeholder="Describe what this automation sequence is intended to do..."
-                    className="w-full px-3.5 py-2 bg-white rounded-xl text-sm border border-brand-border outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-1">
-                      Trigger Event <span className="text-rose-500">*</span>
-                    </label>
-                    <select
-                      value={formData.event}
-                      onChange={(e) => setFormData({ ...formData, event: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-white rounded-xl text-sm border border-brand-border outline-none focus:border-primary focus:ring-1 focus:ring-primary font-medium"
-                    >
-                      {events.length > 0 ? (
-                        events.map((ev) => (
-                          <option key={ev.event} value={ev.event}>
-                            {ev.event} ({ev.target}) {!ev.emitted ? '— [Not emitted yet]' : ''}
-                          </option>
-                        ))
-                      ) : (
-                        <>
-                          <option value="lead.created">lead.created (lead)</option>
-                          <option value="lead.converted">lead.converted (opportunity)</option>
-                          <option value="opportunity.booked">opportunity.booked (opportunity)</option>
-                          <option value="estimate.sent">estimate.sent (opportunity)</option>
-                          <option value="job.moving_day_reminder">job.moving_day_reminder (opportunity)</option>
-                        </>
-                      )}
-                    </select>
-
-                    {currentEventMeta && !currentEventMeta.emitted && (
-                      <div className="mt-2 text-xs bg-amber-50 text-amber-800 border border-amber-200 rounded-lg p-2 flex items-center gap-2">
-                        <AlertCircle size={14} className="shrink-0 text-amber-600" />
-                        <span>This event is accepted but not currently emitted by the application.</span>
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-1">
-                      Branch Scope
-                    </label>
-                    <select
-                      value={formData.branch_id || ''}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          branch_id: e.target.value ? Number(e.target.value) : null,
-                        })
-                      }
-                      className="w-full px-3.5 py-2.5 bg-white rounded-xl text-sm border border-brand-border outline-none focus:border-primary focus:ring-1 focus:ring-primary font-medium"
-                    >
-                      <option value="">Company-Wide (All Branches)</option>
-                      {branches.map((b) => (
-                        <option key={b.id} value={b.id}>
-                          Branch: {b.name}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-[11px] text-muted mt-1">
-                      {formData.branch_id
-                        ? 'Rule will only apply to the selected branch.'
-                        : 'Rule will apply across all branches in the company.'}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="pt-2">
-                  <label className="flex items-center gap-2.5 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.is_active}
-                      onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-                      className="rounded border-slate-300 text-primary focus:ring-primary h-4 w-4"
-                    />
-                    <span className="text-sm font-semibold text-heading">Enable automation upon saving</span>
-                  </label>
+                  <select
+                    value={formData.event}
+                    onChange={(e) => setFormData({ ...formData, event: e.target.value })}
+                    disabled={metadataLoading || Boolean(metadataError) || triggerEvents.length === 0}
+                    className="w-full px-3 py-2 bg-subtle rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    {triggerEvents.map((event) => (
+                      <option key={event.event} value={event.event}>
+                        {event.event} ({event.target}) {!event.emitted ? '— [Not emitted yet]' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {currentEventMeta && !currentEventMeta.emitted && (
+                    <div className="mt-2 text-xs bg-amber-50 text-amber-800 border border-amber-200 rounded-lg p-2 flex items-center gap-2">
+                      <AlertCircle size={14} className="shrink-0 text-amber-600" />
+                      <span>This event is accepted but not currently emitted by the application.</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           )}
 
-          {/* STEP 1: Conditions */}
-          {activeStep === 1 && (
+          {/* STEP 3: Filters */}
+          {activeStep === 3 && (
             <div className="space-y-6 max-w-3xl mx-auto">
               <div>
-                <h3 className="text-base font-bold text-heading">2. Conditions (Optional)</h3>
+                <h3 className="text-xl font-bold text-heading">Add filters (optional)</h3>
                 <p className="text-xs text-muted mt-0.5">
                   Define matching rules to filter when this automation should execute. If left empty, it runs for every record of target <strong>{targetType}</strong>.
                 </p>
@@ -781,12 +819,12 @@ export default function AutomationWizardModal({
             </div>
           )}
 
-          {/* STEP 2: Communication Steps */}
-          {activeStep === 2 && (
+          {/* STEP 1: Actions */}
+          {activeStep === 1 && (
             <div className="space-y-6 max-w-3xl mx-auto">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-base font-bold text-heading">3. Communication Steps</h3>
+                  <h3 className="text-xl font-bold text-heading">Actions</h3>
                   <p className="text-xs text-muted mt-0.5">
                     Configure the message steps to send. Each step uses an active General template.
                   </p>
@@ -960,9 +998,34 @@ export default function AutomationWizardModal({
             </div>
           )}
 
-          {/* STEP 3: Review & Summary */}
-          {activeStep === 3 && (
-            <div className="space-y-6 max-w-3xl mx-auto">
+          {/* STEP 2: Target */}
+          {activeStep === 2 && (
+            <>
+              <div className="max-w-3xl mx-auto space-y-4">
+                <div>
+                  <h3 className="text-xl font-bold text-heading">Target</h3>
+                  <p className="text-sm text-muted mt-0.5">
+                    The selected trigger determines the record type this automation targets.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-brand-border p-4 space-y-3">
+                  <div className="text-sm font-bold text-heading">Automation scope</div>
+                  <div className="rounded-xl border border-primary bg-primary/5 p-4">
+                    <div className="text-sm font-bold text-heading capitalize">{targetType}</div>
+                    <div className="text-xs text-muted mt-1">Triggered by {formData.event}</div>
+                  </div>
+                  <div className="rounded-xl border border-brand-border bg-slate-50 p-4">
+                    <div className="text-sm font-bold text-heading">Branch</div>
+                    <div className="text-xs text-muted mt-1">
+                      {formData.branch_id ? branchName || `Branch #${formData.branch_id}` : 'All branches'}
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted">
+                    Target type is tied to the selected trigger event and cannot be changed independently.
+                  </p>
+                </div>
+              </div>
+              <div className="hidden">
               <div>
                 <h3 className="text-base font-bold text-heading">4. Review Automation Configuration</h3>
                 <p className="text-xs text-muted mt-0.5">
@@ -1061,16 +1124,50 @@ export default function AutomationWizardModal({
                 </div>
               </div>
             </div>
+            </>
           )}
+          </div>
+
+          <aside className="hidden md:block w-80 shrink-0 border-l border-brand-border bg-slate-50/70 overflow-y-auto p-5">
+            <div className="space-y-3">
+              <div>
+                <div className="text-sm font-bold text-heading">Live Preview</div>
+                <div className="text-xs text-muted">See your automation as you build it</div>
+              </div>
+              <div className="space-y-2">
+                <div className="rounded-xl border border-brand-border bg-white px-3 py-2.5 text-sm">
+                  When {targetType} {String(formData.event.split('.').slice(1).join(' ') || 'changes')}
+                </div>
+                {formData.steps.map((step, index) => {
+                  const templates = step.channel === 'sms' ? generalSmsTemplates : generalEmailTemplates;
+                  const template = templates.find((item) => String(item.id) === String(step.template_id));
+                  const action = `Send ${step.channel}`;
+                  return (
+                    <div key={`${step.channel}-${index}`} className="rounded-xl border border-brand-border bg-white px-3 py-2.5 text-sm">
+                      {index + 1}. {action}
+                      {template?.name ? ` · ${template.name}` : ''}
+                      {step.delay_minutes > 0 ? ` · after ${step.delay_value} ${step.delay_unit}` : ''}
+                    </div>
+                  );
+                })}
+                <div className="rounded-xl border border-brand-border bg-white px-3 py-2.5 text-sm">
+                  Scope: {formData.branch_id ? branchName || `Branch #${formData.branch_id}` : 'All branches'}
+                </div>
+              </div>
+              <div className="text-xs text-muted">
+                {allConditionsCount + anyConditionsCount} {allConditionsCount + anyConditionsCount === 1 ? 'filter' : 'filters'} applied
+              </div>
+            </div>
+          </aside>
         </div>
 
         {/* Modal Footer */}
-        <div className="p-4 px-6 border-t border-brand-border flex items-center justify-between shrink-0 bg-slate-50/70">
+        <div className="px-5 py-3 border-t border-brand-border flex items-center justify-between shrink-0">
           <button
             type="button"
-            disabled={activeStep === 0 || isSaving}
+            disabled={activeStep === 0 || isSaving || metadataLoading || Boolean(metadataError)}
             onClick={() => setActiveStep((s) => Math.max(0, s - 1))}
-            className="px-4 py-2 bg-white border border-brand-border text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-100 disabled:opacity-40 transition-colors shadow-xs"
+            className="px-4 py-2 bg-slate-100 text-heading rounded-xl text-sm font-semibold hover:bg-slate-200 disabled:opacity-40 transition-colors"
           >
             Previous
           </button>
@@ -1078,30 +1175,20 @@ export default function AutomationWizardModal({
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={onClose}
-              disabled={isSaving}
-              className="px-4 py-2 text-slate-600 hover:text-slate-800 rounded-xl text-sm font-semibold transition-colors"
+              onClick={handleSave}
+              disabled={isSaving || metadataLoading || Boolean(metadataError)}
+              className="px-5 py-2 bg-gradient-to-r from-orange-300 to-rose-200 text-heading rounded-xl text-sm font-bold transition-colors disabled:opacity-50"
             >
-              Cancel
+              {isSaving ? 'Saving...' : 'Save'}
             </button>
-            {activeStep < stepLabels.length - 1 ? (
-              <button
-                type="button"
-                onClick={() => setActiveStep((s) => Math.min(stepLabels.length - 1, s + 1))}
-                className="px-5 py-2 bg-primary text-white rounded-xl text-sm font-bold shadow-md hover:bg-[#003d2f] transition-all flex items-center gap-1.5"
-              >
-                Next <ChevronRight size={16} />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={isSaving}
-                className="px-6 py-2 bg-primary text-white rounded-xl text-sm font-bold shadow-md hover:bg-[#003d2f] transition-all disabled:opacity-50"
-              >
-                {isSaving ? 'Saving...' : formData.id ? 'Update Automation' : 'Create Automation'}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => setActiveStep((s) => Math.min(stepLabels.length - 1, s + 1))}
+              disabled={activeStep === stepLabels.length - 1 || isSaving || metadataLoading || Boolean(metadataError)}
+              className="px-5 py-2 bg-slate-100 text-heading rounded-xl text-sm font-bold hover:bg-slate-200 transition-colors disabled:opacity-50 inline-flex items-center gap-1.5"
+            >
+              Next <ChevronRight size={16} />
+            </button>
           </div>
         </div>
       </div>

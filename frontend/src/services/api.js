@@ -759,7 +759,13 @@ export const deactivateCustomAutomation = (id) => api.delete(`/tenant/communicat
 export const getCustomAutomationEvents = () => api.get("/tenant/communications/automations/events/");
 export const getCustomAutomationRuns = (id) => api.get(`/tenant/communications/automations/${id}/runs/`);
 
-export const getGeneralTemplates = (params) => api.get("/tenant/communications/templates/", { params });
+export const getGeneralTemplates = (params) => {
+  const { include_inactive, ...queryParams } = params || {};
+  const path = include_inactive
+    ? "/tenant/communications/templates/managed/"
+    : "/tenant/communications/templates/";
+  return api.get(path, { params: queryParams });
+};
 export const getGeneralTemplate = (id) => api.get(`/tenant/communications/templates/${id}/`);
 export const getGeneralTemplateVariables = () => api.get("/tenant/communications/templates/variables/");
 export const createGeneralTemplate = (data) => api.post("/tenant/communications/templates/", data);
