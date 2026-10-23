@@ -27,7 +27,8 @@ export default function RecordDataPreview({ mode, onRender, document }) {
       const data = await onRender({ type: sourceType, id });
       if (current === request.current) setResult(data);
     } catch (failure) {
-      if (current === request.current) setError(failure?.response?.data?.detail || failure?.message || 'Unable to load record values.');
+      const detail = failure?.response?.data?.detail;
+      if (current === request.current) setError((typeof detail === 'string' && detail) || failure?.message || 'Unable to load record values.');
     } finally {
       if (current === request.current) setLoading(false);
     }

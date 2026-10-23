@@ -32,4 +32,13 @@ describe('Actual record values', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Access denied');
     expect(screen.queryByTitle('Actual record document')).not.toBeInTheDocument();
   });
+
+  it('shows a readable message when the server detail is not text', async () => {
+    const onRender = vi.fn().mockRejectedValue({ message: 'Request failed', response: { data: { detail: { source: ['Invalid'] } } } });
+    render(<RecordDataPreview mode="invoice" onRender={onRender} />);
+    fireEvent.click(screen.getByText('Check actual record values'));
+    fireEvent.change(screen.getByLabelText('Record ID'), { target: { value: '42' } });
+    fireEvent.click(screen.getByText('Check values'));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Request failed'));
+  });
 });
