@@ -1,3 +1,4 @@
+import { getTenantTemplateKind, getTenantTemplateMode, getTenantTemplateRoute } from '../utils/templateBoundary';
 import { createPortal } from 'react-dom';
 import { getDocumentContent, getDocumentHtml } from './documentContent';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -538,7 +539,7 @@ const safeList = (payload) => {
   return [];
 };
 
-export default function DocumentTemplates({ branchId = null, builderRouteView = '', builderRouteItemId = null, onOpenChooser = null, basePath = '' }) {
+export default function DocumentTemplates({ branchId = null, builderRouteView = '', builderRouteItemId = null, onOpenChooser = null, basePath = '', templateKind = 'document' }) {
   const { user } = useAuth();
   const navigate = useNavigate();
   let location = { pathname: '' };
@@ -698,45 +699,19 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
       const params = {};
       if (branchFilter) params.branch = branchFilter;
 
-      const [legalRes, estimateRes, commRes] = await Promise.allSettled([
-        getDocumentTemplates(params),
-        getEstimatePortalTemplates ? getEstimatePortalTemplates(params) : Promise.resolve([]),
-        getCommunicationTemplates ? getCommunicationTemplates(params) : Promise.resolve([]),
-      ]);
-
-      const rawLegal = legalRes.status === 'fulfilled' ? normalize(legalRes.value?.data ?? legalRes.value) : [];
-      const rawEstimate = estimateRes.status === 'fulfilled' ? normalize(estimateRes.value?.data ?? estimateRes.value) : [];
-      const rawComm = commRes.status === 'fulfilled' ? normalize(commRes.value?.data ?? commRes.value) : [];
-
-      setLegalItems(rawLegal);
-      setEstimateItems(rawEstimate);
-      setCommItems(rawComm);
-
-      const unifiedLegal = rawLegal.map((t) => ({
+      const response = await getDocumentTemplates({ ...params, kind: templateKind });
+      const rows = normalize(response?.data ?? response).filter((item) => getTenantTemplateKind(item) === templateKind);
+      setLegalItems(rows);
+      setEstimateItems([]);
+      setCommItems([]);
+      setItems(rows.map((t) => ({
         ...t,
         source_type: 'legal',
         unified_type: t.template_type,
-        display_type: t.template_type === 'bol' ? 'BOL' : t.template_type === 'invoice' ? 'Invoice' : t.template_type === 'credit_card_authorization' ? 'CC Auth' : 'Contract',
-        applies_to_label: t.scope_type === 'job' || t.applies_to_entity === 'job' || t.scope_type === 'planned_sub_job' ? 'Job' : 'Opportunity',
-      }));
+        display_type: templateKind === 'invoice' ? 'Invoice' : t.template_type === 'bol' ? 'BOL' : t.template_type === 'credit_card_authorization' ? 'CC Auth' : 'Contract',
+        applies_to_label: templateKind === 'invoice' ? 'Invoice' : t.scope_type === 'job' ? 'Job' : 'Opportunity',
+      })));
 
-      const unifiedEstimate = rawEstimate.map((t) => ({
-        ...t,
-        source_type: 'estimate',
-        unified_type: 'estimate',
-        display_type: 'Estimate',
-        applies_to_label: 'Customer Portal',
-      }));
-
-      const unifiedComm = rawComm.map((t) => ({
-        ...t,
-        source_type: 'comm',
-        unified_type: String(t.channel || '').toLowerCase() === 'sms' ? 'sms' : 'email',
-        display_type: String(t.channel || '').toLowerCase() === 'sms' ? 'SMS' : 'Email',
-        applies_to_label: String(t.channel || '').toLowerCase() === 'sms' ? 'SMS Alert' : 'Transactional Email',
-      }));
-
-      setItems([...unifiedLegal, ...unifiedEstimate, ...unifiedComm]);
     } catch (err) {
       setItems([]);
       setMessage({ type: 'error', text: err?.response?.data?.detail || 'Unable to load templates.' });
@@ -761,7 +736,7 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
   useEffect(() => {
     loadTemplates();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchFilter]);
+  }, [branchFilter, templateKind]);
 
   useEffect(() => {
     (async () => {
@@ -834,18 +809,13 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
 
         if (isCancelled) return;
 
-        let mode = 'contract';
-        let group = template.source_type || (template.kind === 'estimate' ? 'estimate' : 'legal');
-        if (template.source_type === 'estimate' || template.kind === 'estimate') {
-          mode = 'estimate';
-        } else if (template.source_type === 'comm') {
-          mode = String(template.channel || '').toLowerCase() === 'sms' ? 'sms' : 'email';
-        } else {
-          if (template.template_type === 'bol') mode = 'bol';
-          else if (template.template_type === 'credit_card_authorization') mode = 'cc_auth';
-          else if (template.template_type === 'invoice' || template.template_type === 'payment_receipt' || template.kind === 'invoice') mode = 'invoice';
-          else mode = 'contract';
+        const kind = getTenantTemplateKind(template);
+        if (kind !== templateKind) {
+          navigate(getTenantTemplateRoute(effectiveBasePath, kind, template.id), { replace: true });
+          return;
         }
+        const mode = getTenantTemplateMode(template);
+        const group = 'legal';
         setActiveBuilderMeta({ group, mode });
 
         let hydratedContent = template.content || null;
@@ -874,7 +844,7 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
         loadVariables(template.id);
         setView('edit');
       } else {
-        const chosenType = pendingNewTypeRef.current || (typeFilter !== 'all' ? typeFilter : 'contract');
+        const chosenType = templateKind === 'invoice' ? 'invoice' : pendingNewTypeRef.current || (typeFilter !== 'all' ? typeFilter : 'contract');
         pendingNewTypeRef.current = null;
         const preset = PRESET_LAYOUTS.find((p) => {
           if (chosenType === 'contract') return p.name === 'Services Contract';
@@ -900,13 +870,13 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
       lastBuilderRouteRef.current = routeKey;
     };
 
-    loadBuilderRoute();
+    loadBuilderRoute().catch((error) => { if (!isCancelled) setMessage({ type: 'error', text: error.message }); });
 
     return () => {
       isCancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [builderRouteView, builderRouteItemId, isLoading, items, navigate, isBuilderOpen, effectiveBasePath]);
+  }, [builderRouteView, builderRouteItemId, isLoading, items, navigate, isBuilderOpen, effectiveBasePath, templateKind]);
 
   const openDocumentBuilder = () => {
     const templateId = draft?.id || selectedId;
@@ -930,61 +900,11 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
     setMessage({ type: 'success', text: 'Template duplicated. Click Save to create it.' });
   };
 
-  const handleEditRow = async (template) => {
-    setSelectedId(template.id);
-    let mode = 'contract';
-    let group = template.source_type || 'legal';
-    if (template.source_type === 'estimate') {
-      mode = 'estimate';
-    } else if (template.source_type === 'comm') {
-      mode = String(template.channel || '').toLowerCase() === 'sms' ? 'sms' : 'email';
-    } else {
-      if (template.template_type === 'bol') mode = 'bol';
-      else if (template.template_type === 'credit_card_authorization') mode = 'cc_auth';
-      else if (template.template_type === 'invoice' || template.template_type === 'payment_receipt') mode = 'invoice';
-      else mode = 'contract';
-    }
-    setActiveBuilderMeta({ group, mode });
-
-    let hydratedContent = template.content || null;
-    let lockVersion = template.lock_version || 1;
-
-    try {
-      const draftRes = await getBuilderTemplateDraft(template.id);
-      const draftData = draftRes?.data ?? draftRes;
-      if (draftData?.document?.sections) {
-        hydratedContent = fromBackendDocument(draftData.document, { name: template.name, mode });
-        lockVersion = draftData.revision?.lock_version || draftData.lock_version || 1;
-      }
-    } catch {
-      // Fall back to template summary content if draft cannot be fetched
-    }
-
-    setDraft({
-      ...EMPTY_TEMPLATE,
-      ...template,
-      ...(hydratedContent ? { content: hydratedContent } : {}),
-      lock_version: lockVersion,
-    });
-    setIsBuilderOpen(true);
-    if (template.source_type === 'estimate') {
-      navigate(`${estimateBasePath}/${template.id}/builder`);
-    } else if (template.source_type === 'comm') {
-      navigate(`${commBasePath}/${template.id}/builder`);
-    } else {
-      navigate(`${effectiveBasePath}/${template.id}/builder`);
-    }
+  const handleEditRow = (template) => {
+    navigate(getTenantTemplateRoute(effectiveBasePath, getTenantTemplateKind(template), template.id));
   };
 
-  const getBuilderMode = () => {
-    if (activeBuilderMeta?.mode) return activeBuilderMeta.mode;
-    if (draft?.source_type === 'estimate') return 'estimate';
-    if (draft?.source_type === 'comm') return String(draft.channel || '').toLowerCase() === 'sms' ? 'sms' : 'email';
-    if (draft.template_type === 'bol') return 'bol';
-    if (draft.template_type === 'credit_card_authorization') return 'cc_auth';
-    if (draft.template_type === 'invoice' || draft.template_type === 'payment_receipt') return 'invoice';
-    return 'contract';
-  };
+  const getBuilderMode = () => activeBuilderMeta?.mode || (templateKind === 'invoice' ? 'invoice' : getTenantTemplateMode(draft));
 
   const handleToggleActive = async (template) => {
     const nextState = !template.is_active;
@@ -1067,6 +987,8 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
           name: `Copy of ${template.name}`,
           template_type: template.template_type,
           applies_to_entity: template.applies_to_entity || 'opportunity',
+          kind: getTenantTemplateKind(template),
+          subtype: template.subtype,
           scope_type: template.scope_type || template.applies_to_entity || 'opportunity',
           applies_to_service_type: template.applies_to_service_type || '',
           applies_to_binding_type: template.applies_to_binding_type || '',
@@ -1150,6 +1072,8 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
     // Default: Legal template
     const payload = {
       name: String(draft.name || '').trim(),
+      kind: templateKind,
+      subtype: draft.subtype || (templateKind === 'invoice' ? 'final' : draft.template_type),
       template_type: String(draft.template_type || '').trim(),
       applies_to_entity: String(draft.applies_to_entity || '').trim() || 'opportunity',
       scope_type: String(draft.scope_type || draft.applies_to_entity || '').trim() || 'opportunity',
@@ -1395,9 +1319,9 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
         <Card className="p-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
             <div>
-              <h2 className="text-xl font-bold text-slate-800">Document Templates</h2>
+              <h2 className="text-xl font-bold text-slate-800">{templateKind === 'invoice' ? 'Invoice Templates' : 'Document Templates'}</h2>
               <p className="text-sm text-slate-500 mt-1">
-                Design and manage legal contracts, bills of lading, payment invoices, and credit card authorizations.
+                {templateKind === 'invoice' ? 'Design final, deposit, storage, and progress invoices.' : 'Design and manage contracts, bills of lading, waivers, and credit card authorizations.'}
               </p>
             </div>
 
@@ -1406,7 +1330,7 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
               type="button"
               onClick={() => {
                 if (onOpenChooser) {
-                  onOpenChooser('document');
+                  onOpenChooser(templateKind);
                 } else {
                   setIsCreateModalOpen(true);
                 }
@@ -1414,7 +1338,7 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
               className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold shadow-sm transition text-sm shrink-0 cursor-pointer"
             >
               <PlusCircle size={18} />
-              <span>+ New Document</span>
+              <span>+ New {templateKind === 'invoice' ? 'Invoice' : 'Document'}</span>
             </button>
           </div>
 
@@ -1469,7 +1393,7 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
                 type="button"
                 onClick={() => {
                   if (onOpenChooser) {
-                    onOpenChooser('document');
+                    onOpenChooser(templateKind);
                   } else {
                     setIsCreateModalOpen(true);
                   }
@@ -1477,7 +1401,7 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
                 className="mt-4 inline-flex items-center gap-2 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2.5 rounded-xl transition"
               >
                 <PlusCircle size={15} />
-                <span>Create Document</span>
+                <span>Create {templateKind === 'invoice' ? 'Invoice' : 'Document'}</span>
               </button>
             </div>
           ) : (
@@ -1504,6 +1428,7 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
                             </div>
                             <div>
                               <div>{t.name}</div>
+                              {t.catalog_source?.revision_number && <p className="text-xs font-normal text-slate-500">Copied from global v{t.catalog_source.revision_number}</p>}
                               <div className="text-[11px] font-normal text-slate-500">{t.subject || t.description || 'No subject'}</div>
                             </div>
                           </div>
@@ -1606,7 +1531,8 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
         existingCommTemplates={commItems.length ? commItems : items.filter((t) => t.source_type === 'comm')}
         branches={branches}
         defaultBranchId={branchFilter || branchId}
-        initialCategory={typeFilter !== 'all' ? typeFilter : 'contract'}
+        templateKind={templateKind}
+        initialCategory={templateKind === 'invoice' ? 'invoice' : typeFilter !== 'all' ? typeFilter : 'contract'}
         presetLayouts={PRESET_LAYOUTS}
       />
 

@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, FileSignature, FileSpreadsheet, Mail, MessageSquare, ArrowRight, Check } from 'lucide-react';
+import { X, Receipt, FileSignature, FileSpreadsheet, Mail, MessageSquare, ArrowRight, Check } from 'lucide-react';
 
 export const TEMPLATE_TYPES = [
   {
     id: 'document',
     label: 'Document Template',
     badge: 'Legal & Operations',
-    description: 'Legal contracts, bills of lading, payment invoices, and credit card authorizations for Opportunities and Jobs.',
+    description: 'Contracts, bills of lading, waivers, and credit card authorizations for Opportunities and Jobs.',
     icon: FileSignature,
     iconColor: 'text-blue-600 dark:text-blue-400',
     iconBg: 'bg-blue-50 dark:bg-blue-950/40',
@@ -21,6 +21,13 @@ export const TEMPLATE_TYPES = [
     iconColor: 'text-purple-600 dark:text-purple-400',
     iconBg: 'bg-purple-50 dark:bg-purple-950/40',
     selectedBorder: 'border-purple-600 dark:border-purple-500 ring-2 ring-purple-500/20 bg-purple-50/40 dark:bg-purple-950/20',
+  },
+  {
+    id: 'invoice', label: 'Invoice Template', badge: 'Billing',
+    description: 'Final, deposit, storage, and progress invoice layouts.',
+    icon: Receipt,
+    iconColor: 'text-amber-600', iconBg: 'bg-amber-50',
+    selectedBorder: 'border-amber-600 ring-2 ring-amber-500/20 bg-amber-50/40',
   },
   {
     id: 'communication',

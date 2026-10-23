@@ -10,16 +10,22 @@ import {
 } from '../../../services/api';
 import GlobalTemplateCreateForm from './GlobalTemplateCreateForm';
 import ChooseTemplateTypeModal from './modals/ChooseTemplateTypeModal';
+import { getTemplateRoute } from './templateRoutes';
 
 const UnifiedTemplateBuilder = lazy(() => import('./UnifiedTemplateBuilder/UnifiedTemplateBuilder'));
 
-const BASE = '/document-templates';
 const PAGE_SIZE = 50;
 const TEMPLATE_SECTIONS = [
   {
+    id: 'invoice',
+    label: 'Invoice Templates',
+    description: 'Design final, deposit, storage, and progress invoice layouts.',
+    icon: FileText,
+  },
+  {
     id: 'document',
     label: 'Document Templates',
-    description: 'Design and manage legal contracts, bills of lading, payment invoices, and credit card authorizations.',
+    description: 'Design and manage contracts, bills of lading, waivers, and credit card authorizations.',
     icon: FileSignature,
   },
   {
@@ -45,7 +51,7 @@ export default function DocumentTemplates({ builderRouteView = '', builderRouteI
   const [count, setCount] = useState(0);
   const [offset, setOffset] = useState(0);
   const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState(['email', 'sms'].includes(initialKind) ? 'communication' : initialKind || 'document');
+  const filter = ['email', 'sms'].includes(initialKind) ? 'communication' : initialKind || 'document';
   const [state, setState] = useState('');
   const [refresh, setRefresh] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -53,10 +59,9 @@ export default function DocumentTemplates({ builderRouteView = '', builderRouteI
   const [error, setError] = useState('');
   const [editor, setEditor] = useState(null);
   const [editorLoading, setEditorLoading] = useState(false);
-  const [createKind, setCreateKind] = useState(null);
   const [showTypePicker, setShowTypePicker] = useState(false);
   const creating = builderRouteView === 'builder' && (!builderRouteItemId || builderRouteItemId === 'new');
-  const showCreateForm = creating || Boolean(createKind);
+  const showCreateForm = creating;
   const editingId = builderRouteView === 'builder' && !creating ? builderRouteItemId : null;
   const activeSection = TEMPLATE_SECTIONS.find((section) => section.id === filter) || TEMPLATE_SECTIONS[0];
   const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
@@ -87,37 +92,41 @@ export default function DocumentTemplates({ builderRouteView = '', builderRouteI
     setError('');
     (async () => {
       const { data: template } = await getBuilderTemplate(editingId);
+      if (!active) return;
+      const { fromGlobalDocument, getTemplateMode } = await import('./UnifiedTemplateBuilder/core/globalTemplateAdapter');
+      const mode = getTemplateMode(template);
+      if (!active) return;
+      if (template.kind !== filter) {
+        navigate(getTemplateRoute(template.kind, editingId), { replace: true });
+        return;
+      }
       if (!canManage && !template.draft_revision && !template.published_revision) throw new Error("This template has no saved revision.");
       const { data: draft } = canManage ? await startBuilderTemplateDraft(editingId)
         : template.draft_revision ? await getBuilderTemplateDraft(editingId)
         : await getBuilderTemplateRevision(editingId, template.published_revision.id);
       if (!active) return;
-      const { fromGlobalDocument, getTemplateMode } = await import('./UnifiedTemplateBuilder/core/globalTemplateAdapter');
-      if (!active) return;
-      const mode = getTemplateMode(template);
       const content = fromGlobalDocument(draft.document, { name: template.name, mode });
       setEditor({ ...template, mode, content: { ...content, lock_version: draft.revision.lock_version },
         lock_version: draft.revision.lock_version, isHydratedFromServer: true });
     })().catch((err) => { if (active) setError(getApiErrorMessage(err)); })
       .finally(() => { if (active) setEditorLoading(false); });
     return () => { active = false; };
-  }, [editingId, canManage]);
+  }, [editingId, canManage, filter, navigate]);
 
-  const back = () => { setError(''); setRefresh((n) => n + 1); navigate(BASE); };
+  const back = () => { setError(''); setRefresh((n) => n + 1); navigate(getTemplateRoute(filter)); };
   const closeCreate = () => {
-    setCreateKind(null);
     setShowTypePicker(false);
     if (creating) back();
   };
   const chooseCreateKind = (selected) => {
-    setCreateKind(selected === 'estimate' ? 'estimate_portal' : selected);
+    navigate(getTemplateRoute(selected === 'estimate' ? 'estimate_portal' : selected, 'new'));
     setShowTypePicker(false);
   };
   const changeSection = (sectionId) => {
-    setFilter(sectionId);
     setOffset(0);
     setQuery('');
     setState('');
+    navigate(getTemplateRoute(sectionId));
   };
   const mutate = async (operation) => {
     if (busy) return;
@@ -161,10 +170,9 @@ export default function DocumentTemplates({ builderRouteView = '', builderRouteI
     {error && <div role="alert" className="p-3 bg-red-50 text-red-700 border border-red-200 rounded-lg">{error}</div>}
     {editingId ? <div className="p-8 flex gap-3 items-center">{editorLoading && <Loader2 className="animate-spin" size={20} />}
       {editorLoading ? 'Loading template…' : 'Unable to open this template.'}<button onClick={back}>Back to templates</button></div>
-    : showCreateForm ? canManage ? <GlobalTemplateCreateForm initialKind={createKind || initialKind || 'document'} onClose={closeCreate} onCreated={(data) => {
-      setCreateKind(null);
+    : showCreateForm ? canManage ? <GlobalTemplateCreateForm initialKind={filter} fixedKind onClose={closeCreate} onCreated={(data) => {
       setRefresh((n) => n + 1);
-      navigate(`${BASE}/${data.id}/builder`, { replace: true });
+      navigate(getTemplateRoute(data.kind, data.id), { replace: true });
     }} /> : <p role="alert">You do not have permission to create global templates.</p> : <>
       <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-100">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
@@ -172,7 +180,7 @@ export default function DocumentTemplates({ builderRouteView = '', builderRouteI
           <h1 className="text-2xl font-bold text-slate-900">{activeSection.label}</h1>
           <p className="mt-1 text-sm text-slate-600">{activeSection.description}</p>
         </div>
-        {canManage && <button className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white shadow-sm transition-colors hover:bg-blue-700" onClick={() => setShowTypePicker(true)}><Plus size={18} />New {activeSection.id === 'document' ? 'Document' : activeSection.id === 'estimate_portal' ? 'Estimate' : 'Template'}</button>}
+        {canManage && <button className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white shadow-sm transition-colors hover:bg-blue-700" onClick={() => setShowTypePicker(true)}><Plus size={18} />New {activeSection.id === 'document' ? 'Document' : activeSection.id === 'estimate_portal' ? 'Estimate' : activeSection.id === 'invoice' ? 'Invoice' : 'Template'}</button>}
       </div>
       <div className="mb-6 flex gap-3">
         <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 px-4 text-slate-400">
@@ -204,11 +212,11 @@ export default function DocumentTemplates({ builderRouteView = '', builderRouteI
             <td className="px-4 py-4 text-left"><div className="flex min-w-0 items-center gap-3"><span className="shrink-0 rounded-lg bg-indigo-50 p-2 text-indigo-600"><Icon size={18} /></span><div className="min-w-0"><p className="break-words font-bold leading-5 text-slate-900">{item.name}</p><p className="mt-0.5 break-words text-xs leading-4 text-slate-500">{item.description || 'Global template'}</p></div></div></td>
             <td className="px-3 py-4 text-center"><span title={typeLabel} className="block max-w-full truncate rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold leading-4 tracking-wide text-slate-700">{typeLabel}</span></td>
             <td className="px-3 py-4 text-center"><span className="inline-block max-w-full whitespace-nowrap rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">{appliesTo}</span></td>
-            <td className="px-3 py-4 text-center text-slate-600">{item.published_revision ? `v${item.published_revision.revision_number}` : '—'}</td>
+            <td className="px-3 py-4 text-center text-slate-600">{item.published_revision ? `v${item.published_revision.revision_number}` : 'Not published'}{item.draft_revision && <span className="block text-xs text-amber-700">Draft available</span>}</td>
             <td className="px-3 py-4 text-center text-slate-600">Global</td>
             <td className="px-3 py-4 text-center"><span className={`inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-bold ${item.state === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{item.state === 'active' && <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}{item.state === 'active' ? 'Active' : item.state}</span></td>
             <td className="px-3 py-4 text-center"><div className="flex flex-nowrap items-center justify-center gap-1.5">
-              {item.state !== 'archived' && <button aria-label={`${canManage ? 'Edit' : 'View'} ${item.name}`} disabled={busy} onClick={() => navigate(`${BASE}/${item.id}/builder`)} className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-100">{canManage ? <Pencil size={16} /> : 'View'}</button>}
+              {item.state !== 'archived' && <button aria-label={`${canManage ? 'Edit' : 'View'} ${item.name}`} disabled={busy} onClick={() => navigate(getTemplateRoute(item.kind, item.id))} className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-100">{canManage ? <Pencil size={16} /> : 'View'}</button>}
               {canManage && <><button aria-label={`Duplicate ${item.name}`} disabled={busy || item.state === 'archived'} onClick={() => mutate(() => duplicateBuilderTemplate(item.id))} className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-100"><Copy size={16} /></button>
                 <button aria-label={item.state === 'active' ? `Deactivate ${item.name}` : `Activate ${item.name}`} disabled={busy} onClick={() => mutate(() => item.state === 'active' ? deactivateBuilderTemplate(item.id) : activateBuilderTemplate(item.id))} className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100">{item.state === 'active' ? 'Deactivate' : 'Activate'}</button>
                 {item.state !== 'archived' && <button aria-label={`Archive ${item.name}`} disabled={busy} onClick={() => { if (window.confirm(`Archive “${item.name}”?`)) mutate(() => archiveBuilderTemplate(item.id)); }} className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-100"><Trash2 size={16} /></button>}</>}
@@ -244,7 +252,7 @@ export default function DocumentTemplates({ builderRouteView = '', builderRouteI
       isOpen={showTypePicker}
       onClose={() => setShowTypePicker(false)}
       onSelectType={chooseCreateKind}
-      initialType={initialKind === 'estimate_portal' ? 'estimate' : initialKind || 'document'}
+      initialType={filter === 'estimate_portal' ? 'estimate' : filter || 'document'}
     />}
   </div>;
 }

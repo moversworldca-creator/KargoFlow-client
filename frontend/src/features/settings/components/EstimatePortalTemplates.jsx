@@ -1,3 +1,4 @@
+import { getTenantTemplateKind, getTenantTemplateRoute } from '../utils/templateBoundary';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AlertCircle, CheckCircle2, Loader2, PlusCircle, Save, Trash2, Edit2, ArrowLeft, FileText, Copy, Search, Layout, X } from 'lucide-react';
@@ -554,7 +555,7 @@ export default function EstimatePortalTemplates({ branchId = null, builderRouteV
       if (branchFilter) params.branch = branchFilter;
       const res = await getEstimatePortalTemplates(params);
       const list = normalize(res?.data ?? res);
-      setItems(list);
+      setItems(list.filter((item) => !item.kind || getTenantTemplateKind(item) === 'estimate_portal'));
     } catch (err) {
       setItems([]);
       setMessage({ type: 'error', text: err?.response?.data?.detail || 'Unable to load templates.' });
@@ -649,6 +650,11 @@ export default function EstimatePortalTemplates({ branchId = null, builderRouteV
         }
 
         if (isCancelled) return;
+        const kind = template.kind ? getTenantTemplateKind(template) : 'estimate_portal';
+        if (kind !== 'estimate_portal') {
+          navigate(getTenantTemplateRoute(effectiveBasePath, kind, template.id), { replace: true });
+          return;
+        }
 
         let hydratedContent = template.content || null;
         let lockVersion = template.lock_version || 1;
@@ -692,7 +698,7 @@ export default function EstimatePortalTemplates({ branchId = null, builderRouteV
       lastBuilderRouteRef.current = routeKey;
     };
 
-    loadBuilderRoute();
+    loadBuilderRoute().catch((error) => { if (!isCancelled) setMessage({ type: 'error', text: error.message }); });
 
     return () => {
       isCancelled = true;
@@ -909,7 +915,7 @@ export default function EstimatePortalTemplates({ branchId = null, builderRouteV
                 className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold shadow-sm transition text-sm shrink-0 cursor-pointer"
               >
                 <PlusCircle size={18} />
-                <span>+ New Document</span>
+                <span>+ New Estimate</span>
               </button>
             </div>
 

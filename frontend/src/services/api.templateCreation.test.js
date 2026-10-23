@@ -16,6 +16,15 @@ import {
 } from "./api";
 
 describe("template creation draft conversion", () => {
+  it.each([
+    [createDocumentTemplate, 'document', 'contract'],
+    [createDocumentTemplate, 'invoice', 'progress'],
+    [createEstimatePortalTemplate, 'estimate_portal', 'hourly'],
+  ])('passes the platform catalog source to the server without replacing it with blank content', async (create, kind, subtype) => {
+    await create({ name: 'Copy', kind, subtype, branch_id: 3, catalog_template_key: 'platform.custom', content: { items: [] } });
+    expect(apiMock.post).toHaveBeenCalledWith('/tenant/builder/templates/', expect.objectContaining({ kind, subtype, branch_id: 3, catalog_template_key: 'platform.custom' }));
+    expect(apiMock.post.mock.calls[0][1]).not.toHaveProperty('document');
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     apiMock.delete.mockResolvedValue({ data: {} });

@@ -549,7 +549,9 @@ export const createEstimatePortalTemplate = async (data) => {
         description: data.description || "",
         branch_id: data.branch ? Number(data.branch) : (data.branch_id ? Number(data.branch_id) : null),
       };
-  if (data.document || data.content || data.html_content) {
+  if (data.catalog_template_key) {
+    builderData.catalog_template_key = data.catalog_template_key;
+  } else if (data.document || data.content || data.html_content) {
     builderData.document = toBackendTemplateDocument(data, "estimate_portal");
   }
 
@@ -676,6 +678,13 @@ export const deleteBuilderCustomVariable = (id) =>
 
 export const getBuilderTemplates = (params = {}) =>
   api.get("/tenant/builder/templates/", { params });
+
+export const getBuilderCatalog = (params = {}) => params.kind === 'communication'
+  ? getCommunicationCatalog({ branch_id: params.branch_id })
+  : api.get('/tenant/builder/templates/catalog/', { params });
+
+export const getCommunicationCatalogTemplate = (key, params = {}) =>
+  api.get(`/tenant/communications/catalog/${encodeURIComponent(key)}/`, { params });
 
 export const getBuilderTemplate = (id) =>
   api.get(`/tenant/builder/templates/${id}/`);
@@ -876,7 +885,9 @@ export const createDocumentTemplate = async (data) => {
     description: data.description || "",
     branch_id: data.branch_id ?? (data.branch ? Number(data.branch) : null),
   };
-  if (data.document || data.content || data.html_content) {
+  if (data.catalog_template_key) {
+    builderData.catalog_template_key = data.catalog_template_key;
+  } else if (data.document || data.content || data.html_content) {
     builderData.document = toBackendTemplateDocument(data, kind === "invoice" ? "invoice" : subtype);
   }
 

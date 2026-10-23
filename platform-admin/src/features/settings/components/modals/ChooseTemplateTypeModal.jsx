@@ -3,10 +3,20 @@ import { X, FileSignature, FileSpreadsheet, Mail, MessageSquare, ArrowRight, Che
 
 export const TEMPLATE_TYPES = [
   {
+    id: 'invoice',
+    label: 'Invoice Template',
+    badge: 'Billing',
+    description: 'Final, deposit, storage, and progress invoices with line items and totals.',
+    icon: FileSpreadsheet,
+    iconColor: 'text-amber-600 dark:text-amber-400',
+    iconBg: 'bg-amber-50 dark:bg-amber-950/40',
+    selectedBorder: 'border-amber-600 ring-2 ring-amber-500/20 bg-amber-50/40',
+  },
+  {
     id: 'document',
     label: 'Document Template',
     badge: 'Legal & Operations',
-    description: 'Legal contracts, bills of lading, payment invoices, and credit card authorizations for Opportunities and Jobs.',
+    description: 'Contracts, bills of lading, waivers, and credit card authorizations for Opportunities and Jobs.',
     icon: FileSignature,
     iconColor: 'text-blue-600 dark:text-blue-400',
     iconBg: 'bg-blue-50 dark:bg-blue-950/40',
@@ -136,7 +146,7 @@ export default function ChooseTemplateTypeModal({
 
         {/* Cards Body */}
         <div className="p-6 space-y-3.5">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5" role="radiogroup" aria-label="Template categories">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5" role="radiogroup" aria-label="Template categories">
             {TEMPLATE_TYPES.map((type) => {
               const Icon = type.icon;
               const SecondaryIcon = type.iconSecondary;

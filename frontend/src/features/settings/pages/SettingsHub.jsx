@@ -1,3 +1,4 @@
+import { getTenantTemplateKind, getTenantTemplateRoute } from '../utils/templateBoundary';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
@@ -56,9 +57,7 @@ import TeamManagement from "../components/TeamManagement";
 import DocumentTemplates from "../components/DocumentTemplates";
 import EstimatePortalTemplates from "../components/EstimatePortalTemplates";
 import ChooseTemplateTypeModal from "../components/modals/ChooseTemplateTypeModal";
-import CreateDocumentModal from "../components/modals/CreateDocumentModal";
-import CreateEstimatePortalModal from "../components/modals/CreateEstimatePortalModal";
-import CreateCommunicationModal from "../components/modals/CreateCommunicationModal";
+import CreateUniversalDocumentModal from "../components/modals/CreateUniversalDocumentModal";
 import { PlusCircle } from "lucide-react";
 
 const FALLBACK_BRANCHES = [
@@ -171,7 +170,8 @@ const SETTINGS_GROUPS = [
     shortLabel: "Documents",
     icon: FileSignature,
     tabs: [
-      { id: "document-templates", label: "Document Templates", description: "Legal contracts, bills of lading, payment invoices, and authorizations.", icon: FileSignature, render: (branchId, subView, itemId, onOpenChooser, isDocs) => <DocumentTemplates branchId={Number(branchId) || null} basePath={isDocs ? "/documents/document-templates" : "/settings/documents/document-templates"} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} onOpenChooser={onOpenChooser} /> },
+      { id: "document-templates", label: "Document Templates", description: "Legal contracts, bills of lading, waivers, and authorizations.", icon: FileSignature, render: (branchId, subView, itemId, onOpenChooser, isDocs) => <DocumentTemplates key="document" branchId={Number(branchId) || null} basePath={isDocs ? "/documents/document-templates" : "/settings/documents/document-templates"} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} onOpenChooser={onOpenChooser} /> },
+      { id: "invoice-templates", label: "Invoice Templates", description: "Final, deposit, storage, and progress invoice layouts.", icon: FileSignature, render: (branchId, subView, itemId, onOpenChooser, isDocs) => <DocumentTemplates key="invoice" templateKind="invoice" branchId={Number(branchId) || null} basePath={isDocs ? "/documents/invoice-templates" : "/settings/documents/invoice-templates"} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} onOpenChooser={onOpenChooser} /> },
       { id: "estimate-portal-templates", label: "Estimate Templates", description: "Customer estimate portal templates, rate calculations, and charges layouts.", icon: FileText, render: (branchId, subView, itemId, onOpenChooser, isDocs) => <EstimatePortalTemplates branchId={Number(branchId) || null} basePath={isDocs ? "/documents/estimate-portal-templates" : "/settings/documents/estimate-portal-templates"} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} onOpenChooser={onOpenChooser} /> },
       { id: "communication-templates", label: "Email & SMS Templates", description: "Transactional email designs, SMS notification templates, and merge tags.", icon: Mail, render: (branchId, subView, itemId, onOpenChooser, isDocs) => <CommunicationTemplates branchId={branchId} basePath={isDocs ? "/documents/communication-templates" : "/settings/documents/communication-templates"} closePath={isDocs ? "/documents/communication-templates" : "/settings/documents/communication-templates"} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} onOpenChooser={onOpenChooser} /> },
     ],
@@ -197,6 +197,7 @@ const LEGACY_ROUTES = {
   "communication-templates": ["documents", "communication-templates"],
   templates: ["documents", "communication-templates"],
   "document-templates": ["documents", "document-templates"],
+  "invoice-templates": ["documents", "invoice-templates"],
   "estimate-portal-templates": ["documents", "estimate-portal-templates"],
 };
 
@@ -230,7 +231,9 @@ export default function SettingsHub({ initialGroup }) {
 
   const subTab =
     params.subTab ||
-    (currentPathname.includes("estimate-portal-templates") || splat.includes("estimate-portal-templates")
+    (currentPathname.includes("invoice-templates") || splat.includes("invoice-templates")
+      ? "invoice-templates"
+      : currentPathname.includes("estimate-portal-templates") || splat.includes("estimate-portal-templates")
       ? "estimate-portal-templates"
       : currentPathname.includes("communication-templates") || splat.includes("communication-templates")
       ? "communication-templates"
@@ -256,7 +259,8 @@ export default function SettingsHub({ initialGroup }) {
   const handleOpenTemplateChooser = (defaultType = null) => {
     let resolvedType = defaultType;
     if (!resolvedType) {
-      if (activeTab?.id === "estimate-portal-templates") resolvedType = "estimate";
+      if (activeTab?.id === "invoice-templates") resolvedType = "invoice";
+      else if (activeTab?.id === "estimate-portal-templates") resolvedType = "estimate";
       else if (activeTab?.id === "communication-templates" || activeTab?.id === "templates") resolvedType = "communication";
       else resolvedType = "document";
     }
@@ -265,8 +269,9 @@ export default function SettingsHub({ initialGroup }) {
   };
 
   const handleTemplateTypeSelected = (selectedType) => {
+    setChosenTemplateType(selectedType);
     setIsChooseTypeModalOpen(false);
-    if (selectedType === "document") {
+    if (["document", "invoice"].includes(selectedType)) {
       setIsCreateDocModalOpen(true);
     } else if (selectedType === "estimate") {
       setIsCreateEstimateModalOpen(true);
@@ -282,6 +287,7 @@ export default function SettingsHub({ initialGroup }) {
         // Document, Estimate, and Communication templates are accessible to all settings users
         if (
           tab.id === "document-templates" ||
+          tab.id === "invoice-templates" ||
           tab.id === "estimate-portal-templates" ||
           tab.id === "communication-templates" ||
           tab.id === "templates"
@@ -628,6 +634,7 @@ export default function SettingsHub({ initialGroup }) {
           {/* Shared Global Action Button (hidden on Document & Estimate Templates pages) */}
           {(activeGroup.id === "documents" || isDocumentsRoute) &&
             activeTab?.id !== "document-templates" &&
+            activeTab?.id !== "invoice-templates" &&
             activeTab?.id !== "estimate-portal-templates" && (
             <div className="shrink-0 pl-2">
             </div>
@@ -649,52 +656,24 @@ export default function SettingsHub({ initialGroup }) {
           onSelectType={handleTemplateTypeSelected}
         />
 
-        {/* Step 2: Document Templates Creation Modal */}
-        <CreateDocumentModal
-          isOpen={isCreateDocModalOpen}
-          onClose={() => setIsCreateDocModalOpen(false)}
-          branches={branches}
-          defaultBranchId={branchId}
-          onCreated={(created) => {
+        <CreateUniversalDocumentModal
+          isOpen={isCreateDocModalOpen || isCreateEstimateModalOpen || isCreateCommModalOpen}
+          templateKind={isCreateEstimateModalOpen ? 'estimate_portal' : isCreateCommModalOpen ? 'communication' : chosenTemplateType === 'invoice' ? 'invoice' : 'document'}
+          initialCategory={chosenTemplateType === 'invoice' ? 'invoice' : isCreateEstimateModalOpen ? 'estimate:binding' : isCreateCommModalOpen ? 'comm:email:custom_email' : 'contract'}
+          onClose={() => {
             setIsCreateDocModalOpen(false);
-            if (created?.id) {
-              navigate(isDocumentsRoute ? `/documents/document-templates/${created.id}/builder` : `/settings/documents/document-templates/${created.id}/builder`);
-            }
-          }}
-        />
-
-        {/* Step 2: Estimate Portal Templates Creation Modal */}
-        <CreateEstimatePortalModal
-          isOpen={isCreateEstimateModalOpen}
-          onClose={() => setIsCreateEstimateModalOpen(false)}
-          onBack={() => {
             setIsCreateEstimateModalOpen(false);
-            handleOpenTemplateChooser("estimate");
+            setIsCreateCommModalOpen(false);
           }}
           branches={branches}
           defaultBranchId={branchId}
-          onCreated={(created) => {
+          onCreated={(created, meta) => {
+            setIsCreateDocModalOpen(false);
             setIsCreateEstimateModalOpen(false);
-            if (created?.id) {
-              navigate(isDocumentsRoute ? `/documents/estimate-portal-templates/${created.id}/builder` : `/settings/documents/estimate-portal-templates/${created.id}/builder`);
-            }
-          }}
-        />
-
-        {/* Step 2: Email & SMS Templates Creation Modal */}
-        <CreateCommunicationModal
-          isOpen={isCreateCommModalOpen}
-          onClose={() => setIsCreateCommModalOpen(false)}
-          onBack={() => {
-            setIsCreateCommModalOpen(false);
-            handleOpenTemplateChooser("communication");
-          }}
-          branches={branches}
-          defaultBranchId={branchId}
-          onCreated={(created) => {
             setIsCreateCommModalOpen(false);
             if (created?.id) {
-              navigate(isDocumentsRoute ? `/documents/communication-templates/${created.id}/builder` : `/settings/documents/communication-templates/${created.id}/builder`);
+              const kind = created.kind || (meta.mode === 'invoice' ? 'invoice' : meta.group === 'estimate' ? 'estimate_portal' : meta.group === 'comm' ? 'communication' : getTenantTemplateKind(created));
+              navigate(getTenantTemplateRoute(`${isDocumentsRoute ? '/documents' : '/settings/documents'}/document-templates`, kind, created.id));
             }
           }}
         />

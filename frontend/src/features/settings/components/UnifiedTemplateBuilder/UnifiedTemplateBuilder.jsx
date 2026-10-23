@@ -1,3 +1,4 @@
+import { isTemplateForMode } from '../../../../../../shared/template-builder/core/templateBoundary.js';
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import TopNavbar from "./components/TopNavbar";
 import LeftSidebar from "./components/LeftSidebar";
@@ -102,7 +103,7 @@ export default function UnifiedTemplateBuilder({
       subject: initialSource?.subject || initial.settings?.subject || "",
       template_key: initialSource?.template_key || initial.settings?.template_key || "",
       branch: initialSource?.branch || branchId || initial.settings?.branch || null,
-      category: initialSource?.category || initial.settings?.category || (mode === "email" ? "Email" : mode === "sms" ? "SMS" : "Estimate"),
+      category: initialSource?.category || initial.settings?.category || "general",
     };
     return initial;
   });
@@ -122,7 +123,7 @@ export default function UnifiedTemplateBuilder({
   useEffect(() => {
     let isCancelled = false;
     const targetId = template?.id || draft?.id || initialSource?.id;
-    if (targetId) {
+    if (targetId && !initialSource?.isHydratedFromServer) {
       getBuilderTemplateDraft(targetId)
         .then((res) => {
           if (isCancelled) return;
@@ -202,6 +203,7 @@ export default function UnifiedTemplateBuilder({
     try {
       const payload = {
         ...deepClone(doc),
+        mode,
         updatedAt: new Date().toISOString(),
       };
       const blob = new Blob([JSON.stringify(payload, null, 2)], {
@@ -218,7 +220,7 @@ export default function UnifiedTemplateBuilder({
       console.error("Export error:", err);
       setToastMessage("Failed to export template as JSON");
     }
-  }, [doc]);
+  }, [doc, mode]);
 
   // Import Document Schema from JSON File
   const handleImportFile = async (e) => {
@@ -232,6 +234,7 @@ export default function UnifiedTemplateBuilder({
       }
       const text = await file.text();
       const parsed = JSON.parse(text);
+      if (!isTemplateForMode(parsed, mode)) throw new Error("Import a template exported from this editor type.");
       const errors = validateTemplateDocument(parsed);
       if (errors.length > 0) {
         throw new Error(errors.slice(0, 3).join("; "));
@@ -790,7 +793,7 @@ export default function UnifiedTemplateBuilder({
   const handleSaveToLibrary = async (targetDoc = doc) => {
     try {
       const nextLibrary = [
-        { ...deepClone(targetDoc), updatedAt: new Date().toISOString() },
+        { ...deepClone(targetDoc), mode, updatedAt: new Date().toISOString() },
         ...library.filter((it) => (it.id ? it.id !== targetDoc.id : it.name !== targetDoc.name)),
       ].slice(0, 25);
       setLibrary(nextLibrary);
@@ -801,6 +804,10 @@ export default function UnifiedTemplateBuilder({
   };
 
   const handleLoadFromLibrary = (templateDoc) => {
+    if (!isTemplateForMode(templateDoc, mode)) {
+      setToastMessage("Choose a saved template from this editor type.");
+      return;
+    }
     const loaded = deepClone(templateDoc);
     if (!loaded.pages || !Array.isArray(loaded.pages) || loaded.pages.length === 0) {
       loaded.pages = [{ id: "page-1", name: "Page 1", items: loaded.items || [] }];
@@ -1033,6 +1040,8 @@ export default function UnifiedTemplateBuilder({
         onTogglePanel={() => setIsPanelOpen(!isPanelOpen)}
       />
 
+      {initialSource?.catalog_source?.revision_number && <p role="status" className="shrink-0 border-b border-slate-200 bg-blue-50 px-4 py-2 text-xs text-slate-700">Copied from global v{initialSource.catalog_source.revision_number}. This tenant copy is independent of later global publishes.</p>}
+
       {/* Main Workspace (Left Sidebar + Center Canvas + Right Inspector) */}
       <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden relative">
         {/* Mobile Backdrop Overlay when Sidebar is open */}
@@ -1059,14 +1068,14 @@ export default function UnifiedTemplateBuilder({
             onPageSizeChange={handlePageSizeChange}
             orientation={orientation}
             onOrientationChange={handleOrientationChange}
-            category={doc.settings?.category || "Estimate"}
+            category={doc.settings?.category || "general"}
             onCategoryChange={(cat) =>
               updateDoc({
                 ...doc,
                 settings: { ...(doc.settings || {}), category: cat },
               })
             }
-            library={library}
+            library={library.filter((item) => isTemplateForMode(item, mode))}
             onLoadFromLibrary={handleLoadFromLibrary}
             onDeleteFromLibrary={handleDeleteFromLibrary}
             onAddWidget={handleAddWidget}

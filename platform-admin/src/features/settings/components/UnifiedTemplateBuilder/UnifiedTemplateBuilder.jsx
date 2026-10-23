@@ -46,7 +46,7 @@ import {
   fromBackendDocument,
 } from "./core/documentAdapter";
 
-import { fromGlobalDocument, toGlobalDocument } from "./core/globalTemplateAdapter";
+import { fromGlobalDocument, toGlobalDocument, isTemplateForMode } from "./core/globalTemplateAdapter";
 
 export default function UnifiedTemplateBuilder({
   mode = "estimate",
@@ -111,7 +111,7 @@ export default function UnifiedTemplateBuilder({
       subject: initialSource?.subject || initial.settings?.subject || "",
       template_key: initialSource?.template_key || initial.settings?.template_key || "",
       branch: initialSource?.branch || branchId || initial.settings?.branch || null,
-      category: initialSource?.category || initial.settings?.category || (mode === "email" ? "Email" : mode === "sms" ? "SMS" : "Estimate"),
+      category: initialSource?.category || initial.settings?.category || "general",
     };
     initial.lock_version = initialSource?.lock_version || initial.lock_version || 1;
     return initial;
@@ -163,6 +163,8 @@ export default function UnifiedTemplateBuilder({
   const lockVersionRef = useRef(initialSource?.lock_version || doc.lock_version || 1);
   const needsNewDraftRef = useRef(false);
   const hasPublishedRef = useRef(Boolean(initialSource?.published_revision));
+  const [publishedRevision, setPublishedRevision] = useState(initialSource?.published_revision || null);
+  const [hasUnpublishedChanges, setHasUnpublishedChanges] = useState(Boolean(initialSource?.draft_revision));
   const remoteBusyRef = useRef(false);
   const editVersionRef = useRef(0);
   const [remotePreview, setRemotePreview] = useState(null);
@@ -220,6 +222,7 @@ export default function UnifiedTemplateBuilder({
     try {
       const payload = {
         ...deepClone(doc),
+        mode,
         updatedAt: new Date().toISOString(),
       };
       const blob = new Blob([JSON.stringify(payload, null, 2)], {
@@ -236,7 +239,7 @@ export default function UnifiedTemplateBuilder({
       console.error("Export error:", err);
       setToastMessage("Failed to export template as JSON");
     }
-  }, [doc]);
+  }, [doc, mode]);
 
   // Import Document Schema from JSON File
   const handleImportFile = async (e) => {
@@ -250,6 +253,7 @@ export default function UnifiedTemplateBuilder({
       }
       const text = await file.text();
       const parsed = JSON.parse(text);
+      if (!isTemplateForMode(parsed, mode)) throw new Error("Import a template exported from this editor type.");
       const errors = validateTemplateDocument(parsed);
       if (errors.length > 0) {
         throw new Error(errors.slice(0, 3).join("; "));
@@ -807,7 +811,7 @@ export default function UnifiedTemplateBuilder({
   const handleSaveToLibrary = async (targetDoc = doc) => {
     try {
       const nextLibrary = [
-        { ...deepClone(targetDoc), updatedAt: new Date().toISOString() },
+        { ...deepClone(targetDoc), mode, updatedAt: new Date().toISOString() },
         ...library.filter((it) => (it.id ? it.id !== targetDoc.id : it.name !== targetDoc.name)),
       ].slice(0, 25);
       setLibrary(nextLibrary);
@@ -818,6 +822,10 @@ export default function UnifiedTemplateBuilder({
   };
 
   const handleLoadFromLibrary = (templateDoc) => {
+    if (!isTemplateForMode(templateDoc, mode)) {
+      setToastMessage("Choose a saved template from this editor type.");
+      return;
+    }
     const loaded = deepClone(templateDoc);
     if (!loaded.pages || !Array.isArray(loaded.pages) || loaded.pages.length === 0) {
       loaded.pages = [{ id: "page-1", name: "Page 1", items: loaded.items || [] }];
@@ -855,6 +863,7 @@ export default function UnifiedTemplateBuilder({
         lock_version: lockVersionRef.current, document,
       });
       lockVersionRef.current = data.revision.lock_version;
+      setHasUnpublishedChanges(true);
       warnings = data.warnings || [];
       setDoc((current) => ({ ...current, lock_version: data.revision.lock_version }));
     } else if (!onSave) {
@@ -881,6 +890,7 @@ export default function UnifiedTemplateBuilder({
   const handleSaveDraft = handleSave;
 
   const applyServerDraft = (data) => {
+    setHasUnpublishedChanges(true);
     const loaded = fromGlobalDocument(data.document, { name: data.template?.name || doc.name, mode });
     lockVersionRef.current = data.revision.lock_version;
     needsNewDraftRef.current = false;
@@ -900,6 +910,7 @@ export default function UnifiedTemplateBuilder({
       } else {
         onBack?.();
       }
+      setHasUnpublishedChanges(false);
       setToastMessage("Draft discarded.");
     });
   };
@@ -910,7 +921,9 @@ export default function UnifiedTemplateBuilder({
     await persistDraft();
     const { data: validation } = await validateBuilderTemplateDraft(targetTemplateId);
     if (!validation.valid) throw new Error((validation.errors || []).map((item) => item.message).join(" ") || "The draft is not valid.");
-    await publishBuilderTemplateDraft(targetTemplateId);
+    const { data: published } = await publishBuilderTemplateDraft(targetTemplateId);
+    setPublishedRevision(published.published_revision || null);
+    setHasUnpublishedChanges(false);
     hasPublishedRef.current = true;
     needsNewDraftRef.current = true;
     setToastMessage("Template published successfully.");
@@ -975,6 +988,13 @@ export default function UnifiedTemplateBuilder({
         onTogglePanel={() => setIsPanelOpen(!isPanelOpen)}
       />
 
+      <p role="status" className="shrink-0 border-b border-slate-200 bg-blue-50 px-4 py-2 text-xs text-slate-700">
+        {publishedRevision ? `Tenant copies use published${publishedRevision.revision_number ? ` v${publishedRevision.revision_number}` : ' content'}.`
+          : 'This template has no published version available to tenants.'}
+        {(isDirty || hasUnpublishedChanges) && ' Draft changes reach new tenant copies after Publish.'}
+        {' Existing tenant copies keep their own content.'}
+      </p>
+
       {/* Main Workspace (Left Sidebar + Center Canvas + Right Inspector) */}
       <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden relative">
         {/* Mobile Backdrop Overlay when Sidebar is open */}
@@ -1008,7 +1028,7 @@ export default function UnifiedTemplateBuilder({
                 settings: { ...(doc.settings || {}), category: cat },
               })
             }
-            library={library}
+            library={library.filter((item) => isTemplateForMode(item, mode))}
             onLoadFromLibrary={handleLoadFromLibrary}
             onDeleteFromLibrary={handleDeleteFromLibrary}
             onAddWidget={handleAddWidget}

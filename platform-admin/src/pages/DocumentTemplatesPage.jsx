@@ -11,9 +11,10 @@ export default function DocumentTemplatesPage() {
   if (!hasPermission(PLATFORM_PERMISSIONS.TEMPLATES_VIEW)) {
     return <AccessDenied requiredPermission={PLATFORM_PERMISSIONS.TEMPLATES_VIEW} />;
   }
-  const parts = pathname.replace(/^\/(document-templates|estimate-portal-templates|communication-templates)\/?/, '').split('/').filter(Boolean);
+  const parts = pathname.replace(/^\/(document-templates|estimate-portal-templates|invoice-templates|communication-templates)\/?/, '').split('/').filter(Boolean);
   const initialKind = pathname.startsWith('/estimate-portal-templates') ? 'estimate_portal'
-    : pathname.startsWith('/communication-templates') ? 'communication' : '';
+    : pathname.startsWith('/invoice-templates') ? 'invoice'
+      : pathname.startsWith('/communication-templates') ? 'communication' : '';
   return <DocumentTemplates
     key={initialKind} initialKind={initialKind}
     builderRouteView={parts.includes('builder') ? 'builder' : ''}

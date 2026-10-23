@@ -1,3 +1,4 @@
+import { getTenantTemplateKind } from '../../utils/templateBoundary';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, FileSignature, Truck, Receipt, CreditCard, FileText, Mail, MessageSquare, Loader2, AlertCircle } from 'lucide-react';
@@ -5,6 +6,9 @@ import {
   createDocumentTemplate,
   createEstimatePortalTemplate,
   createCommunicationTemplate,
+  getBuilderCatalog,
+  getCommunicationCatalogTemplate,
+  normalizeEstimateSubtype,
 } from '../../../../services/api';
 
 export const UNIVERSAL_CATEGORIES = [
@@ -24,6 +28,7 @@ export const UNIVERSAL_CATEGORIES = [
   },
   {
     id: 'invoice',
+    invoice_subtype: 'final',
     aliasId: 'legal:invoice',
     group: 'legal',
     label: 'Payment Invoice',
@@ -35,6 +40,11 @@ export const UNIVERSAL_CATEGORIES = [
     presetName: 'Payment Invoice',
     icon: Receipt,
   },
+  ...['deposit', 'storage', 'progress'].map((subtype) => ({
+    id: `invoice:${subtype}`, group: 'legal', label: `${subtype[0].toUpperCase()}${subtype.slice(1)} Invoice`,
+    subLabel: 'Invoice / Billing Scope', scope_type: 'invoice', template_type: 'invoice', invoice_subtype: subtype,
+    builderMode: 'invoice', defaultTitle: `${subtype[0].toUpperCase()}${subtype.slice(1)} Invoice`, icon: Receipt,
+  })),
   {
     id: 'credit_card_authorization',
     aliasId: 'legal:credit_card_authorization',
@@ -93,6 +103,12 @@ export const UNIVERSAL_CATEGORIES = [
     defaultTitle: 'Quick Rate Estimate',
     icon: FileText,
   },
+  { id: 'valuation_waiver', group: 'legal', label: 'Valuation Waiver', subLabel: 'Document', scope_type: 'opportunity', template_type: 'valuation_waiver', builderMode: 'contract', defaultTitle: 'Valuation Waiver', icon: FileText },
+  { id: 'inventory_sheet', group: 'legal', label: 'Inventory Sheet', subLabel: 'Document', scope_type: 'job', template_type: 'inventory_sheet', builderMode: 'contract', defaultTitle: 'Inventory Sheet', icon: FileText },
+  { id: 'agreement', group: 'legal', label: 'Agreement / Acknowledgement', subLabel: 'Document', scope_type: 'opportunity', template_type: 'agreement', builderMode: 'contract', defaultTitle: 'Agreement / Acknowledgement', icon: FileText },
+  { id: 'custom', group: 'legal', label: 'Custom Document', subLabel: 'Document', scope_type: 'opportunity', template_type: 'custom', builderMode: 'contract', defaultTitle: 'Custom Document', icon: FileText },
+  { id: 'estimate:binding', group: 'estimate', label: 'Binding Estimate', subLabel: 'Customer Portal', estimate_type: 'binding', builderMode: 'estimate', defaultTitle: 'Binding Estimate', icon: FileText },
+  { id: 'estimate:hourly', group: 'estimate', label: 'Hourly Estimate', subLabel: 'Customer Portal', estimate_type: 'hourly', builderMode: 'estimate', defaultTitle: 'Hourly Estimate', icon: FileText },
   // Customer Communications - Email
   {
     id: 'comm:email:quote_sent',
@@ -176,6 +192,10 @@ const DEFAULT_SAMPLE_HTML = `<div style="font-family: ui-sans-serif, system-ui, 
   </p>
 </div>`;
 
+const getCategoryKind = (category) => category.group === 'estimate' ? 'estimate_portal'
+  : category.group === 'comm' ? 'communication'
+    : category.template_type === 'invoice' ? 'invoice' : 'document';
+
 export default function CreateUniversalDocumentModal({
   isOpen,
   onClose,
@@ -187,7 +207,9 @@ export default function CreateUniversalDocumentModal({
   defaultBranchId = null,
   initialCategory = 'legal:contract',
   presetLayouts = [],
+  templateKind = '',
 }) {
+  const initialBranchId = defaultBranchId ? String(defaultBranchId) : branches[0]?.id ? String(branches[0].id) : '';
   const [selectedCategoryId, setSelectedCategoryId] = useState(initialCategory || 'legal:contract');
   const [title, setTitle] = useState('');
   const [titleTouched, setTitleTouched] = useState(false);
@@ -197,6 +219,10 @@ export default function CreateUniversalDocumentModal({
   const [selectedBranch, setSelectedBranch] = useState(defaultBranchId ? String(defaultBranchId) : '');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [platformTemplates, setPlatformTemplates] = useState([]);
+  const [platformLoading, setPlatformLoading] = useState(false);
+  const [platformError, setPlatformError] = useState('');
+  const [catalogRefresh, setCatalogRefresh] = useState(0);
 
   const titleInputRef = useRef(null);
 
@@ -218,7 +244,7 @@ export default function CreateUniversalDocumentModal({
       setTemplateKey(categoryObj?.defaultKey ? `${categoryObj.defaultKey}_${Date.now().toString(36).slice(-4)}` : '');
       setTitleTouched(false);
       setStartingTemplate('preset');
-      setSelectedBranch(defaultBranchId ? String(defaultBranchId) : (branches[0]?.id ? String(branches[0].id) : ''));
+      setSelectedBranch(initialBranchId);
       setErrorMessage('');
 
       const timer = setTimeout(() => {
@@ -229,7 +255,7 @@ export default function CreateUniversalDocumentModal({
       }, 50);
       return () => clearTimeout(timer);
     }
-  }, [isOpen, initialCategory, defaultBranchId, branches]);
+  }, [isOpen, initialCategory, initialBranchId]);
 
   // Handle escape key
   useEffect(() => {
@@ -259,18 +285,47 @@ export default function CreateUniversalDocumentModal({
     : [];
 
   // Filter compatible custom templates strictly by selected category
+  const catalogKind = getCategoryKind(currentCategory);
+  useEffect(() => {
+    let active = true;
+    if (!isOpen) return undefined;
+    setPlatformTemplates([]);
+    setPlatformError('');
+    setPlatformLoading(true);
+    getBuilderCatalog({ kind: catalogKind, ...(selectedBranch ? { branch_id: Number(selectedBranch) } : {}) })
+      .then((response) => {
+        const data = response?.data ?? response;
+        if (active) setPlatformTemplates(Array.isArray(data) ? data : data?.results || []);
+      })
+      .catch((err) => { if (active) setPlatformError(err.response?.data?.detail || 'Platform templates could not be loaded.'); })
+      .finally(() => { if (active) setPlatformLoading(false); });
+    return () => { active = false; };
+  }, [isOpen, catalogKind, selectedBranch, catalogRefresh]);
+
+  const compatiblePlatformTemplates = platformTemplates.filter((template) => {
+    const subtype = template.subtype || template.template_subtype;
+    const kind = template.kind || template.template_kind || (['email', 'sms'].includes(subtype) ? 'communication' : '');
+    if (kind !== catalogKind) return false;
+    if (catalogKind === 'invoice') return subtype === currentCategory.invoice_subtype;
+    if (catalogKind === 'estimate_portal') return subtype === normalizeEstimateSubtype(currentCategory.estimate_type);
+    if (catalogKind === 'communication') return subtype === currentCategory.channel;
+    const expected = currentCategory.template_type === 'credit_card_authorization' ? 'cc_authorization' : currentCategory.template_type;
+    return subtype === expected;
+  });
+
   const compatibleCustomTemplates = useMemo(() => {
     if (currentCategory.group === 'legal') {
       return (existingLegalTemplates || []).filter((t) => {
+        if (getTenantTemplateKind(t) !== catalogKind) return false;
         const type = String(t.template_type || '').toLowerCase();
         if (currentCategory.template_type === 'contract') {
-          return type === 'contract' || type === 'agreement';
+          return type === 'contract';
         }
         if (currentCategory.template_type === 'bol') {
           return type === 'bol' || type.includes('lading') || type.includes('loc');
         }
         if (currentCategory.template_type === 'invoice') {
-          return type === 'invoice' || type.includes('receipt') || type.includes('bill');
+          return (t.subtype || 'final') === currentCategory.invoice_subtype;
         }
         if (currentCategory.template_type === 'credit_card_authorization') {
           return type === 'credit_card_authorization' || type === 'cc_auth';
@@ -282,7 +337,7 @@ export default function CreateUniversalDocumentModal({
     if (currentCategory.group === 'estimate') {
       return (existingEstimateTemplates || []).filter((t) => {
         const type = String(t.template_type || '').toLowerCase();
-        return type === currentCategory.estimate_type || !type;
+        return (!t.kind || t.kind === 'estimate_portal') && normalizeEstimateSubtype(t.subtype || type) === normalizeEstimateSubtype(currentCategory.estimate_type);
       });
     }
 
@@ -294,11 +349,13 @@ export default function CreateUniversalDocumentModal({
     }
 
     return [];
-  }, [existingLegalTemplates, existingEstimateTemplates, existingCommTemplates, currentCategory]);
+  }, [existingLegalTemplates, existingEstimateTemplates, existingCommTemplates, currentCategory, catalogKind]);
 
   // Category switch handler
   const handleCategoryChange = (newCatId) => {
     const newCategory = resolveCategory(newCatId);
+    const kind = getCategoryKind(newCategory);
+    if (templateKind && templateKind !== kind) return;
     setSelectedCategoryId(newCategory.id);
     if (!titleTouched || !title.trim()) {
       setTitle(newCategory?.defaultTitle || '');
@@ -320,7 +377,10 @@ export default function CreateUniversalDocumentModal({
   const isTitleValid = trimmedTitle.length >= 3 && trimmedTitle.length <= 120;
   const isEmailValid = currentCategory.channel !== 'email' || Boolean(subject.trim());
   const isTemplateKeyValid = currentCategory.group !== 'comm' || (Boolean(templateKey.trim()) && TEMPLATE_KEY_RE.test(templateKey.trim()));
-  const isFormValid = isTitleValid && isEmailValid && isTemplateKeyValid && Boolean(startingTemplate);
+  const sourceReady = startingTemplate.startsWith('catalog:')
+    ? !platformLoading && compatiblePlatformTemplates.some((template) => `catalog:${template.template_key}` === startingTemplate)
+    : startingTemplate.startsWith('template:') ? compatibleCustomTemplates.some((template) => `template:${template.id}` === startingTemplate) : ['blank', 'preset'].includes(startingTemplate);
+  const isFormValid = isTitleValid && isEmailValid && isTemplateKeyValid && Boolean(startingTemplate) && sourceReady && (!templateKind || templateKind === catalogKind);
 
   const handleSubmit = async (e) => {
     e?.preventDefault();
@@ -338,6 +398,30 @@ export default function CreateUniversalDocumentModal({
         ? Number(branches[0].id)
         : null;
 
+      if (startingTemplate.startsWith('catalog:')) {
+        const key = startingTemplate.slice('catalog:'.length);
+        const source = compatiblePlatformTemplates.find((template) => template.template_key === key);
+        if (!source) throw new Error('Choose an available published platform template.');
+        const subtype = source.subtype || source.template_subtype;
+        let saved;
+        const payload = { name: trimmedTitle, branch_id: branchVal, kind: catalogKind, subtype, catalog_template_key: key };
+        if (catalogKind === 'communication') {
+          const previewResponse = await getCommunicationCatalogTemplate(key, { branch_id: branchVal });
+          const preview = previewResponse?.data ?? previewResponse;
+          const response = await createCommunicationTemplate({ name: trimmedTitle, branch: branchVal, channel: subtype,
+            template_key: templateKey.trim(), subject: subtype === 'email' ? subject.trim() : '',
+            body_text: preview.body_text || '', body_html: preview.body_html || '' });
+          saved = response?.data ?? response;
+        } else {
+          const response = catalogKind === 'estimate_portal'
+            ? await createEstimatePortalTemplate(payload) : await createDocumentTemplate(payload);
+          saved = response?.data ?? response;
+        }
+        if (!saved?.id) throw new Error('Server returned an unexpected response with no template ID.');
+        onCreated(saved, { group: currentCategory.group, mode: currentCategory.builderMode || (catalogKind === 'estimate_portal' ? 'estimate' : currentCategory.channel), payload });
+        return;
+      }
+
       // ==========================================
       // 1. LEGAL & OPERATIONAL DOCUMENTS DISPATCH
       // ==========================================
@@ -345,6 +429,7 @@ export default function CreateUniversalDocumentModal({
         let initialContent = { docSettings: { format: 'Letter', margin: '40px' }, blocks: [] };
         let initialHtml = '';
         let initialSubject = '';
+        let sourceSubtype;
 
         if (startingTemplate === 'blank') {
           initialContent = {
@@ -376,6 +461,7 @@ export default function CreateUniversalDocumentModal({
           const sourceId = Number(startingTemplate.replace('template:', ''));
           const sourceTemplate = (existingLegalTemplates || []).find((t) => Number(t.id) === sourceId);
           if (sourceTemplate) {
+            sourceSubtype = sourceTemplate.subtype;
             initialSubject = sourceTemplate.subject || '';
             initialHtml = sourceTemplate.html_content || '';
             try {
@@ -388,6 +474,7 @@ export default function CreateUniversalDocumentModal({
 
         const payload = {
           name: trimmedTitle,
+          ...(sourceSubtype || currentCategory.invoice_subtype ? { subtype: sourceSubtype || currentCategory.invoice_subtype } : {}),
           template_type: currentCategory.template_type,
           scope_type: currentCategory.scope_type,
           applies_to_entity: currentCategory.scope_type === 'job' ? 'planned_sub_job' : currentCategory.scope_type,
@@ -543,7 +630,7 @@ export default function CreateUniversalDocumentModal({
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/50">
           <div>
             <h3 id="create-universal-document-modal-title" className="text-xl font-extrabold text-slate-900 tracking-tight">
-              Create Document
+              {templateKind === 'invoice' ? 'Create Invoice' : templateKind === 'estimate_portal' ? 'Create Estimate' : templateKind === 'communication' ? 'Create Message Template' : 'Create Document'}
             </h3>
             <p id="create-universal-document-modal-description" className="text-xs text-slate-500 mt-0.5">
               Select a category, configure settings, and choose your starting layout.
@@ -583,29 +670,10 @@ export default function CreateUniversalDocumentModal({
                 disabled={isSubmitting}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all appearance-none cursor-pointer disabled:opacity-50"
               >
-                <optgroup label="Opportunity Scope (Legal)">
-                  <option value="contract">Moving Contract</option>
-                  <option value="credit_card_authorization">Credit Card Authorization</option>
-                </optgroup>
-                <optgroup label="Job Scope (Operations & Move Day)">
-                  <option value="bol">Bill of Lading — LOC</option>
-                </optgroup>
-                <optgroup label="Invoice Scope (Billing)">
-                  <option value="invoice">Payment Invoice</option>
-                </optgroup>
-                <optgroup label="Customer Estimate Portals (Sales Acceptance)">
-                  <option value="estimate:moving">Residential Moving Estimate</option>
-                  <option value="estimate:commercial">Commercial Office & Freight Estimate</option>
-                  <option value="estimate:minimal">Minimal Single-Total Rate Quote</option>
-                </optgroup>
-                <optgroup label="Customer Communications (Automated Triggers)">
-                  <option value="comm:email:quote_sent">Quote Sent Email Template</option>
-                  <option value="comm:email:booking_confirmed">Booking Confirmation Email</option>
-                  <option value="comm:email:custom_email">Custom Transactional Email</option>
-                  <option value="comm:sms:quote_sent_sms">Quote Sent SMS Alert</option>
-                  <option value="comm:sms:crew_dispatched_sms">Move Day Crew Dispatch SMS</option>
-                  <option value="comm:sms:custom_sms">Custom Operational SMS Alert</option>
-                </optgroup>
+                {UNIVERSAL_CATEGORIES.filter((category) => {
+                  const kind = getCategoryKind(category);
+                  return !templateKind || kind === templateKind;
+                }).map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}
               </select>
               <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-slate-400">
                 <svg className="w-4 h-4 fill-current" viewBox="0 0 20 20">
@@ -736,6 +804,11 @@ export default function CreateUniversalDocumentModal({
                 <option value="blank">
                   Blank Canvas (Clean Page)
                 </option>
+                {compatiblePlatformTemplates.length > 0 && <optgroup label="Published Platform Templates">
+                  {compatiblePlatformTemplates.map((template) => <option key={template.template_key} value={`catalog:${template.template_key}`}>
+                    {template.name}{template.published_revision_number ? ` — Published v${template.published_revision_number}` : ''}
+                  </option>)}
+                </optgroup>}
                 {compatibleCustomTemplates.length > 0 && (
                   <optgroup label="Compatible Existing Templates">
                     {compatibleCustomTemplates.map((t) => (
@@ -753,8 +826,13 @@ export default function CreateUniversalDocumentModal({
               </div>
             </div>
             <p className="text-[11px] text-slate-500 mt-1">
-              Start with the recommended system preset, create from scratch, or clone an existing template.
+              {platformLoading ? 'Loading platform templates…' : startingTemplate.startsWith('catalog:')
+                ? 'Copies the latest published global version at creation. Saved drafts are not included. Existing tenant copies keep their own content.'
+                : 'Choose a published platform template, a preset, or an existing template.'}
             </p>
+            {platformError && <p role="status" className="mt-1 text-xs text-amber-700">{platformError}</p>}
+            <button type="button" disabled={isSubmitting || platformLoading} onClick={() => setCatalogRefresh((value) => value + 1)} className="mt-1 text-xs font-medium text-blue-600 hover:underline disabled:opacity-50">Refresh platform templates</button>
+            {!platformLoading && !platformError && !compatiblePlatformTemplates.length && <p className="mt-1 text-xs text-slate-500">No published platform templates match this type. Save and publish the platform template to make it available here.</p>}
           </div>
 
           {/* Optional Branch Assignment */}
@@ -767,7 +845,7 @@ export default function CreateUniversalDocumentModal({
                 <select
                   id="universal-document-branch"
                   value={selectedBranch}
-                  onChange={(e) => setSelectedBranch(e.target.value)}
+                  onChange={(e) => { setSelectedBranch(e.target.value); setStartingTemplate('preset'); }}
                   disabled={isSubmitting}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all appearance-none cursor-pointer disabled:opacity-50"
                 >
@@ -807,7 +885,7 @@ export default function CreateUniversalDocumentModal({
                   Creating...
                 </>
               ) : (
-                'Create Document'
+                templateKind === 'invoice' ? 'Create Invoice' : templateKind === 'estimate_portal' ? 'Create Estimate' : templateKind === 'communication' ? 'Create Message Template' : 'Create Document'
               )}
             </button>
           </div>

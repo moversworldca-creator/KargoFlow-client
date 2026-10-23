@@ -3,9 +3,13 @@ import { createBlankDocument, createHtmlWidget } from '../model/templateModel';
 import { compileDocumentBodyToHtml } from '../model/htmlCompiler';
 
 export function getTemplateMode(template) {
-  if (template.kind === 'communication') return template.subtype;
+  if (template.kind === 'communication') {
+    if (!['email', 'sms'].includes(template.subtype)) throw new Error('Unsupported message template type.');
+    return template.subtype;
+  }
   if (template.kind === 'estimate_portal') return 'estimate';
   if (template.kind === 'invoice') return 'invoice';
+  if (template.kind !== 'document') throw new Error('Unsupported template kind.');
   if (template.subtype === 'cc_authorization') return 'cc_auth';
   return template.subtype === 'bol' ? 'bol' : 'contract';
 }
@@ -31,3 +35,5 @@ export function toGlobalDocument(doc, mode, smsText = '') {
   if (mode === 'email') return { subject: doc.settings?.subject || '', body_html: compileDocumentBodyToHtml(doc), body_text: '' };
   return toBackendDocument(doc, mode);
 }
+
+export { isTemplateForMode } from '../../../../../../../shared/template-builder/core/templateBoundary.js';

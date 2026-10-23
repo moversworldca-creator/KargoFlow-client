@@ -1,3 +1,4 @@
+import DocumentSettings from '../../../../../../../shared/template-builder/components/DocumentSettings.jsx';
 import React, { useState, useEffect } from "react";
 import { getBuilderVariables, getBuilderMeta } from "../../../../../services/api";
 import {
@@ -522,6 +523,8 @@ export default function LeftSidebar({
                   </span>
                 )}
               </div>
+
+              <DocumentSettings mode={mode} settings={templateSettings} onChange={onTemplateSettingsChange} />
 
               {mode === "email" && (
                 <div>

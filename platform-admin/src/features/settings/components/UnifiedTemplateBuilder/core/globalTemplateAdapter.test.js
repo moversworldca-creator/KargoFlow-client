@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { fromGlobalDocument, getTemplateMode, toGlobalDocument } from './globalTemplateAdapter';
+import { fromGlobalDocument, getTemplateMode, toGlobalDocument, isTemplateForMode } from './globalTemplateAdapter';
 
 describe('Global template document adapter', () => {
+  it('accepts saved templates only within their editor mode', () => {
+    expect(isTemplateForMode({ mode: 'estimate_portal' }, 'estimate')).toBe(true);
+    expect(isTemplateForMode({ mode: 'invoice' }, 'invoice')).toBe(true);
+    expect(isTemplateForMode({ mode: 'estimate' }, 'invoice')).toBe(false);
+    expect(isTemplateForMode({ mode: 'contract' }, 'invoice')).toBe(false);
+    expect(isTemplateForMode({}, 'invoice')).toBe(false);
+  });
+
+  it('rejects unknown kinds and message channels before opening an editor', () => {
+    expect(() => getTemplateMode({ kind: 'unknown', subtype: 'contract' })).toThrow('Unsupported template kind');
+    expect(() => getTemplateMode({ kind: 'communication', subtype: 'contract' })).toThrow('Unsupported message template type');
+  });
+
   it('maps every catalog kind and communication channel to the existing canvas', () => {
     for (const [kind, subtype, mode] of [
       ['communication', 'email', 'email'], ['communication', 'sms', 'sms'],

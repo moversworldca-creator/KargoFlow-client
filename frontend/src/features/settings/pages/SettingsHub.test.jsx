@@ -25,6 +25,9 @@ vi.mock('../../../shared/auth/useCan', () => ({
 }));
 
 vi.mock('../../../services/api', () => ({
+  getBuilderCatalog: vi.fn().mockResolvedValue({ results: [] }),
+  getCommunicationCatalogTemplate: vi.fn(),
+  normalizeEstimateSubtype: (value) => ({ moving: 'non_binding', commercial: 'non_binding', minimal: 'flat_rate' }[value] || value),
   default: {
     general: {
       getBranches: vi.fn(() =>
@@ -52,7 +55,7 @@ vi.mock('../components/BranchSettings', () => ({
 }));
 
 vi.mock('../components/DocumentTemplates', () => ({
-  default: () => <div data-testid="document-templates-module">Document Templates Content</div>,
+  default: ({ templateKind = "document", onOpenChooser }) => <div data-testid="document-templates-module">{templateKind}<button onClick={() => onOpenChooser(templateKind)}>New template</button></div>,
 }));
 
 vi.mock('../components/EstimatePortalTemplates', () => ({
@@ -179,6 +182,26 @@ describe('SettingsHub', () => {
     expect(screen.getByRole('tab', { name: /Estimate Templates/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /\+ Create Template/i })).not.toBeInTheDocument();
     expect(screen.getByTestId('document-templates-module')).toBeInTheDocument();
+  });
+
+  it('opens the separate invoice section under documents', () => {
+    routeState.pathname = '/documents/document-templates';
+    routeState.params = { subTab: 'document-templates' };
+    render(<SettingsHub initialGroup="documents" />);
+    fireEvent.click(screen.getByRole('tab', { name: /^Invoice Templates/ }));
+    expect(navigate).toHaveBeenCalledWith('/documents/invoice-templates');
+  });
+
+  it('scopes invoice creation to invoice categories', async () => {
+    routeState.pathname = '/documents/invoice-templates';
+    routeState.params = { subTab: 'invoice-templates' };
+    render(<SettingsHub initialGroup="documents" />);
+    expect(screen.getByTestId('document-templates-module')).toHaveTextContent('invoice');
+    fireEvent.click(screen.getByRole('button', { name: 'New template' }));
+    expect(screen.getByRole('radio', { name: /invoice template/i })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+    const options = [...screen.getByLabelText(/Document Applies To/i).options].map((option) => option.value);
+    expect(options).toEqual(['invoice', 'invoice:deposit', 'invoice:storage', 'invoice:progress']);
   });
 
   it('navigates to estimate templates under /documents when clicked', () => {

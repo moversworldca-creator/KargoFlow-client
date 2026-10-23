@@ -4,13 +4,21 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import UnifiedTemplateBuilder from './UnifiedTemplateBuilder';
 import { createBlankDocument } from './model/templateModel';
 import * as api from '../../../../services/api';
+import { loadLibrarySync } from './core/storageService';
+
+vi.mock('./core/storageService', async (original) => ({ ...await original(), loadLibrarySync: vi.fn(() => []) }));
 
 vi.mock('../../../../services/api', async (original) => ({
   ...await original(), saveBuilderTemplateDraft: vi.fn(), validateBuilderTemplateDraft: vi.fn(),
   publishBuilderTemplateDraft: vi.fn(), startBuilderTemplateDraft: vi.fn(), discardBuilderTemplateDraft: vi.fn(),
   previewBuilderTemplate: vi.fn(),
 }));
-vi.mock('./components/LeftSidebar', () => ({ default: () => null }));
+vi.mock('./components/LeftSidebar', () => ({ default: ({ onPageSizeChange, onOrientationChange, library, onLoadFromLibrary }) => <>
+  <output data-testid="library-names">{library.map((item) => item.name).join(", ")}</output>
+  <button onClick={() => onLoadFromLibrary({ mode: "estimate", name: "Wrong kind", items: [] })}>Load estimate</button>
+  <button onClick={() => onPageSizeChange('Legal')}>Use Legal paper</button>
+  <button onClick={() => onOrientationChange('Landscape')}>Use landscape</button>
+</> }));
 vi.mock('./components/RightPropertiesPanel', () => ({ default: () => null }));
 vi.mock('./components/DocumentCanvas', () => ({ default: ({ items = [], smsText, onSmsTextChange, onOpenHtmlEditor, onUpdateItem }) =>
   <>
@@ -42,6 +50,7 @@ function showEditor({ items = [], ...props } = {}) {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  loadLibrarySync.mockReturnValue([]);
   let lock = 5;
   api.saveBuilderTemplateDraft.mockImplementation(async () => ({ data: { revision: { lock_version: ++lock } } }));
   api.validateBuilderTemplateDraft.mockResolvedValue({ data: { valid: true, errors: [] } });
@@ -50,6 +59,31 @@ beforeEach(() => {
 });
 
 describe('Global editor persistence', () => {
+  it('limits the saved-template shelf to the current mode and rejects a different mode', async () => {
+    loadLibrarySync.mockReturnValue([
+      { mode: 'invoice', name: 'Invoice layout' },
+      { mode: 'estimate', name: 'Estimate layout' },
+      { mode: 'contract', name: 'Contract layout' },
+    ]);
+    showEditor({ mode: 'invoice' });
+    expect(screen.getByTestId('library-names')).toHaveTextContent('Invoice layout');
+    expect(screen.getByTestId('library-names')).not.toHaveTextContent('Estimate layout');
+    expect(screen.getByTestId('library-names')).not.toHaveTextContent('Contract layout');
+    fireEvent.click(screen.getByText('Load estimate'));
+    expect(await screen.findByText('Choose a saved template from this editor type.')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Save Template'));
+    await waitFor(() => expect(api.saveBuilderTemplateDraft).toHaveBeenCalledOnce());
+    expect(api.saveBuilderTemplateDraft.mock.calls[0][1].document.settings).toBeDefined();
+  });
+
+  it('saves changed layout controls with the selected paper size and orientation', async () => {
+    showEditor({ mode: 'estimate' });
+    fireEvent.click(screen.getByText('Use Legal paper'));
+    fireEvent.click(screen.getByText('Use landscape'));
+    fireEvent.click(screen.getByLabelText('Save Template'));
+    await waitFor(() => expect(api.saveBuilderTemplateDraft).toHaveBeenCalledOnce());
+    expect(api.saveBuilderTemplateDraft.mock.calls[0][1].document.settings.page).toMatchObject({ size: 'Legal', orientation: 'landscape' });
+  });
   it('saves SMS once, including clearing text, and uses the returned version on the next save', async () => {
     const metadata = vi.fn();
     showEditor({ onSave: metadata });
@@ -95,6 +129,19 @@ describe('Global editor persistence', () => {
     expect(await screen.findByText('A text message needs a body.')).toBeInTheDocument();
     expect(api.publishBuilderTemplateDraft).not.toHaveBeenCalled();
     expect(screen.queryByText('Template published successfully.')).not.toBeInTheDocument();
+  });
+
+  it('distinguishes saved drafts from the version used by new tenant copies', async () => {
+    api.publishBuilderTemplateDraft.mockResolvedValueOnce({ data: { published_revision: { id: 17, revision_number: 14 } } });
+    showEditor();
+    expect(screen.getByText(/Tenant copies use published content/)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Save Template'));
+    await screen.findByText('Template draft saved successfully.');
+    expect(screen.getByText(/Draft changes reach new tenant copies after Publish/)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Publish Template'));
+    await screen.findByText('Template published successfully.');
+    expect(screen.getByText(/Tenant copies use published v14/)).toBeInTheDocument();
+    expect(screen.queryByText(/Draft changes reach new tenant copies after Publish/)).not.toBeInTheDocument();
   });
 
   it('starts a fresh draft for the next save after publishing', async () => {

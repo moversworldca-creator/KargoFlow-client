@@ -1,7 +1,7 @@
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import DocumentTemplatesPage from './DocumentTemplatesPage';
 import * as api from '../services/api';
 
@@ -13,10 +13,11 @@ vi.mock('../services/api', async (original) => ({
   getBuilderTemplateDraft: vi.fn(), getBuilderTemplateRevision: vi.fn(),
 }));
 vi.mock('../features/settings/components/UnifiedTemplateBuilder/UnifiedTemplateBuilder', () => ({
-  default: ({ mode, canSave }) => <div data-testid="loaded-editor">{mode} / {canSave ? 'editable' : 'read-only'}</div>,
+  default: ({ mode, canSave, onBack }) => <div data-testid="loaded-editor">{mode} / {canSave ? 'editable' : 'read-only'}<button onClick={onBack}>Back</button></div>,
 }));
 const template = { id: 7, name: 'Welcome', kind: 'communication', subtype: 'email', state: 'active', published_revision: { id: 2 }, draft_revision: null };
-function show(path = '/document-templates') { return render(<MemoryRouter initialEntries={[path]}><DocumentTemplatesPage /></MemoryRouter>); }
+function Location() { return <output data-testid="location">{useLocation().pathname}</output>; }
+function show(path = '/document-templates') { return render(<MemoryRouter initialEntries={[path]}><Location /><DocumentTemplatesPage /></MemoryRouter>); }
 beforeEach(() => {
   vi.clearAllMocks();
   auth.allowed = ['platform.templates.view', 'platform.templates.manage', 'platform.templates.publish'];
@@ -24,6 +25,7 @@ beforeEach(() => {
   api.getBuilderMeta.mockResolvedValue({ data: { kinds: [
     { kind: 'document', subtypes: [{ key: 'contract', label: 'Moving Contract' }, { key: 'bol', label: 'Bill of Lading' }] },
     { kind: 'estimate_portal', subtypes: [{ key: 'binding', label: 'Binding' }] },
+    { kind: 'invoice', subtypes: [{ key: 'final', label: 'Final' }, { key: 'deposit', label: 'Deposit' }, { key: 'storage', label: 'Storage' }, { key: 'progress', label: 'Progress' }] },
     { kind: 'communication', subtypes: [{ key: 'email', label: 'Email' }, { key: 'sms', label: 'SMS' }] },
   ] } });
   api.getBuilderTemplate.mockResolvedValue({ data: template });
@@ -35,6 +37,54 @@ beforeEach(() => {
 });
 
 describe('Platform global templates page', () => {
+  it.each([
+    ['estimate_portal', 'binding', 'estimate', '/estimate-portal-templates'],
+    ['invoice', 'deposit', 'invoice', '/invoice-templates'],
+    ['document', 'contract', 'contract', '/document-templates'],
+  ])('keeps %s editor and return navigation within its section', async (kind, subtype, mode, route) => {
+    api.getBuilderTemplate.mockResolvedValue({ data: { ...template, kind, subtype } });
+    show(`${route}/7/builder`);
+    expect(await screen.findByTestId('loaded-editor')).toHaveTextContent(`${mode} / editable`);
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(screen.getByTestId('location')).toHaveTextContent(route);
+    await waitFor(() => expect(api.getBuilderTemplates).toHaveBeenCalledWith(expect.objectContaining({ kind })));
+  });
+
+  it('redirects legacy invoice links before opening a draft', async () => {
+    const invoice = { ...template, kind: 'invoice', subtype: 'final' };
+    api.getBuilderTemplate.mockResolvedValue({ data: invoice });
+    api.startBuilderTemplateDraft.mockImplementation(async () => {
+      expect(screen.getByTestId('location')).toHaveTextContent('/invoice-templates/7/builder');
+      return { data: { document: { sections: [] }, revision: { lock_version: 1 } } };
+    });
+    show('/document-templates/7/builder');
+    expect(await screen.findByTestId('loaded-editor')).toHaveTextContent('invoice / editable');
+    expect(api.startBuilderTemplateDraft).toHaveBeenCalledExactlyOnceWith('7');
+  });
+
+  it('browses invoices and creates one using its selected billing subtype', async () => {
+    show();
+    await screen.findByText('Welcome');
+    fireEvent.click(screen.getByRole('button', { name: 'Invoice Templates' }));
+    await waitFor(() => expect(api.getBuilderTemplates).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'invoice' })));
+    fireEvent.click(screen.getByRole('button', { name: 'New Invoice' }));
+    expect(screen.getByRole('radio', { name: /invoice template/i })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+    await screen.findByRole('option', { name: 'Progress' });
+    expect(screen.getByTestId('location')).toHaveTextContent('/invoice-templates/new/builder');
+    expect(screen.getByLabelText('Template')).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Invoice type'), { target: { value: 'deposit' } });
+    fireEvent.change(screen.getByLabelText('Template title'), { target: { value: 'Deposit invoice' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Invoice' }));
+    await waitFor(() => expect(api.createBuilderTemplate).toHaveBeenCalledExactlyOnceWith({
+      kind: 'invoice', subtype: 'deposit', name: 'Deposit invoice', category: 'general', description: '',
+    }));
+  });
+
+  it('supports a direct invoice catalog route', async () => {
+    show('/invoice-templates');
+    await waitFor(() => expect(api.getBuilderTemplates).toHaveBeenCalledWith(expect.objectContaining({ kind: 'invoice' })));
+  });
   it('shows category tabs and switches the catalog to estimate and communication templates', async () => {
     show();
     await screen.findByText('Welcome');
@@ -128,13 +178,13 @@ describe('Platform global templates page', () => {
     expect(createForm).not.toHaveClass('space-y-5');
     expect(createForm).toHaveClass('max-w-xl');
     expect(createForm.querySelector('.overflow-y-auto')).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'Document applies to' })).toHaveValue('contract');
+    expect(screen.getByRole('combobox', { name: 'Document type' })).toHaveValue('contract');
     expect(screen.getByRole('combobox', { name: 'Starting template' })).toBeInTheDocument();
     await screen.findByRole('option', { name: 'Contract Preset (copy)' });
     fireEvent.change(screen.getByLabelText('Template title'), { target: { value: 'My Contract' } });
     fireEvent.change(screen.getByRole('combobox', { name: 'Starting template' }), { target: { value: '8' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create Document' }));
-    await waitFor(() => expect(api.duplicateBuilderTemplate).toHaveBeenCalledWith('8', { name: 'My Contract' }));
+    await waitFor(() => expect(api.duplicateBuilderTemplate).toHaveBeenCalledWith('8', { name: 'My Contract', category: 'general', description: '' }));
   });
 
   it('denies unauthorized staff before making catalog requests', async () => {

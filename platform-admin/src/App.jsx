@@ -63,6 +63,7 @@ export default function App() {
             <Route path="/document-templates" element={<DocumentTemplatesPage />} />
             <Route path="/document-templates/*" element={<DocumentTemplatesPage />} />
             <Route path="/estimate-portal-templates/*" element={<DocumentTemplatesPage />} />
+            <Route path="/invoice-templates/*" element={<DocumentTemplatesPage />} />
             <Route path="/communication-templates/*" element={<DocumentTemplatesPage />} />
             <Route path="/admins" element={<AdminsPage />} />
             <Route path="/audit" element={<AuditPage />} />

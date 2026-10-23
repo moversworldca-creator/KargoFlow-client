@@ -8,6 +8,8 @@ import {
   getDocumentVariableRegistry,
   getEstimatePortalTemplates,
   getTemplateVariables,
+  getBuilderTemplate,
+  getBuilderTemplateDraft,
 } from '../../../services/api';
 
 const navigate = vi.fn();
@@ -28,6 +30,7 @@ vi.mock('../../../services/api', () => ({
   getBuilderVariables: vi.fn().mockResolvedValue([]),
   getBuilderBlocks: vi.fn().mockResolvedValue([]),
   getBuilderSettings: vi.fn().mockResolvedValue({ data: {} }),
+  getBuilderTemplate: vi.fn(),
   getBuilderTemplateDraft: vi.fn().mockResolvedValue({ data: null }),
   saveBuilderTemplateDraft: vi.fn().mockResolvedValue({ data: null }),
   getDocumentVariableRegistry: vi.fn(),
@@ -44,6 +47,13 @@ describe('EstimatePortalTemplates', () => {
     getEstimatePortalTemplates.mockResolvedValue([]);
     getTemplateVariables.mockResolvedValue([]);
     createEstimatePortalTemplate.mockResolvedValue({ id: 42, name: 'Custom Estimate Portal' });
+  });
+
+  it('redirects invoice links before loading an estimate draft', async () => {
+    getBuilderTemplate.mockResolvedValue({ data: { id: 81, kind: 'invoice', subtype: 'deposit', name: 'Deposit' } });
+    render(<EstimatePortalTemplates branchId={1} basePath="/documents/estimate-portal-templates" builderRouteView="builder" builderRouteItemId="81" />);
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/documents/invoice-templates/81/builder', { replace: true }));
+    expect(getBuilderTemplateDraft).not.toHaveBeenCalled();
   });
 
   it('saves new estimate builder templates with a valid portal template type', async () => {

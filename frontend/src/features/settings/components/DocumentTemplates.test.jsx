@@ -1,10 +1,16 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import DocumentTemplates from './DocumentTemplates';
+import CreateUniversalDocumentModal from './modals/CreateUniversalDocumentModal';
 
 const apiMocks = vi.hoisted(() => ({
   createDocumentTemplate: vi.fn(),
+  getBuilderTemplate: vi.fn(),
+  getBuilderTemplateDraft: vi.fn(),
+  getBuilderCatalog: vi.fn().mockResolvedValue({ results: [] }),
+  getCommunicationCatalogTemplate: vi.fn(),
+  normalizeEstimateSubtype: vi.fn((value) => ({ moving: "non_binding", commercial: "non_binding", minimal: "flat_rate" }[value] || value)),
   createTemplateVariable: vi.fn(),
   deleteDocumentTemplate: vi.fn(),
   deleteTemplateVariable: vi.fn(),
@@ -183,10 +189,21 @@ describe('DocumentTemplates Page & Create Document Modal', () => {
     apiMocks.deleteCommunicationTemplate.mockResolvedValue({ data: { success: true } });
   });
 
+  it.each([
+    ['invoice', 'deposit', '/documents/invoice-templates/81/builder'],
+    ['estimate_portal', 'binding', '/documents/estimate-portal-templates/81/builder'],
+  ])('redirects a misplaced %s link before reading its draft', async (kind, subtype, path) => {
+    apiMocks.getBuilderTemplate.mockResolvedValue({ data: { id: 81, kind, subtype, name: 'Other kind' } });
+    render(<DocumentTemplates branchId={5} basePath="/documents/document-templates" builderRouteView="builder" builderRouteItemId="81" />);
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith(path, { replace: true }));
+    expect(apiMocks.getBuilderTemplateDraft).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('unified-template-builder')).not.toBeInTheDocument();
+  });
+
   it('renders the Document Templates page with heading, description, and prominent + New Document button', async () => {
     render(<DocumentTemplates branchId={5} />);
     expect(screen.getByRole('heading', { level: 2, name: 'Document Templates' })).toBeInTheDocument();
-    expect(screen.getByText(/Design and manage legal contracts, bills of lading, payment invoices/i)).toBeInTheDocument();
+    expect(screen.getByText(/Design and manage contracts, bills of lading, waivers/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /\+ New Document/i })).toBeInTheDocument();
     expect(await screen.findByText('Moving Services Agreement')).toBeInTheDocument();
     expect(screen.getByText('Uniform Household BOL')).toBeInTheDocument();
@@ -253,15 +270,12 @@ describe('DocumentTemplates Page & Create Document Modal', () => {
     expect(titleInput.value).toBe('Uniform Bill of Lading');
     expect(startingTemplateSelect).toHaveTextContent(/Uniform Bill of Lading/i);
 
-    // Switch to Payment Invoice
-    fireEvent.change(categorySelect, { target: { value: 'invoice' } });
-    expect(titleInput.value).toBe('Payment Invoice');
-    expect(startingTemplateSelect).toHaveTextContent(/Payment Invoice/i);
+    expect([...categorySelect.options].map((option) => option.value)).not.toContain('invoice');
   });
 
   it('submits form with correct payload and launches builder upon successful template creation', async () => {
-    render(<DocumentTemplates branchId={5} />);
-    fireEvent.click(await screen.findByRole('button', { name: /\+ New Document/i }));
+    render(<DocumentTemplates branchId={5} templateKind="invoice" basePath="/documents/invoice-templates" />);
+    fireEvent.click(await screen.findByRole('button', { name: /\+ New Invoice/i }));
 
     const categorySelect = screen.getByLabelText(/Document Applies To/i);
     const titleInput = screen.getByLabelText(/Document Title/i);
@@ -271,7 +285,7 @@ describe('DocumentTemplates Page & Create Document Modal', () => {
     fireEvent.change(titleInput, { target: { value: 'Commercial Freight Invoice' } });
     fireEvent.change(startingTemplateSelect, { target: { value: 'blank' } });
 
-    const submitBtn = screen.getByRole('button', { name: 'Create Document' });
+    const submitBtn = within(screen.getByRole('dialog')).getByRole('button', { name: 'Create Invoice' });
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
@@ -286,7 +300,7 @@ describe('DocumentTemplates Page & Create Document Modal', () => {
     });
 
     await waitFor(() => {
-      expect(navigate).toHaveBeenCalledWith('/settings/document-templates/99/builder');
+      expect(navigate).toHaveBeenCalledWith('/documents/invoice-templates/99/builder');
     });
   });
 
@@ -330,25 +344,15 @@ describe('DocumentTemplates Page & Create Document Modal', () => {
     expect(await screen.findByText('Moving Services Agreement')).toBeInTheDocument();
   });
 
-  it('renders optgroups for Opportunity, Job, Estimate, and Communication scopes in Create Document modal', async () => {
+  it('offers document subtypes without invoice, estimate, or message categories', async () => {
     render(<DocumentTemplates branchId={5} />);
-    await screen.findByText('Moving Services Agreement');
-
-    // Open + New Document modal
-    const newDocBtn = screen.getByRole('button', { name: /\+ New Document/i });
-    fireEvent.click(newDocBtn);
-
-    const categorySelect = screen.getByLabelText(/Document Applies To/i);
-
-    // Verify optgroups exist
-    const opportunityGroup = categorySelect.querySelector('optgroup[label*="Opportunity Scope"]');
-    const jobGroup = categorySelect.querySelector('optgroup[label*="Job Scope"]');
-    const estimateGroup = categorySelect.querySelector('optgroup[label*="Customer Estimate Portals"]');
-    const commGroup = categorySelect.querySelector('optgroup[label*="Customer Communications"]');
-    expect(opportunityGroup).toBeInTheDocument();
-    expect(jobGroup).toBeInTheDocument();
-    expect(estimateGroup).toBeInTheDocument();
-    expect(commGroup).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /\+ New Document/i }));
+    const values = [...screen.getByLabelText(/Document Applies To/i).options].map((option) => option.value);
+    expect(values).toContain('contract');
+    expect(values).toContain('bol');
+    expect(values).toContain('inventory_sheet');
+    expect(values).not.toContain('invoice');
+    expect(values.some((value) => value.startsWith('estimate:') || value.startsWith('comm:'))).toBe(false);
   });
 
   it('clones existing template with deep-copied content and independent structure', async () => {
@@ -412,41 +416,37 @@ describe('DocumentTemplates Page & Create Document Modal', () => {
     expect(titleInput.value).toBe('Duplicate Contract Name');
   });
 
-  it('renders unified document list aggregating all document types without category filter tabs', async () => {
+  it('loads only the document catalog and excludes other kinds', async () => {
     render(<DocumentTemplates branchId={5} />);
     expect(await screen.findByText('Moving Services Agreement')).toBeInTheDocument();
-    expect(screen.getByText('Standard Estimate Portal')).toBeInTheDocument();
-    expect(screen.getByText('Quote Follow-up Email')).toBeInTheDocument();
-    expect(screen.getByText('Move Day Reminder SMS')).toBeInTheDocument();
-
-    // Verify category filter tabs and badges are not rendered
-    expect(screen.queryByRole('button', { name: /^All Documents/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Estimates/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Emails/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^SMS Alerts/i })).not.toBeInTheDocument();
+    expect(apiMocks.getDocumentTemplates).toHaveBeenCalledWith({ branch: '5', kind: 'document' });
+    expect(apiMocks.getEstimatePortalTemplates).not.toHaveBeenCalled();
+    expect(apiMocks.getCommunicationTemplates).not.toHaveBeenCalled();
+    expect(screen.queryByText('Standard Estimate Portal')).not.toBeInTheDocument();
+    expect(screen.queryByText('Quote Follow-up Email')).not.toBeInTheDocument();
   });
 
-  it('filters across all document types including Estimates and SMS alerts via search input', async () => {
+  it('shows the actual global source version on copied templates', async () => {
+    apiMocks.getDocumentTemplates.mockResolvedValue({ data: [{ id: 31, branch: 5, name: 'Copied terms', kind: 'document', template_type: 'contract', is_active: true, catalog_source: { revision_number: 9 } }] });
     render(<DocumentTemplates branchId={5} />);
-    await screen.findByText('Moving Services Agreement');
+    expect(await screen.findByText('Copied from global v9')).toBeInTheDocument();
+  });
 
-    const searchInput = screen.getByPlaceholderText(/Search templates/i);
-
-    // Search for Estimates
-    fireEvent.change(searchInput, { target: { value: 'Standard Estimate' } });
-    expect(screen.getByText('Standard Estimate Portal')).toBeInTheDocument();
-    expect(screen.queryByText('Moving Services Agreement')).not.toBeInTheDocument();
-    expect(screen.queryByText('Quote Follow-up Email')).not.toBeInTheDocument();
-
-    // Search for SMS
-    fireEvent.change(searchInput, { target: { value: 'Reminder SMS' } });
-    expect(screen.getByText('Move Day Reminder SMS')).toBeInTheDocument();
-    expect(screen.queryByText('Standard Estimate Portal')).not.toBeInTheDocument();
+  it('loads invoices through the existing catalog with an invoice kind filter', async () => {
+    apiMocks.getDocumentTemplates.mockResolvedValue({ data: [
+      { id: 31, branch: 5, name: 'Deposit invoice', kind: 'invoice', subtype: 'deposit', template_type: 'invoice', scope_type: 'invoice', is_active: true },
+      { id: 32, name: 'Wrong document', kind: 'document', template_type: 'contract', is_active: true },
+    ] });
+    render(<DocumentTemplates branchId={5} templateKind="invoice" basePath="/documents/invoice-templates" />);
+    expect(await screen.findByText('Deposit invoice')).toBeInTheDocument();
+    expect(screen.queryByText('Wrong document')).not.toBeInTheDocument();
+    expect(apiMocks.getDocumentTemplates).toHaveBeenCalledWith({ branch: '5', kind: 'invoice' });
+    fireEvent.click(screen.getByTitle('Edit Template'));
+    expect(navigate).toHaveBeenCalledWith('/documents/invoice-templates/31/builder');
   });
 
   it('creates an estimate portal template via universal modal and dispatches createEstimatePortalTemplate', async () => {
-    render(<DocumentTemplates branchId={5} />);
-    fireEvent.click(await screen.findByRole('button', { name: /\+ New Document/i }));
+    render(<CreateUniversalDocumentModal isOpen defaultBranchId={5} branches={user.branches} onClose={vi.fn()} onCreated={vi.fn()} />);
 
     const categorySelect = screen.getByLabelText(/Document Applies To/i);
     const titleInput = screen.getByLabelText(/Document Title/i);
@@ -468,14 +468,11 @@ describe('DocumentTemplates Page & Create Document Modal', () => {
       );
     });
 
-    await waitFor(() => {
-      expect(navigate).toHaveBeenCalledWith('/settings/estimate-portal-templates/202/builder');
-    });
+
   });
 
   it('creates an email communication template with subject via universal modal and dispatches createCommunicationTemplate', async () => {
-    render(<DocumentTemplates branchId={5} />);
-    fireEvent.click(await screen.findByRole('button', { name: /\+ New Document/i }));
+    render(<CreateUniversalDocumentModal isOpen defaultBranchId={5} branches={user.branches} onClose={vi.fn()} onCreated={vi.fn()} />);
 
     const categorySelect = screen.getByLabelText(/Document Applies To/i);
     const titleInput = screen.getByLabelText(/Document Title/i);
@@ -501,8 +498,6 @@ describe('DocumentTemplates Page & Create Document Modal', () => {
       );
     });
 
-    await waitFor(() => {
-      expect(navigate).toHaveBeenCalledWith('/settings/documents/communication-templates/303/builder');
-    });
+
   });
 });
