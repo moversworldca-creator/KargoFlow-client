@@ -63,15 +63,19 @@ export default function UnifiedTemplateBuilder({
   const modeConfig = getModeConfig(mode);
   const initialSource = draft || template;
   const targetTemplateId = initialSource?.id || template?.id || draft?.id;
+  const needsServerDraft = Boolean(targetTemplateId && !['email', 'sms'].includes(mode) && !initialSource?.isHydratedFromServer);
+  const [isLoadingDraft, setIsLoadingDraft] = useState(needsServerDraft);
+  const [draftLoadError, setDraftLoadError] = useState('');
+  const [draftLoadAttempt, setDraftLoadAttempt] = useState(0);
 
   // Template Document Model
   const [doc, setDoc] = useState(() => {
     let initial;
     if (initialSource && typeof initialSource === "object") {
-      if (initialSource.items && Array.isArray(initialSource.items) && initialSource.items.length > 0) {
-        initial = initialSource;
-      } else if (initialSource.content && typeof initialSource.content === "object" && Array.isArray(initialSource.content.items) && initialSource.content.items.length > 0) {
-        initial = initialSource.content;
+      if (Array.isArray(initialSource.items)) {
+        initial = deepClone(initialSource);
+      } else if (initialSource.content && typeof initialSource.content === "object" && Array.isArray(initialSource.content.items)) {
+        initial = deepClone(initialSource.content);
       }
     }
     if (!initial) {
@@ -83,7 +87,8 @@ export default function UnifiedTemplateBuilder({
         initial.items = [emailWidget];
         initial.pages = [{ id: "page-1", name: "Page 1", items: [emailWidget] }];
       } else {
-        initial = createInitialDocument(mode);
+        initial = targetTemplateId ? createBlankDocument(modeConfig.defaultPageSize || 'A4', modeConfig.defaultOrientation || 'Portrait') : createInitialDocument(mode);
+        if (targetTemplateId) initial.name = initialSource?.name || '';
       }
     }
 
@@ -125,6 +130,10 @@ export default function UnifiedTemplateBuilder({
     let isCancelled = false;
     const targetId = template?.id || draft?.id || initialSource?.id;
     if (targetId && !initialSource?.isHydratedFromServer) {
+      if (needsServerDraft) {
+        setIsLoadingDraft(true);
+        setDraftLoadError('');
+      }
       getBuilderTemplateDraft(targetId)
         .then((res) => {
           if (isCancelled) return;
@@ -136,19 +145,25 @@ export default function UnifiedTemplateBuilder({
             });
             if (loaded) {
               const lockVersion = draftData.revision?.lock_version || draftData.lock_version || 1;
-              updateDoc({ ...loaded, lock_version: lockVersion, isHydratedFromServer: true });
+              updateDoc({ ...loaded, lock_version: lockVersion, isHydratedFromServer: true }, false);
             }
+          } else if (needsServerDraft) {
+            throw new Error('The saved template document is missing from the response.');
           }
         })
         .catch((err) => {
-          // Graceful fallback to initial doc if draft cannot be fetched (e.g. offline/mock)
-          console.warn("Could not load backend draft on mount:", err?.message);
+          if (isCancelled) return;
+          if (needsServerDraft) setDraftLoadError('Unable to load the saved template. Retry to load its current content.');
+          else console.warn("Could not load backend draft on mount:", err?.message);
+        })
+        .finally(() => {
+          if (!isCancelled) setIsLoadingDraft(false);
         });
     }
     return () => {
       isCancelled = true;
     };
-  }, [template?.id, draft?.id, initialSource?.id]);
+  }, [template?.id, draft?.id, initialSource?.id, draftLoadAttempt]);
 
   // Editor State
   const [selectedItemId, setSelectedItemId] = useState(null);
@@ -1007,6 +1022,16 @@ export default function UnifiedTemplateBuilder({
   };
 
   const selectedItem = (doc.items || []).find((it) => it.id === selectedItemId);
+
+  if (isLoadingDraft || draftLoadError) {
+    return <div className={`flex flex-col items-center justify-center gap-3 bg-slate-100 p-6 text-slate-800 ${isOverlay ? 'fixed inset-0 z-[70000]' : 'w-full h-full'}`}>
+      {draftLoadError ? <>
+        <p role="alert">{draftLoadError}</p>
+        <button type="button" onClick={() => setDraftLoadAttempt(value => value + 1)} className="rounded bg-blue-600 px-4 py-2 text-white">Retry loading template</button>
+      </> : <p role="status">Loading saved template…</p>}
+      <button type="button" onClick={onBack} className="text-sm text-slate-600">Back to templates</button>
+    </div>;
+  }
 
   return (
     <div className={`flex flex-col bg-slate-100 overflow-hidden text-slate-800 ${isOverlay ? "fixed inset-0 z-[70000] w-screen h-screen" : "w-full h-full"}`}>
