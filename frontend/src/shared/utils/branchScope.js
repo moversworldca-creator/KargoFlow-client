@@ -33,9 +33,18 @@ export const getUserBranchIds = (user) => {
 export const isCompanyWideUser = (user) => {
   if (!user || typeof user !== 'object') return false;
   if (user.is_superuser || user.is_system_admin) return true;
-  if (user.is_owner || user.worker_type === 'owner' || user.employee_type === 'owner') return true;
-  if (user.role === 'admin' || user.role === 'owner' || user.role === 'super_admin') return true;
-  if (Array.isArray(user.roles) && user.roles.some((r) => typeof r === 'string' && ['admin', 'owner', 'company admin', 'company owner', 'super admin'].includes(r.toLowerCase()))) {
+  if (user.is_owner || user.is_admin || user.is_company_admin) return true;
+  const workerType = String(user.worker_type || user.employee_type || '').toLowerCase();
+  if (['owner', 'admin', 'company_admin', 'super_admin'].includes(workerType)) return true;
+
+  const roleStr = typeof user.role === 'string' ? user.role.toLowerCase().replace(/_/g, ' ') : '';
+  if (['admin', 'owner', 'super admin', 'company admin', 'company owner'].includes(roleStr)) return true;
+  if (user.role && typeof user.role === 'object') {
+    const roleObjName = String(user.role.name || user.role.label || '').toLowerCase().replace(/_/g, ' ');
+    if (['admin', 'owner', 'super admin', 'company admin', 'company owner'].includes(roleObjName)) return true;
+  }
+
+  if (Array.isArray(user.roles) && user.roles.some((r) => typeof r === 'string' && ['admin', 'owner', 'company admin', 'company owner', 'super admin'].includes(r.toLowerCase().replace(/_/g, ' ')))) {
     return true;
   }
   if (Array.isArray(user.role_details)) {
@@ -45,13 +54,13 @@ export const isCompanyWideUser = (user) => {
         (r.branch_id === null ||
           r.branch_id === undefined ||
           r.scope === 'company' ||
-          ['Company Admin', 'Company Owner', 'Super Admin', 'Admin', 'Owner'].includes(r.name))
+          ['company admin', 'company owner', 'super admin', 'admin', 'owner'].includes(String(r.name || r.label || r.codename || '').trim().toLowerCase().replace(/_/g, ' ')))
     );
     if (isCompanyRole) return true;
   }
   if (Array.isArray(user.permissions)) {
     const hasAdminPerm = user.permissions.some((p) =>
-      ['crm.admin', 'branches.manage', 'branches.view', 'settings.manage', 'company.manage'].includes(p)
+      ['crm.admin', 'branches.manage', 'branches.view', 'branches.create', 'settings.manage', 'company.manage', 'company.admin'].includes(String(p).trim().toLowerCase())
     );
     if (hasAdminPerm) return true;
   }

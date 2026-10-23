@@ -12,7 +12,7 @@ import {
   getTasks,
   getLeadActivities,
 } from '../../services/api';
-import { getUserBranchIds } from '../utils/branchScope';
+import { getUserBranchIds, isCompanyWideUser } from '../utils/branchScope';
 
 const asList = (res) => {
   if (Array.isArray(res)) return res;
@@ -30,8 +30,9 @@ const sharedQueryOptions = {
 
 export const useBranchesLookup = () => {
   const { user } = useAuth();
+  const isCompanyWide = isCompanyWideUser(user);
   const allowedBranchIds = getUserBranchIds(user);
-  const restrictToAccessibleBranches = allowedBranchIds.length > 0 && !user?.is_superuser && !user?.is_system_admin;
+  const restrictToAccessibleBranches = !isCompanyWide && allowedBranchIds.length > 0;
 
   return useQuery({
     queryKey: ['branches', restrictToAccessibleBranches ? allowedBranchIds.join(',') : 'all'],
@@ -47,8 +48,9 @@ export const useBranchesLookup = () => {
 
 export const useUsersLookup = (branch = null) => {
   const { user } = useAuth();
+  const isCompanyWide = isCompanyWideUser(user);
   const allowedBranchIds = getUserBranchIds(user);
-  const restrictToAccessibleBranches = allowedBranchIds.length > 0 && !user?.is_superuser && !user?.is_system_admin;
+  const restrictToAccessibleBranches = !isCompanyWide && allowedBranchIds.length > 0;
 
   return useQuery({
     queryKey: ['users', branch || 'all', restrictToAccessibleBranches ? allowedBranchIds.join(',') : 'all'],

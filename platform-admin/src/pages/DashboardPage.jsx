@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, Plus, RefreshCw, Calendar } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
-import { useDashboardData, usePlans, useInvalidatePlatformQueries } from '../hooks/usePlatformData';
+import { useDashboardData, usePlans, useTenants, useSubscriptions, useInvalidatePlatformQueries } from '../hooks/usePlatformData';
 import PlatformOverviewTab from '../components/PlatformOverviewTab';
 import ProvisionTenantModal from '../components/ProvisionTenantModal';
+import TenantLifecycleModal from '../components/TenantLifecycleModal';
+import SubscriptionLifecycleModal from '../components/SubscriptionLifecycleModal';
 
 export default function DashboardPage() {
   const navigate = useNavigate();
@@ -12,6 +14,8 @@ export default function DashboardPage() {
 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showProvisionModal, setShowProvisionModal] = useState(false);
+  const [selectedTenant, setSelectedTenant] = useState(null);
+  const [selectedSubscription, setSelectedSubscription] = useState(null);
   const [currentDateTime, setCurrentDateTime] = useState(new Date());
 
   useEffect(() => {
@@ -21,6 +25,8 @@ export default function DashboardPage() {
 
   const { data: dashboardData, isLoading: isDashLoading, refetch: refetchDash } = useDashboardData();
   const { data: plans = [], isLoading: isPlansLoading, refetch: refetchPlans } = usePlans();
+  const { data: tenants = [], isLoading: isTenantsLoading, refetch: refetchTenants } = useTenants({ page_size: 5 });
+  const { data: subscriptions = [], isLoading: isSubsLoading, refetch: refetchSubs } = useSubscriptions({ page_size: 5 });
   const { invalidateAll } = useInvalidatePlatformQueries();
 
   const isLoading = isDashLoading || isPlansLoading;
@@ -28,7 +34,7 @@ export default function DashboardPage() {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      await Promise.all([refetchDash(), refetchPlans()]);
+      await Promise.all([refetchDash(), refetchPlans(), refetchTenants(), refetchSubs()]);
       showToast('Dashboard metrics refreshed.', 'success');
     } catch {
       showToast('Error syncing dashboard metrics.', 'error');
@@ -37,7 +43,7 @@ export default function DashboardPage() {
     }
   };
 
-  const handleNavigateTab = (tab) => {
+  const handleNavigateTab = (tab, filterQuery = '') => {
     const routeMap = {
       overview: '/',
       tenants: '/tenants',
@@ -49,7 +55,8 @@ export default function DashboardPage() {
       admins: '/admins',
       audits: '/audit',
     };
-    navigate(routeMap[tab] || `/${tab}`);
+    const target = routeMap[tab] || `/${tab}`;
+    navigate(filterQuery ? `${target}?${filterQuery}` : target);
   };
 
   const formattedDate = new Intl.DateTimeFormat('en-US', {
@@ -75,27 +82,27 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="space-y-4 max-w-[1600px] mx-auto pb-8">
+    <div className="w-full space-y-1.5 pb-0.5">
       {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
         <div>
-          <h1 className="text-2xl sm:text-[28px] font-black text-slate-900 dark:text-white tracking-tight leading-tight">
+          <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight leading-tight">
             Platform Operations Dashboard
           </h1>
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-normal mt-1">
+          <p className="text-xs text-slate-500 dark:text-slate-400 font-normal mt-0.5">
             Monitor platform health, tenant activity, and system operations
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 self-start sm:self-auto flex-wrap">
+        <div className="flex items-center gap-1.5 self-start sm:self-auto flex-wrap">
           {/* Date & Time Widget */}
-          <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 shadow-2xs">
-            <Calendar size={16} className="text-slate-400 dark:text-slate-500 shrink-0" />
+          <div className="flex items-center gap-2 px-2.5 py-1 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 text-slate-700 dark:text-slate-300 shadow-2xs">
+            <Calendar size={13} className="text-slate-400 dark:text-slate-500 shrink-0" />
             <div className="leading-tight">
-              <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
+              <div className="text-[11px] font-bold text-slate-800 dark:text-slate-200">
                 {formattedDate}
               </div>
-              <div className="text-[11px] text-slate-400 dark:text-slate-500">
+              <div className="text-[10px] text-slate-400 dark:text-slate-500">
                 {formattedDayTime}
               </div>
             </div>
@@ -105,19 +112,19 @@ export default function DashboardPage() {
           <button
             onClick={handleRefresh}
             disabled={isRefreshing}
-            className="px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5 text-xs font-bold shadow-2xs cursor-pointer"
+            className="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5 text-xs font-bold shadow-2xs cursor-pointer"
             title="Reload control plane data"
           >
-            <RefreshCw size={14} className={isRefreshing ? 'animate-spin text-blue-600' : 'text-slate-500'} />
+            <RefreshCw size={12} className={isRefreshing ? 'animate-spin text-blue-600' : 'text-slate-500'} />
             <span>Refresh</span>
           </button>
 
           {/* Provision Tenant Button */}
           <button
             onClick={() => setShowProvisionModal(true)}
-            className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+            className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
           >
-            <Plus size={15} />
+            <Plus size={13} />
             <span>Provision Tenant</span>
           </button>
         </div>
@@ -126,8 +133,12 @@ export default function DashboardPage() {
       <PlatformOverviewTab
         dashboardData={dashboardData}
         plans={plans}
+        tenants={tenants}
+        subscriptions={subscriptions}
         onNavigateTab={handleNavigateTab}
         onOpenProvisionModal={() => setShowProvisionModal(true)}
+        onSelectTenant={(tenant) => setSelectedTenant(tenant)}
+        onSelectSubscription={(sub) => setSelectedSubscription(sub)}
       />
 
       <ProvisionTenantModal
@@ -135,6 +146,24 @@ export default function DashboardPage() {
         onClose={() => setShowProvisionModal(false)}
         plans={plans}
         onTenantProvisioned={() => invalidateAll()}
+      />
+
+      {/* Tenant Lifecycle Action Modal */}
+      <TenantLifecycleModal
+        isOpen={Boolean(selectedTenant)}
+        onClose={() => setSelectedTenant(null)}
+        tenant={selectedTenant}
+        onTenantUpdated={() => invalidateAll()}
+      />
+
+      {/* Subscription Lifecycle Action Modal */}
+      <SubscriptionLifecycleModal
+        isOpen={Boolean(selectedSubscription)}
+        onClose={() => setSelectedSubscription(null)}
+        subscription={selectedSubscription}
+        plans={plans}
+        tenants={tenants}
+        onSubscriptionUpdated={() => invalidateAll()}
       />
     </div>
   );

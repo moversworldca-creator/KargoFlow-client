@@ -614,10 +614,10 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
       const list = Array.isArray(response)
         ? response
         : Array.isArray(response?.results)
-        ? response.results
-        : Array.isArray(response?.data)
-        ? response.data
-        : [];
+          ? response.results
+          : Array.isArray(response?.data)
+            ? response.data
+            : [];
       // Branch Directory and settings manages all operating company branches
       setBranches(list);
     } catch (err) {
@@ -788,9 +788,8 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
 
         {message.text && (
           <div
-            className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium ${
-              message.type === 'success' ? 'bg-primary-tint/30 text-primary' : 'bg-[#FDE8E8]/30 text-[#791F1F]'
-            }`}
+            className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium ${message.type === 'success' ? 'bg-primary-tint/30 text-primary' : 'bg-[#FDE8E8]/30 text-[#791F1F]'
+              }`}
           >
             {message.type === 'success' ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
             {message.text}
@@ -871,9 +870,8 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
                       </span>
                     )}
                     <span
-                      className={`rounded px-2 py-0.5 text-[0.625rem] font-bold uppercase ${
-                        isBranchActive(branch) ? 'bg-primary-tint/30 text-primary' : 'bg-[#FDE8E8]/30 text-[#791F1F]'
-                      }`}
+                      className={`rounded px-2 py-0.5 text-[0.625rem] font-bold uppercase ${isBranchActive(branch) ? 'bg-primary-tint/30 text-primary' : 'bg-[#FDE8E8]/30 text-[#791F1F]'
+                        }`}
                     >
                       {isBranchActive(branch) ? 'Active' : 'Inactive'}
                     </span>
@@ -1005,9 +1003,8 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
 
       {message.text && (
         <div
-          className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium ${
-            message.type === 'success' ? 'bg-primary-tint/30 text-primary' : 'bg-[#FDE8E8]/30 text-[#791F1F]'
-          }`}
+          className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium ${message.type === 'success' ? 'bg-primary-tint/30 text-primary' : 'bg-[#FDE8E8]/30 text-[#791F1F]'
+            }`}
         >
           {message.type === 'success' ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
           {message.text}

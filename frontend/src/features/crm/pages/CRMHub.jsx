@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth/context/AuthContext';
-import { getUserBranchIds } from '../../../shared/utils/branchScope';
+import { getUserBranchIds, isCompanyWideUser } from '../../../shared/utils/branchScope';
 import useCan from '../../../shared/auth/useCan';
 import { PERMISSIONS } from '../../../shared/permissions/registry';
 import {
@@ -380,8 +380,9 @@ const CRMHub = ({ defaultTab }) => {
 
   const [branches, setBranches] = useState([]);
   const [users, setUsers] = useState([]);
+  const isCompanyWide = isCompanyWideUser(user);
   const accessibleBranchIds = useMemo(() => new Set(getUserBranchIds(user)), [user]);
-  const restrictToAccessibleBranches = accessibleBranchIds.size > 0 && !user?.is_superuser && !user?.is_system_admin;
+  const restrictToAccessibleBranches = !isCompanyWide && accessibleBranchIds.size > 0;
   const [assignLoading, setAssignLoading] = useState(false);
   const [assignForm, setAssignForm] = useState({ branch: '', assigned_to: '' });
 

@@ -73,11 +73,9 @@ export default function SupportPage() {
   }
 
   return (
-    <div className="space-y-3.5 max-w-7xl mx-auto pb-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div className="space-y-2 max-w-7xl mx-auto pb-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
-          <div className="flex items-center gap-2">
-          </div>
           <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
             Support Sessions & Tenant Impersonation
           </h1>
@@ -85,10 +83,10 @@ export default function SupportPage() {
 
         <button
           onClick={handleRefresh}
-          className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5 text-xs font-bold self-start sm:self-auto cursor-pointer"
+          className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5 text-xs font-bold self-start sm:self-auto cursor-pointer shadow-2xs"
           title="Reload support sessions"
         >
-          <RefreshCw size={14} />
+          <RefreshCw size={13} />
           <span>Refresh</span>
         </button>
       </div>

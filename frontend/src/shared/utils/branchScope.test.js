@@ -44,6 +44,20 @@ describe('branchScope', () => {
       branches: [{ id: 1 }],
     };
     expect(filterAccessibleBranches(companyAdminRoleUser, branches)).toEqual(branches);
+
+    const branchManagerWithPerms = {
+      id: 4,
+      permissions: ['branches.manage'],
+      branches: [{ id: 1 }],
+    };
+    expect(filterAccessibleBranches(branchManagerWithPerms, branches)).toEqual(branches);
+
+    const companyAdminStringRole = {
+      id: 5,
+      role: 'company_admin',
+      branches: [{ id: 1 }],
+    };
+    expect(filterAccessibleBranches(companyAdminStringRole, branches)).toEqual(branches);
   });
 });
 

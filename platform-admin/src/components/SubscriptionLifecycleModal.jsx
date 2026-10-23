@@ -52,13 +52,14 @@ export default function SubscriptionLifecycleModal({
   subscription, 
   plans = [], 
   tenants = [], 
-  onSubscriptionUpdated 
+  onSubscriptionUpdated,
+  initialTab = 'transition'
 }) {
   useModal(isOpen, onClose);
   const { showToast } = useToast();
   const activeSubscription = subscription || {};
 
-  const [activeSubTab, setActiveSubTab] = useState('transition'); // 'transition', 'plan_change', 'dates', 'cancel_reactivate', 'history'
+  const [activeSubTab, setActiveSubTab] = useState(initialTab); // 'transition', 'plan_change', 'dates', 'cancel_reactivate', 'history'
 
   // Transition form
   const allowedNextStatuses = ALLOWED_TRANSITIONS[activeSubscription.status] || [];
@@ -112,8 +113,11 @@ export default function SubscriptionLifecycleModal({
       setCancelReason('');
       setReactivateReason('');
       setHistoryList(subscription.status_history || []);
+      if (initialTab) {
+        setActiveSubTab(initialTab);
+      }
     }
-  }, [subscription, isOpen]);
+  }, [subscription, isOpen, initialTab]);
 
   // Fetch history when history tab is selected
   useEffect(() => {
@@ -149,7 +153,20 @@ export default function SubscriptionLifecycleModal({
         next_status: targetStatus,
         reason: transitionReason.trim(),
       };
-      if (targetStatus === 'past_due' && graceDays) {
+      if (targetStatus === 'active') {
+        const now = new Date();
+        const nextPeriod = new Date(now);
+        if (subscription.billing_interval === 'year') {
+          nextPeriod.setFullYear(nextPeriod.getFullYear() + 1);
+        } else {
+          nextPeriod.setMonth(nextPeriod.getMonth() + 1);
+        }
+        payload.fields = {
+          trial_ends_at: null,
+          current_period_start: now.toISOString(),
+          current_period_end: nextPeriod.toISOString(),
+        };
+      } else if (targetStatus === 'past_due' && graceDays) {
         payload.fields = {
           grace_period_ends_at: new Date(Date.now() + Number(graceDays) * 86400000).toISOString(),
         };
@@ -176,17 +193,28 @@ export default function SubscriptionLifecycleModal({
     setIsSubmitting(true);
     try {
       const companyId = subscription.tenant_id || subscription.company_id || subscription.id;
+      const now = new Date();
+      const nextPeriod = new Date(now);
+      if (billingInterval === 'year') {
+        nextPeriod.setFullYear(nextPeriod.getFullYear() + 1);
+      } else {
+        nextPeriod.setMonth(nextPeriod.getMonth() + 1);
+      }
+
       const res = await platformApi.changeSubscriptionPlan(companyId, {
         plan_id: newPlanId,
         new_plan_id: newPlanId,
-        plan_id: newPlanId,
         billing_interval: billingInterval,
         effective: effectiveTiming,
         effective_timing: effectiveTiming,
         reason: planChangeReason.trim(),
         tenant_id: subscription.tenant_id || subscription.company_id,
         company_id: subscription.tenant_id || subscription.company_id,
-        current_status: subscription.status,
+        new_status: 'active',
+        status: 'active',
+        trial_ends_at: null,
+        current_period_start: now.toISOString(),
+        current_period_end: nextPeriod.toISOString(),
       });
       showToast(res.data?.message || 'Plan changed successfully.', 'success');
       if (res.data?.downgrade_warning) {
@@ -345,9 +373,24 @@ export default function SubscriptionLifecycleModal({
               <span className="text-base font-bold text-blue-600 dark:text-blue-400">{currentPlan.name}</span>
             </div>
             <div className="pt-2 sm:pt-0 sm:px-4">
-              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mb-1">Billing Period</span>
-              <span className="text-sm font-medium text-slate-500 dark:text-slate-400">
-                {subscription.current_period_end ? new Date(subscription.current_period_end).toLocaleDateString() : 'N/A'}
+              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mb-1">
+                {subscription.status === 'trialing' ? 'Trial Period' : 'Billing Period'}
+              </span>
+              <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                {subscription.status === 'trialing'
+                  ? (subscription.trial_ends_at ? `Trial ends ${new Date(subscription.trial_ends_at).toLocaleDateString()}` : 'Trial Active')
+                  : (() => {
+                      const d = subscription.current_period_end
+                        ? new Date(subscription.current_period_end)
+                        : (() => {
+                            const start = subscription.current_period_start ? new Date(subscription.current_period_start) : (subscription.created_at ? new Date(subscription.created_at) : new Date());
+                            const exp = new Date(start);
+                            if (subscription.billing_interval === 'year') exp.setFullYear(exp.getFullYear() + 1);
+                            else exp.setMonth(exp.getMonth() + 1);
+                            return exp;
+                          })();
+                      return `Expires ${d.toLocaleDateString()}`;
+                    })()}
               </span>
             </div>
             <div className="pt-2 sm:pt-0 sm:pl-4">

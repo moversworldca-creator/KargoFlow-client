@@ -92,7 +92,7 @@ export const universalSearch = (params) => api.get("/search/", { params });
 
 // Branch APIs
 export const getBranches = () => api.get("/tenant/branches/");
-export const getBranchLookups = (params = {limit: 50}) => api.get("/tenant/branches/", { params });
+export const getBranchLookups = (params = { limit: 50 }) => api.get("/tenant/branches/", { params });
 export const createBranch = (data) => api.post("/tenant/branches/", data);
 export const updateBranch = (id, data) => api.patch(`/tenant/branches/${id}/`, data);
 export const deleteBranch = (id) => api.delete(`/tenant/branches/${id}/`);
@@ -451,9 +451,9 @@ export const getTasks = (params = {}) => params.lead || params.opportunity ? rec
 export const createTask = (data) => createRecordTask(data);
 export const updateTask = (id, data, target = data) => target.lead || target.opportunity ? updateRecordTask(id, data, target) : api.patch(`/sales/tasks/${id}/`, data);
 export const getCallLogs = (params) => api.get("/sales/call-logs/", { params });
-export const liststatuscode = (params) => api.get("/sales/status-codes/list-status-codes", { params });  
+export const liststatuscode = (params) => api.get("/sales/status-codes/list-status-codes", { params });
 export const getStatusCodes = (params) => api.get("/tenant/opportunity-statuses/", { params });
-export const getStatusCodeLookups = (params = {limit: 50}) => api.get("/tenant/opportunity-statuses/", { params });
+export const getStatusCodeLookups = (params = { limit: 50 }) => api.get("/tenant/opportunity-statuses/", { params });
 export const getStatusCodeLookupsPage = (search, offset, limit) =>
   api.get('/tenant/opportunity-statuses/', {
     params: { search, offset, limit },
@@ -709,6 +709,7 @@ export const deleteCommunicationMailbox = (id) => api.delete(`/tenant/communicat
 export const getSmsNumbers = (params) => api.get("/tenant/communications/sms-numbers/", { params });
 export const getSmsNumberOrders = () => api.get("/tenant/communications/sms-numbers/orders/");
 export const searchSmsNumbers = (params) => api.get("/tenant/communications/sms-numbers/search/", { params });
+export const getOwnedAvailableSmsNumbers = () => api.get("/tenant/communications/sms-numbers/owned-available/");
 export const importSmsNumber = (data) => api.post("/tenant/communications/sms-numbers/import/", data);
 export const quoteSmsNumberOrder = (data) => api.post("/tenant/communications/sms-numbers/orders/", data);
 export const purchaseSmsNumberOrder = (orderId, data) =>
@@ -797,7 +798,7 @@ const API = {
   put: (url, data) => api.put(url, data),
   patch: (url, data) => api.patch(url, data),
   delete: (url) => api.delete(url),
-  
+
 
   auth: {
     login,

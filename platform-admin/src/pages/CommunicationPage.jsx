@@ -116,10 +116,13 @@ export default function CommunicationPage() {
     setBusy(true);
     try {
       const res = await platformApi.testCommunicationConnection(providerKey);
-      showToast(res?.data?.message || `${label} API handshake success (Roundtrip: 74ms, TLS 1.3 verified).`, 'success');
+      const isSuccess = Boolean(res?.data?.success);
+      const message = res?.data?.message || (isSuccess ? `${label} connection test passed.` : `${label} connection test failed.`);
+      showToast(message, isSuccess ? 'success' : 'error');
       invalidateCommunication();
-    } catch {
-      showToast(`${label} API handshake success (Roundtrip: 74ms, TLS 1.3 verified).`, 'success');
+      await Promise.all([overview.refetch(), resend.refetch(), telnyx.refetch(), health.refetch()]);
+    } catch (err) {
+      showToast(apiError(err, `${label} connection test failed.`), 'error');
     } finally {
       setBusy(false);
     }
@@ -128,14 +131,24 @@ export default function CommunicationPage() {
   const handlePingAllEdges = async () => {
     setIsPingingAll(true);
     try {
-      await Promise.all([
-        platformApi.testCommunicationConnection('Resend'),
-        platformApi.testCommunicationConnection('Telnyx'),
+      const [resendRes, telnyxRes] = await Promise.all([
+        platformApi.testCommunicationConnection('resend'),
+        platformApi.testCommunicationConnection('telnyx'),
       ]);
-      showToast('All carrier API edges verified healthy (Avg roundtrip: 68ms, TLS 1.3).', 'success');
+      const resendOk = Boolean(resendRes?.data?.success);
+      const telnyxOk = Boolean(telnyxRes?.data?.success);
+      if (resendOk && telnyxOk) {
+        showToast('All carrier API edges verified healthy.', 'success');
+      } else if (!resendOk && !telnyxOk) {
+        showToast('Both Resend and Telnyx connection tests failed.', 'error');
+      } else {
+        const failed = !resendOk ? 'Resend' : 'Telnyx';
+        showToast(`Carrier test completed: ${failed} connection test failed.`, 'error');
+      }
       invalidateCommunication();
-    } catch {
-      showToast('Carrier edges verified healthy (Avg roundtrip: 68ms, TLS 1.3).', 'success');
+      await Promise.all([overview.refetch(), resend.refetch(), telnyx.refetch(), health.refetch()]);
+    } catch (err) {
+      showToast(apiError(err, 'Carrier edge check failed.'), 'error');
     } finally {
       setIsPingingAll(false);
     }
@@ -189,26 +202,26 @@ export default function CommunicationPage() {
     onInspect: setInspectData,
   };
 
-  // Metrics extract for executive summary strip
+  // Metrics extract for executive summary strip (100% real data from overview API)
   const resendStats = overviewData?.resend || {
-    verified_domains: 142,
-    pending_domains: 3,
-    sent_today: 284910,
-    sent_change_pct: 4.2,
-    bounce_rate_pct: 0.04,
-    reputation_pct: 99.8,
+    verified_domains: 0,
+    pending_domains: 0,
+    sent_today: 0,
+    sent_change_pct: null,
+    bounce_rate_pct: null,
+    reputation_pct: null,
   };
 
   const telnyxStats = overviewData?.telnyx || {
-    active_did_numbers: 1280,
-    provisioning_pending: 14,
-    tenant_count: 89,
-    dispatched_today: 189420,
-    dispatched_change_pct: 11.8,
-    carrier_rejection_pct: 0.12,
+    active_did_numbers: 0,
+    provisioning_pending: 0,
+    tenant_count: 0,
+    dispatched_today: 0,
+    dispatched_change_pct: null,
+    carrier_rejection_pct: null,
   };
 
-  const totalDispatches = (resendStats.sent_today || 0) + (telnyxStats.dispatched_today || 0);
+  const totalDispatches = (Number(resendStats.sent_today) || 0) + (Number(telnyxStats.dispatched_today) || 0);
 
   const tabs = [
     { 
@@ -216,157 +229,117 @@ export default function CommunicationPage() {
       label: 'Central Overview', 
       icon: Radio, 
       badge: 'LIVE', 
-      badgeColor: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' 
+      badgeColor: 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 font-black' 
     },
     { 
       id: 'resend', 
       label: 'Resend (Email Core)', 
       icon: Mail, 
-      badge: `${resendStats.verified_domains} DOMAINS`, 
-      badgeColor: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20' 
+      badge: `${resendStats.verified_domains || 0} DOMAINS`, 
+      badgeColor: 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 font-black' 
     },
     { 
       id: 'telnyx', 
       label: 'Telnyx (SMS & Numbers)', 
       icon: Phone, 
-      badge: `${telnyxStats.active_did_numbers.toLocaleString()} DIDS`, 
-      badgeColor: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' 
+      badge: `${(telnyxStats.active_did_numbers || 0).toLocaleString()} DIDS`, 
+      badgeColor: 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 font-black' 
     },
     { 
       id: 'health', 
       label: 'Health & Latency', 
       icon: Activity, 
       badge: '99.99% SLA', 
-      badgeColor: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20' 
+      badgeColor: 'bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 font-black' 
     },
     { 
       id: 'audit', 
       label: 'Platform Security Audit', 
       icon: ShieldCheck, 
       badge: 'HMAC SECURE', 
-      badgeColor: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20' 
+      badgeColor: 'bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 font-black' 
     },
   ];
 
   return (
-    <div className="space-y-5 max-w-7xl mx-auto pb-12">
+    <div className="space-y-2 sm:space-y-2.5 max-w-7xl mx-auto pb-6">
       {/* =========================================================================
-          TOP COMMAND CENTER HERO BAR
+          TOP COMMAND CENTER HEADER CARD (Compact Spacing)
       ========================================================================= */}
-<div className="relative overflow-hidden rounded-2xl bg-white text-slate-900 p-4 sm:p-5 shadow-xl border border-slate-200">
-        {/* Subtle Ambient Tech Glows */}
-        <div className="absolute top-0 right-1/4 w-96 h-36 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 right-0 w-80 h-36 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-3 sm:p-3.5 shadow-2xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <h1 className="text-lg sm:text-xl font-black tracking-tight text-slate-900 dark:text-white leading-tight">
+            Communication Infrastructure Console
+          </h1>
 
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-          {/* Title & Metadata */}
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 text-blue-800 border border-blue-300">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                Controlled Platform Scope
-              </span>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                Carrier Routing Engine Active
-              </span>
-              <span className="text-[11px] text-black-900 font-mono hidden sm:inline">
-                Synced: <strong className="text-black font-bold">{lastSynced}</strong>
-              </span>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-blue-600/20 border border-blue-400/30 flex items-center justify-center text-blue-400 shadow-inner">
-                <Radio size={22} className="animate-pulse" />
-              </div>
-              <div>
-  
-<h1 className="text-xl sm:text-2xl font-black tracking-tight text-blue-700 flex items-center gap-2">
-  Communication Infrastructure Console
-</h1>
-              </div>
-            </div>
-          </div>
-
-          {/* Quick Command Actions */}
-          <div className="flex flex-wrap items-center gap-2.5 self-start lg:self-center shrink-0">
+          {/* Quick Header Actions (Compact & Clean) */}
+          <div className="flex items-center gap-1.5 self-start sm:self-auto">
             <button
               onClick={handleRefresh}
               disabled={isRefreshing}
-              className="px-3.5 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 text-xs font-bold border border-slate-700/80 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-60"
-              title="Pull latest live telemetry across all clusters"
+              className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer disabled:opacity-60"
+              title="Pull latest live telemetry across clusters"
             >
-              <RefreshCw size={14} className={isRefreshing ? 'animate-spin text-blue-400' : 'text-slate-400'} />
-              <span>{isRefreshing ? 'Syncing...' : 'Sync Telemetry'}</span>
+              <RefreshCw size={12} className={isRefreshing ? 'animate-spin text-blue-600' : 'text-slate-500'} />
+              <span>{isRefreshing ? 'Syncing...' : 'Sync'}</span>
             </button>
 
             <button
               onClick={handlePingAllEdges}
               disabled={isPingingAll}
-              className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-md shadow-blue-900/30 cursor-pointer disabled:opacity-60"
-              title="Send real-time probe to Resend & Telnyx API gateways"
+              className="px-2 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer disabled:opacity-60"
+              title="Send real-time probe to carrier API gateways"
             >
-              <Zap size={14} className={isPingingAll ? 'animate-bounce text-yellow-300' : 'text-blue-200'} />
-              <span>{isPingingAll ? 'Probing...' : 'Probe Carrier Edges'}</span>
+              <Zap size={12} className={isPingingAll ? 'animate-bounce text-yellow-300' : 'text-blue-100'} />
+              <span>{isPingingAll ? 'Probing...' : 'Probe Edges'}</span>
             </button>
-
-            {canManage && (
-              <button
-                onClick={() => handleOpenRotateKey('Resend')}
-                className="px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700/90 text-slate-300 hover:text-white text-xs font-bold border border-slate-700/80 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-                title="Rotate API credentials"
-              >
-                <Lock size={13} className="text-purple-400" />
-                <span className="hidden sm:inline">Credentials</span>
-              </button>
-            )}
           </div>
         </div>
-       
-{/* Global Live Carrier Heartbeat Bar */}
-<div className="mt-5 pt-4 border-t border-slate-200 flex items-center justify-between gap-4">
 
-  {/* Left side: Compact status information */}
-  <div className="flex items-center gap-5 text-slate-700 font-mono text-[12px] tracking-normal">
+        {/* Global Live Carrier Heartbeat Row */}
+        <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 font-mono">
+            <span className="flex items-center gap-1.5 whitespace-nowrap">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+              <span className="text-slate-600 dark:text-slate-400">Resend Edge:</span>
+              <strong className="text-slate-900 dark:text-slate-200 font-bold">US-East-1 (62ms)</strong>
+            </span>
 
-    <span className="flex items-center gap-2 whitespace-nowrap">
-      <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-      Resend Edge: <strong className="text-slate-900 font-bold">US-East-1 (62ms)</strong>
-    </span>
+            <span className="flex items-center gap-1.5 whitespace-nowrap">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+              <span className="text-slate-600 dark:text-slate-400">Telnyx Tier 1:</span>
+              <strong className="text-slate-900 dark:text-slate-200 font-bold">Chicago Hub (74ms)</strong>
+            </span>
 
-    <span className="flex items-center gap-2 whitespace-nowrap">
-      <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-      Telnyx Tier 1: <strong className="text-slate-900 font-bold">Chicago Hub (74ms)</strong>
-    </span>
+            <span className="flex items-center gap-1.5 whitespace-nowrap">
+              <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0" />
+              <span className="text-slate-600 dark:text-slate-400">TCR 10DLC:</span>
+              <strong className="text-slate-900 dark:text-slate-200 font-bold">Strict Enforced</strong>
+            </span>
 
-    <span className="flex items-center gap-2 whitespace-nowrap">
-      <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
-      TCR 10DLC: <strong className="text-slate-900 font-bold">Strict Enforced</strong>
-    </span>
-
-  </div>
-
-  {/* Right side: Zero-Knowledge Policy */}
-  <button
-    onClick={() => setShowGovernanceDetails(!showGovernanceDetails)}
-    className="flex items-center gap-1 text-[11px] font-semibold text-slate-600 hover:text-blue-700 whitespace-nowrap shrink-0"
-  >
-    <Shield size={12} className="text-amber-500" />
-    <span>Zero-Knowledge Policy (Sec 2.4)</span>
-    {showGovernanceDetails ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-  </button>
-
-</div>
+            <span className="flex items-center gap-1.5 whitespace-nowrap">
+              <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+              <button
+                type="button"
+                onClick={() => setShowGovernanceDetails(!showGovernanceDetails)}
+                className="text-slate-700 dark:text-slate-300 font-semibold hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer"
+              >
+                Zero-Knowledge Policy (Sec 2.4)
+              </button>
+            </span>
+          </div>
+        </div>
 
         {/* Expandable Governance Details Banner */}
         {showGovernanceDetails && (
-          <div className="mt-3.5 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200/90 text-xs animate-in fade-in slide-in-from-top-1 duration-150 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-start gap-2.5">
-              <Shield size={16} className="text-amber-400 shrink-0 mt-0.5" />
+          <div className="mt-2 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 text-amber-900 dark:text-amber-200 text-xs animate-in fade-in slide-in-from-top-1 duration-150 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-start gap-2">
+              <Shield size={15} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
               <p className="text-[11px] leading-relaxed">
                 <strong>Platform Zero-Knowledge Governance:</strong> Super Admins oversee high-level routing, carrier key rotation, and DID pools. Direct reading of customer SMS or email bodies is cryptographically blocked by per-tenant encryption envelopes.
               </p>
             </div>
-            <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0 self-start sm:self-auto">
+            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-amber-200/80 dark:bg-amber-900/60 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-800 shrink-0 self-start sm:self-auto">
               SEC 2.4 ENFORCED
             </span>
           </div>
@@ -374,138 +347,113 @@ export default function CommunicationPage() {
       </div>
 
       {/* =========================================================================
-          EXECUTIVE TELEMETRY STRIP (4-CARD GRID)
+          EXECUTIVE TELEMETRY STRIP (4-CARD GRID - Compact Spacing)
       ========================================================================= */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-        {/* Card 1: Total Multi-Tenant Traffic */}
-        <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 shadow-xs hover:border-slate-300 dark:hover:border-slate-700 transition-all flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Outbound Dispatches (24h)</span>
-            <span className="p-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
-              <Zap size={14} />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-2.5">
+        {/* Card 1: Outbound Dispatches */}
+        <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-3 sm:p-3.5 shadow-2xs flex flex-col justify-between h-[112px] sm:h-[116px]">
+          <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+            OUTBOUND DISPATCHES (24H)
+          </span>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight leading-none">
+              {totalDispatches.toLocaleString()}
+            </span>
+            <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center">
+              &uarr; 6.8%
             </span>
           </div>
-          <div className="mt-2">
-            <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-                {totalDispatches.toLocaleString()}
-              </span>
-              <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center">
-                &uarr; 6.8%
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-mono">
-              <span>Email: 284.9k</span>
-              <span>&bull;</span>
-              <span>SMS: 189.4k</span>
-            </div>
+          <div className="text-xs text-slate-500 dark:text-slate-400 font-normal truncate">
+            Email: 284.9k &bull; SMS: 189.4k
           </div>
         </div>
 
-        {/* Card 2: Resend Email Platform */}
+        {/* Card 2: Resend Email Core */}
         <div 
           onClick={() => setActiveTab('resend')}
-          className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 shadow-xs hover:border-blue-400 dark:hover:border-blue-500/50 transition-all cursor-pointer group flex flex-col justify-between"
+          className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-3 sm:p-3.5 shadow-2xs flex flex-col justify-between h-[112px] sm:h-[116px] cursor-pointer hover:border-blue-400 dark:hover:border-blue-600 transition-all group"
+          title="Click to view Resend email platform"
         >
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Resend Email Core</span>
-            <span className="p-1.5 rounded-lg bg-slate-900 text-white dark:bg-slate-800 text-[11px] font-black px-2">
-              R
+          <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+            RESEND EMAIL CORE
+          </span>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight leading-none">
+              {resendStats.verified_domains || 0}
+            </span>
+            <span className="text-xs font-bold text-amber-500">
+              &bull; {resendStats.pending_domains || 0} pending
             </span>
           </div>
-          <div className="mt-2">
-            <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-                {resendStats.verified_domains}
-              </span>
-              <span className="text-[11px] font-bold text-amber-500">
-                +{resendStats.pending_domains} pending
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-              <span>Reputation: <strong className="text-emerald-600 font-bold">{resendStats.reputation_pct}%</strong></span>
-              <span className="text-blue-600 dark:text-blue-400 font-bold group-hover:translate-x-0.5 transition-transform">&rarr;</span>
-            </div>
+          <div className="text-xs text-slate-500 dark:text-slate-400 font-normal truncate">
+            Reputation: {resendStats.reputation_pct != null ? `${resendStats.reputation_pct}%` : '%'}
           </div>
         </div>
 
-        {/* Card 3: Telnyx SMS Fleet */}
+        {/* Card 3: Telnyx SMS & DIDs */}
         <div 
           onClick={() => setActiveTab('telnyx')}
-          className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 shadow-xs hover:border-emerald-400 dark:hover:border-emerald-500/50 transition-all cursor-pointer group flex flex-col justify-between"
+          className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-3 sm:p-3.5 shadow-2xs flex flex-col justify-between h-[112px] sm:h-[116px] cursor-pointer hover:border-emerald-400 dark:hover:border-emerald-600 transition-all group"
+          title="Click to view Telnyx fleet"
         >
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Telnyx SMS &amp; DIDs</span>
-            <span className="p-1.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[11px] px-2">
-              T
+          <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+            TELNYX SMS &amp; DIDS
+          </span>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight leading-none">
+              {(telnyxStats.active_did_numbers || 0).toLocaleString()}
+            </span>
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+              in {telnyxStats.tenant_count || 0} orgs
             </span>
           </div>
-          <div className="mt-2">
-            <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-                {telnyxStats.active_did_numbers.toLocaleString()}
-              </span>
-              <span className="text-[11px] font-bold text-slate-400">
-                in {telnyxStats.tenant_count} orgs
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-              <span>Carrier Route: <strong className="text-emerald-600 font-bold">Tier 1</strong></span>
-              <span className="text-emerald-600 dark:text-emerald-400 font-bold group-hover:translate-x-0.5 transition-transform">&rarr;</span>
-            </div>
+          <div className="text-xs text-slate-500 dark:text-slate-400 font-normal truncate">
+            Carrier Route: <strong className="text-emerald-600 dark:text-emerald-400 font-bold">Tier 1</strong>
           </div>
         </div>
 
-        {/* Card 4: Edge Health & SLA */}
+        {/* Card 4: Network Health & SLA */}
         <div 
           onClick={() => setActiveTab('health')}
-          className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 shadow-xs hover:border-indigo-400 dark:hover:border-indigo-500/50 transition-all cursor-pointer group flex flex-col justify-between"
+          className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-3 sm:p-3.5 shadow-2xs flex flex-col justify-between h-[112px] sm:h-[116px] cursor-pointer hover:border-purple-400 dark:hover:border-purple-600 transition-all group"
+          title="Click to view health & latency matrix"
         >
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Network Health &amp; SLA</span>
-            <span className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
-              <Activity size={14} />
+          <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+            NETWORK HEALTH &amp; SLA
+          </span>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-extrabold text-emerald-600 dark:text-emerald-400 tracking-tight leading-none">
+              99.99%
+            </span>
+            <span className="text-xs font-normal text-slate-400 font-mono">
+              ~68ms latency
             </span>
           </div>
-          <div className="mt-2">
-            <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight">
-                99.99%
-              </span>
-              <span className="text-[11px] font-bold text-slate-400 font-mono">
-                ~68ms latency
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-              <span>Backlog: <strong className="text-slate-700 dark:text-slate-300 font-bold">0 messages</strong></span>
-              <span className="text-indigo-600 dark:text-indigo-400 font-bold group-hover:translate-x-0.5 transition-transform">&rarr;</span>
-            </div>
+          <div className="text-xs text-slate-500 dark:text-slate-400 font-normal truncate">
+            Backlog: <strong className="text-slate-900 dark:text-slate-200 font-bold">0 messages</strong>
           </div>
         </div>
       </div>
 
       {/* =========================================================================
-          HIGH-DENSITY SEGMENTED TAB NAVIGATION
+          SEGMENTED TAB NAVIGATION (Compact Spacing)
       ========================================================================= */}
-      <div className="bg-slate-100 dark:bg-slate-950/60 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center gap-1 overflow-x-auto no-scrollbar shadow-inner">
+      <div className="bg-white dark:bg-slate-900 p-1 rounded-xl border border-slate-200/80 dark:border-slate-800 flex items-center gap-1 overflow-x-auto no-scrollbar shadow-2xs">
         {tabs.map((tab) => {
-          const Icon = tab.icon;
           const isActive = activeTab === tab.id;
-          const badge = tab.status ? healthBadge(tab.status) : null;
           return (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 isActive
-                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm border border-slate-200/80 dark:border-slate-800'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-900/40'
+                  ? 'bg-blue-50/90 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800/80 shadow-2xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800/60'
               }`}
             >
-              <Icon size={15} className={isActive ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400'} />
               <span>{tab.label}</span>
               {tab.badge && (
-                <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${tab.badgeColor}`}>
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold tracking-tight ${tab.badgeColor}`}>
                   {tab.badge}
                 </span>
               )}
