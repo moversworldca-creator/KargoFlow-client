@@ -46,10 +46,13 @@ import AddressAutocomplete from '../../../shared/ui/AddressAutocomplete';
 import {
     EstimateHeader, SummaryBento, EstimateTabs, ChargesTab, RouteTab, InventoryTab
 } from './RedesignEstimateComponents';
+import { AddChargeModal, EditChargeModal } from './EstimateChargeModals';
+import { estimateApi } from '../leads/estimateApi';
 import PaymentsPanel from './PaymentsPanel';
 import api, {
     addEstimateCharge,
     applyEstimatePackage,
+    clearEstimateOverride,
     createContract,
     sendRecordEmail,
     createPaymentRequest,
@@ -57,6 +60,7 @@ import api, {
     createRefund,
     deleteEstimateCharge,
     getContracts,
+    getEstimate,
     getEstimates,
     getDocumentTemplates,
     getEstimateDiscountPresets,
@@ -84,8 +88,10 @@ import api, {
     requestEstimateInventory,
     requestEstimatePortal,
     resendEstimate,
+    reviseEstimate,
     sendEstimate,
     sendContractForSignature,
+    supersedeEstimate,
     previewDocumentTemplate,
     clearEstimateSignatures,
     createCustomer,
@@ -3681,6 +3687,8 @@ export default function EstimateView({
     const [chargeForm, setChargeForm] = useState(blankCharge);
     const [chargeTotalIsManual, setChargeTotalIsManual] = useState(false);
     const [isAddChargeModalOpen, setIsAddChargeModalOpen] = useState(false);
+    const [isModernAddChargeModalOpen, setIsModernAddChargeModalOpen] = useState(false);
+    const [editingChargeRecord, setEditingChargeRecord] = useState(null);
     const [editingChargeId, setEditingChargeId] = useState(null);
     const [editingChargeForm, setEditingChargeForm] = useState(blankCharge);
     const [editingChargeTotalIsManual, setEditingChargeTotalIsManual] = useState(false);
@@ -5421,16 +5429,12 @@ export default function EstimateView({
         }
         if (!silent) setLoading(true);
         try {
-            const response = await getEstimates({ opportunity: opportunity.id });
+            const response = await getEstimates({ opportunity_id: opportunity.id });
             const rows = Array.isArray(response?.results) ? response.results : Array.isArray(response) ? response : [];
-            let active = rows.find((row) => row.method === 'manual') || rows[0] || null;
-            if (!active) {
-                active = getStoredDraftEstimate(opportunity.id);
-            }
-            if (active?.id && !String(active.id).startsWith('draft-')) {
+            const active = rows[0] || null;
+            if (active?.id) {
                 try {
-                    const detailResponse = await api.get(`/estimates/${active.id}/`);
-                    const detail = detailResponse?.data || detailResponse || active;
+                    const detail = await getEstimate(active.id);
                     setEstimate(detail);
                     if (!isEditingDetails) syncManual(detail);
                     return detail;
@@ -5440,18 +5444,12 @@ export default function EstimateView({
                     return active;
                 }
             } else {
-                setEstimate(active);
-                if (!isEditingDetails) syncManual(active);
-                return active;
+                setEstimate(null);
+                return null;
             }
-        } catch {
-            const draft = getStoredDraftEstimate(opportunity.id);
-            if (draft) {
-                setEstimate(draft);
-                if (!isEditingDetails) syncManual(draft);
-                return draft;
-            }
-            if (!silent) setToast({ type: 'error', text: 'Failed to load manual estimate.' });
+        } catch (err) {
+            if (!silent) setToast({ type: 'error', text: getErrorMessage(err, 'Failed to load estimate.') });
+            setEstimate(null);
             return null;
         } finally {
             if (!silent) setLoading(false);
@@ -6022,7 +6020,7 @@ export default function EstimateView({
                         })
                     )
                 );
-                const recalced = await recalculateEstimate(estimate.id);
+                const recalced = await recalculateEstimate(estimate.id, estimate.edit_version);
                 setEstimate(recalced);
                 syncManual(recalced);
             } else {
@@ -6705,11 +6703,11 @@ export default function EstimateView({
                 description: charge.description || '',
                 unit_price: String(charge.unit_price ?? 0),
                 quantity: String(charge.quantity ?? 1),
-                unit: charge.unit || charge?.source_snapshot?.frozen?.unit || 'no',
-                total_price: String(charge.total_price ?? 0),
-                subtotal: String(charge.total_price ?? 0),
+                unit: charge.unit || charge?.source_snapshot?.frozen?.unit || 'each',
+                total_price: String(charge.total_price ?? charge.amount ?? 0),
+                subtotal: String(charge.subtotal ?? charge.total_price ?? charge.amount ?? 0),
                 discount_amount: String(charge.discount_amount ?? 0),
-                total_cost: String(charge.total_cost ?? charge.total_price ?? 0),
+                total_cost: String(charge.total_cost ?? charge.total_price ?? charge.amount ?? 0),
                 taxable: Boolean(charge.taxable),
                 tax_rate: Number(charge.tax_rate || 0),
                 tax_amount: Number(charge.tax_amount || 0),
@@ -6717,8 +6715,9 @@ export default function EstimateView({
                 rate: String(charge.unit_price ?? 0),
                 qty: String(charge.quantity ?? 1),
                 tax: charge.taxable ? 'Standard' : 'Exempt',
-                total: Number(charge.total_price || 0),
-                source_type: charge.source_type,
+                total: Number(charge.total_price ?? charge.amount ?? 0),
+                source_type: charge.source_type || (charge.category === 'discount' ? 'discount' : 'manual'),
+                is_manual_override: Boolean(charge.is_manual_override),
                 sort_order: Number(charge.sort_order || 0),
                 category: charge.category,
                 planned_sub_job: charge.planned_sub_job ?? charge.planned_sub_job_id ?? null,
@@ -6727,7 +6726,7 @@ export default function EstimateView({
             }));
 
             const matchesSelectedSubJob = (charge) => {
-                if (normalizeChargeCategory(charge?.category) === 'discount') return true;
+                if (charge.source_type === 'discount' || normalizeChargeCategory(charge?.category) === 'discount') return true;
                 if (!normalizedSelectedJobId) return true;
                 const metadata = charge?.metadata && typeof charge.metadata === 'object' ? charge.metadata : {};
                 const scopedId = charge?.planned_sub_job_id ?? charge?.planned_sub_job ?? metadata?.planned_sub_job_id ?? metadata?.opportunity_sub_job_id ?? metadata?.sub_job_id ?? metadata?.job_id ?? null;
@@ -6735,18 +6734,7 @@ export default function EstimateView({
                 return normalizedSelectedJobId === primarySubJobId;
             };
 
-            // Separate parents and children
-            const parents = allCharges.filter((c) => !c.metadata?.parent_charge_id && matchesSelectedSubJob(c));
-            const children = allCharges.filter((c) => c.metadata?.parent_charge_id && matchesSelectedSubJob(c));
-
-            return parents.map((p) => {
-                const subCharges = children.filter((c) => String(c.metadata.parent_charge_id) === String(p.id));
-                return {
-                    ...p,
-                    subCharges,
-                    totalDiscount: p.discount_amount,
-                };
-            });
+            return allCharges.filter(matchesSelectedSubJob);
         },
         [estimate, catalogItems, opportunityJobs, selectedSubJobId]
     );
@@ -6754,64 +6742,28 @@ export default function EstimateView({
     const calculations = useMemo(
         () => {
             const subtotal = Number(estimate?.subtotal || 0);
-            const liveDiscountAmount = Math.max(0, Number(manual.discount_amount || estimate?.discount_amount || 0));
-            const backendDiscountAmount = Math.max(0, Number(estimate?.discount_amount || 0));
-            const taxableSubtotalFromBackend = Number(estimate?.taxable_subtotal || 0);
-            const nonTaxableSubtotalFromBackend = Number(estimate?.non_taxable_subtotal || 0);
-            let taxPct = Number(manual.sales_tax_pct || estimate?.sales_tax_pct || 0);
-
-            // Heuristic: if taxPct > 1, it is likely a percentage (e.g. 8.25 for 8.25%) 
-            // rather than a decimal (0.0825).
-            if (taxPct > 1) {
-                taxPct = taxPct / 100;
-            }
-
-            const isTaxExempt = Boolean(manual.tax_exempt);
-            const effectiveSubtotal = Math.max(0, subtotal - liveDiscountAmount);
-            const backendHasLiveDiscount = backendDiscountAmount === liveDiscountAmount;
-            const estimatedTaxableSubtotal = (() => {
-                if (Number.isFinite(taxableSubtotalFromBackend) && backendHasLiveDiscount) {
-                    return taxableSubtotalFromBackend;
-                }
-                if (isTaxExempt) {
-                    return 0;
-                }
-                if (subtotal <= 0) {
-                    return 0;
-                }
-                if (Number.isFinite(taxableSubtotalFromBackend) && taxableSubtotalFromBackend >= 0) {
-                    const taxableShare = taxableSubtotalFromBackend / subtotal;
-                    return Math.max(0, effectiveSubtotal * taxableShare);
-                }
-                const nonTaxableFallback = Number.isFinite(nonTaxableSubtotalFromBackend) ? nonTaxableSubtotalFromBackend : 0;
-                return Math.max(0, effectiveSubtotal - nonTaxableFallback);
-            })();
-            const computedTaxAmount = isTaxExempt ? 0 : (estimatedTaxableSubtotal * taxPct);
-            const taxAmount = backendHasLiveDiscount && Number.isFinite(Number(estimate?.sales_tax_amount))
-                ? Number(estimate.sales_tax_amount)
-                : computedTaxAmount;
-            
-            const minimumCharge = Number(manual.minimum_charge_override || 0);
-            let totalDue = backendHasLiveDiscount && Number.isFinite(Number(estimate?.grand_total))
-                ? Number(estimate.grand_total)
-                : effectiveSubtotal + taxAmount;
-            if (minimumCharge && totalDue < minimumCharge) {
-                totalDue = minimumCharge;
-            }
+            const discountAmount = Math.max(0, Number(estimate?.discount_amount || 0));
+            const taxableSubtotal = Number(estimate?.taxable_subtotal || Math.max(0, subtotal - discountAmount));
+            const nonTaxableSubtotal = Number(estimate?.non_taxable_subtotal || 0);
+            const taxPct = Number(estimate?.sales_tax_pct || 0);
+            const isTaxExempt = Boolean(estimate?.tax_exempt);
+            const taxAmount = Number(estimate?.sales_tax_amount || 0);
+            const totalDue = Number(estimate?.grand_total || (taxableSubtotal + taxAmount));
+            const depositAmount = Number(estimate?.deposit_amount || 0);
 
             return {
                 subtotal,
-                taxableSubtotal: estimatedTaxableSubtotal,
-                nonTaxableSubtotal: Math.max(0, effectiveSubtotal - estimatedTaxableSubtotal),
+                taxableSubtotal,
+                nonTaxableSubtotal,
                 taxPct,
                 taxExempt: isTaxExempt,
                 taxAmount,
-                discountAmount: liveDiscountAmount,
+                discountAmount,
                 totalDue,
-                depositAmount: Number(estimate?.deposit_amount || 0),
+                depositAmount,
             };
         },
-        [estimate, manual.sales_tax_pct, manual.tax_exempt, manual.discount_amount, manual.minimum_charge_override]
+        [estimate]
     );
 
     const estimateSubtotalBeforeEstimateDiscount = useMemo(
@@ -7422,26 +7374,19 @@ export default function EstimateView({
         }
         setSaving(true);
         try {
-            let row;
+            const created = await createEstimate({ opportunity_id: opportunity.id });
+            let row = created;
+            let pricingWarning = '';
             try {
-                row = await createEstimate({
-                    opportunity: opportunity.id,
-                    method: 'manual',
-                    ...blankManualFields,
-                });
-            } catch (createErr) {
-                if (createErr?.code === 'MODULE_NOT_AVAILABLE' || createErr?.response?.status === 404 || createErr?.response?.status === 501) {
-                    row = buildDefaultDraftEstimate(opportunity.id, blankManualFields);
-                    setStoredDraftEstimate(opportunity.id, row);
-                } else {
-                    throw createErr;
-                }
+                row = await recalculateEstimate(created.id, created.edit_version);
+            } catch (err) {
+                pricingWarning = `Estimate draft created. ${getErrorMessage(err, 'Complete tariff inputs and recalculate to price it.')}`;
             }
             setEstimate(row);
             syncManual(row);
-            setToast({ type: 'success', text: 'Manual estimate created.' });
+            setToast({ type: pricingWarning ? 'error' : 'success', text: pricingWarning || 'Estimate created and priced.' });
         } catch (err) {
-            setToast({ type: 'error', text: getErrorMessage(err, 'Failed to create manual estimate.') });
+            setToast({ type: 'error', text: getErrorMessage(err, 'Failed to create estimate.') });
         } finally {
             setSaving(false);
         }
@@ -7492,28 +7437,22 @@ export default function EstimateView({
 
             await Promise.resolve(onRefresh?.());
 
-            let row;
+            const created = await createEstimate({ opportunity_id: opportunity.id });
+            let row = created;
+            let pricingWarning = '';
             try {
-                row = await createEstimate({
-                    opportunity: opportunity.id,
-                    method: 'manual',
-                    ...blankManualFields,
-                });
-            } catch (createErr) {
-                if (createErr?.code === 'MODULE_NOT_AVAILABLE' || createErr?.response?.status === 404 || createErr?.response?.status === 501) {
-                    row = buildDefaultDraftEstimate(opportunity.id, blankManualFields);
-                    setStoredDraftEstimate(opportunity.id, row);
-                } else {
-                    throw createErr;
-                }
+                row = await recalculateEstimate(created.id, created.edit_version);
+            } catch (err) {
+                pricingWarning = `Estimate draft created. ${getErrorMessage(err, 'Complete tariff inputs and recalculate to price it.')}`;
             }
             setEstimate(row);
             syncManual(row);
             setIsEstimateRequirementsModalOpen(false);
             setEstimateRequirementsDraft(null);
-            setToast({ type: 'success', text: 'Manual estimate created.' });
+            setToast({ type: pricingWarning ? 'error' : 'success', text: pricingWarning || 'Estimate created and priced.' });
         } catch (err) {
             setEstimateRequirementsError(getErrorMessage(err, 'Failed to save the required estimate data.'));
+            setToast({ type: 'error', text: getErrorMessage(err, 'Failed to create estimate.') });
         } finally {
             setIsSavingEstimateRequirements(false);
         }
@@ -8183,12 +8122,12 @@ export default function EstimateView({
         if (!ensureEstimateEditable('This estimate cannot be edited right now.')) return;
         setSaving(true);
         try {
-            const row = await recalculateEstimate(estimate.id);
+            const row = await recalculateEstimate(estimate.id, estimate.edit_version);
             setEstimate(row);
             syncManual(row);
             setToast({ type: 'success', text: 'Estimate recalculated.' });
-        } catch {
-            setToast({ type: 'error', text: 'Failed to recalculate estimate.' });
+        } catch (err) {
+            handleEstimateMutationError(err, 'Failed to recalculate estimate.');
         } finally {
             setSaving(false);
         }
@@ -8369,15 +8308,277 @@ export default function EstimateView({
                     return;
                 }
 
+                payload.edit_version = estimate?.edit_version;
                 const row = await sendEstimate(estimateId, payload);
                 setEstimate(row);
                 syncManual(row);
                 setToast({ type: 'success', text: 'Estimate sent successfully.' });
             } catch (err) {
+                const code = err?.response?.data?.code || err?.code;
                 const detail = err?.response?.data?.detail;
-                setToast({ type: 'error', text: detail || 'Failed to send estimate.' });
+                if (code === 'APPROVAL_REQUIRED') {
+                    setToast({ type: 'error', text: 'This estimate requires manager approval before it can be sent.' });
+                } else if (code === 'NEEDS_RECALCULATION') {
+                    setToast({ type: 'error', text: 'Estimate inputs have changed. Please recalculate before sending.' });
+                } else if (code === 'NOT_PRICED') {
+                    setToast({ type: 'error', text: 'Estimate has not been priced yet.' });
+                } else if (code === 'ESTIMATE_EXPIRED') {
+                    setToast({ type: 'error', text: 'This estimate has expired and cannot be sent.' });
+                } else if (err?.response?.status === 409 || err?.status === 409) {
+                    setToast({ type: 'error', text: 'The estimate was updated in another session. Please reload to see the latest version.' });
+                    loadEstimate(true);
+                } else {
+                    setToast({ type: 'error', text: detail || 'Failed to send estimate.' });
+                }
             }
         })();
+    };
+
+    const handleEstimateMutationError = (err, defaultMsg) => {
+        if (err?.response?.status === 409 || err?.status === 409) {
+            const code = err?.response?.data?.code || err?.code;
+            if (code === 'TARIFF_LINE') {
+                setToast({ type: 'error', text: 'Tariff lines cannot be deleted. Adjust job inputs or override the rate.' });
+                return;
+            }
+            setToast({
+                type: 'error',
+                text: 'The estimate was modified in another session. Please reload to see the latest version.',
+            });
+            loadEstimate(true);
+            return;
+        }
+        const msg = getErrorMessage(err, defaultMsg);
+        setToast({ type: 'error', text: msg });
+    };
+
+    const handleAddManualCharge = async (chargeData) => {
+        if (!estimate?.id) return;
+        setSaving(true);
+        try {
+            const payload = {
+                ...chargeData,
+                edit_version: estimate.edit_version,
+            };
+            const updated = await addEstimateCharge(estimate.id, payload);
+            setEstimate(updated);
+            syncManual(updated);
+            setIsModernAddChargeModalOpen(false);
+            setToast({ type: 'success', text: 'Charge added.' });
+        } catch (err) {
+            handleEstimateMutationError(err, 'Failed to add charge.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleAddDiscountCharge = async (discountData) => {
+        if (!estimate?.id) return;
+        setSaving(true);
+        try {
+            const payload = {
+                ...discountData,
+                edit_version: estimate.edit_version,
+            };
+            const updated = await addEstimateCharge(estimate.id, payload);
+            setEstimate(updated);
+            syncManual(updated);
+            setIsModernAddChargeModalOpen(false);
+            setToast({ type: 'success', text: 'Discount applied.' });
+        } catch (err) {
+            handleEstimateMutationError(err, 'Failed to apply discount.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleSaveChargeEdit = async (fields) => {
+        if (!estimate?.id || !editingChargeRecord?.id) return;
+        setSaving(true);
+        try {
+            const payload = {
+                ...fields,
+                edit_version: estimate.edit_version,
+            };
+            const updated = await updateEstimateCharge(estimate.id, editingChargeRecord.id, payload);
+            setEstimate(updated);
+            syncManual(updated);
+            setEditingChargeRecord(null);
+            setToast({ type: 'success', text: 'Charge updated.' });
+        } catch (err) {
+            handleEstimateMutationError(err, 'Failed to update charge.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleClearChargeOverride = async (chargeId) => {
+        if (!estimate?.id) return;
+        const targetId = chargeId || editingChargeRecord?.id;
+        if (!targetId) return;
+        setSaving(true);
+        try {
+            const updated = await clearEstimateOverride(estimate.id, targetId, estimate.edit_version);
+            setEstimate(updated);
+            syncManual(updated);
+            setEditingChargeRecord(null);
+            setToast({ type: 'success', text: 'Tariff price restored.' });
+        } catch (err) {
+            handleEstimateMutationError(err, 'Failed to restore tariff price.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleSaveJobInputs = async (jobId, inputs) => {
+        if (!estimate?.id) return;
+        setSaving(true);
+        try {
+            const currentJobs = (estimate.inputs?.jobs || {});
+            const nextJobs = {
+                ...currentJobs,
+                [String(jobId)]: {
+                    ...(currentJobs[String(jobId)] || {}),
+                    ...inputs,
+                },
+            };
+            const updated = await updateEstimate(estimate.id, {
+                inputs: {
+                    ...(estimate.inputs || {}),
+                    jobs: nextJobs,
+                },
+                edit_version: estimate.edit_version,
+            });
+            setEstimate(updated);
+            syncManual(updated);
+            setToast({ type: 'success', text: 'Job inputs saved and repriced.' });
+        } catch (err) {
+            handleEstimateMutationError(err, 'Failed to save job inputs.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleUpdateDeposit = async ({ type, value }) => {
+        if (!estimate?.id) return;
+        setSaving(true);
+        try {
+            const updated = await updateEstimate(estimate.id, {
+                inputs: {
+                    ...(estimate.inputs || {}),
+                    deposit: { type, value },
+                },
+                edit_version: estimate.edit_version,
+            });
+            setEstimate(updated);
+            syncManual(updated);
+            setToast({ type: 'success', text: 'Deposit policy updated.' });
+        } catch (err) {
+            handleEstimateMutationError(err, 'Failed to update deposit.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleUpdateNte = async (nteAmount) => {
+        if (!estimate?.id) return;
+        setSaving(true);
+        try {
+            const updated = await updateEstimate(estimate.id, {
+                not_to_exceed_amount: nteAmount,
+                edit_version: estimate.edit_version,
+            });
+            setEstimate(updated);
+            syncManual(updated);
+            setToast({ type: 'success', text: 'Not To Exceed amount updated.' });
+        } catch (err) {
+            handleEstimateMutationError(err, 'Failed to update NTE amount.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleUpdateTaxExemption = async ({ tax_exempt, tax_exemption_reason, tax_exemption_certificate_number }) => {
+        if (!estimate?.id) return;
+        setSaving(true);
+        try {
+            const updated = await updateEstimate(estimate.id, {
+                tax_exempt,
+                tax_exemption_reason,
+                tax_exemption_certificate_number,
+                edit_version: estimate.edit_version,
+            });
+            setEstimate(updated);
+            syncManual(updated);
+            setToast({ type: 'success', text: 'Tax exemption updated.' });
+        } catch (err) {
+            handleEstimateMutationError(err, 'Failed to update tax exemption.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleRequestApproval = async () => {
+        if (!estimate?.id) return;
+        setSaving(true);
+        try {
+            const updated = await estimateApi.requestApproval(estimate.id, { edit_version: estimate.edit_version });
+            setEstimate(updated);
+            syncManual(updated);
+            setToast({ type: 'success', text: 'Approval requested.' });
+        } catch (err) {
+            handleEstimateMutationError(err, 'Failed to request approval.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleDecideApproval = async (ruleId, decision, notes = '') => {
+        if (!estimate?.id) return;
+        setSaving(true);
+        try {
+            const updated = await estimateApi.decideApproval(estimate.id, ruleId, decision, {
+                notes,
+                edit_version: estimate.edit_version,
+            });
+            setEstimate(updated);
+            syncManual(updated);
+            setToast({ type: 'success', text: `Approval ${decision}.` });
+        } catch (err) {
+            handleEstimateMutationError(err, `Failed to ${decision} approval.`);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleRevise = async () => {
+        if (!estimate?.id) return;
+        setSaving(true);
+        try {
+            const updated = await reviseEstimate(estimate.id, estimate.edit_version);
+            setEstimate(updated);
+            syncManual(updated);
+            setToast({ type: 'success', text: 'Estimate revised and opened for edits.' });
+        } catch (err) {
+            handleEstimateMutationError(err, 'Failed to revise estimate.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleSupersede = async (reason) => {
+        if (!estimate?.id) return;
+        setSaving(true);
+        try {
+            const newEstimate = await supersedeEstimate(estimate.id, { reason, edit_version: estimate.edit_version });
+            setEstimate(newEstimate);
+            syncManual(newEstimate);
+            setToast({ type: 'success', text: 'Estimate superseded. New estimate version created.' });
+        } catch (err) {
+            handleEstimateMutationError(err, 'Failed to supersede estimate.');
+        } finally {
+            setSaving(false);
+        }
     };
 
     const handleClearEstimateSignatures = async () => {
@@ -8672,7 +8873,7 @@ export default function EstimateView({
 
     const recalculateAndSyncEstimate = async () => {
         if (!estimate?.id) return null;
-        const recalced = await recalculateEstimate(estimate.id);
+        const recalced = await recalculateEstimate(estimate.id, estimate.edit_version);
         setEstimate(recalced);
         syncManual(recalced);
         return recalced;
@@ -9010,31 +9211,27 @@ export default function EstimateView({
     };
 
     const handleDeleteCharge = async (chargeId) => {
-        if (!chargeId) return;
+        if (!chargeId || !estimate?.id) return;
         if (!ensureEstimateEditable()) return;
+
+        const charge = (estimate.charges || lineItems).find((c) => String(c.id) === String(chargeId));
+        if (charge?.source_type === 'tariff') {
+            setToast({ type: 'error', text: 'Tariff lines cannot be deleted. Modify job tariff inputs or override the rate.' });
+            return;
+        }
+
+        if (!window.confirm('Are you sure you want to delete this charge?')) return;
         setSaving(true);
         try {
-            const row = lineItems.find((r) => String(r.id) === String(chargeId));
-            const subDiscounts = row?.subCharges || [];
-            await deleteEstimateCharge(chargeId);
-            for (const d of subDiscounts) {
-                try {
-                    await deleteEstimateCharge(d.id);
-                } catch (subErr) {
-                    console.error('Failed to remove sub-charge discount:', subErr);
-                }
-            }
-            if (estimate?.id) {
-                const recalced = await recalculateEstimate(estimate.id);
-                setEstimate(recalced);
-                syncManual(recalced);
-            }
+            const updated = await deleteEstimateCharge(estimate.id, chargeId, { edit_version: estimate.edit_version });
+            setEstimate(updated);
+            syncManual(updated);
             if (editingChargeId === chargeId) {
                 cancelEditingCharge();
             }
             setToast({ type: 'success', text: 'Charge removed.' });
-        } catch {
-            setToast({ type: 'error', text: 'Failed to remove charge.' });
+        } catch (err) {
+            handleEstimateMutationError(err, 'Failed to remove charge.');
         } finally {
             setSaving(false);
         }
@@ -10109,20 +10306,33 @@ export default function EstimateView({
                 {estimateActiveTab === 'charges' && (
                     <>
                     <ChargesTab
-	                        charges={lineItems}
-	                          subJobs={opportunityJobs}
-                          selectedSubJob={opportunityJobs.find((job) => String(job?.id) === String(selectedSubJobId)) || null}
-                          subJobServiceOptions={subJobServiceOptions}
-                          selectedSubJobId={selectedSubJobId}
-                          onSelectedSubJobChange={onSelectedSubJobChange}
-                          onCreateSubJob={onCreateSubJob}
-                          onRefreshSubJobs={onRefreshSubJobs}
-                          onDeleteSelectedSubJob={async (jobId) => {
-                              await onDeleteSelectedSubJob?.(jobId);
-                              await loadEstimate(true);
-                          }}
-                          onUpdateSelectedSubJob={onUpdateSelectedSubJob}
-	                        totals={calculations}
+                        charges={lineItems}
+                        subJobs={opportunityJobs}
+                        selectedSubJob={opportunityJobs.find((job) => String(job?.id) === String(selectedSubJobId)) || null}
+                        subJobServiceOptions={subJobServiceOptions}
+                        selectedSubJobId={selectedSubJobId}
+                        onSelectedSubJobChange={onSelectedSubJobChange}
+                        onCreateSubJob={onCreateSubJob}
+                        onRefreshSubJobs={onRefreshSubJobs}
+                        onDeleteSelectedSubJob={async (jobId) => {
+                            await onDeleteSelectedSubJob?.(jobId);
+                            await loadEstimate(true);
+                        }}
+                        onUpdateSelectedSubJob={onUpdateSelectedSubJob}
+                        totals={calculations}
+                        estimate={estimate}
+                        jobInputs={estimate?.inputs?.jobs}
+                        onSaveJobInputs={handleSaveJobInputs}
+                        onRecalculate={handleRecalculate}
+                        isRecalculating={saving}
+                        onClearOverride={handleClearChargeOverride}
+                        onUpdateDeposit={handleUpdateDeposit}
+                        onUpdateNte={handleUpdateNte}
+                        onUpdateTaxExemption={handleUpdateTaxExemption}
+                        onRequestApproval={handleRequestApproval}
+                        onDecideApproval={handleDecideApproval}
+                        onRevise={handleRevise}
+                        onSupersede={handleSupersede}
                         crewNotes={manual.special_items_notes}
                         customerNotes={manual.packing_notes}
                         internalNotes={manual.access_notes}
@@ -10132,27 +10342,27 @@ export default function EstimateView({
                         onCrewNotesBlur={(val) => saveManualNotesOnly({ special_items_notes: val })}
                         onCustomerNotesBlur={(val) => saveManualNotesOnly({ packing_notes: val })}
                         onInternalNotesBlur={(val) => saveManualNotesOnly({ access_notes: val })}
-			                        taxPctInput={manual.sales_tax_pct ?? ''}
-			                        taxExempt={Boolean(manual.tax_exempt)}
-			                        taxSaving={Boolean(saving)}
-			                        onTaxPctChange={handleTaxPctChange}
-			                        onTaxPctBlur={handleTaxPctBlur}
-			                        onTaxExemptChange={handleTaxExemptToggle}
+                        taxPctInput={String(estimate?.sales_tax_pct ?? manual.sales_tax_pct ?? '')}
+                        taxExempt={Boolean(estimate?.tax_exempt ?? manual.tax_exempt)}
+                        taxSaving={Boolean(saving)}
+                        onTaxPctChange={handleTaxPctChange}
+                        onTaxPctBlur={handleTaxPctBlur}
+                        onTaxExemptChange={handleTaxExemptToggle}
                         discountPresets={discountPresets}
                         selectedDiscountPresetId={selectedDiscountPresetId}
                         appliedDiscountPresets={appliedDiscountPresets}
                         onDiscountPresetChange={handleDiscountPresetChange}
                         onRemoveDiscount={handleRemoveDiscount}
-                        discountInput={manual.discount_amount ?? ''}
-			                        discountSaving={Boolean(saving)}
-			                        onDiscountChange={handleDiscountChange}
-			                        onDiscountBlur={handleDiscountBlur}
-                                    onApplyCustomDiscount={handleApplyCustomDiscount}
-		                        onSaveTaxes={() => {}}
-                        onAddCharge={canModifyEstimate ? startAddingCharge : undefined}
+                        discountInput={String(estimate?.discount_amount ?? manual.discount_amount ?? '')}
+                        discountSaving={Boolean(saving)}
+                        onDiscountChange={handleDiscountChange}
+                        onDiscountBlur={handleDiscountBlur}
+                        onApplyCustomDiscount={handleApplyCustomDiscount}
+                        onSaveTaxes={() => {}}
+                        onAddCharge={canModifyEstimate ? () => setIsModernAddChargeModalOpen(true) : undefined}
                         onApplyPackage={canModifyEstimate ? () => setIsPackageModalOpen(true) : undefined}
                         onAddCatalogItem={canModifyEstimate ? () => setIsCatalogModalOpen(true) : undefined}
-                        onEditCharge={canModifyEstimate ? startEditingCharge : undefined}
+                        onEditCharge={canModifyEstimate ? (c) => setEditingChargeRecord(c) : undefined}
                         onDeleteCharge={canModifyEstimate ? handleDeleteCharge : undefined}
                         onReorderCharges={handleReorderCharges}
                         isLocked={isOpportunityLocked || estimateIsLocked}
@@ -10771,214 +10981,27 @@ export default function EstimateView({
                 </div>
             )}
 
-            {isAddChargeModalOpen && (
-                <div data-testid="estimate-add-charge-modal" className="fixed inset-0 z-[70] flex items-center justify-center p-0 md:p-4 bg-black/20">
-                    {normalizeChargeCategory(chargeForm.category) === 'moving_labor' ? (
-                        renderMovingLaborModalContent(chargeForm, setChargeForm, false, cancelAddingCharge, handleAddCharge, chargeContext, saving)
-                    ) : normalizeChargeCategory(chargeForm.category) === 'fuel_surcharge' ? (
-                        renderFuelSurchargeModalContent(chargeForm, setChargeForm, false, cancelAddingCharge, handleAddCharge, chargeContext, catalogItems, saving)
-                    ) : normalizeChargeCategory(chargeForm.category) === 'transportation' ? (
-                        renderTransportationModalContent(chargeForm, setChargeForm, false, cancelAddingCharge, handleAddCharge, chargeContext, catalogItems, inventorySummary, saving)
-                    ) : normalizeChargeCategory(chargeForm.category) === 'packing' ? (
-                        renderPackingModalContent(chargeForm, setChargeForm, false, cancelAddingCharge, handleAddCharge, chargeContext, catalogItems, inventorySummary, saving)
-                    ) : (
-                        <div className="relative w-full h-full md:h-auto max-h-screen md:max-h-[calc(100vh-4rem)] md:max-w-5xl rounded-none md:rounded-[2rem] border-0 md:border border-ink-100 bg-white shadow-2xl overflow-hidden flex flex-col">
-                            {/* Header */}
-                            <div className="flex items-center justify-between gap-4 px-5 md:px-8 py-4 md:py-5 border-b border-ink-100 bg-gradient-to-r from-brand-tint/20 to-white shrink-0">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                                        <Calculator size={20} />
-                                    </div>
-                                    <div>
-                                        <h3 className="text-xl font-heading font-black text-heading leading-tight">
-                                            {normalizeChargeCategory(chargeForm.category) === 'moving_labor'
-                                                ? `Add Moving Labor`
-                                                : 'Add Charge'}
-                                        </h3>
-                                    </div>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={cancelAddingCharge}
-                                    className="p-2 rounded-full text-ink-400 hover:text-heading hover:bg-page transition-colors cursor-pointer"
-                                    aria-label="Close"
-                                >
-                                    <X size={18} />
-                                </button>
-                            </div>
+            <AddChargeModal
+                isOpen={isModernAddChargeModalOpen || isAddChargeModalOpen}
+                onClose={() => {
+                    setIsModernAddChargeModalOpen(false);
+                    setIsAddChargeModalOpen(false);
+                }}
+                onAddManual={handleAddManualCharge}
+                onAddDiscount={handleAddDiscountCharge}
+                discountPresets={discountPresets}
+                plannedSubJobId={selectedSubJobId}
+                isSaving={saving}
+            />
 
-                            {/* Scrollable Grid Layout */}
-                            <div className="flex-1 overflow-y-auto min-h-0">
-                                <div className="grid grid-cols-1 lg:grid-cols-12 gap-0 lg:h-full">
-                                    {/* Left Form Column */}
-                                    <div className="lg:col-span-7 p-5 md:p-8 space-y-5 md:space-y-6 lg:border-r border-ink-100 lg:overflow-y-auto lg:h-full">
-                                        <ChargeFormSection title="Charge Details" description="">
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                <FormInput label="Name" value={chargeForm.name} onChange={(e) => setChargeForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Moving Labor" />
-                                                <FormInput
-                                                    label="Charge Type"
-                                                    as="select"
-                                                    value={chargeForm.category}
-                                                    onChange={(e) => setChargeForm((p) => ({ ...p, category: normalizeChargeCategory(e.target.value), category_preset_key: '' }))}
-                                                >
-                                                    {CHARGE_CATEGORY_OPTIONS.map(([value, label]) => (
-                                                        <option key={value} value={value}>{label}</option>
-                                                    ))}
-                                                </FormInput>
-                                            </div>
-                                        </ChargeFormSection>
-
-                                        {renderChargeCategoryFields(chargeForm, setChargeForm)}
-
-                                        <ChargeFormSection title="Adjustments" description="">
-                                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                                                <FormInput
-                                                    label="Line Discount ($)"
-                                                    type="number"
-                                                    value={chargeForm.quick_discount}
-                                                    onChange={(e) => setChargeForm((p) => ({ ...p, quick_discount: e.target.value }))}
-                                                    placeholder="0.00"
-                                                />
-
-                                            </div>
-                                        </ChargeFormSection>
-
-                                        <FormInput
-                                            label="Description"
-                                            as="textarea"
-                                            value={chargeForm.description}
-                                            onChange={(e) => setChargeForm((p) => ({ ...p, description: e.target.value }))}
-                                            placeholder="Optional description for this charge..."
-                                        />
-                                    </div>
-
-                                    {/* Right Summary Column */}
-                                    <div className="lg:col-span-5 p-5 md:p-8 bg-slate-50/50 lg:overflow-y-auto lg:h-full flex flex-col justify-between">
-                                        <ChargePricingSummary
-                                            form={chargeForm}
-                                            context={chargeContext}
-                                            catalogItems={catalogItems}
-                                            subtotal={computeChargeTotal(chargeForm, chargeContext, { presetMode: getChargePresetMode(chargeForm) })}
-                                            discount={chargeForm.quick_discount}
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Footer */}
-                            <div className="flex items-center justify-end gap-3 p-5 md:p-6 bg-slate-50 rounded-b-none md:rounded-b-[2rem] border-t border-ink-100 shrink-0">
-                                <GhostBtn onClick={cancelAddingCharge}>Cancel</GhostBtn>
-                                {canModifyEstimate ? <PrimaryBtn onClick={handleAddCharge} disabled={saving}>Add Charge</PrimaryBtn> : null}
-                            </div>
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {editingChargeId && (
-                <div className="fixed inset-0 z-[70] flex items-center justify-center p-0 md:p-4 bg-black/20">
-                    {normalizeChargeCategory(editingChargeForm.category) === 'moving_labor' ? (
-                        renderMovingLaborModalContent(editingChargeForm, setEditingChargeForm, true, cancelEditingCharge, handleSaveCharge, chargeContext, saving)
-                    ) : normalizeChargeCategory(editingChargeForm.category) === 'fuel_surcharge' ? (
-                        renderFuelSurchargeModalContent(editingChargeForm, setEditingChargeForm, true, cancelEditingCharge, handleSaveCharge, chargeContext, catalogItems, saving)
-                    ) : normalizeChargeCategory(editingChargeForm.category) === 'transportation' ? (
-                        renderTransportationModalContent(editingChargeForm, setEditingChargeForm, true, cancelEditingCharge, handleSaveCharge, chargeContext, catalogItems, inventorySummary, saving)
-                    ) : normalizeChargeCategory(editingChargeForm.category) === 'packing' ? (
-                        renderPackingModalContent(editingChargeForm, setEditingChargeForm, true, cancelEditingCharge, handleSaveCharge, chargeContext, catalogItems, inventorySummary, saving)
-                    ) : (
-                        <div className="relative w-full h-full md:h-auto max-h-screen md:max-h-[calc(100vh-4rem)] md:max-w-5xl rounded-none md:rounded-[2rem] border-0 md:border border-ink-100 bg-white shadow-2xl overflow-hidden flex flex-col">
-                            {/* Header */}
-                            <div className="flex items-center justify-between gap-4 px-5 md:px-8 py-4 md:py-5 border-b border-ink-100 bg-gradient-to-r from-brand-tint/20 to-white shrink-0">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                                        <Calculator size={20} />
-                                    </div>
-                                    <div>
-                                        <h3 className="text-xl font-heading font-black text-heading leading-tight">Edit Charge</h3>
-                                    </div>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={cancelEditingCharge}
-                                    className="p-2 rounded-full text-ink-400 hover:text-heading hover:bg-page transition-colors cursor-pointer"
-                                    aria-label="Close"
-                                >
-                                    <X size={18} />
-                                </button>
-                            </div>
-
-                            {/* Scrollable Grid Layout */}
-                            <div className="flex-1 overflow-y-auto min-h-0">
-                                <div className="grid grid-cols-1 lg:grid-cols-12 gap-0 lg:h-full">
-                                    {/* Left Form Column */}
-                                    <div className="lg:col-span-7 p-5 md:p-8 space-y-5 md:space-y-6 lg:border-r border-ink-100 lg:overflow-y-auto lg:h-full">
-                                        <ChargeFormSection title="Charge Details" description="">
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                <FormInput
-                                                    label="Name"
-                                                    value={editingChargeForm.name}
-                                                    onChange={(e) => setEditingChargeForm((p) => ({ ...p, name: e.target.value }))}
-                                                    placeholder="e.g. Moving Labor"
-                                                />
-                                                <FormInput
-                                                    label="Charge Type"
-                                                    as="select"
-                                                    value={editingChargeForm.category}
-                                                    onChange={(e) => setEditingChargeForm((p) => ({ ...p, category: normalizeChargeCategory(e.target.value), category_preset_key: '' }))}
-                                                >
-                                                    {CHARGE_CATEGORY_OPTIONS.map(([value, label]) => (
-                                                        <option key={value} value={value}>{label}</option>
-                                                    ))}
-                                                </FormInput>
-                                            </div>
-                                        </ChargeFormSection>
-
-                                        {renderChargeCategoryFields(editingChargeForm, setEditingChargeForm)}
-
-                                        <ChargeFormSection title="Adjustments" description="">
-                                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                                                <FormInput
-                                                    label="Line Discount ($)"
-                                                    type="number"
-                                                    value={editingChargeForm.quick_discount}
-                                                    onChange={(e) => setEditingChargeForm((p) => ({ ...p, quick_discount: e.target.value }))}
-                                                    placeholder="0.00"
-                                                />
-
-                                            </div>
-                                        </ChargeFormSection>
-
-                                        <FormInput
-                                            label="Description"
-                                            as="textarea"
-                                            value={editingChargeForm.description}
-                                            onChange={(e) => setEditingChargeForm((p) => ({ ...p, description: e.target.value }))}
-                                            placeholder="Optional description for this charge..."
-                                        />
-                                    </div>
-
-                                    {/* Right Summary Column */}
-                                    <div className="lg:col-span-5 p-5 md:p-8 bg-slate-50/50 lg:overflow-y-auto lg:h-full flex flex-col justify-between">
-                                        <ChargePricingSummary
-                                            form={editingChargeForm}
-                                            context={chargeContext}
-                                            catalogItems={catalogItems}
-                                            subtotal={computeChargeTotal(editingChargeForm, chargeContext, { presetMode: getChargePresetMode(editingChargeForm) })}
-                                            discount={editingChargeForm.quick_discount}
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Footer */}
-                            <div className="flex items-center justify-end gap-3 p-5 md:p-6 bg-slate-50 rounded-b-none md:rounded-b-[2rem] border-t border-ink-100 shrink-0">
-                                <GhostBtn onClick={cancelEditingCharge}>Cancel</GhostBtn>
-                                <PrimaryBtn onClick={handleSaveCharge} disabled={saving}>Save Changes</PrimaryBtn>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            )}
+            <EditChargeModal
+                isOpen={Boolean(editingChargeRecord)}
+                charge={editingChargeRecord}
+                onClose={() => setEditingChargeRecord(null)}
+                onSave={handleSaveChargeEdit}
+                onClearOverride={handleClearChargeOverride}
+                isSaving={saving}
+            />
 
             {isAddInventoryItemModalOpen && (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/20">

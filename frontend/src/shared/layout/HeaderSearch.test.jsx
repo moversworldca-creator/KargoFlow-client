@@ -7,7 +7,7 @@ import * as api from '../../services/api';
 
 vi.mock('../../services/api', () => ({
   universalSearch: vi.fn(),
-  getTasks: vi.fn().mockResolvedValue({ results: [] }),
+  getFollowUps: vi.fn().mockResolvedValue([]),
   getNotifications: vi.fn().mockResolvedValue({ results: [] }),
   markAllNotificationsRead: vi.fn(),
   markNotificationRead: vi.fn(),

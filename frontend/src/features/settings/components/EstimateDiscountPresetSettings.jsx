@@ -23,7 +23,7 @@ const INITIAL_FORM = {
 
 const fmtValue = (row) => {
   const value = Number(row?.value || 0);
-  if (String(row?.discount_type || '') === 'fixed') {
+  if (String(row?.discount_type || '') === 'fixed' || String(row?.discount_type || '') === 'amount') {
     return `$${value.toFixed(2)}`;
   }
   return `${value.toFixed(2).replace(/\.00$/, '')}%`;
@@ -106,9 +106,12 @@ const EstimateDiscountPresetSettings = () => {
 
     setSaving(true);
     try {
+      const backendDiscountType = (formData.discount_type === 'fixed' || formData.discount_type === 'amount')
+        ? 'amount'
+        : 'percentage';
       const payload = {
         label,
-        discount_type: String(formData.discount_type || 'percent'),
+        discount_type: backendDiscountType,
         value,
         sort_order: Number(formData.sort_order || 0),
         is_active: formData.is_active !== false,

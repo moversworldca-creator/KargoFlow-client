@@ -1,6 +1,56 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronDown, ChevronUp, Edit2, GripVertical, Lock, MoreVertical, RotateCcw, Trash2, Unlock, Send } from 'lucide-react';
+import TariffAdditionalInputs from './TariffAdditionalInputs';
+import {
+  AlertCircle,
+  Calculator,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  DollarSign,
+  Edit2,
+  GripVertical,
+  Info,
+  Loader2,
+  Lock,
+  MoreVertical,
+  Percent,
+  Plus,
+  RotateCcw,
+  Send,
+  Shield,
+  Tag,
+  Trash2,
+  Unlock,
+  Wrench,
+} from 'lucide-react';
 import { Icon, Pill, StatusDot, IconButton, PrimaryBtn, GhostBtn } from '../../../shared/ui/RedesignAtoms';
+
+export const CATEGORY_PRESENTATION_MAP = {
+  labor: { label: 'Labor', tone: 'bg-blue-50 text-blue-700 border-blue-200', icon: 'users' },
+  travel: { label: 'Trip & Travel', tone: 'bg-amber-50 text-amber-700 border-amber-200', icon: 'navigation' },
+  fuel: { label: 'Fuel Surcharge', tone: 'bg-orange-50 text-orange-700 border-orange-200', icon: 'fuel' },
+  storage: { label: 'Storage', tone: 'bg-purple-50 text-purple-700 border-purple-200', icon: 'archive' },
+  services: { label: 'Additional Services', tone: 'bg-indigo-50 text-indigo-700 border-indigo-200', icon: 'tool' },
+  bulky_items: { label: 'Bulky Items', tone: 'bg-cyan-50 text-cyan-700 border-cyan-200', icon: 'box' },
+  shuttle: { label: 'Shuttle', tone: 'bg-teal-50 text-teal-700 border-teal-200', icon: 'truck' },
+  materials: { label: 'Materials', tone: 'bg-slate-100 text-slate-700 border-slate-200', icon: 'package' },
+  packing: { label: 'Packing', tone: 'bg-violet-50 text-violet-700 border-violet-200', icon: 'layers' },
+  valuation: { label: 'Valuation', tone: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: 'shield' },
+  discount: { label: 'Discount', tone: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: 'tag' },
+  other: { label: 'Other', tone: 'bg-slate-100 text-slate-700 border-slate-200', icon: 'circle' },
+};
+
+export const normalizeCategory = (cat) => {
+  const c = String(cat || '').toLowerCase().trim();
+  if (c === 'moving_labor') return 'labor';
+  if (c === 'trip_and_travel') return 'travel';
+  if (c === 'fuel_surcharge') return 'fuel';
+  if (c === 'storage_in_transit') return 'storage';
+  if (c === 'additional_services') return 'services';
+  if (c === 'bulky_item') return 'bulky_items';
+  if (c === 'shuttle_fees') return 'shuttle';
+  return CATEGORY_PRESENTATION_MAP[c] ? c : 'other';
+};
 
 const fmtMoney = (value) => {
   const amount = Number(value);
@@ -208,6 +258,19 @@ export function ChargesTab({
   selectedSubJob = null,
   onUpdateSelectedSubJob,
   totals,
+  estimate = null,
+  jobInputs = null,
+  onSaveJobInputs,
+  onRecalculate,
+  isRecalculating = false,
+  onClearOverride,
+  onUpdateDeposit,
+  onUpdateNte,
+  onUpdateTaxExemption,
+  onRequestApproval,
+  onDecideApproval,
+  onRevise,
+  onSupersede,
   crewNotes = '',
   customerNotes = '',
   internalNotes = '',
@@ -249,27 +312,98 @@ export function ChargesTab({
   const [noteDrafts, setNoteDrafts] = useState({ crew: '', customer: '', internal: '' });
   const [editingNoteIdx, setEditingNoteIdx] = useState(null);
   const [editingNoteDraft, setEditingNoteDraft] = useState('');
-  const [draggedChargeId, setDraggedChargeId] = useState(null);
-  const [customDiscountType, setCustomDiscountType] = useState('percent');
-  const [customDiscountValue, setCustomDiscountValue] = useState('');
   const [isSubJobMenuOpen, setIsSubJobMenuOpen] = useState(false);
   const [isItemActionsMenuOpen, setIsItemActionsMenuOpen] = useState(false);
   const [activeActionMenuChargeId, setActiveActionMenuChargeId] = useState(null);
-  const groupTone = {
-    moving_labor: "bg-blue-50 text-blue-700",
-    transportation: "bg-indigo-50 text-indigo-700",
-    packing: "bg-violet-50 text-violet-700",
-    materials: "bg-slate-100 text-slate-700",
-    trip_and_travel: "bg-amber-50 text-amber-700",
-    discount: "bg-emerald-50 text-emerald-700",
-  };
+  const [isTariffInputsOpen, setIsTariffInputsOpen] = useState(true);
+  const [savingJobInputs, setSavingJobInputs] = useState(false);
+  const [savingDeposit, setSavingDeposit] = useState(false);
+  const [savingNte, setSavingNte] = useState(false);
+  const [savingTaxExempt, setSavingTaxExempt] = useState(false);
+
+  // Job Tariff Inputs Draft
+  const currentJobSavedInputs = (estimate?.inputs?.jobs || {})[String(selectedSubJobId)] || (jobInputs || {})[String(selectedSubJobId)] || {};
+  const [additionalInputs, setAdditionalInputs] = useState({});
+  const [jobInputDraft, setJobInputDraft] = useState({
+    crew_size: '',
+    trucks: '',
+    hours: '',
+    volume_cuft: '',
+    weight_lbs: '',
+    distance_miles: '',
+    moving_pricing_type: '',
+  });
+
+  useEffect(() => {
+    const saved = (estimate?.inputs?.jobs || {})[String(selectedSubJobId)] || (jobInputs || {})[String(selectedSubJobId)] || {};
+    setAdditionalInputs(saved);
+    setJobInputDraft({
+      crew_size: String(saved.crew_size ?? ''),
+      trucks: String(saved.trucks ?? ''),
+      hours: String(saved.hours ?? ''),
+      volume_cuft: String(saved.volume_cuft ?? selectedSubJob?.volume_cuft ?? ''),
+      weight_lbs: String(saved.weight_lbs ?? selectedSubJob?.weight_lbs ?? ''),
+      distance_miles: String(saved.distance_miles ?? ''),
+      moving_pricing_type: saved.moving_pricing_type || '',
+    });
+  }, [selectedSubJobId, estimate?.inputs?.jobs, jobInputs, selectedSubJob]);
+
+  // Tax Exemption Draft
+  const [taxExemptionDraft, setTaxExemptionDraft] = useState({
+    tax_exempt: false,
+    tax_exemption_reason: '',
+    tax_exemption_certificate_number: '',
+  });
+
+  useEffect(() => {
+    setTaxExemptionDraft({
+      tax_exempt: Boolean(estimate?.tax_exempt ?? taxExempt),
+      tax_exemption_reason: estimate?.tax_exemption_reason || '',
+      tax_exemption_certificate_number: estimate?.tax_exemption_certificate_number || '',
+    });
+  }, [estimate?.tax_exempt, estimate?.tax_exemption_reason, estimate?.tax_exemption_certificate_number, taxExempt]);
+
+  // Deposit Draft
+  const [depositDraft, setDepositDraft] = useState({
+    type: 'percentage',
+    value: '10',
+  });
+
+  useEffect(() => {
+    const dep = estimate?.inputs?.deposit || {};
+    if (dep.type) {
+      setDepositDraft({
+        type: dep.type || 'percentage',
+        value: String(dep.value ?? '10'),
+      });
+    }
+  }, [estimate?.inputs?.deposit]);
+
+  // NTE Draft
+  const [nteDraft, setNteDraft] = useState('');
+  useEffect(() => {
+    setNteDraft(estimate?.not_to_exceed_amount != null ? String(estimate.not_to_exceed_amount) : '');
+  }, [estimate?.not_to_exceed_amount]);
+
   const activeNotesValue = activeNoteTab === 'crew' ? crewNotes : activeNoteTab === 'customer' ? customerNotes : internalNotes;
   const activeDraft = noteDrafts[activeNoteTab] || '';
-  const displayCharges = charges.filter((c) => String(c?.category || '') !== 'discount');
-  const selectedJobSubtotal = displayCharges.reduce((sum, c) => sum + Number(c.total_price || 0), 0);
+
+  // Filter charges: line items vs discount lines
+  const displayCharges = charges.filter((c) => c.source_type !== 'discount' && String(c?.category || '') !== 'discount');
+  const discountCharges = charges.filter((c) => c.source_type === 'discount' || String(c?.category || '') === 'discount');
+
+  const selectedJobSubtotal = displayCharges.reduce((sum, c) => sum + Number(c.total_price || c.subtotal || 0), 0);
   const chargeTotal = selectedJobSubtotal;
-  const estimateLevelDiscount = Math.max(0, Number(totals?.discountAmount || 0));
-  const estimateSubtotal = Number.isFinite(Number(totals?.subtotal)) ? Number(totals.subtotal) : selectedJobSubtotal;
+
+  // Authoritative server totals with fallback to client props
+  const displaySubtotal = estimate?.subtotal != null ? Number(estimate.subtotal) : (totals?.subtotal != null ? Number(totals.subtotal) : selectedJobSubtotal);
+  const displayDiscount = estimate?.discount_amount != null ? Number(estimate.discount_amount) : (totals?.discountAmount != null ? Number(totals.discountAmount) : 0);
+  const displayTaxable = estimate?.taxable_subtotal != null ? Number(estimate.taxable_subtotal) : (totals?.taxableSubtotal != null ? Number(totals.taxableSubtotal) : Math.max(0, displaySubtotal - displayDiscount));
+  const displayTax = estimate?.sales_tax_amount != null ? Number(estimate.sales_tax_amount) : (totals?.taxAmount != null ? Number(totals.taxAmount) : 0);
+  const displayGrandTotal = estimate?.grand_total != null ? Number(estimate.grand_total) : (totals?.totalDue != null ? Number(totals.totalDue) : 0);
+  const displayDeposit = estimate?.deposit_amount != null ? Number(estimate.deposit_amount) : (totals?.depositAmount != null ? Number(totals.depositAmount) : 0);
+  const salesTaxPct = estimate?.sales_tax_pct != null ? estimate.sales_tax_pct : (taxPctInput || '0');
+
   const selectedSubJobLabel = selectedSubJob?.sub_job_number
     || (selectedSubJob
       ? `${selectedSubJob.sales_number || selectedSubJob.display_number || selectedSubJob.id}-${selectedSubJob.sequence || 1}`
@@ -282,13 +416,7 @@ export function ChargesTab({
     .split('_')
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
-  const taxableSubtotal = (() => {
-    const rawTaxableSubtotal = Number(totals?.taxableSubtotal);
-    if (Number.isFinite(rawTaxableSubtotal)) {
-      return Math.min(Math.max(0, rawTaxableSubtotal), estimateSubtotal);
-    }
-    return Math.max(0, estimateSubtotal - estimateLevelDiscount);
-  })();
+
   const postedMessages = String(activeNotesValue || '')
     .split('\n\n')
     .map((row) => row.trim())
@@ -299,7 +427,7 @@ export function ChargesTab({
       return { stamp: stamp.trim(), body: rest.join('::').trim() };
     });
 
-    const postActiveMessage = () => {
+  const postActiveMessage = () => {
     const text = String(activeDraft || '').trim();
     if (!text) return;
     const stamp = new Date().toLocaleString();
@@ -351,669 +479,1103 @@ export function ChargesTab({
     updateMessageList(newMessages);
   };
 
+  const handleSaveJobInputsClick = async () => {
+    if (!selectedSubJobId || !onSaveJobInputs) return;
+    try {
+      setSavingJobInputs(true);
+      await onSaveJobInputs(selectedSubJobId, {
+        ...additionalInputs,
+        crew_size: jobInputDraft.crew_size ? Number(jobInputDraft.crew_size) : null,
+        trucks: jobInputDraft.trucks ? Number(jobInputDraft.trucks) : null,
+        hours: jobInputDraft.hours ? String(jobInputDraft.hours) : null,
+        volume_cuft: jobInputDraft.volume_cuft ? String(jobInputDraft.volume_cuft) : null,
+        weight_lbs: jobInputDraft.weight_lbs ? String(jobInputDraft.weight_lbs) : null,
+        distance_miles: jobInputDraft.distance_miles ? String(jobInputDraft.distance_miles) : null,
+        moving_pricing_type: jobInputDraft.moving_pricing_type || null,
+      });
+    } finally {
+      setSavingJobInputs(false);
+    }
+  };
+
+  const handleSaveDepositClick = async () => {
+    if (!onUpdateDeposit) return;
+    try {
+      setSavingDeposit(true);
+      await onUpdateDeposit({
+        type: depositDraft.type,
+        value: depositDraft.value,
+      });
+    } finally {
+      setSavingDeposit(false);
+    }
+  };
+
+  const handleSaveNteClick = async () => {
+    if (!onUpdateNte) return;
+    try {
+      setSavingNte(true);
+      await onUpdateNte(nteDraft ? String(nteDraft) : null);
+    } finally {
+      setSavingNte(false);
+    }
+  };
+
+  const handleSaveTaxExemptClick = async () => {
+    if (!onUpdateTaxExemption) return;
+    try {
+      setSavingTaxExempt(true);
+      await onUpdateTaxExemption({
+        tax_exempt: Boolean(taxExemptionDraft.tax_exempt),
+        tax_exemption_reason: taxExemptionDraft.tax_exemption_reason.trim(),
+        tax_exemption_certificate_number: taxExemptionDraft.tax_exemption_certificate_number.trim(),
+      });
+    } finally {
+      setSavingTaxExempt(false);
+    }
+  };
+
   return (
-    <div className="grid grid-cols-1 gap-2 lg:grid-cols-12">
-      <section className="lg:col-span-8">
-        <div className="overflow-visible rounded-3xl border border-slate-200 bg-white shadow-card flex flex-col">
-          <div className="flex border-b border-slate-200 relative z-10">
-            <div className="flex flex-1 overflow-x-auto no-scrollbar">
-              {(Array.isArray(subJobs) ? subJobs : []).map((job) => {
-                const number = job.sub_job_number || `${job.sales_number || job.display_number || job.id}-${job.sequence || 1}`;
-                const matchedOption = (Array.isArray(subJobServiceOptions) ? subJobServiceOptions : []).find(
-                  o => String(o.value) === String(job.service_type || '')
-                );
-                const segmentLabel = job.sub_job_number || `${job.sales_number || job.display_number || job.id}-${job.sequence || 1}`;
-                const rawService = job.title || matchedOption?.label || job.service_type || 'Move';
-                const service = String(rawService)
-                  .split('_')
-                  .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-                  .join(' ');
-                const isSelected = String(selectedSubJobId) === String(job.id);
-                
-                return (
-                  <button
-                    key={job.id}
-                    onClick={() => onSelectedSubJobChange?.(String(job.id))}
-                    className={`flex flex-col items-start px-6 py-4 border-b-2 whitespace-nowrap transition-colors ${
-                      isSelected 
-                        ? 'border-brand text-brand bg-brand/5' 
-                        : 'border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-900'
-                    }`}
-                  >
-                    <div className="font-bold text-base">{segmentLabel}</div>
-                    <div className="mt-0.5 text-xs font-semibold uppercase tracking-widest text-slate-400">{service}</div>
-                    <div className="text-sm mt-1 flex items-center gap-6">
-                      <span>{job.move_date ? new Date(job.move_date).toLocaleDateString() : 'Unscheduled'}</span>
-                      <span className="font-mono text-xs">{number}</span>
-                    </div>
-                  </button>
-                );
-              })}
+    <div className="space-y-3">
+      {/* Top Banners */}
+      {estimate?.repricing?.needed && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+            <div>
+              <h4 className="text-sm font-bold text-amber-900">Repricing Required</h4>
+              <p className="text-xs text-amber-700 mt-0.5">
+                Inputs or tariff configuration have changed: {(estimate.repricing.reasons || []).join(', ')}
+              </p>
             </div>
-            
-            <div className="flex items-center px-4 border-l border-slate-100 relative">
+          </div>
+          <button
+            type="button"
+            onClick={onRecalculate}
+            disabled={isRecalculating || isLocked}
+            className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2 text-xs font-bold text-white hover:bg-amber-700 transition disabled:opacity-50 shrink-0"
+          >
+            {isRecalculating ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+            Recalculate Estimate
+          </button>
+        </div>
+      )}
+
+      {estimate?.below_minimum_booking_amount && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-3.5 text-amber-800 text-xs flex items-center gap-2.5">
+          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+          <span>
+            <strong>Notice:</strong> Grand total ({fmtMoney(displayGrandTotal)}) is below the tariff minimum booking amount ({fmtMoney(estimate.calculation_trace?.minimum_booking_amount)}).
+          </span>
+        </div>
+      )}
+
+      {(estimate?.approvals?.outstanding_rule_ids?.length > 0 || estimate?.requires_reapproval) && (
+        <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-indigo-900 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <Shield className="w-5 h-5 text-indigo-600 mt-0.5 shrink-0" />
+            <div>
+              <h4 className="text-sm font-bold text-indigo-900">Manager Approval Required</h4>
+              <p className="text-xs text-indigo-700 mt-0.5">
+                This estimate requires approval before it can be sent.
+                {estimate.approvals?.required_rules?.length
+                  ? ` Rules: ${estimate.approvals.required_rules.map((r) => r.name || r.rule_type).join(', ')}`
+                  : ''}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={onRequestApproval}
+              disabled={isLocked}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-indigo-700 transition disabled:opacity-50"
+            >
+              Request Approval
+            </button>
+          </div>
+        </div>
+      )}
+
+      {estimate?.locked_reason && (
+        <div className="rounded-2xl border border-slate-300 bg-slate-100 p-4 text-slate-800 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <Lock className="w-5 h-5 text-slate-600 shrink-0" />
+            <div>
+              <h4 className="text-sm font-bold text-slate-900">Estimate Locked</h4>
+              <p className="text-xs text-slate-600 mt-0.5">{estimate.locked_reason}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {estimate.lifecycle_state === 'accepted' && onRevise && (
               <button
                 type="button"
-                onClick={() => setIsSubJobMenuOpen((prev) => !prev)}
-                className="flex items-center justify-center text-brand font-medium hover:text-brand-dark transition-colors px-4 py-2 rounded-lg hover:bg-brand/5 whitespace-nowrap"
+                onClick={onRevise}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-3.5 py-2 text-xs font-bold text-white hover:bg-slate-800 transition"
               >
-                <Icon name="plus" className="w-4 h-4 mr-2" /> Add Job
+                <RotateCcw className="w-3.5 h-3.5" /> Revise Estimate
               </button>
-              
-              {isSubJobMenuOpen ? (
-                <div className="absolute top-16 right-4 z-20 min-w-[280px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg mt-2">
-                  <div className="border-b border-slate-100 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-slate-400">
-                    Create sub-job
-                  </div>
-                  {(Array.isArray(subJobServiceOptions) ? subJobServiceOptions : []).map((option) => (
+            )}
+            {['sent', 'viewed', 'accepted'].includes(estimate.lifecycle_state) && onSupersede && (
+              <button
+                type="button"
+                onClick={() => {
+                  const reason = window.prompt('Enter reason for superseding this estimate:');
+                  if (reason) onSupersede(reason);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition"
+              >
+                Supersede with New Estimate
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
+        <section className="lg:col-span-8 space-y-3">
+          <div className="overflow-visible rounded-3xl border border-slate-200 bg-white shadow-card flex flex-col">
+            {/* Sub-Job Header / Tabs */}
+            <div className="flex border-b border-slate-200 relative z-10">
+              <div className="flex flex-1 overflow-x-auto no-scrollbar">
+                {(Array.isArray(subJobs) ? subJobs : []).map((job) => {
+                  const number = job.sub_job_number || `${job.sales_number || job.display_number || job.id}-${job.sequence || 1}`;
+                  const matchedOption = (Array.isArray(subJobServiceOptions) ? subJobServiceOptions : []).find(
+                    (o) => String(o.value) === String(job.service_type || '')
+                  );
+                  const segmentLabel = job.sub_job_number || `${job.sales_number || job.display_number || job.id}-${job.sequence || 1}`;
+                  const rawService = job.title || matchedOption?.label || job.service_type || 'Move';
+                  const service = String(rawService)
+                    .split('_')
+                    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+                    .join(' ');
+                  const isSelected = String(selectedSubJobId) === String(job.id);
+
+                  return (
                     <button
-                      key={option.value}
+                      key={job.id}
+                      onClick={() => onSelectedSubJobChange?.(String(job.id))}
+                      className={`flex flex-col items-start px-6 py-4 border-b-2 whitespace-nowrap transition-colors ${
+                        isSelected
+                          ? 'border-brand text-brand bg-brand/5'
+                          : 'border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                      }`}
+                    >
+                      <div className="font-bold text-base">{segmentLabel}</div>
+                      <div className="mt-0.5 text-xs font-semibold uppercase tracking-widest text-slate-400">{service}</div>
+                      <div className="text-sm mt-1 flex items-center gap-6">
+                        <span>{job.move_date ? new Date(job.move_date).toLocaleDateString() : 'Unscheduled'}</span>
+                        <span className="font-mono text-xs">{number}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center px-4 border-l border-slate-100 relative">
+                <button
+                  type="button"
+                  onClick={() => setIsSubJobMenuOpen((prev) => !prev)}
+                  className="flex items-center justify-center text-brand font-medium hover:text-brand-dark transition-colors px-4 py-2 rounded-lg hover:bg-brand/5 whitespace-nowrap"
+                >
+                  <Icon name="plus" className="w-4 h-4 mr-2" /> Add Job
+                </button>
+
+                {isSubJobMenuOpen ? (
+                  <div className="absolute top-16 right-4 z-20 min-w-[280px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg mt-2">
+                    <div className="border-b border-slate-100 px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-slate-400">
+                      Create sub-job
+                    </div>
+                    {(Array.isArray(subJobServiceOptions) ? subJobServiceOptions : []).map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => {
+                          setIsSubJobMenuOpen(false);
+                          onCreateSubJob?.(option.value);
+                        }}
+                        disabled={isLocked}
+                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Icon name="plus" className="w-4 h-4" />
+                        {option.label}
+                      </button>
+                    ))}
+                    <button
                       type="button"
                       onClick={() => {
                         setIsSubJobMenuOpen(false);
-                        onCreateSubJob?.(option.value);
+                        onRefreshSubJobs?.();
                       }}
-                      disabled={isLocked}
-                      className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                     >
-                      <Icon name="plus" className="w-4 h-4" />
-                      {option.label}
+                      <Icon name="refresh-cw" className="w-4 h-4" />
+                      Refresh sub-jobs
                     </button>
-                  ))}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            {selectedSubJob ? (
+              <div className="p-5 border-b border-slate-200 bg-white">
+                <div className="flex justify-between items-start mb-4">
                   <button
                     type="button"
-                    onClick={() => {
-                      setIsSubJobMenuOpen(false);
-                      onRefreshSubJobs?.();
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                    onClick={() => onOpenJobScheduler?.(selectedSubJob?.id)}
+                    className="text-left text-xl font-bold text-brand hover:text-brand-dark hover:underline"
                   >
-                    <Icon name="refresh-cw" className="w-4 h-4" />
-                    Refresh sub-jobs
+                    {selectedSubJobLabel || selectedSubJobTitle}
+                    <span className="text-sm font-mono text-slate-600 ml-2 tracking-wide">
+                      {selectedSubJobLabel ? selectedSubJobTitle : ''}
+                    </span>
                   </button>
+                  <div className="relative ml-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsItemActionsMenuOpen((prev) => !prev)}
+                      className="p-1.5 rounded-md text-slate-900 transition-colors hover:bg-slate-100"
+                      aria-label="Job actions"
+                    >
+                      <MoreVertical className="w-5 h-5" />
+                    </button>
+                    {isItemActionsMenuOpen ? (
+                      <div className="absolute right-0 top-full z-20 mt-1 min-w-[240px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsItemActionsMenuOpen(false);
+                            onOpenJobScheduler?.(selectedSubJob?.id);
+                          }}
+                          disabled={isLocked}
+                          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-semibold text-brand transition hover:bg-brand/5 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Icon name="calendar" className="w-4 h-4" />
+                          Schedule window
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsItemActionsMenuOpen(false);
+                            onAddCharge?.();
+                          }}
+                          data-testid="estimate-add-charge"
+                          disabled={isLocked}
+                          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Icon name="plus" className="w-4 h-4" />
+                          Add Charge or Discount
+                        </button>
+                        <div className="my-1 border-t border-slate-100" />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsItemActionsMenuOpen(false);
+                            onDeleteSelectedSubJob?.(selectedSubJobId);
+                          }}
+                          disabled={isLocked}
+                          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Icon name="trash-2" className="w-4 h-4" />
+                          Delete selected job
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
-              ) : null}
-            </div>
-          </div>
 
-          {selectedSubJob ? (
-            <div className="p-5 border-b border-slate-200 bg-white">
-              <div className="flex justify-between items-start mb-4">
-                <button
-                  type="button"
-                  onClick={() => onOpenJobScheduler?.(selectedSubJob?.id)}
-                  className="text-left text-xl font-bold text-brand hover:text-brand-dark hover:underline"
-                >
-                  {selectedSubJobLabel || selectedSubJobTitle}
-                  <span className="text-sm font-mono text-slate-600 ml-2 tracking-wide">
-                    {selectedSubJobLabel ? selectedSubJobTitle : ''}
-                  </span>
-                </button>
-                <div className="relative ml-2">
+                <div className="flex justify-between flex-wrap items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => setIsItemActionsMenuOpen((prev) => !prev)}
-                    className="p-1.5 rounded-md text-slate-900 transition-colors hover:bg-slate-100"
-                    aria-label="Job actions"
+                    onClick={() => onOpenJobScheduler?.(selectedSubJob?.id)}
+                    className="inline-flex items-center rounded-lg bg-brand/10 px-4 py-2 text-sm font-semibold text-brand transition-colors hover:bg-brand/15"
                   >
-                    <MoreVertical className="w-5 h-5" />
+                    <Icon name="calendar" className="w-4 h-4 mr-2" />
+                    {selectedSubJob.move_date
+                      ? `${new Date(selectedSubJob.move_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}${selectedSubJob.arrival_window_start ? ` · ${selectedSubJob.arrival_window_start}` : ''}${selectedSubJob.arrival_window_end ? ` - ${selectedSubJob.arrival_window_end}` : ''}`
+                      : 'Schedule Date'}
                   </button>
-                  {isItemActionsMenuOpen ? (
-                    <div className="absolute right-0 top-full z-20 mt-1 min-w-[280px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsItemActionsMenuOpen(false);
-                          onOpenJobScheduler?.(selectedSubJob?.id);
-                        }}
-                        disabled={isLocked}
-                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-semibold text-brand transition hover:bg-brand/5 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Icon name="calendar" className="w-4 h-4" />
-                        Schedule window
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsItemActionsMenuOpen(false);
-                          onApplyPackage?.();
-                        }}
-                        disabled={isLocked}
-                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Icon name="package-plus" className="w-4 h-4" />
-                        Apply package
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsItemActionsMenuOpen(false);
-                          onAddCatalogItem?.();
-                        }}
-                        disabled={isLocked}
-                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Icon name="plus" className="w-4 h-4" />
-                        Add catalog item
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsItemActionsMenuOpen(false);
-                          onAddCharge?.();
-                        }}
-                        data-testid="estimate-add-charge"
-                        disabled={isLocked}
-                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Icon name="plus" className="w-4 h-4" />
-                        Add line item
-                      </button>
-                      <div className="my-1 border-t border-slate-100" />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsItemActionsMenuOpen(false);
-                          onDeleteSelectedSubJob?.(selectedSubJobId);
-                        }}
-                        disabled={isLocked}
-                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Icon name="trash-2" className="w-4 h-4" />
-                        Delete selected job
-                      </button>
-                    </div>
-                  ) : null}
+                  <div className="inline-flex items-center rounded-lg bg-slate-100 px-4 py-2 text-sm font-bold text-slate-800 border border-slate-200">
+                    <span>Job charges subtotal</span>
+                    <span className="ml-4 font-mono text-base text-slate-900">{fmtMoney(chargeTotal)}</span>
+                  </div>
                 </div>
               </div>
+            ) : null}
 
-              <div className="flex justify-between flex-wrap items-center gap-3 mb-5">
-                <button
-                  type="button"
-                  onClick={() => onOpenJobScheduler?.(selectedSubJob?.id)}
-                  className="inline-flex items-center rounded-lg bg-brand/10 px-4 py-2 text-sm font-semibold text-brand transition-colors hover:bg-brand/15"
-                >
-                  <Icon name="calendar" className="w-4 h-4 mr-2" />
-                  {selectedSubJob.move_date
-                    ? `${new Date(selectedSubJob.move_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}${selectedSubJob.arrival_window_start ? ` · ${selectedSubJob.arrival_window_start}` : ''}${selectedSubJob.arrival_window_end ? ` - ${selectedSubJob.arrival_window_end}` : ''}`
-                    : 'Schedule Date'
-                  }
-                </button>
-                <div className="inline-flex items-center rounded-lg bg-slate-100 px-4 py-2 text-sm font-bold text-slate-800 border border-slate-200">
-                  <span>Selected job subtotal</span>
-                  <span className="ml-4 font-mono text-base text-slate-900">{fmtMoney(chargeTotal)}</span>
-                </div>
-              </div>
-
-            </div>
-          ) : null}
-
-          <div className="w-full overflow-x-auto no-scrollbar">
-            <table className="w-full table-fixed min-w-[768px]">
-              <colgroup>
-                <col className="w-[4%]" />
-                <col className="w-[22%]" />
-                <col className="w-[27%]" />
-                <col className="w-[11%]" />
-                <col className="w-[11%]" />
-                <col className="w-[11%]" />
-                <col className="w-[9%]" />
-              </colgroup>
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50/60">
-                  <th className="px-3 py-2.5 text-right text-[11px] font-bold uppercase tracking-widest text-slate-500"></th>
-                  <th className="px-5 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-500">Name</th>
-                  <th className="px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-500">Rate</th>
-                  <th className="px-3 py-2.5 text-right text-[11px] font-bold uppercase tracking-widest text-slate-500">Discount</th>
-                  <th className="px-3 py-2.5 text-right text-[11px] font-bold uppercase tracking-widest text-slate-500">Subtotal</th>
-                  <th className="px-3 py-2.5 text-right text-[11px] font-bold uppercase tracking-widest text-slate-500">Total Cost</th>
-                  <th className="w-10 px-3 py-2.5" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {displayCharges.map((c) => {
-                  const subtotal = c.subtotal;
-                  const rowDiscount = c.discount_amount;
-                  const totalCost = c.total_cost;
-                  const isDragging = String(draggedChargeId || '') === String(c.id);
-                  return (
-                  <tr
-                    key={c.id}
-                    draggable
-                    onDragStart={(event) => {
-                      setDraggedChargeId(c.id);
-                      event.dataTransfer.effectAllowed = 'move';
-                      event.dataTransfer.setData('text/plain', String(c.id));
-                    }}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = 'move';
-                    }}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      const sourceId = event.dataTransfer.getData('text/plain') || draggedChargeId;
-                      setDraggedChargeId(null);
-                      if (sourceId && String(sourceId) !== String(c.id)) {
-                        onReorderCharges?.(sourceId, c.id);
-                      }
-                    }}
-                    onDragEnd={() => setDraggedChargeId(null)}
-                    className={`group cursor-move transition hover:bg-slate-50/60 ${isDragging ? 'bg-blue-50/60 opacity-70' : ''}`}
+            {/* Selected-Job Tariff Inputs Card */}
+            {selectedSubJob && (
+              <div className="border-b border-slate-200 bg-slate-50/50 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsTariffInputsOpen((p) => !p)}
+                    className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700 hover:text-slate-900"
                   >
-                    <td className="px-3 py-3 text-slate-300">
-                      <GripVertical className="h-4 w-4 cursor-grab active:cursor-grabbing" />
-                    </td>
-                    <td className="px-5 py-3">
-                      <button
-                        type="button"
-                        onClick={() => (isLocked ? null : onEditCharge(c))}
-                        className="text-left text-sm font-semibold text-brand hover:text-brand-dark hover:underline"
-                      >
-                        {c.name}
-                      </button>
-                    </td>
-                    <td className="px-3 py-3 text-left font-mono text-sm leading-5 tabular-nums text-slate-700">
-                      <span className="block whitespace-normal break-words" title={c.description || c.rate_display || fmtMoney(c.unit_price)}>
-                        {c.description || c.rate_display || fmtMoney(c.unit_price)}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 text-right font-mono text-sm font-bold tabular-nums text-emerald-700">
-                      {Number(rowDiscount || 0) !== 0
-                        ? (Number(rowDiscount) < 0 ? '-' : '') + fmtMoney(Math.abs(Number(rowDiscount)))
-                        : '--'}
-                    </td>
-                    <td className="px-3 py-3 text-right font-mono text-sm font-bold tabular-nums text-slate-900">
-                      {fmtMoney(subtotal)}
-                    </td>
-                    <td className="px-3 py-3 text-right font-mono text-sm font-bold tabular-nums text-slate-900">
-                      {fmtMoney(totalCost)}
-                    </td>
-                    <td className="px-3 py-3">
-                      {canEditEstimate ? (
-                        <div className="relative flex justify-end">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (isLocked) return;
-                              setActiveActionMenuChargeId((prev) => (String(prev) === String(c.id) ? null : c.id));
-                            }}
-                            disabled={isLocked}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 hover:text-slate-900 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
-                            title="Actions"
-                          >
-                            <MoreVertical className="h-4 w-4" />
-                          </button>
-
-                          {String(activeActionMenuChargeId) === String(c.id) && (
-                            <>
-                              <div
-                                className="fixed inset-0 z-10"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setActiveActionMenuChargeId(null);
-                                }}
-                              />
-                              <div className="absolute right-0 top-full z-20 mt-1 min-w-[130px] overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg animate-in fade-in zoom-in-95 duration-100">
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setActiveActionMenuChargeId(null);
-                                    if (!isLocked) onEditCharge(c);
-                                  }}
-                                  disabled={isLocked}
-                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                  <Edit2 className="h-3.5 w-3.5 text-slate-500" />
-                                  <span>Edit</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setActiveActionMenuChargeId(null);
-                                    if (!isLocked) onDeleteCharge(c.id);
-                                  }}
-                                  disabled={isLocked}
-                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5 text-rose-600" />
-                                  <span>Delete</span>
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      ) : null}
-                    </td>
-                  </tr>
-                )})}
-              </tbody>
-              <tfoot>
-                <tr className="border-t border-slate-200 bg-slate-50/80">
-                  <td className="px-3 py-3" />
-                  <td className="px-5 py-3 text-sm font-black text-slate-900" colSpan={3}>Charges Subtotal</td>
-                  <td className="px-3 py-3 text-right font-mono text-sm font-black tabular-nums text-slate-900">{fmtMoney(selectedJobSubtotal)}</td>
-                  <td className="px-3 py-3" />
-                  <td className="px-3 py-3" />
-                </tr>
-                <tr className="bg-slate-100/90">
-                  <td className="px-3 py-3" />
-                  <td className="px-5 py-3 text-sm font-black text-slate-900" colSpan={4}>Taxable Subtotal</td>
-                  <td className="px-3 py-3 text-right font-mono text-sm font-black tabular-nums text-slate-900">{fmtMoney(taxableSubtotal)}</td>
-                  <td className="px-3 py-3" />
-                  <td className="px-3 py-3" />
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-
-          <div className="bg-[#EBF3FA] text-[#133559] flex items-center justify-between border-t border-blue-100 px-4 py-2.5">
-            {canEditEstimate ? (
-              <button 
-                onClick={isLocked ? undefined : onAddCharge}
-                disabled={isLocked}
-                data-testid="estimate-add-charge"
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800 transition"
-              >
-                <Icon name="plus" className="w-3.5 h-3.5" /> Add line item
-              </button>
-            ) : null}
-            <span className="text-xs text-slate-400">Quantities and rates pull from your service catalog.</span>
-          </div>
-        </div>
-        <div className="mt-2 rounded-3xl border border-slate-200 bg-white p-3 shadow-card">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] font-bold uppercase tracking-widest text-slate-500">Notes</span>
-            {activeNoteTab === 'internal' ? (
-              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-400">
-                <Icon name="eye-off" className="w-3 h-3" /> Not visible to customer
-              </span>
-            ) : null}
-          </div>
-          <div className="mt-3 inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
-            {[
-              ['crew', 'Crew'],
-              ['customer', 'Customer'],
-              ['internal', 'Internal'],
-            ].map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => (isLocked ? null : setActiveNoteTab(key))}
-                disabled={isLocked}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                  activeNoteTab === key
-                    ? 'bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
-            <div className="mb-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white text-slate-600 ring-1 ring-slate-200">
-                <Icon name="message-square" className="h-3.5 w-3.5" />
-              </span>
-              <span>{activeNoteTab === 'crew' ? 'Crew Message' : activeNoteTab === 'customer' ? 'Customer Message' : 'Internal Message'}</span>
-            </div>
-            <div className="max-h-44 space-y-2 overflow-auto pr-1">
-              {postedMessages.length ? postedMessages.map((msg, idx) => (
-                <div key={`${msg.stamp}-${idx}`} className="group relative rounded-2xl bg-white px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200">
-                  {editingNoteIdx === idx ? (
-                    <div className="space-y-2">
-                      <textarea
-                        className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 p-2 text-sm leading-relaxed text-slate-700 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/10"
-                        rows={3}
-                        value={editingNoteDraft}
-                        onChange={(e) => setEditingNoteDraft(e.target.value)}
-                      />
-                      <div className="flex gap-2 justify-end">
-                        <button onClick={() => setEditingNoteIdx(null)} className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50">Cancel</button>
-                        <button onClick={() => saveEditMessage(idx)} className="inline-flex h-8 items-center justify-center rounded-lg bg-brand px-3 text-xs font-bold text-white transition hover:bg-brand-dark">Save</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      {msg.stamp ? <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">{msg.stamp}</div> : null}
-                      <div className="whitespace-pre-wrap leading-relaxed">{msg.body}</div>
-                      <div className="absolute right-2 top-2 hidden items-center gap-1 group-hover:flex">
-                        {canEditEstimate ? (
-                          <>
-                            <button 
-                              onClick={() => { setEditingNoteIdx(idx); setEditingNoteDraft(msg.body); }}
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700 transition"
-                              title="Edit"
-                            >
-                              <Icon name="edit-2" className="h-3 w-3" />
-                            </button>
-                            <button 
-                              onClick={() => deleteMessage(idx)}
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-red-50 text-red-500 hover:bg-red-100 hover:text-red-600 transition"
-                              title="Delete"
-                            >
-                              <Icon name="trash-2" className="h-3 w-3" />
-                            </button>
-                          </>
-                        ) : null}
-                      </div>
-                    </>
+                    <Calculator className="w-4 h-4 text-brand" />
+                    <span>Job Tariff Rating Inputs</span>
+                    {isTariffInputsOpen ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                  </button>
+                  {isTariffInputsOpen && canEditEstimate && !isLocked && (
+                    <button
+                      type="button"
+                      onClick={handleSaveJobInputsClick}
+                      disabled={savingJobInputs || isLocked}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand text-xs font-bold text-white hover:bg-brand-dark transition disabled:opacity-50"
+                    >
+                      {savingJobInputs ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                      Save Inputs & Reprice
+                    </button>
                   )}
                 </div>
-              )) : (
-                <div className="rounded-2xl bg-white px-3 py-4 text-xs font-semibold text-slate-400 ring-1 ring-slate-200">No messages posted yet.</div>
-              )}
+
+                {isTariffInputsOpen && (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                    <TariffAdditionalInputs configuration={estimate?.tariff_configuration} value={additionalInputs}
+                      onChange={setAdditionalInputs} disabled={isLocked || savingJobInputs} />
+                    <div className="col-span-full text-xs text-slate-500">Leave labor hours blank to calculate crew, trucks and hours from shipment size. Enter crew and hours together for manual resources.</div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-500 mb-1" htmlFor="tariff-moving-method">Moving pricing</label>
+                      <select id="tariff-moving-method" value={jobInputDraft.moving_pricing_type}
+                        disabled={isLocked} onChange={(e) => setJobInputDraft((p) => ({ ...p, moving_pricing_type: e.target.value }))}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs">
+                        <option value="">Tariff default</option>
+                        <option value="hourly">Hourly</option>
+                        <option value="flat_plus_hourly">Flat Rate Plus Hourly</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-500 mb-1">Crew Size (with manual hours)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        placeholder="Auto"
+                        value={jobInputDraft.crew_size}
+                        onChange={(e) => setJobInputDraft((p) => ({ ...p, crew_size: e.target.value }))}
+                        disabled={isLocked}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-900 outline-none focus:border-brand"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-500 mb-1">Trucks</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        placeholder="Auto"
+                        value={jobInputDraft.trucks}
+                        onChange={(e) => setJobInputDraft((p) => ({ ...p, trucks: e.target.value }))}
+                        disabled={isLocked}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-900 outline-none focus:border-brand"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-500 mb-1">Labor Hours</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.25"
+                        placeholder="Auto"
+                        value={jobInputDraft.hours}
+                        onChange={(e) => setJobInputDraft((p) => ({ ...p, hours: e.target.value }))}
+                        disabled={isLocked}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-900 outline-none focus:border-brand"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-500 mb-1">Volume (cu·ft)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="Auto"
+                        value={jobInputDraft.volume_cuft}
+                        onChange={(e) => setJobInputDraft((p) => ({ ...p, volume_cuft: e.target.value }))}
+                        disabled={isLocked}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-900 outline-none focus:border-brand"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-500 mb-1">Weight (lbs)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="Auto"
+                        value={jobInputDraft.weight_lbs}
+                        onChange={(e) => setJobInputDraft((p) => ({ ...p, weight_lbs: e.target.value }))}
+                        disabled={isLocked}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-900 outline-none focus:border-brand"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-500 mb-1">Distance (mi)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        placeholder="Route mi"
+                        value={jobInputDraft.distance_miles}
+                        onChange={(e) => setJobInputDraft((p) => ({ ...p, distance_miles: e.target.value }))}
+                        disabled={isLocked}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-900 outline-none focus:border-brand"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Charges Table */}
+            <div className="w-full overflow-x-auto no-scrollbar">
+              <table className="w-full table-fixed min-w-[768px]">
+                <colgroup>
+                  <col className="w-[5%]" />
+                  <col className="w-[30%]" />
+                  <col className="w-[20%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[5%]" />
+                </colgroup>
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50/60">
+                    <th className="px-3 py-2.5 text-center text-[11px] font-bold uppercase tracking-widest text-slate-500"></th>
+                    <th className="px-5 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-500">Name & Details</th>
+                    <th className="px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-widest text-slate-500">Rate</th>
+                    <th className="px-3 py-2.5 text-right text-[11px] font-bold uppercase tracking-widest text-slate-500">Discount</th>
+                    <th className="px-3 py-2.5 text-right text-[11px] font-bold uppercase tracking-widest text-slate-500">Subtotal</th>
+                    <th className="px-3 py-2.5 text-right text-[11px] font-bold uppercase tracking-widest text-slate-500">Total Cost</th>
+                    <th className="w-10 px-3 py-2.5" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {displayCharges.length > 0 ? (
+                    displayCharges.map((c) => {
+                      const subtotal = c.subtotal || c.total_price || (Number(c.quantity || 1) * Number(c.unit_price || 0));
+                      const rowDiscount = c.discount_amount || 0;
+                      const totalCost = c.total_cost || subtotal;
+                      const isTariff = c.source_type === 'tariff';
+                      const isOverride = Boolean(c.is_manual_override);
+                      const catKey = normalizeCategory(c.category);
+                      const catInfo = CATEGORY_PRESENTATION_MAP[catKey] || CATEGORY_PRESENTATION_MAP.other;
+
+                      return (
+                        <tr key={c.id} className="group transition hover:bg-slate-50/60">
+                          <td className="px-3 py-3 text-center">
+                            <span className={`inline-flex items-center justify-center h-6 w-6 rounded-lg text-xs ${catInfo.tone}`}>
+                              <Icon name={catInfo.icon} className="w-3.5 h-3.5" />
+                            </span>
+                          </td>
+                          <td className="px-5 py-3">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => (isLocked ? null : onEditCharge?.(c))}
+                                className="text-left text-sm font-semibold text-brand hover:text-brand-dark hover:underline"
+                              >
+                                {c.name}
+                              </button>
+                              <span
+                                className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                  isTariff
+                                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                    : 'bg-slate-100 text-slate-700 border border-slate-200'
+                                }`}
+                              >
+                                {isTariff ? 'Tariff' : 'Manual'}
+                              </span>
+                              {isOverride && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                  Overridden
+                                </span>
+                              )}
+                            </div>
+                            {c.description && (
+                              <p className="text-xs text-slate-500 mt-0.5 whitespace-normal break-words">{c.description}</p>
+                            )}
+                            {isOverride && c.metadata?.calculated_amount != null && (
+                              <p className="text-[11px] text-amber-700 mt-0.5 font-medium">
+                                Calculated tariff price: {fmtMoney(c.metadata.calculated_amount)}
+                              </p>
+                            )}
+                          </td>
+                          <td className="px-3 py-3 text-left font-mono text-sm leading-5 tabular-nums text-slate-700">
+                            <span className="block whitespace-normal break-words">
+                              {c.quantity && Number(c.quantity) !== 1 ? `${c.quantity} × ` : ''}
+                              {fmtMoney(c.unit_price)}
+                              {c.unit ? ` / ${c.unit}` : ''}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3 text-right font-mono text-sm font-bold tabular-nums text-emerald-700">
+                            {Number(rowDiscount || 0) !== 0
+                              ? (Number(rowDiscount) < 0 ? '-' : '') + fmtMoney(Math.abs(Number(rowDiscount)))
+                              : '--'}
+                          </td>
+                          <td className="px-3 py-3 text-right font-mono text-sm font-bold tabular-nums text-slate-900">
+                            {fmtMoney(subtotal)}
+                          </td>
+                          <td className="px-3 py-3 text-right font-mono text-sm font-bold tabular-nums text-slate-900">
+                            {fmtMoney(totalCost)}
+                          </td>
+                          <td className="px-3 py-3">
+                            {canEditEstimate ? (
+                              <div className="relative flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (isLocked) return;
+                                    setActiveActionMenuChargeId((prev) => (String(prev) === String(c.id) ? null : c.id));
+                                  }}
+                                  disabled={isLocked}
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 hover:text-slate-900 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+                                  title="Actions"
+                                >
+                                  <MoreVertical className="h-4 w-4" />
+                                </button>
+
+                                {String(activeActionMenuChargeId) === String(c.id) && (
+                                  <>
+                                    <div
+                                      className="fixed inset-0 z-10"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setActiveActionMenuChargeId(null);
+                                      }}
+                                    />
+                                    <div className="absolute right-0 top-full z-20 mt-1 min-w-[160px] overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg animate-in fade-in zoom-in-95 duration-100">
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setActiveActionMenuChargeId(null);
+                                          if (!isLocked) onEditCharge?.(c);
+                                        }}
+                                        disabled={isLocked}
+                                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        <Edit2 className="h-3.5 w-3.5 text-slate-500" />
+                                        <span>{isTariff ? 'Edit Override' : 'Edit'}</span>
+                                      </button>
+                                      {isTariff && isOverride && onClearOverride && (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setActiveActionMenuChargeId(null);
+                                            if (!isLocked) onClearOverride(c.id);
+                                          }}
+                                          disabled={isLocked}
+                                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-amber-700 transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                          <RotateCcw className="h-3.5 w-3.5 text-amber-600" />
+                                          <span>Restore Tariff Price</span>
+                                        </button>
+                                      )}
+                                      {isTariff ? (
+                                        <div
+                                          title="Tariff lines cannot be deleted. Adjust tariff inputs or set rate to 0."
+                                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-slate-400 cursor-not-allowed"
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5 text-slate-300" />
+                                          <span>Delete (Tariff locked)</span>
+                                        </div>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setActiveActionMenuChargeId(null);
+                                            if (!isLocked) onDeleteCharge?.(c.id);
+                                          }}
+                                          disabled={isLocked}
+                                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5 text-rose-600" />
+                                          <span>Delete</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            ) : null}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={7} className="px-5 py-8 text-center text-xs text-slate-400">
+                        No charges rated yet. Adjust tariff inputs above or add a manual charge.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-slate-200 bg-slate-50/80">
+                    <td className="px-3 py-3" />
+                    <td className="px-5 py-3 text-sm font-black text-slate-900" colSpan={3}>
+                      Job Charges Subtotal
+                    </td>
+                    <td className="px-3 py-3 text-right font-mono text-sm font-black tabular-nums text-slate-900">
+                      {fmtMoney(selectedJobSubtotal)}
+                    </td>
+                    <td className="px-3 py-3" />
+                    <td className="px-3 py-3" />
+                  </tr>
+                </tfoot>
+              </table>
             </div>
-            <div className="mt-3 flex items-end gap-2">
-              <textarea
-                className="w-full resize-none rounded-2xl border border-slate-200 bg-white p-3 text-sm leading-relaxed text-slate-700 placeholder:text-slate-400 focus:border-brand focus:outline-none focus:ring-4 focus:ring-brand/10"
-                rows={3}
-                value={activeDraft}
-                onChange={(e) => {
-                  if (isLocked) return;
-                  setNoteDrafts((prev) => ({ ...prev, [activeNoteTab]: e.target.value }));
-                }}
-                disabled={isLocked}
-                placeholder={
-                  activeNoteTab === 'crew'
-                    ? 'Type a message for the crew...'
-                    : activeNoteTab === 'customer'
-                      ? 'Type a message for the customer...'
-                      : 'Type an internal message...'
-                }
-              />
+
+            {/* Applied Discounts Subsection */}
+            {discountCharges.length > 0 && (
+              <div className="p-4 border-t border-slate-200 bg-emerald-50/40">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
+                    <Tag className="w-3.5 h-3.5 text-emerald-600" />
+                    Applied Estimate Discounts
+                  </span>
+                  <span className="font-mono text-sm font-black text-emerald-700">
+                    -{fmtMoney(displayDiscount)}
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {discountCharges.map((d) => (
+                    <div
+                      key={d.id}
+                      className="flex items-center justify-between bg-white rounded-xl border border-emerald-100 p-2.5 text-xs shadow-xs"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-800">{d.name}</span>
+                        <span className="text-slate-500 font-mono">
+                          ({d.metadata?.discount_type === 'percentage'
+                            ? `${d.metadata?.value}%`
+                            : fmtMoney(d.metadata?.value || d.unit_price)})
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="font-mono font-bold text-emerald-700">
+                          -{fmtMoney(d.total_price || d.subtotal || d.unit_price)}
+                        </span>
+                        {canEditEstimate && !isLocked && (
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => onEditCharge?.(d)}
+                              className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                              title="Edit discount"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onDeleteCharge?.(d.id)}
+                              className="p-1 rounded text-rose-400 hover:text-rose-600 hover:bg-rose-50"
+                              title="Remove discount"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="bg-[#EBF3FA] text-[#133559] flex items-center justify-between border-t border-blue-100 px-4 py-2.5">
               {canEditEstimate ? (
                 <button
-                  type="button"
-                  onClick={postActiveMessage}
-                  disabled={isLocked || !String(activeDraft || '').trim()}
-                  className="inline-flex h-11 items-center justify-center rounded-xl bg-brand px-4 text-sm font-bold text-white transition hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={isLocked ? undefined : onAddCharge}
+                  disabled={isLocked}
+                  data-testid="estimate-add-charge"
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 transition"
                 >
-                  Post
+                  <Icon name="plus" className="w-3.5 h-3.5 text-brand" /> Add Manual Charge or Discount
                 </button>
               ) : null}
+              <span className="text-xs text-slate-400">Tariff rates are rated directly by the pricing engine.</span>
             </div>
           </div>
-        </div>
-      </section>
 
-      <aside className="lg:col-span-4">
-        <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-card flex flex-col">
-          <div className="bg-[#EBF3FA] text-[#133559] border-b border-blue-100 px-4 py-2.5">
-            <span className="text-[11px] font-bold uppercase tracking-widest text-slate-500">Estimate totals</span>
-          </div>
-	          <dl className="space-y-2 px-5 py-4 text-sm">
-	            <div className="flex items-center justify-between gap-3">
-	              <dt className="text-slate-500">Sales tax %</dt>
-	              <dd className="flex items-center gap-2">
-	                <input
-                  type="number"
-                  value={taxPctInput}
-                  onChange={(e) => onTaxPctChange?.(e.target.value)}
-                  onBlur={() => onTaxPctBlur?.()}
-                  className="w-24 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:border-brand focus:ring-4 focus:ring-brand/10"
-                  placeholder="0"
-                  min="0"
-                  step="1"
-                  inputMode="numeric"
-                />
-                {taxSaving ? (
-                  <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Saving…</span>
-                ) : null}
-              </dd>
+          {/* Notes Section */}
+          <div className="rounded-3xl border border-slate-200 bg-white p-3 shadow-card">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-widest text-slate-500">Notes</span>
+              {activeNoteTab === 'internal' ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-400">
+                  <Icon name="eye-off" className="w-3 h-3" /> Not visible to customer
+                </span>
+              ) : null}
             </div>
-            <div className="flex items-center justify-between gap-3">
-              <dt className="text-slate-500">Tax exempt</dt>
-              <dd className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={Boolean(taxExempt)}
-                  onChange={(e) => onTaxExemptChange?.(e.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300"
-                />
-                <span className="text-xs font-semibold text-slate-500">No tax applied</span>
-              </dd>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <dt className="text-slate-500">Discount</dt>
-              <dd className="flex flex-col items-end gap-2">
-                <div className="flex w-56 items-center gap-2">
-                  <span className="text-xs font-bold text-slate-400">$</span>
-                  <input
-                    type="number"
-                    value={discountInput}
-                    onChange={(e) => onDiscountChange?.(e.target.value)}
-                    onBlur={() => onDiscountBlur?.()}
-                    min="0"
-                    step="0.01"
-                    inputMode="decimal"
-                    placeholder="0.00"
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:border-brand focus:ring-4 focus:ring-brand/10"
-                    aria-label="Discount amount"
-                  />
-                </div>
-                <select
-                  value={selectedDiscountPresetId}
-                  onChange={(e) => onDiscountPresetChange?.(e.target.value)}
-                  className="w-56 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:border-brand focus:ring-4 focus:ring-brand/10"
+            <div className="mt-3 inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+              {[
+                ['crew', 'Crew'],
+                ['customer', 'Customer'],
+                ['internal', 'Internal'],
+              ].map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => (isLocked ? null : setActiveNoteTab(key))}
+                  disabled={isLocked}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                    activeNoteTab === key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                  }`}
                 >
-                  <option value="">Discount preset</option>
-                  {discountPresets.map((preset) => {
-                    const type = String(preset?.discount_type || '').toLowerCase();
-                    const rawValue = Number(preset?.value || 0);
-                    const formattedValue = type === 'fixed'
-                      ? `$${rawValue.toFixed(2)}`
-                      : `${rawValue.toFixed(2).replace(/\.00$/, '')}%`;
-                    return (
-                      <option key={String(preset?.id || '')} value={String(preset?.id || '')}>
-                        {preset?.label} ({formattedValue})
-                      </option>
-                    );
-                  })}
-                  <option value="custom">Custom discount</option>
-                </select>
-                {selectedDiscountPresetId === 'custom' ? (
-                  <div className="flex w-56 items-center gap-1">
-                    <select
-                      value={customDiscountType}
-                      onChange={(e) => setCustomDiscountType(e.target.value)}
-                      className="rounded-xl border border-slate-200 bg-slate-50 px-2 py-2 text-sm font-bold text-slate-900 outline-none focus:border-brand"
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
+              <div className="mb-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white text-slate-600 ring-1 ring-slate-200">
+                  <Icon name="message-square" className="h-3.5 w-3.5" />
+                </span>
+                <span>
+                  {activeNoteTab === 'crew'
+                    ? 'Crew Message'
+                    : activeNoteTab === 'customer'
+                      ? 'Customer Message'
+                      : 'Internal Message'}
+                </span>
+              </div>
+              <div className="max-h-44 space-y-2 overflow-auto pr-1">
+                {postedMessages.length ? (
+                  postedMessages.map((msg, idx) => (
+                    <div
+                      key={`${msg.stamp}-${idx}`}
+                      className="group relative rounded-2xl bg-white px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-200"
                     >
-                      <option value="percent">%</option>
-                      <option value="fixed">$</option>
+                      {editingNoteIdx === idx ? (
+                        <div className="space-y-2">
+                          <textarea
+                            className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 p-2 text-sm leading-relaxed text-slate-700 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/10"
+                            rows={3}
+                            value={editingNoteDraft}
+                            onChange={(e) => setEditingNoteDraft(e.target.value)}
+                          />
+                          <div className="flex gap-2 justify-end">
+                            <button
+                              onClick={() => setEditingNoteIdx(null)}
+                              className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={() => saveEditMessage(idx)}
+                              className="inline-flex h-8 items-center justify-center rounded-lg bg-brand px-3 text-xs font-bold text-white transition hover:bg-brand-dark"
+                            >
+                              Save
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          {msg.stamp ? (
+                            <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                              {msg.stamp}
+                            </div>
+                          ) : null}
+                          <div className="whitespace-pre-wrap leading-relaxed">{msg.body}</div>
+                          <div className="absolute right-2 top-2 hidden items-center gap-1 group-hover:flex">
+                            {canEditEstimate ? (
+                              <>
+                                <button
+                                  onClick={() => {
+                                    setEditingNoteIdx(idx);
+                                    setEditingNoteDraft(msg.body);
+                                  }}
+                                  className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700 transition"
+                                  title="Edit"
+                                >
+                                  <Icon name="edit-2" className="h-3 w-3" />
+                                </button>
+                                <button
+                                  onClick={() => deleteMessage(idx)}
+                                  className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-red-50 text-red-500 hover:bg-red-100 hover:text-red-600 transition"
+                                  title="Delete"
+                                >
+                                  <Icon name="trash-2" className="h-3 w-3" />
+                                </button>
+                              </>
+                            ) : null}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-2xl bg-white px-3 py-4 text-xs font-semibold text-slate-400 ring-1 ring-slate-200">
+                    No messages posted yet.
+                  </div>
+                )}
+              </div>
+              <div className="mt-3 flex items-end gap-2">
+                <textarea
+                  className="w-full resize-none rounded-2xl border border-slate-200 bg-white p-3 text-sm leading-relaxed text-slate-700 placeholder:text-slate-400 focus:border-brand focus:outline-none focus:ring-4 focus:ring-brand/10"
+                  rows={3}
+                  value={activeDraft}
+                  onChange={(e) => {
+                    if (isLocked) return;
+                    setNoteDrafts((prev) => ({ ...prev, [activeNoteTab]: e.target.value }));
+                  }}
+                  disabled={isLocked}
+                  placeholder={
+                    activeNoteTab === 'crew'
+                      ? 'Type a message for the crew...'
+                      : activeNoteTab === 'customer'
+                        ? 'Type a message for the customer...'
+                        : 'Type an internal message...'
+                  }
+                />
+                {canEditEstimate ? (
+                  <button
+                    type="button"
+                    onClick={postActiveMessage}
+                    disabled={isLocked || !String(activeDraft || '').trim()}
+                    className="inline-flex h-11 items-center justify-center rounded-xl bg-brand px-4 text-sm font-bold text-white transition hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Post
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Sidebar: Authoritative Totals, Tax Profile, Deposit, NTE */}
+        <aside className="lg:col-span-4 space-y-3">
+          <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-card flex flex-col">
+            <div className="bg-[#EBF3FA] text-[#133559] border-b border-blue-100 px-4 py-2.5 flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-widest text-slate-500">Estimate Totals</span>
+              <span className="rounded-full border border-blue-200 bg-white px-2.5 py-0.5 text-[10px] font-bold text-blue-700">
+                Authoritative
+              </span>
+            </div>
+
+            <dl className="space-y-3 px-5 py-4 text-sm border-b border-slate-100">
+              {/* Sales Tax Rate (Branch profile - Read only) */}
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-slate-500 flex items-center gap-1.5">
+                  <Percent className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Branch sales tax</span>
+                </dt>
+                <dd className="font-mono text-sm font-bold text-slate-800">
+                  {salesTaxPct}%
+                  <span className="ml-1 text-[11px] font-normal text-slate-400">(Configured)</span>
+                </dd>
+              </div>
+
+              {/* Tax Exemption */}
+              <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label htmlFor="taxExemptCheck" className="text-xs font-bold text-slate-700 cursor-pointer flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="taxExemptCheck"
+                      checked={Boolean(taxExemptionDraft.tax_exempt)}
+                      onChange={(e) => setTaxExemptionDraft((p) => ({ ...p, tax_exempt: e.target.checked }))}
+                      disabled={isLocked}
+                      className="h-4 w-4 rounded border-slate-300 text-brand"
+                    />
+                    <span>Tax exempt</span>
+                  </label>
+                  {canEditEstimate && !isLocked && (
+                    <button
+                      type="button"
+                      onClick={handleSaveTaxExemptClick}
+                      disabled={savingTaxExempt || isLocked}
+                      className="text-[11px] font-bold text-brand hover:underline disabled:opacity-50"
+                    >
+                      {savingTaxExempt ? 'Saving…' : 'Update Tax Exemption'}
+                    </button>
+                  )}
+                </div>
+
+                {taxExemptionDraft.tax_exempt && (
+                  <div className="space-y-2 pt-1">
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">
+                        Exemption Reason *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Non-profit / Government / First Nations"
+                        value={taxExemptionDraft.tax_exemption_reason}
+                        onChange={(e) => setTaxExemptionDraft((p) => ({ ...p, tax_exemption_reason: e.target.value }))}
+                        disabled={isLocked}
+                        className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 outline-none focus:border-brand"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">
+                        Certificate # (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Certificate / registry #"
+                        value={taxExemptionDraft.tax_exemption_certificate_number}
+                        onChange={(e) => setTaxExemptionDraft((p) => ({ ...p, tax_exemption_certificate_number: e.target.value }))}
+                        disabled={isLocked}
+                        className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800 outline-none focus:border-brand"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Deposit Required */}
+              <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <DollarSign className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Deposit policy</span>
+                  </span>
+                  <span className="font-mono text-xs font-bold text-slate-800">
+                    {fmtMoney(displayDeposit)}
+                  </span>
+                </div>
+                {canEditEstimate && !isLocked && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <select
+                      value={depositDraft.type}
+                      onChange={(e) => setDepositDraft((p) => ({ ...p, type: e.target.value }))}
+                      disabled={isLocked}
+                      className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 outline-none"
+                    >
+                      <option value="none">None</option>
+                      <option value="percentage">Percent (%)</option>
+                      <option value="amount">Fixed ($)</option>
                     </select>
+                    {depositDraft.type !== 'none' && (
+                      <input
+                        type="number"
+                        min="0"
+                        step={depositDraft.type === 'percentage' ? '1' : '0.01'}
+                        value={depositDraft.value}
+                        onChange={(e) => setDepositDraft((p) => ({ ...p, value: e.target.value }))}
+                        disabled={isLocked}
+                        placeholder={depositDraft.type === 'percentage' ? '10' : '100'}
+                        className="w-20 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-900 outline-none"
+                      />
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleSaveDepositClick}
+                      disabled={savingDeposit || isLocked}
+                      className="text-[11px] font-bold text-brand hover:underline disabled:opacity-50 ml-auto"
+                    >
+                      {savingDeposit ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Not To Exceed (NTE) */}
+              <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <Shield className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Not To Exceed (NTE)</span>
+                  </span>
+                  {estimate?.not_to_exceed_is_manual ? (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                      Manual Override
+                    </span>
+                  ) : null}
+                </div>
+                {canEditEstimate && !isLocked && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <span className="text-xs font-bold text-slate-400">$</span>
                     <input
                       type="number"
-                      value={customDiscountValue}
-                      onChange={(e) => setCustomDiscountValue(e.target.value)}
-                      placeholder="Amount"
-                      className="flex-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-2 py-2 text-sm font-bold text-slate-900 outline-none focus:border-brand"
+                      min="0"
+                      step="0.01"
+                      placeholder={estimate?.calculation_trace?.not_to_exceed_amount || 'Uncapped'}
+                      value={nteDraft}
+                      onChange={(e) => setNteDraft(e.target.value)}
+                      disabled={isLocked}
+                      className="w-28 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-900 outline-none"
                     />
                     <button
                       type="button"
-                      onClick={() => onApplyCustomDiscount?.(customDiscountType, customDiscountValue)}
-                      disabled={!customDiscountValue}
-                      className="rounded-xl bg-brand px-3 py-2 text-sm font-bold text-white transition hover:bg-brand-dark disabled:opacity-50"
+                      onClick={handleSaveNteClick}
+                      disabled={savingNte || isLocked}
+                      className="text-[11px] font-bold text-brand hover:underline disabled:opacity-50"
                     >
-                      Apply
+                      {savingNte ? 'Saving…' : 'Save'}
                     </button>
-                  </div>
-                ) : null}
-                {discountSaving ? (
-                  <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Saving…</span>
-                ) : null}
-                {Array.isArray(appliedDiscountPresets) && appliedDiscountPresets.length ? (
-                  <div className="flex max-w-md flex-wrap justify-end gap-2 text-right">
-                    {appliedDiscountPresets.map((preset) => (
-                      <span
-                        key={String(preset?.id || `${preset?.label}-${preset?.value}`)}
-                        className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700"
+                    {estimate?.not_to_exceed_is_manual && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNteDraft('');
+                          onUpdateNte?.(null);
+                        }}
+                        disabled={savingNte || isLocked}
+                        className="text-[11px] font-bold text-slate-500 hover:text-slate-800 hover:underline"
+                        title="Reset to tariff-derived NTE"
                       >
-                        <span>{preset?.label}</span>
-                        <span className="font-mono text-[11px]">
-                          {Number(preset?.applied_amount || 0) > 0 ? `-${Number(preset.applied_amount).toFixed(2)}` : '$0.00'}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => onRemoveDiscount?.(preset?.id)}
-                          className="rounded-full bg-white px-1.5 py-0.5 text-[10px] font-bold text-rose-600 ring-1 ring-inset ring-rose-200 hover:bg-rose-50"
-                        >
-                          Remove
-                        </button>
-                      </span>
-                    ))}
+                        Reset
+                      </button>
+                    )}
                   </div>
-                ) : null}
-              </dd>
-            </div>
-          </dl>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Estimate breakdown</div>
-                <div className="mt-1 text-sm font-semibold text-slate-700">Estimate-wide totals update live</div>
+                )}
               </div>
-              <div className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-bold uppercase tracking-widest text-slate-500">
-                Live preview
-              </div>
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <div className="rounded-xl border border-slate-200 bg-white p-3">
-                <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Subtotal</div>
-                <div className="mt-2 font-mono text-lg font-black tabular-nums text-slate-900">{fmtMoney(estimateSubtotal)}</div>
-              </div>
-              <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3">
-                <div className="text-[11px] font-bold uppercase tracking-widest text-emerald-600">Discount</div>
-                <div className="mt-2 font-mono text-lg font-black tabular-nums text-emerald-700">
-                  {Number(totals?.discountAmount || 0) > 0 ? fmtAccountingMoney(-Number(totals.discountAmount || 0)) : fmtAccountingMoney(0)}
+            </dl>
+
+            {/* Authoritative Breakdown Bento */}
+            <div className="p-4 bg-slate-50/80">
+              <div className="grid grid-cols-2 gap-2.5">
+                <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-xs">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Subtotal</div>
+                  <div className="mt-1 font-mono text-base font-black tabular-nums text-slate-900">
+                    {fmtMoney(displaySubtotal)}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 p-3 shadow-xs">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Discounts</div>
+                  <div className="mt-1 font-mono text-base font-black tabular-nums text-emerald-800">
+                    {displayDiscount > 0 ? `-${fmtMoney(displayDiscount)}` : fmtMoney(0)}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-xs">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Taxable Subtotal</div>
+                  <div className="mt-1 font-mono text-base font-black tabular-nums text-slate-900">
+                    {fmtMoney(displayTaxable)}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-xs">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Sales Tax</div>
+                  <div className="mt-1 font-mono text-base font-black tabular-nums text-slate-900">
+                    {fmtMoney(displayTax)}
+                  </div>
                 </div>
               </div>
-              <div className="rounded-xl border border-slate-200 bg-white p-3">
-                <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Taxable</div>
-                <div className="mt-2 font-mono text-lg font-black tabular-nums text-slate-900">{fmtMoney(totals.taxableSubtotal)}</div>
+
+              <div className="mt-3 rounded-2xl border border-blue-200 bg-[#EBF3FA] px-4 py-3.5 text-slate-900 flex items-center justify-between shadow-xs">
+                <div>
+                  <div className="text-[11px] font-black uppercase tracking-widest text-[#133559]">Grand Total</div>
+                  <div className="mt-0.5 text-[10px] font-semibold text-slate-500">Authoritative priced total</div>
+                </div>
+                <div className="font-mono text-2xl font-black tabular-nums text-[#133559]">
+                  {fmtMoney(displayGrandTotal)}
+                </div>
               </div>
-              <div className="rounded-xl border border-slate-200 bg-white p-3">
-                <div className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Tax</div>
-                <div className="mt-2 font-mono text-lg font-black tabular-nums text-slate-900">{fmtMoney(totals.taxAmount)}</div>
-              </div>
-            </div>
-            <div className="mt-3 rounded-xl border border-blue-200/80 bg-[#EBF3FA] px-4 py-3 text-slate-900 flex items-end justify-between shadow-sm">
-              <div>
-                <div className="text-[11px] font-extrabold uppercase tracking-widest text-[#133559]">Grand total</div>
-                <div className="mt-1 text-[10px] font-semibold text-slate-600">Estimate-wide total, not selected job segment</div>
-              </div>
-              <div className="font-mono text-2xl font-black tabular-nums text-slate-900">{fmtMoney(totals.totalDue)}</div>
             </div>
           </div>
-        </div>
-        {paymentsContent ? <div className="mt-2">{paymentsContent}</div> : null}
-      </aside>
+          {paymentsContent ? <div className="mt-2">{paymentsContent}</div> : null}
+        </aside>
+      </div>
     </div>
   );
 }
+ 
+
 
 /* ---------- Route Logistics Tab ---------- */
 export function RouteTab({

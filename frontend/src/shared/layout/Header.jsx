@@ -8,7 +8,7 @@ import {
   Sun, Moon, Target, Layers, Truck, Zap, Building2, ChevronDown, ChevronRight, ChevronLeft, Check, X,
   ArrowUpRight
 } from 'lucide-react';
-import { getTasks, universalSearch, getNotifications, markAllNotificationsRead, markNotificationRead, markNotificationUnread, getCompanies } from '../../services/api';
+import { getFollowUps, universalSearch, getNotifications, markAllNotificationsRead, markNotificationRead, markNotificationUnread, getCompanies } from '../../services/api';
 import logo from '../../assets/full_logo.png';
 import { getLegacyRecordDetailPath } from '../../features/crm/utils/recordRoutes';
 import { toast } from 'sonner';
@@ -688,10 +688,10 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
   const fetchFollowUps = useCallback(async () => {
     setLoadingFollowUps(true);
     try {
-      const response = await getTasks({ ordering: 'due_date', limit: 50 });
+      const response = await getFollowUps({ only_open: true, limit: 50 });
       const tasks = asList(response.data ?? response);
       const pending = tasks.filter((task) => 
-        String(task?.activity_details?.status || task?.activity?.status || '').toLowerCase() !== 'completed'
+        String(task?.status || task?.activity_details?.status || task?.activity?.status || '').toLowerCase() !== 'completed'
       );
       setFollowUps(pending.slice(0, 20));
 
@@ -709,7 +709,7 @@ const Header = ({ onLogout, user, onMenuToggle }) => {
       if (newOverdue.length > 0) {
         if (newOverdue.length === 1) {
           const task = newOverdue[0];
-          const label = task.activity_details?.subject || task.task_type || 'Follow-up';
+          const label = task.title || task.activity_details?.subject || task.task_type || 'Follow-up';
           toast.warning(`Overdue: ${label}`, { 
             id: 'overdue-notification',
             description: 'This follow-up is past its due date.', 

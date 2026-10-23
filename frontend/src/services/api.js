@@ -450,6 +450,14 @@ export const getOpportunityBookedByDateReport = (params) =>
 export const getTasks = (params = {}) => params.lead || params.opportunity ? recordTasks(params) : api.get("/sales/tasks/", { params });
 export const createTask = (data) => createRecordTask(data);
 export const updateTask = (id, data, target = data) => target.lead || target.opportunity ? updateRecordTask(id, data, target) : api.patch(`/sales/tasks/${id}/`, data);
+// Unified follow-up API. These routes work for both Leads and Opportunities and
+// avoid the legacy sales task endpoints and per-record task fan-out requests.
+export const getFollowUps = (params = {}) => api.get("/tenant/followups/", { params });
+export const getFollowUp = (id) => api.get(`/tenant/followups/${id}/`);
+export const createFollowUp = (data) => api.post("/tenant/followups/", data);
+export const updateFollowUp = (id, data) => api.patch(`/tenant/followups/${id}/`, data);
+export const deleteFollowUp = (id) => api.delete(`/tenant/followups/${id}/`);
+export const completeFollowUp = (id) => api.post(`/tenant/followups/${id}/complete/`, {});
 export const getCallLogs = (params) => api.get("/sales/call-logs/", { params });
 export const liststatuscode = (params) => api.get("/sales/status-codes/list-status-codes", { params });  
 export const getStatusCodes = (params) => api.get("/tenant/opportunity-statuses/", { params });
@@ -544,17 +552,53 @@ export const createCrewMember = (data) => api.post("/crew/", data);
 export const updateCrewMember = (id, data) => api.patch(`/crew/${id}/`, data);
 export const deleteCrewMember = (id) => api.delete(`/crew/${id}/`);
 
+import { estimateApi } from "../features/crm/leads/estimateApi";
+export { estimateApi };
+
 // ================= ESTIMATE APIs =================
 export const syncInternalInventory = (id, data) => api.post(`/estimates/${id}/sync-internal-inventory/`, data);
-export const getEstimates = (params) => legacyOperationsApiEnabled ? api.get("/estimates/", { params }) : Promise.resolve([]);
-export const createEstimate = (data) => legacyOperationsApiEnabled ? api.post("/estimates/", data) : unavailableLegacyOperation("Estimate creation");
-export const updateEstimate = (id, data) => api.patch(`/estimates/${id}/`, data);
-export const recalculateEstimate = (id) => api.post(`/estimates/${id}/recalculate/`);
+export const getEstimates = (params) => {
+  const oppId = params?.opportunity_id ?? params?.opportunity;
+  if (!oppId) return Promise.resolve([]);
+  return estimateApi.list(params);
+};
+export const getEstimate = (id) => estimateApi.get(id);
+export const createEstimate = (data, idempotencyKey) => estimateApi.create(data, idempotencyKey);
+export const updateEstimate = (id, data) => estimateApi.update(id, data);
+export const recalculateEstimate = (id, editVersion) => estimateApi.recalculate(id, editVersion);
 export const updateEstimateManualDetails = (id, data) => api.patch(`/estimates/${id}/manual-details/`, data);
-export const addEstimateCharge = (id, data) => api.post(`/estimates/${id}/charges/`, data);
+export const addEstimateCharge = (id, data) => estimateApi.addCharge(id, data);
 export const addEstimateChargeFromCatalog = (id, data) => api.post(`/estimates/${id}/charges/from-catalog/`, data);
-export const updateEstimateCharge = (id, data) => api.patch(`/estimate-charges/${id}/`, data);
-export const deleteEstimateCharge = (id) => api.delete(`/estimate-charges/${id}/`);
+export const updateEstimateCharge = (estimateIdOrChargeId, maybeChargeIdOrData, maybeData) => {
+  if (maybeData !== undefined) {
+    return estimateApi.updateCharge(estimateIdOrChargeId, maybeChargeIdOrData, maybeData);
+  }
+  const chargeId = estimateIdOrChargeId;
+  const data = maybeChargeIdOrData || {};
+  const estimateId = data.estimate_id || data.estimateId;
+  if (estimateId) {
+    return estimateApi.updateCharge(estimateId, chargeId, data);
+  }
+  return api.patch(`/estimate-charges/${chargeId}/`, data);
+};
+export const deleteEstimateCharge = (estimateIdOrChargeId, maybeChargeIdOrVersion, maybeVersion) => {
+  if (maybeVersion !== undefined) {
+    return estimateApi.deleteCharge(estimateIdOrChargeId, maybeChargeIdOrVersion, maybeVersion);
+  }
+  if (typeof maybeChargeIdOrVersion === 'object' && (maybeChargeIdOrVersion?.estimate_id || maybeChargeIdOrVersion?.estimateId)) {
+    const estId = maybeChargeIdOrVersion.estimate_id || maybeChargeIdOrVersion.estimateId;
+    return estimateApi.deleteCharge(estId, estimateIdOrChargeId, maybeChargeIdOrVersion.edit_version);
+  }
+  if (typeof maybeChargeIdOrVersion === 'number' || (typeof maybeChargeIdOrVersion === 'string' && /^\d+$/.test(maybeChargeIdOrVersion))) {
+    return estimateApi.deleteCharge(estimateIdOrChargeId, maybeChargeIdOrVersion, maybeVersion);
+  }
+  return api.delete(`/estimate-charges/${estimateIdOrChargeId}/`);
+};
+export const clearEstimateOverride = (id, chargeId, editVersion) => estimateApi.clearOverride(id, chargeId, editVersion);
+export const reviseEstimate = (id, editVersion) => estimateApi.revise(id, editVersion);
+export const supersedeEstimate = (id, data) => estimateApi.supersede(id, data);
+export const requestEstimateApproval = (id, data) => estimateApi.requestApproval(id, data);
+export const decideEstimateApproval = (id, approvalId, decision, data) => estimateApi.decideApproval(id, approvalId, decision, data);
 export const getEstimatePortalInventory = (id) => legacyOperationsApiEnabled
   ? api.get(`/estimates/${id}/portal-inventory/`)
   : Promise.resolve([]);
@@ -590,14 +634,14 @@ export const requestEstimatePortal = (id, data = {}) => legacyOperationsApiEnabl
   ? api.post(`/estimates/${id}/request-portal/`, data)
   : unavailableLegacyOperation("Estimate portal");
 export const markEstimateInventoryReviewed = (id) => api.post(`/estimates/${id}/mark-inventory-reviewed/`);
-export const sendEstimate = (id, data = {}) => api.post(`/estimates/${id}/send/`, data);
+export const sendEstimate = (id, data = {}, idempotencyKey) => estimateApi.send(id, data, idempotencyKey);
 export const getCustomerPortalSettings = (params) => api.get("/customer-portal-settings/", { params });
 export const createCustomerPortalSettings = (data) => api.post("/customer-portal-settings/", data);
 export const updateCustomerPortalSettings = (id, data) => api.patch(`/customer-portal-settings/${id}/`, data);
-export const getEstimateDiscountPresets = (params) => legacyOperationsApiEnabled ? api.get("/estimate-discount-presets/", { params }) : Promise.resolve([]);
-export const createEstimateDiscountPreset = (data) => api.post("/estimate-discount-presets/", data);
-export const updateEstimateDiscountPreset = (id, data) => api.patch(`/estimate-discount-presets/${id}/`, data);
-export const deleteEstimateDiscountPreset = (id) => api.delete(`/estimate-discount-presets/${id}/`);
+export const getEstimateDiscountPresets = () => estimateApi.settings.getDiscountPresets();
+export const createEstimateDiscountPreset = (data) => estimateApi.settings.createDiscountPreset(data);
+export const updateEstimateDiscountPreset = (id, data) => estimateApi.settings.updateDiscountPreset(id, data);
+export const deleteEstimateDiscountPreset = (id) => estimateApi.settings.updateDiscountPreset(id, { is_active: false });
 export const seedEstimateDiscountPresets = (data = {}) => api.post("/estimate-discount-presets/seed-defaults/", data);
 export const getInventoryRoomTemplates = (params) => api.get("/inventory-room-templates/", { params });
 export const createInventoryRoomTemplate = (data) => api.post("/inventory-room-templates/", data);
@@ -915,6 +959,12 @@ const API = {
     getTasks,
     createTask,
     updateTask,
+    getFollowUps,
+    getFollowUp,
+    createFollowUp,
+    updateFollowUp,
+    deleteFollowUp,
+    completeFollowUp,
     getStatusCodes,
     getStatusCodeLookups,
     getOpportunityLossReasons,
@@ -936,10 +986,19 @@ const API = {
   },
   estimates: {
     getEstimates,
+    getEstimate,
     createEstimate,
+    updateEstimate,
     recalculateEstimate,
     updateEstimateManualDetails,
     addEstimateCharge,
+    updateEstimateCharge,
+    deleteEstimateCharge,
+    clearEstimateOverride,
+    reviseEstimate,
+    supersedeEstimate,
+    requestEstimateApproval,
+    decideEstimateApproval,
     addEstimateChargeFromCatalog,
     requestEstimateInventory,
     markEstimateInventoryReviewed,

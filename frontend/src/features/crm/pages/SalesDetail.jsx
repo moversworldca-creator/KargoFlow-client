@@ -1,7 +1,6 @@
 import { recordWorkError } from '../leads/recordWorkError';
 import LeadInventory from '../leads/LeadInventory';
 import { recordInventoryLeadId } from '../leads/leadInventoryApi';
-import { completeRecordTask } from '../leads/recordWorkApi';
 import InventoryPortalPanel from '../components/InventoryPortalPanel';
 import IssuedDocumentsPanel from '../components/IssuedDocumentsPanel';
 import { hasSendingMailbox, getComposerTemplates, getComposerTemplate } from '../leads/communicationSetupApi';
@@ -137,9 +136,10 @@ import api, {
   updateSalesActivity as updateActivityRequest,
   getCallLogs,
   getActivities as getSalesActivities,
-  getTasks,
-  createTask,
-  updateTask as updateTaskRequest,
+  getFollowUps,
+  createFollowUp,
+  updateFollowUp,
+  completeFollowUp,
   getStatusCodeLookups,
   getOpportunityLossReasonLookups,
   getBranchLookups,
@@ -323,29 +323,87 @@ const getEmailEventSummary = (emailLog) => {
   return items;
 };
 const getActorLabel = (event) => {
-  const a = event?.actor_details || event?.actor || null;
-  const first = String(a?.first_name || '').trim();
-  const last = String(a?.last_name || '').trim();
+  const u = event?.user_details || event?.actor_details || event?.actor || null;
+  const fullName = String(u?.full_name || '').trim();
+  const first = String(u?.first_name || '').trim();
+  const last = String(u?.last_name || '').trim();
   const name = `${first} ${last}`.trim();
+  if (fullName) return fullName;
   if (name) return name;
-  const email = String(a?.email || '').trim();
-  return email || 'System';
+  if (u?.email) return String(u.email).trim();
+
+  if (event?.user_name) return String(event.user_name).trim();
+  if (event?.sent_by_employee_name) return String(event.sent_by_employee_name).trim();
+  if (event?.created_by_name) return String(event.created_by_name).trim();
+  if (event?.salesperson_name) return String(event.salesperson_name).trim();
+  if (event?.sender_name) return String(event.sender_name).trim();
+  if (event?.user_email) return String(event.user_email).trim();
+  if (event?.sender_address) return String(event.sender_address).trim();
+
+  const direction = String(event?.direction || '').toLowerCase();
+  if (direction === 'inbound') {
+    return event?.payload?.from_email || event?.from_email || 'Customer (Inbound)';
+  }
+
+  return 'System';
 };
 const getTimelineLine = (event) => {
-  const title = String(event?.title || event?.email_log_details?.subject || '').trim();
-  const summary = String(event?.summary || event?.email_log_details?.body_text || event?.email_log_details?.body_html || '').trim();
-  const line = summary && title ? `${title} — ${summary}` : summary || title || String(event?.event_type || 'Activity');
-  const activityType = String(event?.payload?.activity_type || '').toLowerCase();
+  const title = String(
+    event?.title || 
+    event?.subject || 
+    event?.email_log_details?.subject || 
+    event?.payload?.subject || 
+    ''
+  ).trim();
+
+  const summary = String(
+    event?.description || 
+    event?.content || 
+    event?.notes || 
+    event?.body_text || 
+    event?.summary || 
+    event?.email_log_details?.body_text || 
+    event?.email_log_details?.body_html || 
+    event?.sms_log_details?.message || 
+    event?.payload?.text || 
+    event?.payload?.message || 
+    ''
+  ).trim();
+
+  const line = summary && title ? `${title} — ${summary}` : summary || title;
+  const activityType = String(
+    event?.payload?.activity_type || 
+    event?.activity_type || 
+    event?.channel || 
+    event?.event_type || 
+    ''
+  ).toLowerCase();
+
   const toEmail = String(
     event?.payload?.email?.to_email ||
     event?.payload?.to_email ||
     event?.email_log_details?.to_email ||
+    event?.to_email ||
+    event?.primary_recipient ||
     ''
   ).trim();
-  if (activityType === 'email' && toEmail && !line.toLowerCase().includes(toEmail.toLowerCase())) {
-    return `${line} — to ${toEmail}`;
+
+  let result = line;
+  if (!result) {
+    if (activityType === 'call') result = 'Phone Call Logged';
+    else if (activityType === 'email') result = 'Email Message';
+    else if (activityType === 'sms') result = 'SMS Message';
+    else if (activityType === 'note') result = 'Internal Note';
+    else if (activityType === 'task') result = 'Task';
+    else if (activityType.startsWith('workflow')) result = 'Pipeline Stage Updated';
+    else if (activityType.startsWith('fields.changed')) result = 'Field Updated';
+    else result = String(event?.event_type || 'Activity');
   }
-  return line;
+
+  if (activityType === 'email' && toEmail && !result.toLowerCase().includes(toEmail.toLowerCase())) {
+    return `${result} — to ${toEmail}`;
+  }
+  return result;
 };
 
 const TIMELINE_FIELD_LABELS = {
@@ -403,16 +461,33 @@ const getTimelineChangeRows = (event) => {
 };
 
 const buildTimelineDedupKey = (event) => {
-  const source = String(event?.source || '').toLowerCase();
-  const eventType = String(event?.event_type || '').toLowerCase();
+  const source = String(event?.source || event?.timeline_source || '').toLowerCase();
+  const eventType = String(event?.event_type || event?.activity_type || event?.channel || '').toLowerCase();
   const createdMinute = String(event?.created_at || '').slice(0, 16);
-  const actor = String(event?.actor_details?.email || event?.actor?.email || '').toLowerCase();
-  const title = normalizeActivityText(event?.title);
-  const summary = normalizeActivityText(event?.summary);
+  const actor = String(
+    event?.actor_details?.email || 
+    event?.actor?.email || 
+    event?.user_details?.email || 
+    event?.user_name || 
+    event?.sender_address || 
+    ''
+  ).toLowerCase();
+  const title = normalizeActivityText(event?.title || event?.subject);
+  const summary = normalizeActivityText(
+    event?.summary || 
+    event?.description || 
+    event?.content || 
+    event?.notes || 
+    event?.body_text
+  );
   const changeSignature = getTimelineChangeRows(event)
     .map((change) => `${change.field}:${change.from}->${change.to}`)
     .join('|');
-  return [source, eventType, createdMinute, actor, title, summary, changeSignature].join('|');
+  const directId = event?.id != null ? String(event.id) : '';
+  const salesActivityId = event?.sales_activity_id != null ? String(event.sales_activity_id) : '';
+  return [salesActivityId || directId, source, eventType, createdMinute, actor, title, summary, changeSignature]
+    .filter(Boolean)
+    .join('|');
 };
 
 const dedupeTimelineEvents = (rows = []) => {
@@ -426,14 +501,14 @@ const dedupeTimelineEvents = (rows = []) => {
 };
 
 const getTimelineLeadSource = (event) => {
-  const leadSource = String(event?.payload?.lead_source || '').trim();
+  const leadSource = String(event?.payload?.lead_source || event?.lead_source || '').trim();
   if (!leadSource) return '';
   return `Lead source: ${leadSource}`;
 };
 
 const getTimelineSystemNoteText = (event) => {
   const payload = event?.payload || {};
-  const summary = String(event?.summary || '').trim();
+  const summary = String(event?.summary || event?.description || '').trim();
   if (payload?.note_type === 'inbound_lead_normalization') {
     return String(payload?.note_content || summary).trim();
   }
@@ -457,49 +532,274 @@ const formatPaymentDate = (iso) => {
   return d.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: 'numeric' });
 };
 
-const getEventTheme = (eventType) => {
-  const type = String(eventType || '').toLowerCase();
+const formatTimelineRelativeTime = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const diffSec = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (diffSec < 60) return 'Just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour}h ago`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay < 7) return `${diffDay}d ago`;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+};
+
+const formatTimelineDateGroup = (iso) => {
+  if (!iso) return 'Recent Activity';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'Recent Activity';
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return 'Today';
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
+  });
+};
+
+const formatCallDuration = (seconds) => {
+  const s = Number(seconds || 0);
+  if (!s || s <= 0) return '';
+  const m = Math.floor(s / 60);
+  const remainingS = s % 60;
+  if (m === 0) return `${remainingS}s`;
+  if (remainingS === 0) return `${m}m`;
+  return `${m}m ${remainingS}s`;
+};
+
+const formatDispositionLabel = (disposition) => {
+  if (!disposition) return 'Completed';
+  return String(disposition)
+    .replace(/[_-]/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+};
+
+const getEventTheme = (eventType, activity = null) => {
+  const type = String(
+    activity?.activity_type || 
+    activity?.type || 
+    activity?.channel || 
+    eventType || 
+    ''
+  ).toLowerCase();
   
-  if (type.startsWith('workflow.')) {
+  if (type.startsWith('workflow.') || type.includes('stage_changed') || type === 'workflow') {
     return {
-      bg: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
-      icon: 'git-commit'
+      bg: 'bg-emerald-50 text-emerald-700 ring-emerald-200 border-emerald-100',
+      badgeBg: 'bg-emerald-100/80 text-emerald-800',
+      icon: 'git-commit',
+      label: 'Workflow'
     };
   }
-  if (type.startsWith('activity.created')) {
+  if (type.startsWith('activity.created') || type.startsWith('activity.updated')) {
     return {
-      bg: 'bg-blue-50 text-blue-700 ring-blue-100',
-      icon: 'plus-circle'
+      bg: 'bg-blue-50 text-blue-700 ring-blue-200 border-blue-100',
+      badgeBg: 'bg-blue-100/80 text-blue-800',
+      icon: 'plus-circle',
+      label: 'Activity'
     };
   }
-  if (type.startsWith('activity.updated')) {
+  if (type.startsWith('assignment.')) {
     return {
-      bg: 'bg-sky-50 text-sky-700 ring-sky-100',
-      icon: 'edit-3'
+      bg: 'bg-violet-50 text-violet-700 ring-violet-200 border-violet-100',
+      badgeBg: 'bg-violet-100/80 text-violet-800',
+      icon: 'user-check',
+      label: 'Assignment'
     };
   }
-  if (type.startsWith('assignment.changed')) {
+  if (type.startsWith('fields.changed') || type.startsWith('field.') || type === 'field_change') {
     return {
-      bg: 'bg-violet-50 text-violet-700 ring-violet-100',
-      icon: 'user-check'
+      bg: 'bg-amber-50 text-amber-700 ring-amber-200 border-amber-100',
+      badgeBg: 'bg-amber-100/80 text-amber-800',
+      icon: 'sliders',
+      label: 'Field Change'
     };
   }
-  if (type.startsWith('fields.changed')) {
+  if (type.startsWith('system.note') || type === 'warning' || activity?.payload?.note_type === 'inbound_lead_normalization') {
     return {
-      bg: 'bg-amber-50 text-amber-700 ring-amber-100',
-      icon: 'sliders'
+      bg: 'bg-rose-50 text-rose-700 ring-rose-200 border-rose-100',
+      badgeBg: 'bg-rose-100/80 text-rose-800',
+      icon: 'alert-circle',
+      label: 'Alert'
     };
   }
-  if (type.startsWith('system.note')) {
+  if (['call', 'phone_call', 'phone-call', 'call_log', 'call-log'].includes(type)) {
     return {
-      bg: 'bg-rose-50 text-rose-700 ring-rose-100',
-      icon: 'alert-circle'
+      bg: 'bg-emerald-50 text-emerald-700 ring-emerald-200 border-emerald-100',
+      badgeBg: 'bg-emerald-100/80 text-emerald-800',
+      icon: 'phone-outgoing',
+      label: 'Call'
+    };
+  }
+  if (['email', 'mail'].includes(type) || activity?.channel === 'email' || activity?.source?.includes('inbound_email')) {
+    return {
+      bg: 'bg-sky-50 text-sky-700 ring-sky-200 border-sky-100',
+      badgeBg: 'bg-sky-100/80 text-sky-800',
+      icon: 'mail',
+      label: 'Email'
+    };
+  }
+  if (['sms', 'text', 'message'].includes(type) || activity?.channel === 'sms' || activity?.source?.includes('sms')) {
+    return {
+      bg: 'bg-amber-50 text-amber-700 ring-amber-200 border-amber-100',
+      badgeBg: 'bg-amber-100/80 text-amber-800',
+      icon: 'message-square',
+      label: 'SMS'
+    };
+  }
+  if (['note', 'comment', 'internal_note'].includes(type)) {
+    return {
+      bg: 'bg-indigo-50 text-indigo-700 ring-indigo-200 border-indigo-100',
+      badgeBg: 'bg-indigo-100/80 text-indigo-800',
+      icon: 'sticky-note',
+      label: 'Note'
+    };
+  }
+  if (['task', 'todo', 'to-do', 'follow_up'].includes(type)) {
+    return {
+      bg: 'bg-purple-50 text-purple-700 ring-purple-200 border-purple-100',
+      badgeBg: 'bg-purple-100/80 text-purple-800',
+      icon: 'check-circle-2',
+      label: 'Task'
     };
   }
   return {
-    bg: 'bg-slate-50 text-slate-700 ring-slate-100',
-    icon: 'clock'
+    bg: 'bg-slate-50 text-slate-700 ring-slate-200 border-slate-100',
+    badgeBg: 'bg-slate-100 text-slate-700',
+    icon: 'clock',
+    label: 'Activity'
   };
+};
+
+const getDrawerActivityKind = (item) => {
+  const raw = String(
+    item?.activity_type || 
+    item?.type || 
+    item?.channel || 
+    item?.event_type || 
+    item?.action || 
+    ''
+  ).toLowerCase().trim();
+  
+  const source = String(item?.source || item?.timeline_source || '').toLowerCase();
+  
+  if (raw.startsWith('workflow.') || raw.includes('stage_changed') || raw === 'workflow') return 'workflow';
+  if (raw.startsWith('fields.changed') || raw.startsWith('field.') || raw === 'field_change') return 'field_change';
+  if (raw.startsWith('assignment.') || raw === 'assignment') return 'assignment';
+  if (raw.startsWith('system.note') || raw === 'warning' || source.includes('warning') || item?.payload?.note_type === 'inbound_lead_normalization') return 'warning';
+  
+  if (source.includes('inbound_email') || item?.inbound_message_id || ['email', 'mail'].includes(raw)) return 'email';
+  if (
+    item?.sms_log_details?.message || 
+    item?.inbound_sms_id || 
+    source.includes('sms') || 
+    ['sms', 'text', 'message'].includes(raw)
+  ) return 'sms';
+  if (['call', 'phone_call', 'phone-call', 'call_log', 'call-log'].includes(raw)) return 'call';
+  if (['note', 'comment', 'internal_note'].includes(raw)) return 'note';
+  if (['task', 'todo', 'to-do', 'follow_up'].includes(raw)) return 'task';
+  if (['meeting', 'meet', 'appointment'].includes(raw)) return 'meeting';
+  
+  return raw || 'note';
+};
+
+const getDrawerActivityTitle = (item, kind) => {
+  const rawSubject = String(
+    item?.subject || 
+    item?.title || 
+    item?.email_log_details?.subject || 
+    item?.payload?.subject || 
+    ''
+  ).trim();
+
+  if (rawSubject && rawSubject.toLowerCase() !== 'activity') {
+    return rawSubject;
+  }
+
+  const direction = String(item?.direction || '').toLowerCase();
+  const isInbound = direction === 'inbound' || Boolean(item?.inbound_message_id) || Boolean(item?.inbound_sms_id);
+
+  if (kind === 'call') {
+    const disp = item?.call_log_details?.disposition || item?.disposition;
+    const dur = item?.call_log_details?.duration_seconds;
+    const durText = dur ? `${Math.floor(dur / 60)}m ${dur % 60}s` : '';
+    if (disp) {
+      const dispFormatted = String(disp).replace(/[_-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+      return `${isInbound ? 'Inbound' : 'Outbound'} Call · ${dispFormatted}${durText ? ` (${durText})` : ''}`;
+    }
+    return isInbound ? 'Inbound Call' : 'Outbound Call Logged';
+  }
+
+  if (kind === 'email') {
+    const to = item?.email_log_details?.to_email || item?.to_email || item?.primary_recipient || item?.payload?.to_email;
+    if (isInbound) {
+      const fromAddr = item?.payload?.from_email || item?.from_email || item?.sender_address;
+      return fromAddr ? `Inbound Email from ${fromAddr}` : 'Inbound Email Received';
+    }
+    return to ? `Email Sent to ${to}` : 'Email Message Sent';
+  }
+
+  if (kind === 'sms') {
+    const phone = item?.sms_log_details?.to_phone || item?.to_phone || item?.payload?.to_phone;
+    if (isInbound) return 'Inbound SMS Received';
+    return phone ? `SMS Sent to ${phone}` : 'SMS Message Sent';
+  }
+
+  if (kind === 'note') {
+    return 'Internal Note';
+  }
+
+  if (kind === 'task') {
+    return item?.task_type ? `Task: ${item.task_type}` : 'Follow-up Task';
+  }
+
+  if (kind === 'workflow') {
+    const stage = item?.payload?.stage || item?.payload?.workflow_stage || item?.stage;
+    return stage ? `Stage Changed to ${stage}` : 'Pipeline Stage Updated';
+  }
+
+  if (kind === 'field_change') {
+    const changes = Array.isArray(item?.payload?.changes) ? item.payload.changes : [];
+    if (changes.length === 1 && changes[0]?.field) {
+      return `Updated ${formatTimelineFieldLabel(changes[0].field)}`;
+    }
+    if (changes.length > 1) {
+      return `Updated ${changes.length} Fields`;
+    }
+    return 'Lead Details Updated';
+  }
+
+  if (kind === 'warning') {
+    return 'System Alert';
+  }
+
+  return rawSubject || `${kind.charAt(0).toUpperCase() + kind.slice(1)} Log`;
+};
+
+const getDrawerActivityBody = (item) => {
+  const direct = item?.description || item?.content || item?.notes || item?.body_text || item?.summary || '';
+  if (direct && typeof direct === 'string' && direct.trim()) {
+    return direct.trim();
+  }
+  const payloadBody = item?.payload?.text || item?.payload?.message || item?.payload?.body_text || item?.payload?.note_content;
+  if (payloadBody && typeof payloadBody === 'string' && payloadBody.trim()) {
+    return payloadBody.trim();
+  }
+  const emailBody = item?.email_log_details?.body_text || item?.email_log_details?.body_html;
+  if (emailBody && typeof emailBody === 'string' && emailBody.trim()) {
+    return emailBody.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  const smsBody = item?.sms_log_details?.message;
+  if (smsBody && typeof smsBody === 'string' && smsBody.trim()) {
+    return smsBody.trim();
+  }
+  return '';
 };
 const normalizeDisplayText = (value) => {
   const text = String(value || '').trim();
@@ -2198,7 +2498,6 @@ const SalesDetail = () => {
   const [conversionReview, setConversionReview] = useState(null);
   const recordTarget = () => isLeadPath ? { lead: opportunity?.id } : { opportunity: opportunity?.id };
   const updateSalesActivity = (activityId, data) => updateActivityRequest(activityId, data, recordTarget());
-  const updateTask = (taskId, data) => updateTaskRequest(taskId, data, recordTarget());
   const [estimateOpportunity, setEstimateOpportunity] = useState(null);
   const [estimateSummary, setEstimateSummary] = useState(null);
   const [isLoadingEstimateOpportunity, setIsLoadingEstimateOpportunity] = useState(false);
@@ -2644,6 +2943,10 @@ const SalesDetail = () => {
   const [editingActivity, setEditingActivity] = useState(null);
   const [expandedActivityKeys, setExpandedActivityKeys] = useState(() => new Set());
   const [isActivityDrawerOpen, setIsActivityDrawerOpen] = useState(false);
+  const [activityDrawerFilter, setActivityDrawerFilter] = useState('all');
+  const [activityDrawerSearch, setActivityDrawerSearch] = useState('');
+  const [isActivityDrawerRefreshing, setIsActivityDrawerRefreshing] = useState(false);
+  const [expandedDrawerLogIds, setExpandedDrawerLogIds] = useState(() => new Set());
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isDuplicateConfirmOpen, setIsDuplicateConfirmOpen] = useState(false);
   const [timelineEvents, setTimelineEvents] = useState([]);
@@ -3981,13 +4284,13 @@ const SalesDetail = () => {
         setFollowUpError('');
 	    setIsLoadingFollowUps(true);
 	    try {
-	      const params = { ordering: '-due_date' };
+	      const params = {};
 	      if (isLeadPath) {
-	        params.lead = targetEntity.id;
+	        params.lead_id = targetEntity.id;
 	      } else {
-	        params.opportunity = targetEntity.id;
+	        params.opportunity_id = targetEntity.id;
 	      }
-	      const rows = asList(await getTasks(params));
+	      const rows = asList(await getFollowUps(params));
           if (requestId !== recordRequestRef.current || followUpId !== followUpRequestRef.current) return;
 	      setFollowUps(rows);
 	    } catch (error) {
@@ -4439,10 +4742,85 @@ const SalesDetail = () => {
     () => [...pinnedActivities, ...unpinnedActivities],
     [pinnedActivities, unpinnedActivities]
   );
-  const drawerTimelineEvents = useMemo(
-    () => dedupeTimelineEvents(timelineEvents || []),
-    [timelineEvents]
-  );
+  const drawerTimelineEvents = useMemo(() => {
+    const rawList = [
+      ...(Array.isArray(activities) ? activities : []),
+      ...(Array.isArray(timelineEvents) ? timelineEvents : []),
+    ];
+    const deduped = dedupeTimelineEvents(rawList);
+    return deduped.sort((a, b) => {
+      const timeA = new Date(a?.created_at || a?.thread_created_at || 0).getTime();
+      const timeB = new Date(b?.created_at || b?.thread_created_at || 0).getTime();
+      return timeB - timeA;
+    });
+  }, [activities, timelineEvents]);
+
+  const drawerFilterCounts = useMemo(() => {
+    const counts = { all: drawerTimelineEvents.length, call: 0, email: 0, sms: 0, note: 0, task: 0, system: 0 };
+    for (const item of drawerTimelineEvents) {
+      const kind = getDrawerActivityKind(item);
+      if (kind === 'call') counts.call++;
+      else if (kind === 'email') counts.email++;
+      else if (kind === 'sms') counts.sms++;
+      else if (kind === 'note') counts.note++;
+      else if (kind === 'task') counts.task++;
+      else counts.system++;
+    }
+    return counts;
+  }, [drawerTimelineEvents]);
+
+  const filteredDrawerActivities = useMemo(() => {
+    let list = drawerTimelineEvents;
+    if (activityDrawerFilter !== 'all') {
+      list = list.filter((item) => {
+        const kind = getDrawerActivityKind(item);
+        if (activityDrawerFilter === 'call') return kind === 'call';
+        if (activityDrawerFilter === 'email') return kind === 'email';
+        if (activityDrawerFilter === 'sms') return kind === 'sms';
+        if (activityDrawerFilter === 'note') return kind === 'note';
+        if (activityDrawerFilter === 'task') return kind === 'task';
+        if (activityDrawerFilter === 'system') {
+          return ['workflow', 'field_change', 'assignment', 'warning', 'system'].includes(kind);
+        }
+        return true;
+      });
+    }
+    const q = String(activityDrawerSearch || '').trim().toLowerCase();
+    if (q) {
+      list = list.filter((item) => {
+        const kind = getDrawerActivityKind(item);
+        const title = getDrawerActivityTitle(item, kind).toLowerCase();
+        const body = getDrawerActivityBody(item).toLowerCase();
+        const actor = getActorLabel(item).toLowerCase();
+        return title.includes(q) || body.includes(q) || actor.includes(q);
+      });
+    }
+    return list;
+  }, [drawerTimelineEvents, activityDrawerFilter, activityDrawerSearch]);
+
+  const groupedDrawerActivities = useMemo(() => {
+    const groups = [];
+    const map = new Map();
+    for (const item of filteredDrawerActivities) {
+      const groupKey = formatTimelineDateGroup(item.created_at);
+      if (!map.has(groupKey)) {
+        const groupObj = { dateLabel: groupKey, items: [] };
+        map.set(groupKey, groupObj);
+        groups.push(groupObj);
+      }
+      map.get(groupKey).items.push(item);
+    }
+    return groups;
+  }, [filteredDrawerActivities]);
+
+  const toggleDrawerExpand = useCallback((id) => {
+    setExpandedDrawerLogIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   const handleLoadMore = useCallback(async () => {
     if (!hasMoreActivities && !hasMoreTimeline) return;
@@ -7681,7 +8059,7 @@ const SalesDetail = () => {
         : null;
       const targetPayload = recordTarget();
       if (followUpMode === 'edit' && editingFollowUpId) {
-        await updateTask(editingFollowUpId, {
+        await updateFollowUp(editingFollowUpId, {
           title: followUpSubject.trim(),
           status: taskRecord?.status || 'pending',
           ...targetPayload,
@@ -7693,7 +8071,7 @@ const SalesDetail = () => {
         if (requestId !== recordRequestRef.current) return;
         setToast({ type: 'success', text: 'Follow-up updated.' });
       } else {
-        await createTask({
+        await createFollowUp({
           title: followUpSubject.trim(),
           status: 'pending',
           ...targetPayload,
@@ -7726,8 +8104,8 @@ const SalesDetail = () => {
     setIsSavingFollowUp(true);
     try {
       const nextStatus = task.status === 'completed' ? 'pending' : 'completed';
-      if (nextStatus === 'completed') await completeRecordTask(task.id, recordTarget());
-      else await updateTask(task.id, { status: 'pending' });
+      if (nextStatus === 'completed') await completeFollowUp(task.id);
+      else await updateFollowUp(task.id, { status: 'pending' });
       if (requestId !== recordRequestRef.current) return;
       await loadFollowUps(opportunity);
       if (requestId !== recordRequestRef.current) return;
@@ -10777,124 +11155,338 @@ const SalesDetail = () => {
       {isActivityDrawerOpen && (
         <div className="fixed inset-0 z-[110] flex justify-end">
           <div
-            className="absolute inset-0 bg-heading/20 transition-opacity"
+            className="absolute inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity duration-200"
             onClick={() => setIsActivityDrawerOpen(false)}
           />
-          <div className="relative h-full w-full max-w-[760px] bg-white shadow-2xl border-l border-ink-100 animate-in slide-in-from-right duration-200 flex flex-col z-10">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-ink-100 bg-white">
-              <div>
-                <div className="label-eyebrow text-brand font-bold uppercase tracking-wider text-xs">Quick Access</div>
-                <h3 className="text-xl font-black text-ink-900 mt-0.5">Activities</h3>
-              </div>
-              <button 
-                onClick={() => setIsActivityDrawerOpen(false)}
-                className="p-1.5 rounded-full hover:bg-slate-100 text-ink-600 transition-colors"
-                aria-label="Close"
-              >
-                <Icon name="x" className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-6 bg-slate-50/40">
-              {!drawerTimelineEvents?.length ? (
-                <div className="py-16 text-center text-ink-400">
-                  <Icon name="clock" className="w-12 h-12 mx-auto mb-4 opacity-20" />
-                  <p className="font-semibold text-slate-500">No activity yet.</p>
+          <div className="relative h-full w-full max-w-[760px] bg-slate-50 shadow-2xl border-l border-slate-200 animate-in slide-in-from-right duration-200 flex flex-col z-10 overflow-hidden">
+            {/* Top Header */}
+            <div className="flex flex-col border-b border-slate-200 bg-white shadow-xs">
+              <div className="flex items-center justify-between px-6 pt-5 pb-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="label-eyebrow text-brand font-black uppercase tracking-wider text-[11px]">Quick Access</span>
+                    <span className="inline-flex items-center rounded-full bg-brand-tint px-2 py-0.5 text-[10px] font-bold text-brand-dark ring-1 ring-inset ring-brand/20">
+                      {drawerTimelineEvents.length} {drawerTimelineEvents.length === 1 ? 'log' : 'logs'}
+                    </span>
+                  </div>
+                  <h3 className="text-xl font-black text-slate-900 tracking-tight mt-0.5">
+                    Activities & History
+                  </h3>
                 </div>
-              ) : (
-                <div className="space-y-3">
-                  {drawerTimelineEvents.map((event, index) => {
-                    const theme = getEventTheme(event?.event_type);
-                    const { date, time } = formatTimelineDateTime(event?.created_at);
-                    const changeRows = getTimelineChangeRows(event);
-                    const isFieldChange = String(event?.event_type || '').toLowerCase().startsWith('fields.changed');
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setIsActivityDrawerRefreshing(true);
+                      try {
+                        await refreshActivityTimeline();
+                      } finally {
+                        setIsActivityDrawerRefreshing(false);
+                      }
+                    }}
+                    disabled={isActivityDrawerRefreshing}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-600 ring-1 ring-slate-200 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 cursor-pointer"
+                    title="Refresh activities"
+                    aria-label="Refresh activities"
+                  >
+                    <Icon name="refresh-cw" className={`w-4 h-4 ${isActivityDrawerRefreshing ? 'animate-spin text-brand' : ''}`} />
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setIsActivityDrawerOpen(false)}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-600 ring-1 ring-slate-200 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                    aria-label="Close drawer"
+                    title="Close drawer"
+                  >
+                    <Icon name="x" className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Search bar & Filter Pills */}
+              <div className="px-6 pb-4 space-y-3">
+                <div className="relative">
+                  <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={activityDrawerSearch}
+                    onChange={(e) => setActivityDrawerSearch(e.target.value)}
+                    placeholder="Search by subject, notes, author..."
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50/70 pl-9 pr-8 py-2 text-xs font-semibold text-slate-800 placeholder-slate-400 focus:bg-white focus:border-brand focus:outline-none focus:ring-3 focus:ring-brand/10 transition-all"
+                  />
+                  {activityDrawerSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setActivityDrawerSearch('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-md hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition-colors"
+                      aria-label="Clear search"
+                    >
+                      <Icon name="x" className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Filter Pills */}
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-thin">
+                  {[
+                    { id: 'all', label: 'All', count: drawerFilterCounts.all },
+                    { id: 'call', label: 'Calls', icon: 'phone-outgoing', count: drawerFilterCounts.call },
+                    { id: 'email', label: 'Emails', icon: 'mail', count: drawerFilterCounts.email },
+                    { id: 'sms', label: 'SMS', icon: 'message-square', count: drawerFilterCounts.sms },
+                    { id: 'note', label: 'Notes', icon: 'sticky-note', count: drawerFilterCounts.note },
+                    { id: 'task', label: 'Tasks', icon: 'check-circle-2', count: drawerFilterCounts.task },
+                    { id: 'system', label: 'Changes & System', icon: 'sliders', count: drawerFilterCounts.system },
+                  ].map((f) => {
+                    const active = activityDrawerFilter === f.id;
                     return (
-                      <div key={event.id} className="grid grid-cols-[100px_minmax(0,1fr)] gap-4 sm:grid-cols-[130px_minmax(0,1fr)] sm:gap-6 relative group">
-                        {/* Time & Actor Column */}
-                        <div className="text-right pt-2.5 select-none">
-                          <div className="text-xs font-extrabold text-ink-800 tracking-tight">{date}</div>
-                          <div className="text-[10px] text-ink-400 font-semibold mt-0.5">{time}</div>
-                          <div className="text-[10px] text-ink-500 mt-2 font-bold flex items-center justify-end gap-1">
-                            <Icon name="user" className="w-3 h-3 text-ink-400" />
-                            <span className="truncate max-w-[90px] sm:max-w-[120px]">{getActorLabel(event)}</span>
-                          </div>
-                        </div>
-
-                        {/* Bullet & Connector Line & Card Column */}
-                        <div className="relative pl-6 pb-6">
-                          {/* Timeline vertical connector line */}
-                          <div className={`absolute left-0 top-6 bottom-0 w-[2px] bg-slate-200/60 ${index === drawerTimelineEvents.length - 1 ? 'hidden' : ''}`} />
-
-                          {/* Timeline node bullet */}
-                          <div className={`absolute -left-3 top-3 h-6 w-6 rounded-full border-4 border-white ${theme.bg} ${theme.fg} shadow-sm ring-1 ring-slate-100 flex items-center justify-center transition-transform group-hover:scale-110 duration-200 z-10`}>
-                            <Icon name={theme.icon} className="w-2.5 h-2.5" />
-                          </div>
-
-                          {/* Card Content */}
-                          <div className="rounded-2xl border border-ink-100 bg-white px-4 py-3.5 shadow-card hover:shadow-md transition-all duration-200 group-hover:border-slate-300">
-                            <div className="flex flex-wrap items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <div className="text-sm font-semibold text-ink-900 leading-snug">{getTimelineLine(event)}</div>
-                                {isFieldChange && changeRows.length ? (
-                                  <div className="mt-2 flex flex-wrap gap-1.5">
-                                    {changeRows.slice(0, 3).map((change) => (
-                                      <span
-                                        key={`${event.id}-${change.field}`}
-                                        className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-bold text-amber-700 ring-1 ring-inset ring-amber-100"
-                                      >
-                                        {change.label}
-                                      </span>
-                                    ))}
-                                    {changeRows.length > 3 ? (
-                                      <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-500 ring-1 ring-inset ring-slate-200">
-                                        +{changeRows.length - 3} more
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                ) : null}
-                              </div>
-                              <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold ${theme.bg} ${theme.fg}`}>
-                                {time}
-                              </span>
-                            </div>
-                            {getTimelineLeadSource(event) && (
-                              <div className="mt-1.5 text-xs text-ink-500 font-medium flex items-center gap-1.5">
-                                <Icon name="info" className="w-3.5 h-3.5 text-brand" />
-                                <span>{getTimelineLeadSource(event)}</span>
-                              </div>
-                            )}
-                            {isFieldChange && changeRows.length ? (
-                              <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/80">
-                                <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-px rounded-xl bg-slate-200/80 overflow-hidden">
-                                  <div className="bg-slate-100 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Before</div>
-                                  <div className="bg-slate-100 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">After</div>
-                                  {changeRows.map((change) => (
-                                    <React.Fragment key={`${event.id}-${change.field}-diff`}>
-                                      <div className="bg-white px-3 py-2.5">
-                                        <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">{change.label}</div>
-                                        <div className="mt-1 text-xs font-semibold text-slate-600 break-words">{change.from}</div>
-                                      </div>
-                                      <div className="bg-white px-3 py-2.5">
-                                        <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">{change.label}</div>
-                                        <div className="mt-1 text-xs font-semibold text-ink-800 break-words">{change.to}</div>
-                                      </div>
-                                    </React.Fragment>
-                                  ))}
-                                </div>
-                              </div>
-                            ) : null}
-                            {event?.event_type && (
-                              <div className="mt-2">
-                                <span className="inline-flex items-center gap-1 rounded-md bg-slate-100/80 px-2 py-0.5 text-[9px] font-bold text-slate-500 uppercase tracking-wider border border-slate-200/40">
-                                  {String(event.event_type).replace('.', ' · ')}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setActivityDrawerFilter(f.id)}
+                        className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-bold whitespace-nowrap transition-all cursor-pointer ${
+                          active
+                            ? 'bg-slate-900 text-white shadow-xs'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
+                        }`}
+                      >
+                        {f.icon && <Icon name={f.icon} className="w-3 h-3" />}
+                        <span>{f.label}</span>
+                        <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-extrabold ${active ? 'bg-white/20 text-white' : 'bg-slate-200/80 text-slate-600'}`}>
+                          {f.count}
+                        </span>
+                      </button>
                     );
                   })}
                 </div>
+              </div>
+            </div>
+
+            {/* Activities List */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {!filteredDrawerActivities?.length ? (
+                <div className="py-20 text-center">
+                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-white border border-slate-200 shadow-xs text-slate-400">
+                    <Icon name="clock" className="w-7 h-7" />
+                  </div>
+                  <h4 className="text-sm font-bold text-slate-800">
+                    {activityDrawerSearch || activityDrawerFilter !== 'all' ? 'No matching activities' : 'No activity logs yet'}
+                  </h4>
+                  <p className="mt-1 text-xs text-slate-500 max-w-xs mx-auto">
+                    {activityDrawerSearch || activityDrawerFilter !== 'all'
+                      ? 'Try adjusting your search terms or filter selection.'
+                      : 'Activities, calls, notes, and emails logged for this lead will appear here chronologically.'}
+                  </p>
+                  {(activityDrawerSearch || activityDrawerFilter !== 'all') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActivityDrawerFilter('all');
+                        setActivityDrawerSearch('');
+                      }}
+                      className="mt-4 inline-flex items-center gap-1 rounded-xl bg-white px-3.5 py-2 text-xs font-bold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 shadow-xs cursor-pointer"
+                    >
+                      Clear Filters
+                    </button>
+                  )}
+                </div>
+              ) : (
+                groupedDrawerActivities.map((group) => (
+                  <div key={group.dateLabel} className="space-y-4">
+                    {/* Date Group Header */}
+                    <div className="sticky top-0 z-10 flex items-center gap-3 py-1 bg-slate-50/90 backdrop-blur-xs">
+                      <div className="h-px flex-1 bg-slate-200" />
+                      <span className="rounded-full bg-white px-3 py-1 text-[11px] font-black uppercase tracking-wider text-slate-500 border border-slate-200 shadow-xs">
+                        {group.dateLabel}
+                      </span>
+                      <div className="h-px flex-1 bg-slate-200" />
+                    </div>
+
+                    {/* Group Items */}
+                    <div className="space-y-3">
+                      {group.items.map((event, index) => {
+                        const kind = getDrawerActivityKind(event);
+                        const theme = getEventTheme(event?.event_type, event);
+                        const { time } = formatTimelineDateTime(event?.created_at);
+                        const relativeTime = formatTimelineRelativeTime(event?.created_at);
+                        const changeRows = getTimelineChangeRows(event);
+                        const isFieldChange = kind === 'field_change' || String(event?.event_type || '').toLowerCase().startsWith('fields.changed');
+                        const title = getDrawerActivityTitle(event, kind);
+                        const body = getDrawerActivityBody(event);
+                        const actor = getActorLabel(event);
+                        const isGroupLastItem = index === group.items.length - 1;
+                        const itemKey = `${event.id || index}-${kind}`;
+                        const isExpanded = expandedDrawerLogIds.has(itemKey);
+                        const isLongBody = body.length > 220;
+                        const direction = String(event?.direction || '').toLowerCase();
+                        const isInbound = direction === 'inbound' || Boolean(event?.inbound_message_id) || Boolean(event?.inbound_sms_id);
+                        const isOutbound = direction === 'outbound' && !isInbound;
+                        const callDurationSeconds = event?.call_log_details?.duration_seconds;
+                        const callDisposition = event?.call_log_details?.disposition || event?.disposition;
+                        const toEmail = event?.email_log_details?.to_email || event?.to_email || event?.primary_recipient || event?.payload?.to_email;
+                        const toPhone = event?.sms_log_details?.to_phone || event?.to_phone || event?.payload?.to_phone;
+                        const leadSource = getTimelineLeadSource(event);
+
+                        return (
+                          <div key={itemKey} className="relative pl-8 pb-3 last:pb-1 group">
+                            {/* Timeline connector line */}
+                            {!isGroupLastItem && (
+                              <div className="absolute left-[13px] top-6 bottom-0 w-[2px] bg-slate-200 group-hover:bg-slate-300 transition-colors" />
+                            )}
+
+                            {/* Timeline node */}
+                            <div className={`absolute left-0 top-3 h-7 w-7 rounded-full border-2 border-white ${theme.bg} shadow-xs ring-1 ring-slate-200 flex items-center justify-center transition-transform group-hover:scale-110 duration-200 z-10`}>
+                              <Icon name={theme.icon} className="w-3.5 h-3.5" />
+                            </div>
+
+                            {/* Card Content */}
+                            <div className="rounded-2xl border border-slate-200/90 bg-white p-4 shadow-xs hover:shadow-md transition-all duration-200 hover:border-slate-300">
+                              {/* Header row */}
+                              <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
+                                <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                                  <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${theme.badgeBg}`}>
+                                    <Icon name={theme.icon} className="w-2.5 h-2.5" />
+                                    {theme.label}
+                                  </span>
+                                  {isInbound && (
+                                    <span className="inline-flex items-center gap-0.5 rounded-md bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold text-sky-700 border border-sky-200/60">
+                                      <Icon name="arrow-down-left" className="w-2.5 h-2.5" /> Inbound
+                                    </span>
+                                  )}
+                                  {isOutbound && (
+                                    <span className="inline-flex items-center gap-0.5 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 border border-slate-200/60">
+                                      <Icon name="arrow-up-right" className="w-2.5 h-2.5" /> Outbound
+                                    </span>
+                                  )}
+                                  <span className="inline-flex items-center gap-1 text-xs font-bold text-slate-700">
+                                    <Icon name="user" className="w-3 h-3 text-slate-400 shrink-0" />
+                                    <span className="truncate max-w-[140px] sm:max-w-[180px]">{actor}</span>
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 shrink-0">
+                                  <Icon name="clock" className="w-3 h-3 text-slate-300" />
+                                  <span>{time}</span>
+                                  {relativeTime && <span className="text-slate-300 hidden sm:inline">({relativeTime})</span>}
+                                </div>
+                              </div>
+
+                              {/* Title */}
+                              <div className="mt-2.5">
+                                <h4 className="text-sm font-extrabold text-slate-900 leading-snug break-words">
+                                  {title}
+                                </h4>
+                              </div>
+
+                              {/* Body */}
+                              {body ? (
+                                <div className="mt-2 rounded-xl bg-slate-50/80 p-3 text-xs leading-relaxed text-slate-700 border border-slate-100 break-words whitespace-pre-wrap font-medium">
+                                  {isLongBody && !isExpanded ? `${body.slice(0, 220)}...` : body}
+                                  {isLongBody && (
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleDrawerExpand(itemKey)}
+                                      className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-bold text-brand hover:text-brand-dark cursor-pointer transition-colors"
+                                    >
+                                      {isExpanded ? (
+                                        <>Show less <Icon name="chevron-up" className="w-3 h-3" /></>
+                                      ) : (
+                                        <>Show full notes <Icon name="chevron-down" className="w-3 h-3" /></>
+                                      )}
+                                    </button>
+                                  )}
+                                </div>
+                              ) : null}
+
+                              {/* Metadata chips */}
+                              <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                                {callDurationSeconds ? (
+                                  <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 border border-emerald-100">
+                                    <Icon name="clock" className="w-2.5 h-2.5" />
+                                    {formatCallDuration(callDurationSeconds)}
+                                  </span>
+                                ) : null}
+                                {callDisposition ? (
+                                  <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-700 border border-slate-200/60">
+                                    <StatusDot tone={callDisposition === 'connected' ? 'emerald' : 'amber'} />
+                                    {formatDispositionLabel(callDisposition)}
+                                  </span>
+                                ) : null}
+                                {toEmail && kind === 'email' ? (
+                                  <span className="inline-flex items-center gap-1 rounded-md bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700 border border-sky-100">
+                                    <Icon name="mail" className="w-2.5 h-2.5" />
+                                    To: {toEmail}
+                                  </span>
+                                ) : null}
+                                {toPhone && kind === 'sms' ? (
+                                  <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 border border-amber-100">
+                                    <Icon name="phone" className="w-2.5 h-2.5" />
+                                    {toPhone}
+                                  </span>
+                                ) : null}
+                                {leadSource ? (
+                                  <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 border border-slate-200/60">
+                                    <Icon name="info" className="w-2.5 h-2.5 text-brand" />
+                                    {leadSource}
+                                  </span>
+                                ) : null}
+                                {event?.is_pinned ? (
+                                  <span className="inline-flex items-center gap-1 rounded-md bg-brand-tint px-2 py-0.5 text-[10px] font-bold text-brand-dark border border-brand/20">
+                                    <Icon name="pin" className="w-2.5 h-2.5" />
+                                    Pinned
+                                  </span>
+                                ) : null}
+                                {kind === 'email' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsActivityDrawerOpen(false);
+                                      setCommTab('email');
+                                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                                      setTimeout(() => {
+                                        const subject = event.subject || event.email_log_details?.subject || '';
+                                        const fromEmail = event?.payload?.from_email || event?.email_log_details?.from_email || event?.from_email || event?.sender_address || '';
+                                        setActivitySubject(subject.toLowerCase().startsWith('re:') ? subject : `Re: ${subject}`);
+                                        if (fromEmail) {
+                                          setActivityEmailToText(fromEmail);
+                                        }
+                                        setCurrentActivityBody('');
+                                      }, 100);
+                                    }}
+                                    className="ml-auto inline-flex items-center gap-1 rounded-lg bg-sky-50 px-2.5 py-1 text-[11px] font-bold text-sky-700 hover:bg-sky-100 transition-colors cursor-pointer border border-sky-200/60"
+                                  >
+                                    <Icon name="reply" className="w-3 h-3" />
+                                    Reply
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* Field Changes Table */}
+                              {isFieldChange && changeRows.length ? (
+                                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/80 overflow-hidden">
+                                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-px bg-slate-200/80">
+                                    <div className="bg-slate-100 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Before</div>
+                                    <div className="bg-slate-100 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">After</div>
+                                    {changeRows.map((change) => (
+                                      <React.Fragment key={`${event.id}-${change.field}-diff`}>
+                                        <div className="bg-white px-3 py-2.5">
+                                          <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">{change.label}</div>
+                                          <div className="mt-1 text-xs font-semibold text-slate-600 break-words">{change.from}</div>
+                                        </div>
+                                        <div className="bg-white px-3 py-2.5">
+                                          <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">{change.label}</div>
+                                          <div className="mt-1 text-xs font-semibold text-slate-900 break-words">{change.to}</div>
+                                        </div>
+                                      </React.Fragment>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))
               )}
             </div>
           </div>

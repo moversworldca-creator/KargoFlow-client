@@ -34,18 +34,19 @@ import {
   getStatusCodeLookupsPage,
   getPayments,
   seedCommunicationTemplates,
-  updateTask,
+  getFollowUps,
+  updateFollowUp,
+  completeFollowUp,
+  deleteFollowUp,
   updateSalesActivity,
-  deleteSalesActivity,
 } from '../../../services/api';
 import {
   getTenantStaff as getLookupUsers,
   getTenantSalesOverview as getSalesDashboardSummary,
-  getTenantTasks as getTasks,
   getTenantActivities as getActivities,
   getTenantLeadActivities as getLeadActivities,
-  updateTenantTask,
 } from '../leads/salesOverviewApi';
+import { getPipelineRecords } from '../leads/pipelineApi';
 import { getRecordDetailPath, getSalesListTabFromSegment, getSalesListTabPath } from '../utils/recordRoutes';
 import useCan from '../../../shared/auth/useCan';
 import { useToast } from '../../../shared/context/ToastContext';
@@ -647,10 +648,14 @@ const resolveStatusLabel = (...sources) => {
   return '—';
 };
 
-const normalizeTaskRow = (task, cache = {}) => {
-  const relatedType = task.opportunity ? 'opportunity' : 'lead';
-  const relatedId = task.opportunity || task.lead;
+const normalizeTaskRow = (task, cache = {}, usersById = {}) => {
+  const opportunityId = task.opportunity ?? task.opportunity_id;
+  const leadId = task.lead ?? task.lead_id;
+  const relatedType = opportunityId ? 'opportunity' : 'lead';
+  const relatedId = opportunityId || leadId;
   const entity = task.related_record_details || cache[`${relatedType}-${relatedId}`] || {};
+  const assignedUserId = task.assigned_to_details?.id || task.assigned_to_id || task.assigned_to || '';
+  const assignedUser = task.assigned_to_details || usersById[String(assignedUserId)] || null;
 
   const customerName = resolvePersonName(entity?.customer_details, entity?.customer, entity);
   const customerEmail = resolveContactValue('email', entity?.customer_details, entity?.customer, entity);
@@ -672,16 +677,18 @@ const normalizeTaskRow = (task, cache = {}) => {
     id: task.record_kind ? `${task.record_kind}:${relatedId}:${task.id}` : task.id,
     row_type: 'task',
     task_id: task.id,
-    native_task: Boolean(task.record_kind),
+    native_task: Boolean(task.record_kind || task.lead_id || task.opportunity_id),
     activity_id: task.activity_details?.id || task.activity?.id || task.activity,
     task_type: task.task_type || 'general',
     due_date: task.due_date || '',
-    subject: task.activity_details?.subject || task.activity?.subject || String(task.notes || '').split('\n')[0] || 'Follow-up task',
+    subject: task.title || task.activity_details?.subject || task.activity?.subject || String(task.notes || '').split('\n')[0] || 'Follow-up task',
     notes: task.notes || task.activity_details?.description || '',
     status: taskStatus,
     status_label: taskStatus === 'completed' ? 'Completed' : 'Pending',
-    assigned_user_id: task.assigned_to_details?.id || task.assigned_to || '',
-    assigned_user_name: task.assigned_to_details ? `${task.assigned_to_details.first_name} ${task.assigned_to_details.last_name}`.trim() : '—',
+    assigned_user_id: assignedUserId,
+    assigned_user_name: assignedUser
+      ? (assignedUser.name || assignedUser.full_name || `${assignedUser.first_name || ''} ${assignedUser.last_name || ''}`.trim() || assignedUser.email || '—')
+      : '—',
 
     related_type: relatedType,
     related_id: relatedId,
@@ -703,8 +710,8 @@ const normalizeTaskRow = (task, cache = {}) => {
     branch_state: entity?.branch_state || '',
     status_values: [taskStatus].filter(Boolean),
     lead_status: entity?.status || 'new',
-    lead_status_label: entity?.status_label || entity?.status || 'New',
-    lead_status_color: entity?.status_color || null,
+    lead_status_label: entity?.status_label || entity?.workflow_stage_label || entity?.status || 'New',
+    lead_status_color: entity?.status_color || entity?.custom_status_color || null,
     lead_custom_status: resolveStatusLabel(
       entity?.custom_status_code_details,
       entity?.custom_status_details,
@@ -1235,11 +1242,11 @@ const PipelineRecordsPane = React.memo(function PipelineRecordsPane({
                       </td>
                       <td className="px-4 py-3.5 max-w-xs">
                         <div className="text-sm font-bold text-slate-900 truncate">
-                          {item.notes ? item.notes.split('\n')[0] : 'Follow-up task'}
+                          {item.subject || 'Follow-up task'}
                         </div>
-                        {item.notes && item.notes.includes('\n') && (
+                        {item.notes && item.notes !== item.subject && (
                           <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                            {item.notes.split('\n').slice(1).join(' ')}
+                            {item.notes}
                           </div>
                         )}
                       </td>
@@ -2574,19 +2581,21 @@ const StatDetailModal = ({ isOpen, metricType = 'calls', onClose, dateRange, bra
             }));
           rawItems = [...salesItems, ...leadItems];
         } else if (metricType === 'tasks') {
-          const tasksRes = await getTasks({
-            limit: 500,
-            branch: localBranch || undefined,
-            assigned_user: localUser || undefined,
-            status: 'pending',
-            startDate,
-            endDate,
+          const tasksRes = await getFollowUps({
+            limit: 200,
+            only_open: true,
+            assigned_to_id: localUser || undefined,
           });
-          rawItems = asList(tasksRes).filter((task) => (task.status || task.activity_details?.status || 'pending') === 'pending').map((task) => ({
+          rawItems = asList(tasksRes).filter((task) => {
+            const createdAt = String(task.created_at || task.due_date || '').slice(0, 10);
+            return (task.status || 'pending') === 'pending'
+              && (!startDate || createdAt >= startDate)
+              && (!endDate || createdAt < endDate);
+          }).map((task) => ({
             ...task,
             row_type: 'task',
-            related_row_type: task.opportunity ? 'opportunity' : task.lead ? 'lead' : null,
-            related_record_id: task.opportunity || task.lead || null,
+            related_row_type: task.opportunity_id ? 'opportunity' : task.lead_id ? 'lead' : null,
+            related_record_id: task.opportunity_id || task.lead_id || null,
             display_number: task.opportunity_details?.display_number || task.lead_details?.display_number || `TASK-${task.id}`,
             name: [task.assigned_to_details?.first_name, task.assigned_to_details?.last_name].filter(Boolean).join(' ').trim() || task.assigned_to_details?.email || '—',
             service_type: task.notes || task.activity_details?.subject || 'Task',
@@ -3833,10 +3842,26 @@ const Sales = () => {
         if (filters.branch) params.branch = filters.branch;
         if (filters.assigned_to) params.assigned_user = filters.assigned_to;
         if (filters.status !== 'all') params.status = filters.status;
-        const tasksRes = await getTasks(params);
+        const [tasksRes, pipelineRecords] = await Promise.all([
+          getFollowUps({
+            limit: params.page_size,
+            offset: (params.page - 1) * params.page_size,
+            ...(params.assigned_user ? { assigned_to_id: params.assigned_user } : {}),
+            ...(params.status === 'pending' ? { only_open: true } : {}),
+          }),
+          getPipelineRecords({ ...(filters.branch ? { branch: filters.branch } : {}) }),
+        ]);
         if (requestSequenceRef.current !== requestId) return;
         const rawTasks = asList(tasksRes?.data || tasksRes);
-        rows = rawTasks.map(task => normalizeTaskRow(task));
+        const recordCache = Object.fromEntries(
+          pipelineRecords.map((record) => [`${record.row_type}-${record.id}`, record]),
+        );
+        const usersById = Object.fromEntries(
+          asList(metadataPayload.users).map((user) => [String(user.id), user]),
+        );
+        rows = rawTasks
+          .map((task) => normalizeTaskRow(task, recordCache, usersById))
+          .filter((task) => !filters.branch || String(task.branch_id) === String(filters.branch));
 
         const totalCount = Number(tasksRes?.data?.count ?? tasksRes?.count ?? rawTasks.length ?? rows.length ?? 0);
 
@@ -4309,10 +4334,10 @@ const Sales = () => {
             branch: filters.branch || '',
             noCache: 1,
           }),
-          getTasks({
-            limit: 500,
-            ...scopeParams,
-            status: 'pending',
+          getFollowUps({
+            limit: 200,
+            only_open: true,
+            ...(filters.assigned_to ? { assigned_to_id: filters.assigned_to } : {}),
           }).catch(() => null),
           getActivities({
             limit: 500,
@@ -4376,7 +4401,7 @@ const Sales = () => {
   }, [dashDateRange, filters.assigned_to, filters.branch, isDashboard]);
 
   const handleToggleTaskStatus = useCallback(async (item) => {
-    if (!item.activity_id) return;
+    if (!item.task_id) return;
     if (!canAll([PERMISSIONS.SALES_CHANGE_TASK])) {
       showToast('You do not have permission to update task status.', 'warning');
       return;
@@ -4384,10 +4409,8 @@ const Sales = () => {
     setTaskActionLoadingId(item.id);
     try {
       const nextStatus = item.status === 'completed' ? 'pending' : 'completed';
-      await (item.native_task ? updateTenantTask(item, { status: nextStatus }) : updateSalesActivity(item.activity_id, {
-        status: nextStatus,
-        completed_at: nextStatus === 'completed' ? new Date().toISOString() : null,
-      }));
+      if (nextStatus === 'completed') await completeFollowUp(item.task_id);
+      else await updateFollowUp(item.task_id, { status: 'pending' });
       setData((prev) => prev.map((row) => (
         row.row_type === 'task' && String(row.id) === String(item.id)
           ? {
@@ -4438,7 +4461,7 @@ const Sales = () => {
 
   const handleSaveTaskEdit = useCallback(async () => {
     const item = taskEditModal.item;
-    if (!item?.task_id || !item?.activity_id) {
+    if (!item?.task_id) {
       showToast('This follow-up is missing task details and cannot be edited.', 'error');
       return;
     }
@@ -4462,27 +4485,14 @@ const Sales = () => {
     const notes = buildFollowUpNotes(taskEditForm);
     setTaskActionLoadingId(item.id);
     try {
-      if (item.native_task) {
-        await updateTenantTask(item, {
-          title: subject, status: taskEditForm.status,
-          task_type: taskEditForm.task_type || 'general',
-          assigned_to_id: taskEditForm.assigned_to ? Number(taskEditForm.assigned_to) : null,
-          due_date: dueAt.toISOString(), notes,
-        });
-      } else {
-      await updateSalesActivity(item.activity_id, {
-        subject,
-        description: notes || subject,
+      await updateFollowUp(item.task_id, {
+        title: subject,
         status: taskEditForm.status,
-        completed_at: taskEditForm.status === 'completed' ? new Date().toISOString() : null,
-      });
-      await updateTask(item.task_id, {
         task_type: taskEditForm.task_type || 'general',
-        assigned_to: taskEditForm.assigned_to ? Number(taskEditForm.assigned_to) : null,
+        assigned_to_id: taskEditForm.assigned_to ? Number(taskEditForm.assigned_to) : null,
         due_date: dueAt.toISOString(),
         notes,
       });
-      }
       setData((prev) => prev.map((row) => (
         row.row_type === 'task' && String(row.id) === String(item.id)
           ? {
@@ -4511,9 +4521,8 @@ const Sales = () => {
   }, [canAll, closeEditTaskModal, fetchInitialData, showToast, taskEditForm, taskEditModal.item]);
 
   const handleDeleteTask = useCallback(async (item) => {
-    if (item?.native_task) { showToast('Task deletion is not available. You can mark it complete.', 'warning'); return; }
-    if (!item?.activity_id) {
-      showToast('This follow-up is missing activity details and cannot be deleted.', 'error');
+    if (!item?.task_id) {
+      showToast('This follow-up is missing task details and cannot be deleted.', 'error');
       return;
     }
     if (!canAll([PERMISSIONS.SALES_CHANGE_TASK])) {
@@ -4525,7 +4534,7 @@ const Sales = () => {
 
     setTaskActionLoadingId(item.id);
     try {
-      await deleteSalesActivity(item.activity_id);
+      await deleteFollowUp(item.task_id);
       setData((prev) => prev.filter((row) => row.row_type !== 'task' || row.id !== item.id));
       if (String(taskEditModal.item?.id || '') === String(item.id)) closeEditTaskModal();
       showToast('Follow-up deleted.', 'success');
@@ -5868,11 +5877,11 @@ const Sales = () => {
                           </td>
                           <td className="px-4 py-3.5 max-w-xs">
                             <div className="text-sm font-bold text-slate-900 truncate">
-                              {item.notes ? item.notes.split('\n')[0] : 'Follow-up task'}
+                          {item.subject || 'Follow-up task'}
                             </div>
-                            {item.notes && item.notes.includes('\n') && (
+                        {item.notes && item.notes !== item.subject && (
                               <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                                {item.notes.split('\n').slice(1).join(' ')}
+                            {item.notes}
                               </div>
                             )}
                           </td>
@@ -5905,7 +5914,7 @@ const Sales = () => {
                               item={item}
                               onToggleStatus={handleToggleTaskStatus}
                               onEdit={openEditTaskModal}
-                              onDelete={item.native_task ? undefined : handleDeleteTask}
+                              onDelete={handleDeleteTask}
                             />
                           </td>
                         </tr>
@@ -6125,11 +6134,11 @@ const Sales = () => {
                         {/* Title & Notes */}
                         <div className="space-y-1">
                           <h4 className="text-sm font-bold text-slate-900 tracking-tight leading-snug">
-                            {item.notes ? item.notes.split('\n')[0] : 'Follow-up task'}
+                            {item.subject || 'Follow-up task'}
                           </h4>
-                          {item.notes && item.notes.includes('\n') && (
+                          {item.notes && item.notes !== item.subject && (
                             <p className="text-[11px] text-slate-505 leading-normal bg-slate-50/60 p-2 rounded-lg border border-slate-100/80 max-h-20 overflow-y-auto whitespace-pre-line">
-                              {item.notes.split('\n').slice(1).join('\n')}
+                              {item.notes}
                             </p>
                           )}
                         </div>
@@ -6188,7 +6197,7 @@ const Sales = () => {
                               item={item}
                               onToggleStatus={handleToggleTaskStatus}
                               onEdit={openEditTaskModal}
-                              onDelete={item.native_task ? undefined : handleDeleteTask}
+                              onDelete={handleDeleteTask}
                             />
                           </div>
                         </div>

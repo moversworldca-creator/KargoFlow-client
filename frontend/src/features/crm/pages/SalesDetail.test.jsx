@@ -1,5 +1,4 @@
 import * as inventoryApi from '../leads/leadInventoryApi';
-import { completeRecordTask } from '../leads/recordWorkApi';
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
@@ -9,7 +8,6 @@ import * as apiService from '../../../services/api';
 
 const permissionState = vi.hoisted(() => ({ denied: [] }));
 vi.mock('../leads/leadInventoryApi', async original => ({ ...await original(), listLeadInventory: vi.fn().mockResolvedValue([]) }));
-vi.mock('../leads/recordWorkApi', async original => ({ ...await original(), completeRecordTask: vi.fn().mockResolvedValue({}) }));
 const routeState = vi.hoisted(() => ({
   params: { id: '123' },
   location: { pathname: '/sales/123', state: {} },
@@ -321,9 +319,10 @@ vi.mock('../../../services/api', () => {
     updateSalesActivity: vi.fn().mockResolvedValue({}),
     deleteSalesActivity: vi.fn().mockResolvedValue({}),
     getActivities: vi.fn().mockResolvedValue([]),
-    getTasks: vi.fn().mockResolvedValue([]),
-    createTask: vi.fn().mockResolvedValue({}),
-    updateTask: vi.fn().mockResolvedValue({}),
+    getFollowUps: vi.fn().mockResolvedValue([]),
+    createFollowUp: vi.fn().mockResolvedValue({}),
+    updateFollowUp: vi.fn().mockResolvedValue({}),
+    completeFollowUp: vi.fn().mockResolvedValue({}),
     getStatusCodes: vi.fn().mockResolvedValue([]),
     getStatusCodeLookups: vi.fn().mockResolvedValue([]),
     getOpportunityLossReasonLookups: vi.fn().mockResolvedValue([]),
@@ -1267,27 +1266,27 @@ describe('SalesDetail Component Tests', () => {
   });
 
   it('completes and reopens tasks without activity IDs and refreshes the timeline', async () => {
-    apiService.getTasks.mockResolvedValue([{ id: 7, title: 'Check inventory', notes: 'Call customer', status: 'pending', due_date: '2020-01-01T09:00:00Z', task_type: 'follow_up', assigned_to_id: 7 }]);
+    apiService.getFollowUps.mockResolvedValue([{ id: 7, title: 'Check inventory', notes: 'Call customer', status: 'pending', due_date: '2020-01-01T09:00:00Z', task_type: 'follow_up', assigned_to_id: 7 }]);
     renderComponent();
     await screen.findByText('Check inventory');
     expect(screen.getByText(/Overdue/)).toBeInTheDocument();
     const timelineCalls = apiService.getActivities.mock.calls.length;
-    apiService.getTasks.mockResolvedValue([{ id: 7, title: 'Check inventory', status: 'completed' }]);
+    apiService.getFollowUps.mockResolvedValue([{ id: 7, title: 'Check inventory', status: 'completed' }]);
     fireEvent.click(screen.getByRole('button', { name: 'Mark follow-up complete' }));
-    await waitFor(() => expect(completeRecordTask).toHaveBeenCalledWith(7, { opportunity: 123 }));
+    await waitFor(() => expect(apiService.completeFollowUp).toHaveBeenCalledWith(7));
     await waitFor(() => expect(apiService.getActivities.mock.calls.length).toBeGreaterThan(timelineCalls));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Reopen follow-up' })).not.toBeDisabled());
-    apiService.getTasks.mockResolvedValue([{ id: 7, title: 'Check inventory', status: 'pending' }]);
+    apiService.getFollowUps.mockResolvedValue([{ id: 7, title: 'Check inventory', status: 'pending' }]);
     fireEvent.click(screen.getByRole('button', { name: 'Reopen follow-up' }));
-    await waitFor(() => expect(apiService.updateTask).toHaveBeenCalledWith(7, { status: 'pending' }, { opportunity: 123 }));
+    await waitFor(() => expect(apiService.updateFollowUp).toHaveBeenCalledWith(7, { status: 'pending' }));
   });
 
   it('edits a lead task without an activity ID and filters completed tasks', async () => {
     apiService.getLead.mockResolvedValue({ id: 123, first_name: 'Ada', last_name: 'Lead', system_state: 'new', branch_id: 1 });
-    apiService.getTasks.mockResolvedValue([{ id: 7, title: 'Original task', notes: 'Confirm items', assigned_to_id: 7, due_date: '2026-10-22T09:00:00Z', task_type: 'follow_up', status: 'pending' }, { id: 8, title: 'Finished task', status: 'completed' }]);
+    apiService.getFollowUps.mockResolvedValue([{ id: 7, title: 'Original task', notes: 'Confirm items', assigned_to_id: 7, due_date: '2026-10-22T09:00:00Z', task_type: 'follow_up', status: 'pending' }, { id: 8, title: 'Finished task', status: 'completed' }]);
     renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
     await screen.findByText('Original task');
-    expect(apiService.getTasks).toHaveBeenCalledWith(expect.objectContaining({ lead: 123 }));
+    expect(apiService.getFollowUps).toHaveBeenCalledWith(expect.objectContaining({ lead_id: 123 }));
     fireEvent.change(screen.getByLabelText('Filter follow-ups'), { target: { value: 'completed' } });
     expect(screen.getByText('Original task')).not.toBeVisible();
     expect(screen.getByText('Finished task')).toBeVisible();
@@ -1296,12 +1295,12 @@ describe('SalesDetail Component Tests', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Edit follow-up' }));
     fireEvent.change(screen.getByPlaceholderText(/e.g. Check on inventory/i), { target: { value: 'Revised task' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
-    await waitFor(() => expect(apiService.updateTask).toHaveBeenCalledWith(7, expect.objectContaining({ title: 'Revised task', assigned_to_id: 7 }), { lead: 123 }));
+    await waitFor(() => expect(apiService.updateFollowUp).toHaveBeenCalledWith(7, expect.objectContaining({ title: 'Revised task', assigned_to_id: 7 })));
   });
 
   it('hides task mutation controls for viewers', async () => {
     permissionState.denied = ['opportunities.update'];
-    apiService.getTasks.mockResolvedValue([{ id: 7, title: 'Read only task', status: 'pending' }]);
+    apiService.getFollowUps.mockResolvedValue([{ id: 7, title: 'Read only task', status: 'pending' }]);
     renderComponent();
     await screen.findByText('Read only task');
     expect(screen.queryByRole('button', { name: 'Edit follow-up' })).not.toBeInTheDocument();
@@ -1342,7 +1341,7 @@ describe('SalesDetail Component Tests', () => {
     // Save
     fireEvent.click(screen.getByRole('button', { name: /Create Follow-up/i }));
     await waitFor(() => {
-      expect(apiService.createTask).toHaveBeenCalledWith(expect.objectContaining({ notes: 'New Follow-up Note' }));
+      expect(apiService.createFollowUp).toHaveBeenCalledWith(expect.objectContaining({ notes: 'New Follow-up Note' }));
     });
   });
 
@@ -1503,6 +1502,86 @@ describe('SalesDetail Component Tests', () => {
     renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
     await screen.findByText('Ada Lead');
     await waitFor(() => expect(screen.getByRole('button', { name: /Retry/i })).toBeInTheDocument());
+  });
+
+  it('opens Quick Access Activities drawer and displays rich activity logs properly', async () => {
+    apiService.getLead.mockResolvedValue(leadFixture);
+    apiService.getActivities.mockResolvedValue([
+      {
+        id: 101,
+        activity_type: 'call',
+        subject: 'Call with Customer',
+        description: 'Confirmed moving date and 3 bedroom inventory.',
+        direction: 'outbound',
+        status: 'completed',
+        created_at: '2026-10-22T16:52:00Z',
+        user_details: { first_name: 'Marcus', last_name: 'Vance', email: 'marcus@example.com' },
+        call_log_details: { duration_seconds: 180, disposition: 'connected' },
+      },
+      {
+        id: 102,
+        activity_type: 'note',
+        subject: 'Internal Note',
+        description: 'Customer mentioned narrow driveway.',
+        created_at: '2026-10-22T16:50:00Z',
+        user_details: { first_name: 'Elena', last_name: 'Rostova', email: 'elena@example.com' },
+      },
+    ]);
+    apiService.getTimelineEvents.mockResolvedValue([
+      {
+        id: 201,
+        channel: 'email',
+        direction: 'inbound',
+        subject: 'Quote inquiry',
+        body_text: 'Can we get an updated estimate?',
+        created_at: '2026-10-22T16:48:00Z',
+        sender_name: 'Jane Customer',
+        sender_address: 'jane@example.com',
+      },
+    ]);
+
+    renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
+    await screen.findByText('Ada Lead');
+
+    // Click Actions dropdown
+    const actionsBtn = screen.getByRole('button', { name: /Actions/i });
+    fireEvent.click(actionsBtn);
+    const activitiesMenuItem = await screen.findByRole('button', { name: /^Activities$/i });
+    fireEvent.click(activitiesMenuItem);
+
+    // Verify Quick Access drawer opens
+    expect(await screen.findByText(/Quick Access/i)).toBeInTheDocument();
+    expect(screen.getByText('Activities & History')).toBeInTheDocument();
+
+    // Verify rich logs are rendered with actual titles, descriptions, and actors (NOT generic "Activity" or "System")
+    expect(screen.getByText('Call with Customer')).toBeInTheDocument();
+    expect(screen.getByText('Confirmed moving date and 3 bedroom inventory.')).toBeInTheDocument();
+    expect(screen.getByText('Marcus Vance')).toBeInTheDocument();
+    expect(screen.getByText('3m')).toBeInTheDocument();
+
+    expect(screen.getByText('Customer mentioned narrow driveway.')).toBeInTheDocument();
+    expect(screen.getByText('Elena Rostova')).toBeInTheDocument();
+
+    expect(screen.getByText('Quote inquiry')).toBeInTheDocument();
+    expect(screen.getByText('Can we get an updated estimate?')).toBeInTheDocument();
+    expect(screen.getByText('Jane Customer')).toBeInTheDocument();
+
+    // Verify filter buttons are rendered
+    expect(screen.getByRole('button', { name: /^Calls/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Emails/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Notes/i })).toBeInTheDocument();
+
+    // Filter by Calls
+    fireEvent.click(screen.getByRole('button', { name: /^Calls/i }));
+    expect(screen.getByText('Call with Customer')).toBeInTheDocument();
+    expect(screen.queryByText('Customer mentioned narrow driveway.')).not.toBeInTheDocument();
+
+    // Close drawer
+    const closeBtn = screen.getByRole('button', { name: /Close drawer/i });
+    fireEvent.click(closeBtn);
+    await waitFor(() => {
+      expect(screen.queryByText('Activities & History')).not.toBeInTheDocument();
+    });
   });
 
 });

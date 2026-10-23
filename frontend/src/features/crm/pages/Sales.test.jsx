@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Sales from './Sales';
+import { getPipelineRecords } from '../leads/pipelineApi';
 import {
   bulkSalesAssign,
   bulkSalesMarkLost,
@@ -20,11 +21,12 @@ import {
   getMoverSizeLookups,
   getServices,
   getStatusCodes,
-  getTasks,
+  getFollowUps,
   seedCommunicationTemplates,
   updateSalesActivity,
-  updateTask,
-  deleteSalesActivity,
+  updateFollowUp,
+  completeFollowUp,
+  deleteFollowUp,
 } from '../../../services/api';
 
 vi.mock('../../../shared/auth/useCan', () => ({
@@ -33,6 +35,10 @@ vi.mock('../../../shared/auth/useCan', () => ({
     canAny: () => true,
     can: () => true,
   }),
+}));
+
+vi.mock('../leads/pipelineApi', () => ({
+  getPipelineRecords: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('../../auth/context/AuthContext', () => ({
@@ -77,12 +83,13 @@ vi.mock('../../../services/api', () => ({
   getSalesDashboardSummary: vi.fn(),
   getStatusCodeLookupsPage: vi.fn(),
   getStatusCodes: vi.fn(),
-  getTasks: vi.fn(),
+  getFollowUps: vi.fn(),
   liststatuscode: vi.fn(),
   seedCommunicationTemplates: vi.fn(),
-  updateTask: vi.fn(),
+  updateFollowUp: vi.fn(),
+  completeFollowUp: vi.fn(),
+  deleteFollowUp: vi.fn(),
   updateSalesActivity: vi.fn(),
-  deleteSalesActivity: vi.fn(),
   getUsers: vi.fn(),
 }));
 
@@ -91,10 +98,8 @@ vi.mock('../leads/salesOverviewApi', async () => {
   return {
     getTenantStaff: api.getLookupUsers,
     getTenantSalesOverview: api.getSalesDashboardSummary,
-    getTenantTasks: api.getTasks,
     getTenantActivities: api.getActivities,
     getTenantLeadActivities: api.getLeadActivities,
-    updateTenantTask: vi.fn(),
   };
 });
 
@@ -165,13 +170,15 @@ describe('Sales DashboardPane', () => {
     vi.mocked(getMyLeadsQueue).mockResolvedValue(makeSalesQueueResponse([]));
     vi.mocked(getActivities).mockResolvedValue([]);
     vi.mocked(getLeadActivities).mockResolvedValue([]);
-    vi.mocked(getTasks).mockResolvedValue({ data: [] });
+    vi.mocked(getFollowUps).mockResolvedValue([]);
+    vi.mocked(getPipelineRecords).mockResolvedValue([]);
     vi.mocked(getPayments).mockResolvedValue([]);
     vi.mocked(getLead).mockResolvedValue({ data: null });
     vi.mocked(getOpportunity).mockResolvedValue({ data: null });
     vi.mocked(updateSalesActivity).mockResolvedValue({});
-    vi.mocked(updateTask).mockResolvedValue({});
-    vi.mocked(deleteSalesActivity).mockResolvedValue({});
+    vi.mocked(updateFollowUp).mockResolvedValue({});
+    vi.mocked(completeFollowUp).mockResolvedValue({});
+    vi.mocked(deleteFollowUp).mockResolvedValue({});
     vi.mocked(bulkSalesAssign).mockResolvedValue({ data: { updated: 1, failed: 0 } });
     vi.mocked(bulkSalesMarkLost).mockResolvedValue({ data: { updated: 1, failed: 0 } });
     vi.mocked(seedCommunicationTemplates).mockResolvedValue({});
@@ -247,11 +254,7 @@ describe('Sales DashboardPane', () => {
       startDate: expect.any(String),
       endDate: expect.any(String),
     }));
-    expect(getTasks).toHaveBeenCalledWith(expect.objectContaining({
-      startDate: expect.any(String),
-      endDate: expect.any(String),
-      status: 'pending',
-    }));
+    expect(getFollowUps).toHaveBeenCalledWith(expect.objectContaining({ only_open: true }));
 
     const userSelect = screen.getByDisplayValue('All Staff');
     fireEvent.change(userSelect, { target: { value: '7' } });
@@ -267,11 +270,7 @@ describe('Sales DashboardPane', () => {
         noCache: 1,
       }));
     });
-    expect(getTasks).toHaveBeenCalledWith(expect.objectContaining({
-      assigned_user: '7',
-      branch: undefined,
-      status: 'pending',
-    }));
+    expect(getFollowUps).toHaveBeenCalledWith(expect.objectContaining({ assigned_to_id: '7', only_open: true }));
 
     expect(within(screen.getByText('Emails Logged').closest('div.rounded-xl')).getByText('4')).toBeInTheDocument();
     expect(within(screen.getByText('SMS Logged').closest('div.rounded-xl')).getByText('2')).toBeInTheDocument();
@@ -284,10 +283,7 @@ describe('Sales DashboardPane', () => {
     expect(getLeadActivities).toHaveBeenCalledWith(expect.objectContaining({
       assigned_user: '7',
     }));
-    expect(getTasks).toHaveBeenCalledWith(expect.objectContaining({
-      assigned_user: '7',
-      status: 'pending',
-    }));
+    expect(getFollowUps).toHaveBeenCalledWith(expect.objectContaining({ assigned_to_id: '7', only_open: true }));
 
     const insights = screen.getByText('User Insights').closest('div.rounded-xl');
     expect(within(insights).getByText('Sandesh Off')).toBeInTheDocument();
@@ -313,58 +309,47 @@ describe('Sales DashboardPane', () => {
       startDate: expect.any(String),
       endDate: expect.any(String),
     }));
-    expect(getTasks).toHaveBeenCalledWith(expect.objectContaining({
-      assigned_user: '7',
-      startDate: expect.any(String),
-      endDate: expect.any(String),
-      status: 'pending',
-    }));
+    expect(getFollowUps).toHaveBeenCalledWith(expect.objectContaining({ assigned_to_id: '7', only_open: true }));
   });
 
   it('renders follow-up table data from backend tasks and related records', async () => {
-    vi.mocked(getTasks).mockResolvedValue({
+    vi.mocked(getPipelineRecords).mockResolvedValue([
+      {
+        id: 55, row_type: 'lead', display_number: 'LEAD-55', name: 'Priya Shah',
+        status: 'qualified', workflow_stage_label: 'Qualified', custom_status_label: 'Needs COI',
+        move_date: '2026-07-12', last_contacted_at: '2026-07-01T09:15:00Z', branch: 5,
+      },
+      {
+        id: 77, row_type: 'opportunity', display_number: 'OPP-77', name: 'Northwind Ops',
+        status: 'booked', workflow_stage_label: 'Booked', custom_status_label: 'Deposit Paid',
+        move_date: '2026-07-15', last_contacted_at: '2026-07-02T11:00:00Z', branch: 5,
+      },
+    ]);
+    vi.mocked(getFollowUps).mockResolvedValue({
       data: [
         {
           id: 101,
+          title: 'Confirm elevator booking',
           task_type: 'call',
           due_date: '2026-07-03T15:30:00Z',
           notes: 'Confirm elevator booking\nAsk for certificate of insurance',
-          lead: 55,
-          opportunity: null,
-          assigned_to: 7,
-          assigned_to_details: {
-            id: 7,
-            first_name: 'Sandesh',
-            last_name: 'Off',
-          },
-          activity: 501,
-          activity_details: {
-            id: 501,
-            subject: 'Confirm elevator booking',
-            description: 'Confirm elevator booking',
-            status: 'pending',
-          },
+          lead_id: 55,
+          opportunity_id: null,
+          assigned_to_id: 7,
+          activity_id: 501,
+          status: 'pending',
         },
         {
           id: 102,
+          title: 'Quote revision',
           task_type: 'general',
           due_date: '2026-07-04T10:00:00Z',
           notes: 'Send revised quote',
-          lead: null,
-          opportunity: 77,
-          assigned_to: 8,
-          assigned_to_details: {
-            id: 8,
-            first_name: 'Asha',
-            last_name: 'Kumar',
-          },
-          activity: 502,
-          activity_details: {
-            id: 502,
-            subject: 'Quote revision',
-            description: 'Send revised quote',
-            status: 'completed',
-          },
+          lead_id: null,
+          opportunity_id: 77,
+          assigned_to_id: 8,
+          activity_id: 502,
+          status: 'completed',
         },
       ],
     });
@@ -418,14 +403,18 @@ describe('Sales DashboardPane', () => {
     expect((await screen.findAllByText('LEAD-55')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('OPP-77').length).toBeGreaterThan(0);
 
-    expect(getTasks).toHaveBeenCalledWith({ ordering: '-activity__created_at', page: 1, page_size: 50 });
+    expect(getFollowUps).toHaveBeenCalledWith({ limit: 50, offset: 0 });
     expect(screen.getAllByText('Sandesh Off').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Asha Kumar').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Priya Shah').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Northwind Ops').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Needs COI').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Deposit Paid').length).toBeGreaterThan(0);
     expect(screen.getByTitle('Select all visible records')).toBeInTheDocument();
   });
 
   it('runs follow-up action menu options for complete, edit, and delete', async () => {
-    vi.mocked(getTasks).mockResolvedValue({
+    vi.mocked(getFollowUps).mockResolvedValue({
       data: [
         {
           id: 101,
@@ -476,10 +465,7 @@ describe('Sales DashboardPane', () => {
     fireEvent.click(screen.getByRole('button', { name: /mark complete/i }));
 
     await waitFor(() => {
-      expect(updateSalesActivity).toHaveBeenCalledWith(501, expect.objectContaining({
-        status: 'completed',
-        completed_at: expect.any(String),
-      }));
+      expect(completeFollowUp).toHaveBeenCalledWith(101);
     });
 
     fireEvent.click(screen.getAllByRole('button', { name: /task actions/i })[0]);
@@ -494,14 +480,11 @@ describe('Sales DashboardPane', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
-      expect(updateSalesActivity).toHaveBeenCalledWith(501, expect.objectContaining({
-        subject: 'Updated call',
-        description: 'Updated call\nUpdated note',
+      expect(updateFollowUp).toHaveBeenCalledWith(101, expect.objectContaining({
+        title: 'Updated call',
         status: 'pending',
-      }));
-      expect(updateTask).toHaveBeenCalledWith(101, expect.objectContaining({
         task_type: 'email',
-        assigned_to: 8,
+        assigned_to_id: 8,
         due_date: expect.any(String),
         notes: 'Updated call\nUpdated note',
       }));
@@ -512,7 +495,7 @@ describe('Sales DashboardPane', () => {
 
     await waitFor(() => {
       expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('Call customer'));
-      expect(deleteSalesActivity).toHaveBeenCalledWith(501);
+      expect(deleteFollowUp).toHaveBeenCalledWith(101);
     });
   });
 
@@ -784,14 +767,11 @@ describe('Sales DashboardPane', () => {
         assigned_user: '7',
       }));
     });
-    expect(getTasks).toHaveBeenCalledWith(expect.objectContaining({
-      assigned_user: '7',
-      status: 'pending',
-    }));
+    expect(getFollowUps).toHaveBeenCalledWith(expect.objectContaining({ assigned_to_id: '7', only_open: true }));
   });
 
   it('hides completed tasks from the follow-up modal so the count matches the dashboard', async () => {
-    vi.mocked(getTasks).mockResolvedValue({
+    vi.mocked(getFollowUps).mockResolvedValue({
       data: [
         {
           id: 201,
@@ -854,11 +834,7 @@ describe('Sales DashboardPane', () => {
       expect(screen.getByText('Follow-up Today')).toBeInTheDocument();
     });
 
-    expect(getTasks).toHaveBeenCalledWith(expect.objectContaining({
-      status: 'pending',
-      branch: undefined,
-      assigned_user: undefined,
-    }));
+    expect(getFollowUps).toHaveBeenCalledWith(expect.objectContaining({ only_open: true }));
     expect(await screen.findAllByText('1 - 1 of 1 Total Results')).toHaveLength(1);
     expect(screen.getAllByText('Call pending lead').length).toBeGreaterThan(0);
     expect(screen.queryByText('Completed task should not count')).not.toBeInTheDocument();
