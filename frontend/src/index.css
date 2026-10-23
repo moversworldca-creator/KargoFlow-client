@@ -1,5 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Lexend+Deca:wght@100..900&family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
+@source "../../shared/template-builder";
 
 /* Tailwind v4 defaults `dark:` to the operating-system preference. The app's
    theme switcher owns the `.dark` class, so variants must follow that class. */
@@ -92,9 +93,10 @@
     scroll-behavior: smooth;
   }
 
-  table thead,
-  table thead tr,
-  table thead th {
+  /* Dashboard table colors must not override template documents. */
+  table thead:not(:where([data-template-document], [data-template-document] *)),
+  table thead tr:not(:where([data-template-document], [data-template-document] *)),
+  table thead th:not(:where([data-template-document], [data-template-document] *)) {
     background-color: #EBF3FA !important;
     color: #133559;
   }
@@ -160,6 +162,7 @@
 }
 
 /* === DARK MODE CONFIGURATION & OVERRIDES === */
+/* Document surfaces retain their authored colors in either dashboard theme. */
 :root.dark, html.dark {
   --color-page: #0b1329;
   --color-card: #14203e;
@@ -189,201 +192,268 @@
 }
 
 @layer utilities {
-  .dark body,
-  .dark html {
+  .dark body:not(:where([data-template-document], [data-template-document] *)),
+  .dark html:not(:where([data-template-document], [data-template-document] *)) {
     background-color: var(--color-page) !important;
     color: var(--color-body) !important;
   }
 
-  .dark h1, .dark h2, .dark h3,
-  .dark h4, .dark h5, .dark h6 {
+  .dark h1:not(:where([data-template-document], [data-template-document] *)),
+  .dark h2:not(:where([data-template-document], [data-template-document] *)),
+  .dark h3:not(:where([data-template-document], [data-template-document] *)),
+  .dark h4:not(:where([data-template-document], [data-template-document] *)),
+  .dark h5:not(:where([data-template-document], [data-template-document] *)),
+  .dark h6:not(:where([data-template-document], [data-template-document] *)) {
     color: var(--color-heading) !important;
   }
 
-  .dark table { background-color: var(--color-card) !important; }
-  .dark th {
+  .dark table:not(:where([data-template-document], [data-template-document] *)) { background-color: var(--color-card) !important; }
+  .dark th:not(:where([data-template-document], [data-template-document] *)) {
     background-color: var(--color-subtle) !important;
     color: var(--color-heading) !important;
     border-color: var(--color-border) !important;
   }
-  .dark td {
+  .dark td:not(:where([data-template-document], [data-template-document] *)) {
     border-color: var(--color-border) !important;
     color: var(--color-body) !important;
   }
-  .dark tr:hover { background-color: var(--color-subtle) !important; }
+  .dark tr:hover:not(:where([data-template-document], [data-template-document] *)) { background-color: var(--color-subtle) !important; }
 
-  .dark .bg-white,
-  .dark .bg-white\/95, .dark .bg-white\/90, .dark .bg-white\/80,
-  .dark .bg-white\/70, .dark .bg-white\/50,
-  .dark .bg-\[\#ffffff\], .dark .bg-\[\#fff\] {
+  .dark .bg-white:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-white\/95:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-white\/90:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-white\/80:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-white\/70:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-white\/50:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-\[\#ffffff\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-\[\#fff\]:not(:where([data-template-document], [data-template-document] *)) {
     background-color: var(--color-card) !important;
   }
 
-  .dark .bg-slate-50, .dark .bg-gray-50,
-  .dark .bg-slate-100, .dark .bg-gray-100,
-  .dark .bg-\[\#fafafa\], .dark .bg-\[\#f1f5f9\],
-  .dark .bg-\[\#eef5fa\], .dark .bg-\[\#f8fafc\],
-  .dark .bg-\[\#f4f7fb\] {
+  .dark .bg-slate-50:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-gray-50:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-slate-100:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-gray-100:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-\[\#fafafa\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-\[\#f1f5f9\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-\[\#eef5fa\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-\[\#f8fafc\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-\[\#f4f7fb\]:not(:where([data-template-document], [data-template-document] *)) {
     background-color: var(--color-subtle) !important;
   }
 
-  .dark .bg-slate-200, .dark .bg-gray-200,
-  .dark .bg-slate-300, .dark .bg-gray-300 {
+  .dark .bg-slate-200:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-gray-200:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-slate-300:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-gray-300:not(:where([data-template-document], [data-template-document] *)) {
     background-color: var(--color-border) !important;
   }
 
-  .dark .bg-slate-100:hover, .dark .bg-gray-100:hover {
+  .dark .bg-slate-100:hover:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-gray-100:hover:not(:where([data-template-document], [data-template-document] *)) {
     background-color: #203055 !important;
   }
 
-  .dark .hover\:bg-black\/5:hover { background-color: rgba(255,255,255,0.05) !important; }
+  .dark .hover\:bg-black\/5:hover:not(:where([data-template-document], [data-template-document] *)) { background-color: rgba(255,255,255,0.05) !important; }
 
-  .dark .border-gray-200, .dark .border-slate-200,
-  .dark .border-gray-100, .dark .border-slate-100,
-  .dark .border-gray-300, .dark .border-slate-300,
-  .dark .border-\[\#bae0f5\], .dark .border-\[\#eef5fa\],
-  .dark .border-\[\#e2e8f0\] {
+  .dark .border-gray-200:not(:where([data-template-document], [data-template-document] *)),
+  .dark .border-slate-200:not(:where([data-template-document], [data-template-document] *)),
+  .dark .border-gray-100:not(:where([data-template-document], [data-template-document] *)),
+  .dark .border-slate-100:not(:where([data-template-document], [data-template-document] *)),
+  .dark .border-gray-300:not(:where([data-template-document], [data-template-document] *)),
+  .dark .border-slate-300:not(:where([data-template-document], [data-template-document] *)),
+  .dark .border-\[\#bae0f5\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark .border-\[\#eef5fa\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark .border-\[\#e2e8f0\]:not(:where([data-template-document], [data-template-document] *)) {
     border-color: var(--color-border) !important;
   }
 
-  .dark .text-slate-800, .dark .text-slate-900,
-  .dark .text-slate-700, .dark .text-black,
-  .dark .text-slate-950, .dark .text-gray-950,
-  .dark .text-\[\#111d23\], .dark .text-\[\#0f172a\],
-  .dark .text-\[\#1e293b\], .dark .text-gray-900,
-  .dark .text-gray-800, .dark .text-gray-700 {
+  .dark .text-slate-800:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-slate-900:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-slate-700:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-black:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-slate-950:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-gray-950:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-\[\#111d23\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-\[\#0f172a\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-\[\#1e293b\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-gray-900:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-gray-800:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-gray-700:not(:where([data-template-document], [data-template-document] *)) {
     color: var(--color-heading) !important;
   }
 
-  .dark .text-slate-600, .dark .text-slate-500,
-  .dark .text-gray-600, .dark .text-gray-500,
-  .dark .text-\[\#334155\], .dark .text-\[\#475569\] {
+  .dark .text-slate-600:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-slate-500:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-gray-600:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-gray-500:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-\[\#334155\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-\[\#475569\]:not(:where([data-template-document], [data-template-document] *)) {
     color: var(--color-body) !important;
   }
 
-  .dark .text-slate-400, .dark .text-gray-400,
-  .dark .text-\[\#64748b\] { color: var(--color-muted) !important; }
+  .dark .text-slate-400:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-gray-400:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-\[\#64748b\]:not(:where([data-template-document], [data-template-document] *)) { color: var(--color-muted) !important; }
 
-  .dark input, .dark select, .dark textarea {
+  .dark input:not(:where([data-template-document], [data-template-document] *)),
+  .dark select:not(:where([data-template-document], [data-template-document] *)),
+  .dark textarea:not(:where([data-template-document], [data-template-document] *)) {
     background-color: var(--color-subtle) !important;
     color: var(--color-heading) !important;
     border-color: var(--color-border) !important;
   }
-  .dark input::placeholder, .dark textarea::placeholder {
+  .dark input:not(:where([data-template-document], [data-template-document] *))::placeholder,
+  .dark textarea:not(:where([data-template-document], [data-template-document] *))::placeholder {
     color: var(--color-muted) !important;
   }
 
-  .dark .text-content-sec { color: var(--color-body) !important; }
-  .dark .text-content-main { color: var(--color-heading) !important; }
+  .dark .text-content-sec:not(:where([data-template-document], [data-template-document] *)) { color: var(--color-body) !important; }
+  .dark .text-content-main:not(:where([data-template-document], [data-template-document] *)) { color: var(--color-heading) !important; }
 
-  .dark .bg-\[\#eef6ff\] { background-color: var(--color-subtle) !important; }
-  .dark .border-\[\#9fcdf5\], .dark .border-\[\#7bb9eb\] { border-color: var(--color-border) !important; }
-  .dark input.text-\[\#1f7ae0\], .dark select.text-\[\#1f7ae0\],
-  .dark textarea.text-\[\#1f7ae0\], .dark div.text-\[\#1f7ae0\] input,
-  .dark div.text-\[\#1f7ae0\] { color: var(--color-heading) !important; }
+  .dark .bg-\[\#eef6ff\]:not(:where([data-template-document], [data-template-document] *)) { background-color: var(--color-subtle) !important; }
+  .dark .border-\[\#9fcdf5\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark .border-\[\#7bb9eb\]:not(:where([data-template-document], [data-template-document] *)) { border-color: var(--color-border) !important; }
+  .dark input.text-\[\#1f7ae0\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark select.text-\[\#1f7ae0\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark textarea.text-\[\#1f7ae0\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark div.text-\[\#1f7ae0\] input:not(:where([data-template-document], [data-template-document] *)),
+  .dark div.text-\[\#1f7ae0\]:not(:where([data-template-document], [data-template-document] *)) { color: var(--color-heading) !important; }
 
-  .dark .text-\[\#004e9a\] { color: #60a5fa !important; }
-  .dark .hover\:text-\[\#004e9a\]:hover { color: #93c5fd !important; }
-  .dark .hover\:border-\[\#004e9a\]:hover { border-color: #60a5fa !important; }
+  .dark .text-\[\#004e9a\]:not(:where([data-template-document], [data-template-document] *)) { color: #60a5fa !important; }
+  .dark .hover\:text-\[\#004e9a\]:hover:not(:where([data-template-document], [data-template-document] *)) { color: #93c5fd !important; }
+  .dark .hover\:border-\[\#004e9a\]:hover:not(:where([data-template-document], [data-template-document] *)) { border-color: #60a5fa !important; }
 
-  .dark canvas.bg-white { background-color: #ffffff !important; }
+  .dark canvas.bg-white:not(:where([data-template-document], [data-template-document] *)) { background-color: #ffffff !important; }
 
-  .dark .bg-\[\#ECFDF5\], .dark .bg-\[\#ecfdf5\] { background-color: rgba(16,185,129,0.15) !important; }
-  .dark .text-\[\#065F46\], .dark .text-\[\#065f46\] { color: #34d399 !important; }
-  .dark .border-\[\#86EFAC\]\/60 { border-color: rgba(16,185,129,0.3) !important; }
+  .dark .bg-\[\#ECFDF5\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-\[\#ecfdf5\]:not(:where([data-template-document], [data-template-document] *)) { background-color: rgba(16,185,129,0.15) !important; }
+  .dark .text-\[\#065F46\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-\[\#065f46\]:not(:where([data-template-document], [data-template-document] *)) { color: #34d399 !important; }
+  .dark .border-\[\#86EFAC\]\/60:not(:where([data-template-document], [data-template-document] *)) { border-color: rgba(16,185,129,0.3) !important; }
 
-  .dark .bg-\[\#FFFBEB\], .dark .bg-\[\#fffbeb\] { background-color: rgba(245,158,11,0.15) !important; }
-  .dark .text-\[\#92400E\], .dark .text-\[\#92400e\] { color: #fbbf24 !important; }
-  .dark .border-\[\#FDE68A\], .dark .border-\[\#fde68a\] { border-color: rgba(245,158,11,0.3) !important; }
+  .dark .bg-\[\#FFFBEB\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-\[\#fffbeb\]:not(:where([data-template-document], [data-template-document] *)) { background-color: rgba(245,158,11,0.15) !important; }
+  .dark .text-\[\#92400E\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-\[\#92400e\]:not(:where([data-template-document], [data-template-document] *)) { color: #fbbf24 !important; }
+  .dark .border-\[\#FDE68A\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark .border-\[\#fde68a\]:not(:where([data-template-document], [data-template-document] *)) { border-color: rgba(245,158,11,0.3) !important; }
 
-  .dark .bg-\[\#FEF2F2\], .dark .bg-\[\#fef2f2\] { background-color: rgba(239,68,68,0.15) !important; }
-  .dark .text-\[\#7F1D1D\], .dark .text-\[\#7f1d1d\] { color: #f87171 !important; }
-  .dark .border-\[\#FCA5A5\]\/50 { border-color: rgba(239,68,68,0.3) !important; }
+  .dark .bg-\[\#FEF2F2\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-\[\#fef2f2\]:not(:where([data-template-document], [data-template-document] *)) { background-color: rgba(239,68,68,0.15) !important; }
+  .dark .text-\[\#7F1D1D\]:not(:where([data-template-document], [data-template-document] *)),
+  .dark .text-\[\#7f1d1d\]:not(:where([data-template-document], [data-template-document] *)) { color: #f87171 !important; }
+  .dark .border-\[\#FCA5A5\]\/50:not(:where([data-template-document], [data-template-document] *)) { border-color: rgba(239,68,68,0.3) !important; }
 
-  .dark .bg-\[\#FDE8E8\]\/30, .dark .bg-\[\#FDE8E8\]\/40,
-  .dark .bg-\[\#FDE8E8\]\/60 { background-color: rgba(239,68,68,0.15) !important; }
-  .dark .hover\:bg-\[\#FDE8E8\]\/30:hover,
-  .dark .hover\:bg-\[\#FDE8E8\]\/50:hover { background-color: rgba(239,68,68,0.25) !important; }
-  .dark .bg-\[\#FDE8E8\] { background-color: #7f1d1d !important; }
-  .dark .border-\[\#FDE8E8\] { border-color: rgba(239,68,68,0.3) !important; }
-  .dark .text-\[\#791F1F\] { color: #f87171 !important; }
-  .dark .hover\:text-\[\#791F1F\]:hover { color: #fca5a5 !important; }
+  .dark .bg-\[\#FDE8E8\]\/30:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-\[\#FDE8E8\]\/40:not(:where([data-template-document], [data-template-document] *)),
+  .dark .bg-\[\#FDE8E8\]\/60:not(:where([data-template-document], [data-template-document] *)) { background-color: rgba(239,68,68,0.15) !important; }
+  .dark .hover\:bg-\[\#FDE8E8\]\/30:hover:not(:where([data-template-document], [data-template-document] *)),
+  .dark .hover\:bg-\[\#FDE8E8\]\/50:hover:not(:where([data-template-document], [data-template-document] *)) { background-color: rgba(239,68,68,0.25) !important; }
+  .dark .bg-\[\#FDE8E8\]:not(:where([data-template-document], [data-template-document] *)) { background-color: #7f1d1d !important; }
+  .dark .border-\[\#FDE8E8\]:not(:where([data-template-document], [data-template-document] *)) { border-color: rgba(239,68,68,0.3) !important; }
+  .dark .text-\[\#791F1F\]:not(:where([data-template-document], [data-template-document] *)) { color: #f87171 !important; }
+  .dark .hover\:text-\[\#791F1F\]:hover:not(:where([data-template-document], [data-template-document] *)) { color: #fca5a5 !important; }
 
-  .dark .from-\[\#f8fcff\]\/95, .dark .from-\[\#f8fcff\]\/96,
-  .dark .from-\[\#f8fcff\]\/92, .dark .from-\[\#eff7ff\]\/95,
-  .dark .from-\[\#dbeeff\] {
+  .dark .from-\[\#f8fcff\]\/95:not(:where([data-template-document], [data-template-document] *)),
+  .dark .from-\[\#f8fcff\]\/96:not(:where([data-template-document], [data-template-document] *)),
+  .dark .from-\[\#f8fcff\]\/92:not(:where([data-template-document], [data-template-document] *)),
+  .dark .from-\[\#eff7ff\]\/95:not(:where([data-template-document], [data-template-document] *)),
+  .dark .from-\[\#dbeeff\]:not(:where([data-template-document], [data-template-document] *)) {
     background-image: linear-gradient(to bottom right, var(--color-card), var(--color-subtle)) !important;
   }
-  .dark .from-slate-50 { background-image: none !important; background-color: var(--color-page) !important; }
-  .dark .from-white { background-image: none !important; background-color: var(--color-card) !important; }
-  .dark .from-brand-tint\/20 { background-image: none !important; background-color: var(--color-card) !important; }
-  .dark .from-\[\#eef5fa\] { background-image: none !important; background-color: var(--color-card) !important; }
+  .dark .from-slate-50:not(:where([data-template-document], [data-template-document] *)) { background-image: none !important; background-color: var(--color-page) !important; }
+  .dark .from-white:not(:where([data-template-document], [data-template-document] *)) { background-image: none !important; background-color: var(--color-card) !important; }
+  .dark .from-brand-tint\/20:not(:where([data-template-document], [data-template-document] *)) { background-image: none !important; background-color: var(--color-card) !important; }
+  .dark .from-\[\#eef5fa\]:not(:where([data-template-document], [data-template-document] *)) { background-image: none !important; background-color: var(--color-card) !important; }
 
-  .dark .glass { background: rgba(20,32,62,0.72) !important; }
-  .dark .glass-strong { background: rgba(20,32,62,0.86) !important; }
+  .dark .glass:not(:where([data-template-document], [data-template-document] *)) { background: rgba(20,32,62,0.72) !important; }
+  .dark .glass-strong:not(:where([data-template-document], [data-template-document] *)) { background: rgba(20,32,62,0.86) !important; }
 
-  .dark .bg-white\/95 { background-color: rgba(20,32,62,0.95) !important; }
-  .dark .bg-white\/90 { background-color: rgba(20,32,62,0.90) !important; }
-  .dark .bg-white\/80 { background-color: rgba(20,32,62,0.80) !important; }
-  .dark .bg-white\/70 { background-color: rgba(20,32,62,0.70) !important; }
-  .dark .bg-white\/60 { background-color: rgba(20,32,62,0.60) !important; }
-  .dark .bg-white\/55 { background-color: rgba(20,32,62,0.55) !important; }
-  .dark .bg-white\/50 { background-color: rgba(20,32,62,0.50) !important; }
-  .dark .bg-white\/40 { background-color: rgba(20,32,62,0.40) !important; }
-  .dark .bg-white\/30 { background-color: rgba(20,32,62,0.30) !important; }
-  .dark .bg-white\/20 { background-color: rgba(20,32,62,0.20) !important; }
-  .dark .bg-white\/10 { background-color: rgba(20,32,62,0.10) !important; }
+  .dark .bg-white\/95:not(:where([data-template-document], [data-template-document] *)) { background-color: rgba(20,32,62,0.95) !important; }
+  .dark .bg-white\/90:not(:where([data-template-document], [data-template-document] *)) { background-color: rgba(20,32,62,0.90) !important; }
+  .dark .bg-white\/80:not(:where([data-template-document], [data-template-document] *)) { background-color: rgba(20,32,62,0.80) !important; }
+  .dark .bg-white\/70:not(:where([data-template-document], [data-template-document] *)) { background-color: rgba(20,32,62,0.70) !important; }
+  .dark .bg-white\/60:not(:where([data-template-document], [data-template-document] *)) { background-color: rgba(20,32,62,0.60) !important; }
+  .dark .bg-white\/55:not(:where([data-template-document], [data-template-document] *)) { background-color: rgba(20,32,62,0.55) !important; }
+  .dark .bg-white\/50:not(:where([data-template-document], [data-template-document] *)) { background-color: rgba(20,32,62,0.50) !important; }
+  .dark .bg-white\/40:not(:where([data-template-document], [data-template-document] *)) { background-color: rgba(20,32,62,0.40) !important; }
+  .dark .bg-white\/30:not(:where([data-template-document], [data-template-document] *)) { background-color: rgba(20,32,62,0.30) !important; }
+  .dark .bg-white\/20:not(:where([data-template-document], [data-template-document] *)) { background-color: rgba(20,32,62,0.20) !important; }
+  .dark .bg-white\/10:not(:where([data-template-document], [data-template-document] *)) { background-color: rgba(20,32,62,0.10) !important; }
 
-  .dark .bg-content-main\/60 { background-color: rgba(11,19,41,0.6) !important; }
+  .dark .bg-content-main\/60:not(:where([data-template-document], [data-template-document] *)) { background-color: rgba(11,19,41,0.6) !important; }
 
-  .dark .contract-portal, .dark .portal-template-default,
-  .dark .contract-portal p, .dark .portal-template-default p,
-  .dark .contract-portal ul, .dark .portal-template-default ul,
-  .dark .contract-portal ol, .dark .portal-template-default ol {
+  .dark .contract-portal:not(:where([data-template-document], [data-template-document] *)),
+  .dark .portal-template-default:not(:where([data-template-document], [data-template-document] *)),
+  .dark .contract-portal p:not(:where([data-template-document], [data-template-document] *)),
+  .dark .portal-template-default p:not(:where([data-template-document], [data-template-document] *)),
+  .dark .contract-portal ul:not(:where([data-template-document], [data-template-document] *)),
+  .dark .portal-template-default ul:not(:where([data-template-document], [data-template-document] *)),
+  .dark .contract-portal ol:not(:where([data-template-document], [data-template-document] *)),
+  .dark .portal-template-default ol:not(:where([data-template-document], [data-template-document] *)) {
     color: var(--color-body) !important;
   }
-  .dark .contract-portal h1, .dark .portal-template-default h1,
-  .dark .contract-portal h2, .dark .portal-template-default h2,
-  .dark .contract-portal h3, .dark .portal-template-default h3,
-  .dark .contract-portal h4, .dark .portal-template-default h4 {
+  .dark .contract-portal h1:not(:where([data-template-document], [data-template-document] *)),
+  .dark .portal-template-default h1:not(:where([data-template-document], [data-template-document] *)),
+  .dark .contract-portal h2:not(:where([data-template-document], [data-template-document] *)),
+  .dark .portal-template-default h2:not(:where([data-template-document], [data-template-document] *)),
+  .dark .contract-portal h3:not(:where([data-template-document], [data-template-document] *)),
+  .dark .portal-template-default h3:not(:where([data-template-document], [data-template-document] *)),
+  .dark .contract-portal h4:not(:where([data-template-document], [data-template-document] *)),
+  .dark .portal-template-default h4:not(:where([data-template-document], [data-template-document] *)) {
     color: var(--color-heading) !important;
   }
-  .dark .contract-portal hr, .dark .portal-template-default hr {
+  .dark .contract-portal hr:not(:where([data-template-document], [data-template-document] *)),
+  .dark .portal-template-default hr:not(:where([data-template-document], [data-template-document] *)) {
     background-color: var(--color-border) !important;
   }
 
-  .dark .prose { color: var(--color-body) !important; }
-  .dark .prose h1, .dark .prose h2, .dark .prose h3,
-  .dark .prose h4, .dark .prose h5, .dark .prose h6,
-  .dark .prose strong, .dark .prose th { color: var(--color-heading) !important; }
+  .dark .prose:not(:where([data-template-document], [data-template-document] *)) { color: var(--color-body) !important; }
+  .dark .prose h1:not(:where([data-template-document], [data-template-document] *)),
+  .dark .prose h2:not(:where([data-template-document], [data-template-document] *)),
+  .dark .prose h3:not(:where([data-template-document], [data-template-document] *)),
+  .dark .prose h4:not(:where([data-template-document], [data-template-document] *)),
+  .dark .prose h5:not(:where([data-template-document], [data-template-document] *)),
+  .dark .prose h6:not(:where([data-template-document], [data-template-document] *)),
+  .dark .prose strong:not(:where([data-template-document], [data-template-document] *)),
+  .dark .prose th:not(:where([data-template-document], [data-template-document] *)) { color: var(--color-heading) !important; }
 
-  .dark aside span.bg-content-main {
+  .dark aside span.bg-content-main:not(:where([data-template-document], [data-template-document] *)) {
     background-color: #0b1620 !important;
     color: #f1f5f9 !important;
   }
-  .dark .bg-content-main {
+  .dark .bg-content-main:not(:where([data-template-document], [data-template-document] *)) {
     background-color: #0b1620 !important;
     color: #f1f5f9 !important;
   }
 
-  .dark .scroll-thin::-webkit-scrollbar-thumb { background: var(--color-border) !important; }
-  .dark .scroll-thin::-webkit-scrollbar-thumb:hover { background: var(--color-subtle) !important; }
+  .dark .scroll-thin:not(:where([data-template-document], [data-template-document] *))::-webkit-scrollbar-thumb { background: var(--color-border) !important; }
+  .dark .scroll-thin:not(:where([data-template-document], [data-template-document] *))::-webkit-scrollbar-thumb:hover { background: var(--color-subtle) !important; }
 }
 
 @layer utilities {
   /* ============================================================
      PRIMARY BUTTON GRADIENT
   ============================================================ */
-  button.bg-brand, a.bg-brand, .btn-primary,
-  button.bg-blue-600, a.bg-blue-600, .bg-primary {
+  button.bg-brand:not(:where([data-template-document], [data-template-document] *)),
+  a.bg-brand:not(:where([data-template-document], [data-template-document] *)),
+  .btn-primary:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-blue-600:not(:where([data-template-document], [data-template-document] *)),
+  a.bg-blue-600:not(:where([data-template-document], [data-template-document] *)),
+  .bg-primary:not(:where([data-template-document], [data-template-document] *)) {
     background: linear-gradient(90deg, #fcb873, #fedfdc) !important;
     border: none !important;
     color: black !important;
     border-color: transparent !important;
     border-radius: 0.5rem !important;
   }
-  button.bg-brand:hover, a.bg-brand:hover, .btn-primary:hover,
-  button.bg-blue-600:hover, a.bg-blue-600:hover, .bg-primary:hover {
+  button.bg-brand:hover:not(:where([data-template-document], [data-template-document] *)),
+  a.bg-brand:hover:not(:where([data-template-document], [data-template-document] *)),
+  .btn-primary:hover:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-blue-600:hover:not(:where([data-template-document], [data-template-document] *)),
+  a.bg-blue-600:hover:not(:where([data-template-document], [data-template-document] *)),
+  .bg-primary:hover:not(:where([data-template-document], [data-template-document] *)) {
     background: linear-gradient(90deg, #f5a85b, #f6cfcb) !important;
     color: black !important;
     border-color: transparent !important;
@@ -393,22 +463,22 @@
   /* ============================================================
      ACTIVE TAB GRADIENT
   ============================================================ */
-  .tab-active,
-  .active-tab,
-  [role="tab"][aria-selected="true"],
-  [role="tab"][data-state="active"],
-  .tab.active,
-  .nav-tab.active {
+  .tab-active:not(:where([data-template-document], [data-template-document] *)),
+  .active-tab:not(:where([data-template-document], [data-template-document] *)),
+  [role="tab"][aria-selected="true"]:not(:where([data-template-document], [data-template-document] *)),
+  [role="tab"][data-state="active"]:not(:where([data-template-document], [data-template-document] *)),
+  .tab.active:not(:where([data-template-document], [data-template-document] *)),
+  .nav-tab.active:not(:where([data-template-document], [data-template-document] *)) {
     background: linear-gradient(90deg, #f5a85b, #f6cfcb) !important;
     color: black !important;
     border-color: transparent !important;
     border-radius: 0.5rem !important;
   }
 
-  .active-tab *,
-  .tab-active *,
-  .active-tab svg,
-  .tab-active svg {
+  .active-tab *:not(:where([data-template-document], [data-template-document] *)),
+  .tab-active *:not(:where([data-template-document], [data-template-document] *)),
+  .active-tab svg:not(:where([data-template-document], [data-template-document] *)),
+  .tab-active svg:not(:where([data-template-document], [data-template-document] *)) {
     color: black !important;
     stroke: black !important;
   }
@@ -416,37 +486,56 @@
   /* ============================================================
      SECONDARY BUTTONS (white bg + dark text) → light blue style
   ============================================================ */
-  button.bg-white.text-black,
-  button.bg-white.text-slate-700, button.bg-white.text-slate-800,
-  button.bg-white.text-slate-900, button.bg-white.text-gray-700,
-  button.bg-white.text-gray-800, button.bg-white.text-gray-900,
-  button.bg-white.text-ink-700, button.bg-white.text-ink-800,
-  button.bg-white.text-ink-900, button.bg-white\/80.text-black,
-  a.bg-white.text-black, a.bg-white.text-slate-700,
-  a.bg-white.text-slate-800, a.bg-white.text-slate-900 {
+  button.bg-white.text-black:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-slate-700:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-slate-800:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-slate-900:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-gray-700:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-gray-800:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-gray-900:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-ink-700:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-ink-800:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-ink-900:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white\/80.text-black:not(:where([data-template-document], [data-template-document] *)),
+  a.bg-white.text-black:not(:where([data-template-document], [data-template-document] *)),
+  a.bg-white.text-slate-700:not(:where([data-template-document], [data-template-document] *)),
+  a.bg-white.text-slate-800:not(:where([data-template-document], [data-template-document] *)),
+  a.bg-white.text-slate-900:not(:where([data-template-document], [data-template-document] *)) {
     background-color: #eef6ff !important;
     color: #1f7ae0 !important;
     border-color: #bfdbfe !important;
   }
 
-  button.bg-white.text-black:hover,
-  button.bg-white.text-slate-700:hover, button.bg-white.text-slate-800:hover,
-  button.bg-white.text-slate-900:hover, button.bg-white.text-gray-700:hover,
-  button.bg-white.text-gray-800:hover, button.bg-white.text-gray-900:hover,
-  button.bg-white.text-ink-700:hover, button.bg-white.text-ink-800:hover,
-  button.bg-white.text-ink-900:hover, button.bg-white\/80.text-black:hover,
-  a.bg-white.text-black:hover, a.bg-white.text-slate-700:hover,
-  a.bg-white.text-slate-800:hover, a.bg-white.text-slate-900:hover {
+  button.bg-white.text-black:hover:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-slate-700:hover:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-slate-800:hover:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-slate-900:hover:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-gray-700:hover:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-gray-800:hover:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-gray-900:hover:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-ink-700:hover:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-ink-800:hover:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-ink-900:hover:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white\/80.text-black:hover:not(:where([data-template-document], [data-template-document] *)),
+  a.bg-white.text-black:hover:not(:where([data-template-document], [data-template-document] *)),
+  a.bg-white.text-slate-700:hover:not(:where([data-template-document], [data-template-document] *)),
+  a.bg-white.text-slate-800:hover:not(:where([data-template-document], [data-template-document] *)),
+  a.bg-white.text-slate-900:hover:not(:where([data-template-document], [data-template-document] *)) {
     background-color: #dbeafe !important;
     color: #1658a1 !important;
   }
 
-  button.bg-white.text-black svg,
-  button.bg-white.text-slate-700 svg, button.bg-white.text-slate-800 svg,
-  button.bg-white.text-slate-900 svg, button.bg-white.text-gray-700 svg,
-  button.bg-white.text-gray-800 svg, button.bg-white.text-gray-900 svg,
-  button.bg-white.text-ink-700 svg, button.bg-white.text-ink-800 svg,
-  button.bg-white.text-ink-900 svg, button.bg-white\/80.text-black svg {
+  button.bg-white.text-black svg:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-slate-700 svg:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-slate-800 svg:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-slate-900 svg:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-gray-700 svg:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-gray-800 svg:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-gray-900 svg:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-ink-700 svg:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-ink-800 svg:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white.text-ink-900 svg:not(:where([data-template-document], [data-template-document] *)),
+  button.bg-white\/80.text-black svg:not(:where([data-template-document], [data-template-document] *)) {
     color: #1f7ae0 !important;
     stroke: #1f7ae0 !important;
   }

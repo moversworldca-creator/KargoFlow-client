@@ -338,18 +338,18 @@ describe("PreviewModal widget editing", () => {
     expect(sheet).toHaveAttribute("data-page-orientation", "Landscape");
     expect(sheet).toHaveAttribute("data-page-width", "1123");
     expect(sheet).toHaveAttribute("data-page-height", "794");
-    expect(sheet.style.padding).toBe("30px");
+    expect(sheet.style.padding).toBe("40px");
     expect(screen.getByRole("button", { name: "Rotate page to Portrait" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByTitle("Mobile 375px View"));
     expect(sheet.style.width).toBe("375px");
-    expect(sheet.style.padding).toBe("24px 16px");
+    expect(sheet.style.padding).toBe("40px");
     expect(sheet).toHaveAttribute("data-page-orientation", "Landscape");
     expect(screen.getByText(/Mobile 375px/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByTitle("Tablet 768px View"));
     expect(sheet.style.width).toBe("768px");
-    expect(sheet.style.padding).toBe("32px");
+    expect(sheet.style.padding).toBe("40px");
   });
 
   it("fits landscape pages to the available preview width and recalculates on resize", () => {

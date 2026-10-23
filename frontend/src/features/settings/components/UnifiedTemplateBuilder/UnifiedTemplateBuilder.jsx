@@ -1088,6 +1088,8 @@ export default function UnifiedTemplateBuilder({
               template_key: doc.settings?.template_key || "",
               branch: doc.settings?.branch || null,
               category: doc.settings?.category || "",
+              margins: doc.settings?.margins,
+              portal: doc.settings?.portal,
             }}
             onTemplateSettingsChange={(patch) =>
               updateDoc({
@@ -1131,7 +1133,7 @@ export default function UnifiedTemplateBuilder({
           preview={false}
           resolveVariables={resolveVariables}
           selection={selection}
-          onSelectPart={(part) => setSelection({ itemId: selectedItemId, part })}
+          onSelectPart={(itemId, part) => setSelection({ itemId, part })}
           onOpenHtmlEditor={(item) => {
             setActiveHtmlItem(item || null);
             setIsCodeModalOpen(true);

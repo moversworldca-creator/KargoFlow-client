@@ -1040,6 +1040,8 @@ export default function UnifiedTemplateBuilder({
               template_key: doc.settings?.template_key || "",
               branch: doc.settings?.branch || null,
               category: doc.settings?.category || "",
+              margins: doc.settings?.margins,
+              portal: doc.settings?.portal,
             }}
             onTemplateSettingsChange={(patch) =>
               updateDoc({

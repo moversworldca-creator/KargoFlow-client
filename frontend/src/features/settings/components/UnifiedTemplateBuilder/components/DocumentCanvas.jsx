@@ -1,6 +1,8 @@
+import { getDocumentSurfaceStyle } from '../../../../../../../shared/template-builder/core/documentPresentation';
 import React, { useRef, useState, useEffect, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import DocumentBlock from "./DocumentBlock";
+import { getPageDimensions } from "../model/templateModel";
 import { analyzeSmsText } from "../core/smsCalculator";
 import {
   Smartphone,
@@ -1099,7 +1101,9 @@ export default function DocumentCanvas({
         >
           <ScaledPageFrame width={emailWidth} zoom={zoom} minHeight={700}>
             <div
+              data-template-document
               style={{
+                fontFamily: documentSettings.fontFamily || "Inter, system-ui, sans-serif",
                 fontSize: documentSettings?.fontSize ? `${documentSettings.fontSize}px` : undefined,
               }}
               className="w-full max-w-[min(600px,calc(100vw-1.5rem))] bg-white min-h-[700px] shadow-lg rounded-lg border border-slate-200 p-4 sm:p-6 space-y-4 transition-all duration-300 relative select-none"
@@ -1181,7 +1185,7 @@ export default function DocumentCanvas({
                   preview={preview}
                   resolveVariables={resolveVariables}
                   selection={selection}
-                  onSelectPart={onSelectPart}
+                  onSelectPart={(part) => onSelectPart(item.id, part)}
                   onOpenHtmlEditor={onOpenHtmlEditor}
                 />
               ))
@@ -1194,11 +1198,8 @@ export default function DocumentCanvas({
   }
 
   // 3. Multi-Page Print Canvas (Letter / A4 / Legal)
-  const isLandscape = orientation?.toLowerCase() === "landscape";
-  const pageBaseWidth = pageSize === "Letter" ? 816 : pageSize === "Legal" ? 816 : 794;
-  const pageBaseHeight = pageSize === "Letter" ? 1056 : pageSize === "Legal" ? 1344 : 1123;
-  const pageWidth = isLandscape ? pageBaseHeight : pageBaseWidth;
-  const pageMinHeight = isLandscape ? pageBaseWidth : pageBaseHeight;
+  const isLandscape = String(orientation).toLowerCase() === "landscape";
+  const { width: pageWidth, height: pageMinHeight } = getPageDimensions(pageSize, orientation);
 
   // Normalized document pages stack
   const docPages =
@@ -1538,7 +1539,7 @@ export default function DocumentCanvas({
                 className={`h-8 w-8 inline-flex items-center justify-center rounded-md transition ${
                   devicePreview === "tablet" ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600 hover:text-slate-900"
                 }`}
-                title="Tablet view"
+                title="Tablet view (768px)"
                 aria-label="Tablet preview"
               >
                 <Tablet size={17} />
@@ -1553,7 +1554,7 @@ export default function DocumentCanvas({
                 className={`h-8 w-8 inline-flex items-center justify-center rounded-md transition ${
                   devicePreview === "mobile" ? "bg-white text-blue-600 shadow-2xs" : "text-slate-600 hover:text-slate-900"
                 }`}
-                title="Mobile view "
+                title="Mobile view (375px)"
                 aria-label="Mobile preview"
               >
                 <Smartphone size={17} />
@@ -1672,11 +1673,7 @@ export default function DocumentCanvas({
           <div className="flex flex-col items-center gap-16 min-w-fit m-auto" data-testid="document-page-stack">
             {docPages.map((page, pageIndex) => {
               const pageOrientation = page.orientation || orientation;
-              const pageIsLandscape = String(pageOrientation).toLowerCase() === "landscape";
-              const pageBaseWidth = page.pageSize === "Letter" ? 816 : 794;
-              const pageBaseHeight = page.pageSize === "Letter" ? 1056 : page.pageSize === "Legal" ? 1344 : 1123;
-              const currentPageWidth = pageIsLandscape ? pageBaseHeight : pageBaseWidth;
-              const currentPageHeight = pageIsLandscape ? pageBaseWidth : pageBaseHeight;
+              const { width: currentPageWidth, height: currentPageHeight } = getPageDimensions(page.pageSize || pageSize, pageOrientation);
 
               return (
               <ScaledPageFrame
@@ -1781,10 +1778,11 @@ export default function DocumentCanvas({
 
                 {/* Physical Printable Sheet Canvas */}
                 <div
+                  data-template-document
                   style={{
                     width: currentPageWidth,
                     minHeight: currentPageHeight,
-                    fontSize: documentSettings?.fontSize ? `${documentSettings.fontSize}px` : undefined,
+                    ...getDocumentSurfaceStyle(documentSettings),
                   }}
                   className="bg-white shadow-xl rounded-sm p-12 space-y-6 transition-all box-border max-w-full overflow-x-hidden relative select-none"
                 >
@@ -1925,7 +1923,7 @@ export default function DocumentCanvas({
                             preview={preview}
                             resolveVariables={resolveVariables}
                             selection={selection}
-                            onSelectPart={onSelectPart}
+                            onSelectPart={(part) => onSelectPart(item.id, part)}
                             onOpenHtmlEditor={onOpenHtmlEditor}
                           />
                         </React.Fragment>
@@ -2009,7 +2007,8 @@ export default function DocumentCanvas({
                         style={{
                           minHeight: "auto",
                           width: "100%",
-                          fontSize: documentSettings?.fontSize ? `${documentSettings.fontSize}px` : undefined,
+                          fontFamily: documentSettings.fontFamily || "Inter, system-ui, sans-serif",
+                fontSize: documentSettings?.fontSize ? `${documentSettings.fontSize}px` : undefined,
                         }}
                       >
                         {(page.items || []).length === 0 ? (
@@ -2070,7 +2069,7 @@ export default function DocumentCanvas({
                                   preview={preview}
                                   resolveVariables={resolveVariables}
                                   selection={selection}
-                                  onSelectPart={onSelectPart}
+                                  onSelectPart={(part) => onSelectPart(item.id, part)}
                                   onOpenHtmlEditor={onOpenHtmlEditor}
                                 />
                               </React.Fragment>

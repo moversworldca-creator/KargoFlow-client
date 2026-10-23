@@ -1,3 +1,4 @@
+import { getDocumentSurfaceStyle } from '../../../../../../../shared/template-builder/core/documentPresentation';
 import React, { useRef, useState, useEffect, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import DocumentBlock from "./DocumentBlock";
@@ -1114,7 +1115,9 @@ export default function DocumentCanvas({
         >
           <ScaledPageFrame width={emailWidth} zoom={zoom} minHeight={700}>
             <div
+              data-template-document
               style={{
+                fontFamily: documentSettings.fontFamily || "Inter, system-ui, sans-serif",
                 fontSize: documentSettings?.fontSize ? `${documentSettings.fontSize}px` : undefined,
               }}
               className="w-full max-w-[min(600px,calc(100vw-1.5rem))] bg-white min-h-[700px] shadow-lg rounded-lg border border-slate-200 p-4 sm:p-6 space-y-4 transition-all duration-300 relative select-none"
@@ -1777,10 +1780,11 @@ export default function DocumentCanvas({
 
                 {/* Physical Printable Sheet Canvas */}
                 <div
+                  data-template-document
                   style={{
                     width: currentPageWidth,
                     minHeight: currentPageHeight,
-                    fontSize: documentSettings?.fontSize ? `${documentSettings.fontSize}px` : undefined,
+                    ...getDocumentSurfaceStyle(documentSettings),
                   }}
                   className="bg-white shadow-xl rounded-sm p-12 space-y-6 transition-all box-border max-w-full overflow-x-hidden relative select-none"
                 >
@@ -2005,7 +2009,8 @@ export default function DocumentCanvas({
                         style={{
                           minHeight: "auto",
                           width: "100%",
-                          fontSize: documentSettings?.fontSize ? `${documentSettings.fontSize}px` : undefined,
+                          fontFamily: documentSettings.fontFamily || "Inter, system-ui, sans-serif",
+                fontSize: documentSettings?.fontSize ? `${documentSettings.fontSize}px` : undefined,
                         }}
                       >
                         {(page.items || []).length === 0 ? (

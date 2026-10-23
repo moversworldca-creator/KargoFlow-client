@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { History, X, RotateCcw, Plus, Clock, Check, Bookmark, Loader2 } from "lucide-react";
-import { getBuilderTemplateRevisions, restoreBuilderTemplateRevision, discardBuilderTemplateDraft, getApiErrorMessage } from "../../../../../services/api";
+import { getBuilderTemplateRevisions, restoreBuilderTemplateRevision, discardBuilderTemplateDraft, compareBuilderTemplateRevisions, getApiErrorMessage } from "../../../../../services/api";
+import RevisionComparison from '../../../../../../../shared/template-builder/components/RevisionComparison.jsx';
 
 export default function VersionHistoryModal({
   isOpen,
@@ -107,6 +108,7 @@ export default function VersionHistoryModal({
         </form>
 
         {error && <p role="alert" className="p-4 text-red-700">{error}</p>}
+        <RevisionComparison revisions={remoteRevisions} onCompare={(from, to) => compareBuilderTemplateRevisions(templateId, from, to)} />
         {/* Snapshot List & Detail View */}
         <div className="flex-1 overflow-y-auto p-6">
           {isLoadingRevisions && (

@@ -1,3 +1,4 @@
+import { getDocumentSurfaceStyle } from '../../../../../../../shared/template-builder/core/documentPresentation';
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Eye,
@@ -938,8 +939,10 @@ export default function PreviewModal({
 
               {/* Rendered Email Content Blocks */}
               <div
+                data-template-document
                 style={{
-                  fontSize: doc.settings?.fontSize ? `${doc.settings.fontSize}px` : undefined,
+                  fontFamily: getDocumentSurfaceStyle(doc.settings).fontFamily,
+                        fontSize: doc.settings?.fontSize ? `${doc.settings.fontSize}px` : undefined,
                 }}
                 className="p-6 space-y-4"
               >
@@ -1077,12 +1080,14 @@ export default function PreviewModal({
 
                     {/* Physical Printable Page Sheet */}
                     <article
+                      data-template-document
                       style={{
                         width: isMobileFrame ? "375px" : isTabletFrame ? "768px" : `${pageDimensions.width}px`,
                         minHeight: `${pageDimensions.height}px`,
-                        padding: isMobileFrame ? "24px 16px" : isTabletFrame ? "32px" : "30px",
+                        ...getDocumentSurfaceStyle(doc.settings),
                         boxSizing: "border-box",
                         backgroundColor: "#ffffff",
+                        fontFamily: getDocumentSurfaceStyle(doc.settings).fontFamily,
                         fontSize: doc.settings?.fontSize ? `${doc.settings.fontSize}px` : undefined,
                       }}
                       className="preview-modal-sheet document preview clean-preview-doc bg-white shadow-2xl rounded-xs space-y-6 transition-all box-border max-w-full border border-slate-300/80"
