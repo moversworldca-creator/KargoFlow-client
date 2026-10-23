@@ -25,6 +25,7 @@ import {
   Palette,
 } from "lucide-react";
 import { compressImageFile } from "../core/storageService";
+import { sanitizeHtml } from "../core/htmlSanitizer";
 
 export default function NotesRichTextEditor({
   value = "",
@@ -184,8 +185,10 @@ export default function NotesRichTextEditor({
   // Sync external value when not typing
   useEffect(() => {
     if (!editorRef.current) return;
-    if (!isTypingRef.current && editorRef.current.innerHTML !== value) {
-      editorRef.current.innerHTML = value || "";
+    // Stored or imported notes are untrusted markup: never inject it unsanitized.
+    const safeHtml = sanitizeHtml(value || "").cleanHtml;
+    if (!isTypingRef.current && editorRef.current.innerHTML !== safeHtml) {
+      editorRef.current.innerHTML = safeHtml;
     }
   }, [value]);
 
