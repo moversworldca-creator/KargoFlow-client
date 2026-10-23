@@ -11,6 +11,12 @@ import {
   normalizeEstimateSubtype,
 } from '../../../../services/api';
 
+const getExistingTemplateVersion = (template) => {
+  if (template.draft_revision?.revision_number != null) return `Draft v${template.draft_revision.revision_number}`;
+  if (template.published_revision?.revision_number != null) return `Published v${template.published_revision.revision_number}`;
+  return template.version != null ? `v${template.version}` : 'Version unavailable';
+};
+
 export const UNIVERSAL_CATEGORIES = [
   // Legal & Operational Documents - Opportunity Scope
   {
@@ -806,14 +812,14 @@ export default function CreateUniversalDocumentModal({
                 </option>
                 {compatiblePlatformTemplates.length > 0 && <optgroup label="Published Platform Templates">
                   {compatiblePlatformTemplates.map((template) => <option key={template.template_key} value={`catalog:${template.template_key}`}>
-                    {template.name}{template.published_revision_number ? ` — Published v${template.published_revision_number}` : ''}
+                    {template.name} — {template.published_revision_number != null ? `Published v${template.published_revision_number}` : 'Published version unavailable'}
                   </option>)}
                 </optgroup>}
                 {compatibleCustomTemplates.length > 0 && (
                   <optgroup label="Compatible Existing Templates">
                     {compatibleCustomTemplates.map((t) => (
                       <option key={t.id} value={`template:${t.id}`}>
-                        {t.name} {t.branch ? `(Branch #${t.branch})` : ''}
+                        {t.name} — {getExistingTemplateVersion(t)}{t.catalog_source?.revision_number != null ? ` — Copied from global v${t.catalog_source.revision_number}` : ''}{t.branch ? ` (Branch #${t.branch})` : ''}
                       </option>
                     ))}
                   </optgroup>

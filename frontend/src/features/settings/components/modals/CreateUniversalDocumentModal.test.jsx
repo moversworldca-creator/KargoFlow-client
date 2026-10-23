@@ -34,7 +34,7 @@ describe("CreateUniversalDocumentModal Builder workflow scopes", () => {
     create.mockResolvedValue({ data: { id: 71, kind, subtype } });
     const created = vi.fn();
     render(<CreateUniversalDocumentModal isOpen initialCategory={category} defaultBranchId={3} branches={branches} onClose={vi.fn()} onCreated={created} />);
-    await screen.findByRole('option', { name: source.name });
+    await screen.findByRole('option', { name: `${source.name} — Published version unavailable` });
     fireEvent.change(screen.getByLabelText(/starting template/i), { target: { value: `catalog:${source.template_key}` } });
     fireEvent.click(screen.getByRole('button', { name: 'Create Document' }));
     await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ kind, subtype, branch_id: 3, catalog_template_key: source.template_key })));
@@ -60,7 +60,7 @@ describe("CreateUniversalDocumentModal Builder workflow scopes", () => {
       { id: 2, name: 'Tenant final', kind: 'invoice', subtype: 'final', template_type: 'invoice' },
       { id: 3, name: 'Tenant contract', kind: 'document', template_type: 'contract' },
     ]} onClose={vi.fn()} onCreated={vi.fn()} />);
-    await screen.findByRole('option', { name: 'Valid deposit' });
+    await screen.findByRole('option', { name: 'Valid deposit — Published version unavailable' });
     expect(screen.queryByRole('option', { name: 'Wrong invoice subtype' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Wrong kind' })).not.toBeInTheDocument();
     expect(screen.getByLabelText(/Starting Template/i)).toHaveTextContent('Tenant deposit');
@@ -101,7 +101,7 @@ describe("CreateUniversalDocumentModal Builder workflow scopes", () => {
     getCommunicationCatalogTemplate.mockResolvedValue({ body_text: 'Published message text', body_html: '<p>Published HTML</p>' });
     createCommunicationTemplate.mockResolvedValue({ id: 72 });
     render(<CreateUniversalDocumentModal isOpen initialCategory={channel === 'email' ? 'comm:email:custom_email' : 'comm:sms:custom_sms'} onClose={vi.fn()} onCreated={vi.fn()} branches={branches} />);
-    await screen.findByRole('option', { name: 'Platform message' });
+    await screen.findByRole('option', { name: 'Platform message — Published version unavailable' });
     fireEvent.change(screen.getByLabelText(/starting template/i), { target: { value: 'catalog:platform.message' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create Document' }));
     await waitFor(() => expect(createCommunicationTemplate).toHaveBeenCalledWith(expect.objectContaining({ channel, body_text: 'Published message text', body_html: '<p>Published HTML</p>' })));
