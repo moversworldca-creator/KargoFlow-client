@@ -12,6 +12,20 @@ describe("normalizeBuilderVariableGroups", () => {
       expect(tags).not.toContain('{{estimate.expiry_date}}');
     }
   );
+  it.each(['email', 'sms'])('offers only approved communication tokens for %s', (mode) => {
+    const approved = [
+      'customer.name', 'customer.first_name', 'customer.full_name', 'customer.phone', 'customer.email',
+      'contact.name', 'contact.first_name', 'contact.email', 'contact.phone',
+      'lead.number', 'lead.move_date', 'lead.origin_city', 'lead.destination_city',
+      'opportunity.number', 'opportunity.move_date', 'move.date', 'move.origin_city', 'move.destination_city',
+      'branch.name', 'branch.phone', 'branch.email', 'company.name',
+      'employee.name', 'employee.first_name', 'employee.email', 'employee.phone',
+    ].map((token) => `{{${token}}}`);
+    const tags = getVariablesForMode(mode).flatMap(group => group.items.map(item => item.tag));
+    expect(tags.length).toBeGreaterThan(0);
+    expect(tags.filter((tag) => !approved.includes(tag))).toEqual([]);
+  });
+
   it("maps the backend's grouped variables response to sidebar merge tags", () => {
     expect(
       normalizeBuilderVariableGroups([

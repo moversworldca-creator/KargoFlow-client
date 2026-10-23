@@ -46,12 +46,42 @@ export const MERGE_VARIABLES = {
     { label: "Branch Email", tag: "{{company.email}}" },
     { label: "Branch Address", tag: "{{company.address}}" },
   ],
-  links: [
-    { label: "Customer Portal URL", tag: "{{portal.action_url}}" },
-    { label: "Direct Tracking Link", tag: "{{tracking.short_url}}" },
-    { label: "Unsubscribe URL", tag: "{{unsubscribe.url}}" },
-  ],
 };
+
+/** Email/SMS tokens: exactly the communications renderer's approved variables. */
+export const COMMUNICATION_VARIABLES = [
+  { group: "Customer & Contact", items: [
+    { label: "Customer Full Name", tag: "{{customer.full_name}}" },
+    { label: "Customer First Name", tag: "{{customer.first_name}}" },
+    { label: "Customer Phone", tag: "{{customer.phone}}" },
+    { label: "Customer Email", tag: "{{customer.email}}" },
+    { label: "Contact Name", tag: "{{contact.name}}" },
+    { label: "Contact First Name", tag: "{{contact.first_name}}" },
+    { label: "Contact Email", tag: "{{contact.email}}" },
+    { label: "Contact Phone", tag: "{{contact.phone}}" },
+  ] },
+  { group: "Lead & Move", items: [
+    { label: "Lead Number", tag: "{{lead.number}}" },
+    { label: "Lead Move Date", tag: "{{lead.move_date}}" },
+    { label: "Lead Origin City", tag: "{{lead.origin_city}}" },
+    { label: "Lead Destination City", tag: "{{lead.destination_city}}" },
+    { label: "Opportunity Number", tag: "{{opportunity.number}}" },
+    { label: "Opportunity Move Date", tag: "{{opportunity.move_date}}" },
+    { label: "Move Date", tag: "{{move.date}}" },
+    { label: "Origin City", tag: "{{move.origin_city}}" },
+    { label: "Destination City", tag: "{{move.destination_city}}" },
+  ] },
+  { group: "Company, Branch & Staff", items: [
+    { label: "Company Name", tag: "{{company.name}}" },
+    { label: "Branch Name", tag: "{{branch.name}}" },
+    { label: "Branch Phone", tag: "{{branch.phone}}" },
+    { label: "Branch Email", tag: "{{branch.email}}" },
+    { label: "Employee Name", tag: "{{employee.name}}" },
+    { label: "Employee First Name", tag: "{{employee.first_name}}" },
+    { label: "Employee Email", tag: "{{employee.email}}" },
+    { label: "Employee Phone", tag: "{{employee.phone}}" },
+  ] },
+];
 
 export { normalizeLegacyMergeFieldAliases } from './mergeFieldAliases.js';
 
@@ -93,21 +123,8 @@ export function getVariablesForMode(mode = "estimate") {
         ...common,
       ];
     case "email":
-      return [
-        { group: "Action Links", items: MERGE_VARIABLES.links },
-        { group: "Estimate & Move", items: [...MERGE_VARIABLES.estimate, ...MERGE_VARIABLES.move] },
-        ...common,
-      ];
     case "sms":
-      return [
-        { group: "Quick Tokens", items: [
-          { label: "First Name", tag: "{{customer.first_name}}" },
-          { label: "Move Date", tag: "{{move.pickup_date}}" },
-          { label: "Balance Due", tag: "{{invoice.balance_due}}" },
-          { label: "Portal Link", tag: "{{portal.action_url}}" },
-        ]},
-        ...common,
-      ];
+      return COMMUNICATION_VARIABLES;
     default:
       return common;
   }

@@ -478,10 +478,10 @@ describe("RightPropertiesPanel widget fields", () => {
     );
 
     fireEvent.change(screen.getByLabelText("Insert Placeholder into email subject"), {
-      target: { value: "{{estimate.number}}" },
+      target: { value: "{{opportunity.number}}" },
     });
     expect(onUpdateDocumentSettings).toHaveBeenCalledWith(expect.objectContaining({
-      subject: "Your estimate {{estimate.number}}",
+      subject: "Your estimate {{opportunity.number}}",
     }));
 
     fireEvent.change(screen.getByLabelText("Insert Placeholder into email body"), {
@@ -507,9 +507,9 @@ describe("RightPropertiesPanel widget fields", () => {
     );
 
     fireEvent.change(screen.getByLabelText("Insert Placeholder into SMS message"), {
-      target: { value: "{{move.pickup_date}}" },
+      target: { value: "{{move.date}}" },
     });
-    expect(onInsertPlaceholder).toHaveBeenCalledWith("{{move.pickup_date}}");
+    expect(onInsertPlaceholder).toHaveBeenCalledWith("{{move.date}}");
     expect(screen.queryByText("Pricing values")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add Custom Pricing Field" })).not.toBeInTheDocument();
   });

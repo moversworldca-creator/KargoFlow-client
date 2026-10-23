@@ -461,8 +461,6 @@ export default function LeftSidebar({
                 </h3>
                 <div className="grid grid-cols-1 gap-1.5">
                   {[
-                    { label: "Customer Portal URL", snippet: "{{portal.action_url}}" },
-                    { label: "Quote & Estimate Link", snippet: "{{quote_link}}" },
                     { label: "Opt-Out Compliance", snippet: "Reply STOP to unsubscribe." },
                   ].map((snip) => (
                     <button
