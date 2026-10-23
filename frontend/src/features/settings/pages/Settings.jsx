@@ -108,7 +108,7 @@ const Settings = () => {
     fetchBranches();
   }, [user]);
 
-  const branchIsolatedTabs = ['team', 'crew', 'trucks', 'roles', 'catalog-packages', 'estimate-catalog', 'estimate-portal-templates', 'branding', 'templates', 'document-templates', 'integrations', 'communications', 'status-codes', 'scheduling', 'mover-types', 'service-types'];
+  const branchIsolatedTabs = ['team', 'crew', 'trucks', 'roles', 'catalog-packages', 'estimate-catalog', 'estimate-portal-templates', 'branding', 'templates', 'document-templates', 'integrations', 'communications', 'status-codes', 'scheduling', 'mover-types', 'service-types', 'mover-sizes', 'move-sizes'];
 
   const toggleSection = (sectionName) => {
     setOpenSections(prev => ({
@@ -246,7 +246,8 @@ const Settings = () => {
       case 'roles': return <RolesPermissions branchId={branchIdProp} />;
       case 'mover-types': return <MoverTypeSettings branchId={branchIdProp} />;
       case 'service-types': return <ServiceTypeSettings branchId={branchIdProp} />;
-      case 'mover-sizes': return <MoverSizeSettings />;
+      case 'mover-sizes':
+      case 'move-sizes': return <MoverSizeSettings branchId={branchIdProp} />;
       case 'estimate-catalog': return <EstimateCatalogManager branchId={branchIdProp} />;
       case 'catalog-packages': return <CatalogPackageBuilder branchId={branchIdProp} />;
       case 'inventory': return <InventoryWorkflowSettings />;

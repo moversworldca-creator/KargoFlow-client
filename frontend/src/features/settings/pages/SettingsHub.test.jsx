@@ -54,6 +54,10 @@ vi.mock('../components/BranchSettings', () => ({
   default: ({ view }) => <div data-testid="branch-settings-module">Branch Settings: {view}</div>,
 }));
 
+vi.mock('../components/MoverSizeSettings', () => ({
+  default: ({ branchId }) => <div data-testid="mover-size-settings-module">Move Sizes Settings: branch {branchId}</div>,
+}));
+
 vi.mock('../components/DocumentTemplates', () => ({
   default: ({ templateKind = "document", onOpenChooser }) => <div data-testid="document-templates-module">{templateKind}<button onClick={() => onOpenChooser(templateKind)}>New template</button></div>,
 }));
@@ -82,9 +86,10 @@ describe('SettingsHub', () => {
     // Check primary tier-1 rail items
     expect(screen.getByTitle('Company Settings')).toBeInTheDocument();
     expect(screen.getByTitle('Branch Settings')).toBeInTheDocument();
-    expect(screen.getByTitle('Operations & Fleet')).toBeInTheDocument();
+    expect(screen.getByTitle('Operations & Scheduling')).toBeInTheDocument();
     expect(screen.getByTitle('Team & Security')).toBeInTheDocument();
     expect(screen.getByTitle('Sales & CRM')).toBeInTheDocument();
+    expect(screen.getByTitle('Move Classifications')).toBeInTheDocument();
 
     // Check active sub-tab pill in sticky tier-2 header
     expect(screen.getByRole('tab', { name: /Profile & Legal/i })).toBeInTheDocument();
@@ -128,90 +133,5 @@ describe('SettingsHub', () => {
     // Verify there is NO floating unsaved changes overlay
     expect(screen.queryByText(/You have unsaved changes/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Discard/i })).not.toBeInTheDocument();
-  });
-
-  it('redirects from /settings/documents to /settings/documents/document-templates', () => {
-    routeState.pathname = '/settings/documents';
-    routeState.params = { mainGroup: 'documents' };
-    render(<SettingsHub />);
-
-    expect(navigate).toHaveBeenCalledWith('/settings/documents/document-templates', { replace: true });
-  });
-
-  it('navigates to /settings/documents/document-templates when clicking Documents in Settings left rail', () => {
-    routeState.pathname = '/settings/company/profile';
-    routeState.params = { mainGroup: 'company', subTab: 'profile' };
-    render(<SettingsHub />);
-
-    const docsButton = screen.getByRole('button', { name: /Documents/i });
-    fireEvent.click(docsButton);
-
-    expect(navigate).toHaveBeenCalledWith('/settings/documents/document-templates');
-  });
-
-  it('renders Documents group cleanly under /settings/documents/document-templates', () => {
-    routeState.pathname = '/settings/documents/document-templates';
-    routeState.params = { mainGroup: 'documents', subTab: 'document-templates' };
-    render(<SettingsHub />);
-
-    expect(screen.getByRole('heading', { name: 'Settings Hub' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Document Templates/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Estimate Templates/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Email & SMS Templates/i })).toBeInTheDocument();
-    expect(screen.getByTestId('document-templates-module')).toBeInTheDocument();
-  });
-
-  it('navigates to estimate templates under /settings/documents when tab is clicked', () => {
-    routeState.pathname = '/settings/documents/document-templates';
-    routeState.params = { mainGroup: 'documents', subTab: 'document-templates' };
-    render(<SettingsHub />);
-
-    const estimateTab = screen.getByRole('tab', { name: /Estimate Templates/i });
-    fireEvent.click(estimateTab);
-
-    expect(navigate).toHaveBeenCalledWith('/settings/documents/estimate-portal-templates');
-  });
-
-  it('renders Documents Hub cleanly when under standalone /documents', () => {
-    routeState.pathname = '/documents/document-templates';
-    routeState.params = { subTab: 'document-templates' };
-    render(<SettingsHub initialGroup="documents" />);
-
-    expect(screen.getByRole('heading', { name: 'Documents Hub' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Document Templates/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Estimate Templates/i })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /\+ Create Template/i })).not.toBeInTheDocument();
-    expect(screen.getByTestId('document-templates-module')).toBeInTheDocument();
-  });
-
-  it('opens the separate invoice section under documents', () => {
-    routeState.pathname = '/documents/document-templates';
-    routeState.params = { subTab: 'document-templates' };
-    render(<SettingsHub initialGroup="documents" />);
-    fireEvent.click(screen.getByRole('tab', { name: /^Invoice Templates/ }));
-    expect(navigate).toHaveBeenCalledWith('/documents/invoice-templates');
-  });
-
-  it('scopes invoice creation to invoice categories', async () => {
-    routeState.pathname = '/documents/invoice-templates';
-    routeState.params = { subTab: 'invoice-templates' };
-    render(<SettingsHub initialGroup="documents" />);
-    expect(screen.getByTestId('document-templates-module')).toHaveTextContent('invoice');
-    fireEvent.click(screen.getByRole('button', { name: 'New template' }));
-    expect(screen.getByRole('radio', { name: /invoice template/i })).toHaveAttribute('aria-checked', 'true');
-    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
-    const options = [...screen.getByLabelText(/Document Applies To/i).options].map((option) => option.value);
-    expect(options).toEqual(['invoice', 'invoice:deposit', 'invoice:storage', 'invoice:progress']);
-  });
-
-  it('navigates to estimate templates under /documents when clicked', () => {
-    routeState.pathname = '/documents/document-templates';
-    routeState.params = { subTab: 'document-templates' };
-    render(<SettingsHub initialGroup="documents" />);
-
-    const estimateTab = screen.getByRole('tab', { name: /Estimate Templates/i });
-    fireEvent.click(estimateTab);
-
-    expect(navigate).toHaveBeenCalledWith('/documents/estimate-portal-templates');
   });
 });

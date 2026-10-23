@@ -8,21 +8,27 @@ import RichTextEditor from '../../../shared/ui/RichTextEditor';
 import EmailVisualBuilder from './EmailVisualBuilder';
 import UnifiedTemplateBuilder from './UnifiedTemplateBuilder/UnifiedTemplateBuilder';
 import API from '../../../services/api';
+import useCan from '../../../shared/auth/useCan';
 import { normalizePreviewHtml, replaceBranchPlaceholders, resolveRenderableUrl } from '../../crm/utils/emailPreview';
 import {
-  getCommunicationTemplates,
-  getCommunicationTemplate,
-  getCommunicationTemplateKeys,
-  getCommunicationTemplateVariables,
-  createCommunicationTemplate,
   updateCommunicationTemplate,
   updateAutomationStep,
-  deleteCommunicationTemplate,
   seedCommunicationTemplates,
   previewCommunicationTemplate,
   getCommunicationTemplateCategories,
   createCommunicationTemplateCategory,
   deleteCommunicationTemplateCategory,
+  getGeneralTemplates,
+  getGeneralTemplate,
+  getGeneralTemplateVariables,
+  createGeneralTemplate,
+  updateGeneralTemplate,
+  deleteGeneralTemplate,
+  getNotificationTemplates,
+  getNotificationTemplate,
+  createNotificationTemplate,
+  updateNotificationTemplate,
+  deleteNotificationTemplate,
 } from '../../../services/api';
 
 
@@ -339,21 +345,52 @@ const normalize = (payload) => {
   return [];
 };
 
-const fetchAllCommunicationTemplates = async (params = {}) => {
-  const merged = [];
-  let page = 1;
-  while (true) {
-    const response = await getCommunicationTemplates({ ...params, page });
-    const rows = normalize(response);
-    merged.push(...rows);
-    if (!response?.next || rows.length === 0) break;
-    page += 1;
-  }
-  return merged;
-};
+const normalizeNotificationTemplate = (template) => ({
+  ...template,
+  body: template.body_text || '',
+  branch: template.branch_id ?? null,
+  category: null,
+  is_active: template.is_active ?? template.state === 'active',
+  sort_order: 0,
+});
+
+const normalizeGeneralTemplate = (template) => ({
+  ...template,
+  body: template.body_text || '',
+  branch: template.branch_id ?? null,
+  category: null,
+  is_active: template.is_active ?? template.state === 'active',
+  sort_order: 0,
+});
+
+const toNotificationTemplatePayload = (template) => ({
+  name: template.name,
+  description: template.description || '',
+  channel: template.channel,
+  subject: template.channel === 'email' ? template.subject || '' : '',
+  body_html: template.channel === 'email' ? template.body_html || '' : '',
+  body_text: template.channel === 'sms'
+    ? template.sms_body || template.body || ''
+    : template.body || '',
+  branch_id: template.branch ? Number(template.branch) : null,
+  is_active: template.is_active !== false,
+});
+
+const toGeneralTemplatePayload = (template) => ({
+  name: template.name,
+  description: template.description || '',
+  channel: template.channel,
+  subject: template.channel === 'email' ? template.subject || '' : '',
+  body_html: template.channel === 'email' ? template.body_html || '' : '',
+  body_text: template.channel === 'sms'
+    ? template.sms_body || template.body || ''
+    : template.body || '',
+  branch_id: template.branch ? Number(template.branch) : null,
+  is_active: template.is_active !== false,
+});
 
 const parseVariablesFromBody = (text = '') => {
-  const matches = text.match(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g) || [];
+  const matches = text.match(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g) || [];
   const vars = new Set(matches.map((m) => m.replace(/[{}\s]/g, '')));
   return Array.from(vars);
 };
@@ -542,9 +579,13 @@ const CommunicationTemplates = ({
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
+  const { can } = useCan();
+  const canManageGeneralTemplates = can('communications.general_templates.update');
   const builderRouteContext = builderRouteState || location.state || {};
   const isAutomationBuilder = String(basePath || '').startsWith('/automation');
   const isAutomationNotificationEditor = isAutomationBuilder && Boolean(builderRouteContext?.automationStepId);
+  const isNotificationTemplateLibrary = isAutomationBuilder && !builderRouteContext?.automationStepId;
+  const isGeneralTemplateLibrary = !isNotificationTemplateLibrary;
   const [selectedId, setSelectedId] = useState(null);
   const [draft, setDraft] = useState(EMPTY_TEMPLATE);
   const [isSaving, setIsSaving] = useState(false);
@@ -556,7 +597,10 @@ const CommunicationTemplates = ({
   
   const { data: rawCategories = [] } = useQuery({
     queryKey: ['communicationTemplateCategories', branchFilter || 'all'],
-    queryFn: async () => normalize(await getCommunicationTemplateCategories(branchFilter ? { branch: branchFilter } : {})),
+    queryFn: async () => isNotificationTemplateLibrary || isGeneralTemplateLibrary
+      ? []
+      : normalize(await getCommunicationTemplateCategories(branchFilter ? { branch: branchFilter } : {})),
+    enabled: !isNotificationTemplateLibrary && !isGeneralTemplateLibrary,
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
@@ -565,12 +609,22 @@ const CommunicationTemplates = ({
   const categories = rawCategories;
 
   const { data: rawItems = [], isLoading } = useQuery({
-    queryKey: ['communicationTemplates', isAutomationBuilder ? 'automation' : branchFilter],
-    queryFn: async () => fetchAllCommunicationTemplates(
-      isAutomationBuilder
-        ? { include_seeded_notifications: true }
-        : (branchFilter ? { branch: branchFilter } : {})
-    ),
+    queryKey: [
+      'communicationTemplates',
+      isNotificationTemplateLibrary ? branchFilter || 'all' : isAutomationBuilder ? 'automation' : branchFilter,
+      isGeneralTemplateLibrary && canManageGeneralTemplates,
+    ],
+    queryFn: async () => {
+      if (isNotificationTemplateLibrary) {
+        const params = { include_inactive: true };
+        if (branchFilter) params.branch_id = Number(branchFilter);
+        const response = await getNotificationTemplates(params);
+        return normalize(response).map(normalizeNotificationTemplate);
+      }
+      const params = { include_inactive: canManageGeneralTemplates };
+      if (branchFilter) params.branch_id = Number(branchFilter);
+      return normalize(await getGeneralTemplates(params)).map(normalizeGeneralTemplate);
+    },
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
@@ -581,12 +635,14 @@ const CommunicationTemplates = ({
   const { data: rawVariables = [] } = useQuery({
     queryKey: ['communicationTemplateVariables', isAutomationBuilder ? 'automation' : branchFilter],
     queryFn: async () => {
-      const response = await getCommunicationTemplateVariables(
-        isAutomationBuilder
-          ? { include_seeded_notifications: true }
-          : (branchFilter ? { branch: branchFilter } : undefined)
-      );
-      return Array.isArray(response?.results) ? response.results : [];
+      if (isNotificationTemplateLibrary) return [];
+      const response = await getGeneralTemplateVariables();
+      const definitions = Array.isArray(response?.results) ? response.results : response || [];
+      return definitions.map((row) => ({
+        ...row,
+        key: String(row.token || '').replace(/^\{\{|\}\}$/g, ''),
+        sample: row.sample || '',
+      }));
     },
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
@@ -606,14 +662,8 @@ const CommunicationTemplates = ({
 
   const { data: rawTemplateKeys = [] } = useQuery({
     queryKey: ['communicationTemplateKeys', isAutomationBuilder ? 'automation' : branchFilter],
-    queryFn: async () => {
-      const response = await getCommunicationTemplateKeys(
-        isAutomationBuilder
-          ? { include_seeded_notifications: true }
-          : (branchFilter ? { branch: branchFilter } : undefined)
-      );
-      return Array.isArray(response?.results) ? response.results : [];
-    },
+    queryFn: async () => [],
+    enabled: false,
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
@@ -866,16 +916,6 @@ const CommunicationTemplates = ({
     });
   }, [availableTemplateKeys, draft.channel]);
 
-  const activeAutomationTemplateKey = useMemo(() => {
-    if (!isAutomationBuilder) return String(draft.template_key || '').trim();
-    if (automationMessageMode === 'sms_only') return String(draft.sms_template_key || '').trim();
-    if (automationMessageMode === 'email_sms') {
-      if (automationEditorTab === 'sms') return String(draft.sms_template_key || '').trim();
-      return String(draft.email_template_key || '').trim();
-    }
-    return String(draft.template_key || draft.email_template_key || '').trim();
-  }, [automationEditorTab, automationMessageMode, draft.email_template_key, draft.sms_template_key, draft.template_key, isAutomationBuilder]);
-
   const getTemplateResponseData = (response) => response?.data || response || null;
 
   const automationModeOptions = [
@@ -883,11 +923,6 @@ const CommunicationTemplates = ({
     { key: 'sms_only', label: 'SMS Only' },
     { key: 'email_sms', label: 'Email & SMS' },
   ];
-
-  const selectedTemplateKeyMeta = useMemo(
-    () => filteredTemplateKeyOptions.find((row) => row.key === activeAutomationTemplateKey) || null,
-    [filteredTemplateKeyOptions, activeAutomationTemplateKey]
-  );
 
   const automationSmsBody = String(draft.sms_body || '').trim() ? draft.sms_body : draft.body || '';
   const resolveBranchLogoUrl = (branch) => {
@@ -901,7 +936,7 @@ const CommunicationTemplates = ({
     if (!candidate) return '';
     return resolveRenderableUrl(candidate);
   };
-  const canSortTemplates = !searchTerm.trim();
+  const canSortTemplates = !isNotificationTemplateLibrary && !isGeneralTemplateLibrary && !searchTerm.trim();
   const groupedTemplates = useMemo(() => {
     const groups = {};
     groups['uncategorized'] = {
@@ -1142,12 +1177,20 @@ const CommunicationTemplates = ({
       try {
         const detail = await queryClient.fetchQuery({
           queryKey: ['communicationTemplate', template.id],
-          queryFn: () => getCommunicationTemplate(template.id),
+          queryFn: async () => {
+            const response = isNotificationTemplateLibrary
+              ? await getNotificationTemplate(template.id)
+            : await getGeneralTemplate(template.id);
+            const data = response?.data || response;
+            return isNotificationTemplateLibrary
+              ? normalizeNotificationTemplate(data)
+            : normalizeGeneralTemplate(data);
+          },
           staleTime: 5 * 60 * 1000,
           gcTime: 10 * 60 * 1000,
         });
         if (detail) {
-          fullTemplate = detail.data || detail;
+          fullTemplate = detail;
         }
       } catch (err) {
         console.error('Failed to load full template details', err);
@@ -1435,11 +1478,11 @@ const CommunicationTemplates = ({
     const selectedBranch = draft.branch || branchFilter || branches[0]?.id || null;
     const errors = {};
 
-    if (!selectedBranch) errors.branch = 'Select a branch for this template.';
-    if (!isAutomationBuilder || channel !== 'email_sms') {
-      if (!templateKey) {
+    if (!selectedBranch && !isGeneralTemplateLibrary) errors.branch = 'Select a branch for this template.';
+    if (!isNotificationTemplateLibrary && (!isAutomationBuilder || channel !== 'email_sms')) {
+      if (!isGeneralTemplateLibrary && !templateKey) {
         errors.template_key = 'Template key is required.';
-      } else if (!TEMPLATE_KEY_RE.test(templateKey)) {
+      } else if (!isGeneralTemplateLibrary && !TEMPLATE_KEY_RE.test(templateKey)) {
         errors.template_key = 'Use letters, numbers, underscore, dash, dot, or colon only.';
       }
     } else {
@@ -1515,6 +1558,19 @@ const CommunicationTemplates = ({
         })?.id
         || null
       );
+      const saveTemplate = (templateId, templatePayload) => {
+        if (isNotificationTemplateLibrary) {
+          const notificationPayload = toNotificationTemplatePayload(templatePayload);
+          return templateId
+            ? updateNotificationTemplate(templateId, notificationPayload)
+            : createNotificationTemplate(notificationPayload);
+        }
+        const generalPayload = toGeneralTemplatePayload(templatePayload);
+        return (templateId
+          ? updateGeneralTemplate(templateId, generalPayload)
+          : createGeneralTemplate(generalPayload))
+          .then(normalizeGeneralTemplate);
+      };
 
       let saved;
       if (isAutomationBuilder && automationMessageMode === 'email_sms') {
@@ -1537,12 +1593,8 @@ const CommunicationTemplates = ({
         };
         const resolvedEmailTemplateId = resolveTemplateId(draft.email_template_id, 'email', emailPayload.template_key);
         const resolvedSmsTemplateId = resolveTemplateId(draft.sms_template_id, 'sms', smsPayload.template_key);
-        const emailResult = resolvedEmailTemplateId
-          ? await updateCommunicationTemplate(resolvedEmailTemplateId, emailPayload)
-          : await createCommunicationTemplate(emailPayload);
-        const smsResult = resolvedSmsTemplateId
-          ? await updateCommunicationTemplate(resolvedSmsTemplateId, smsPayload)
-          : await createCommunicationTemplate(smsPayload);
+        const emailResult = await saveTemplate(resolvedEmailTemplateId, emailPayload);
+        const smsResult = await saveTemplate(resolvedSmsTemplateId, smsPayload);
         const emailSaved = getTemplateResponseData(emailResult);
         const smsSaved = getTemplateResponseData(smsResult);
         saved = emailSaved || smsSaved;
@@ -1569,9 +1621,7 @@ const CommunicationTemplates = ({
         }
       } else {
         const resolvedTemplateId = resolveTemplateId(draft.id, payload.channel, payload.template_key);
-        saved = resolvedTemplateId
-          ? await updateCommunicationTemplate(resolvedTemplateId, payload)
-          : await createCommunicationTemplate(payload);
+        saved = await saveTemplate(resolvedTemplateId, payload);
         if (isAutomationBuilder && builderRouteContext?.automationStepId) {
           const nextStepType = values.channel === 'sms' ? 'send_sms' : 'send_email';
           const nextStepConfig = {
@@ -1764,7 +1814,11 @@ const CommunicationTemplates = ({
   const handleDelete = async (id) => {
     setIsDeleting(true);
     try {
-      await deleteCommunicationTemplate(id);
+      if (isNotificationTemplateLibrary) {
+        await deleteNotificationTemplate(id);
+      } else {
+        await deleteGeneralTemplate(id);
+      }
       await queryClient.invalidateQueries({ queryKey: ['communicationTemplates'] });
       flashMessage('success', 'Template deleted.');
     } catch (err) {
@@ -1778,7 +1832,16 @@ const CommunicationTemplates = ({
     setIsSaving(true);
     try {
       const payload = { ...template, is_active: !template.is_active };
-      const updated = await updateCommunicationTemplate(template.id, payload);
+      const updated = isNotificationTemplateLibrary
+        ? normalizeNotificationTemplate(
+            await updateNotificationTemplate(
+              template.id,
+              toNotificationTemplatePayload(payload)
+            )
+          )
+        : normalizeGeneralTemplate(
+            await updateGeneralTemplate(template.id, toGeneralTemplatePayload(payload))
+          );
       await invalidateCommunicationTemplateQueries();
       flashMessage('success', `Template ${updated.is_active ? 'activated' : 'deactivated'}.`);
     } catch (err) {
@@ -1914,131 +1977,150 @@ const CommunicationTemplates = ({
             </div>
           </div>
 
-          {/* Category Tabs */}
-          {groupedTemplates.length > 1 && (
-            <div className="flex items-center gap-2 overflow-x-auto pb-3 mb-6 no-scrollbar -mx-1 px-1 sm:mx-0 sm:px-0 border-b border-slate-200">
-              {groupedTemplates.map((group) => {
-                const tabId = String(group.category.id || 'uncategorized');
-                const isActive = activeCategoryTab === tabId;
-                return (
-                  <button
-                    key={tabId}
-                    type="button"
-                    onClick={() => setActiveCategoryTab(tabId)}
-                    className={`px-4 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer shrink-0 ${
-                      isActive ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    {group.category.name} ({group.templates.length})
-                  </button>
-                );
-              })}
-            </div>
-          )}
+      {message.text && (
+        <div className={`fixed right-4 top-4 z-[200] flex max-w-[min(420px,calc(100vw-2rem))] items-center gap-2 rounded-xl px-4 py-3 text-sm font-bold shadow-2xl animate-in slide-in-from-top-2 ${
+          message.type === 'success' ? 'bg-primary-tint/30 text-primary' : 'bg-[#FDE8E8]/30 text-[#791F1F]'
+        }`}>
+          {message.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
+          {message.text}
+        </div>
+      )}
 
-          {/* Table */}
-          {filteredItems.length === 0 ? (
-            <div className="border border-slate-100 rounded-2xl p-12 text-center text-slate-400">
-              No templates found. Create a new one or click "+ New Document".
-            </div>
-          ) : (
-            <div className="overflow-x-auto border border-slate-100 rounded-2xl">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-100 bg-slate-50/75 text-[11px] font-black uppercase tracking-wider text-slate-600">
-                    <th className="px-3 sm:px-6 py-3 sm:py-4">Template Name</th>
-                    <th className="px-3 sm:px-6 py-3 sm:py-4">Channel</th>
-                    <th className="hidden md:table-cell px-6 py-4">Category</th>
-                    <th className="hidden lg:table-cell px-6 py-4">Branch</th>
-                    <th className="px-3 sm:px-6 py-3 sm:py-4">Status</th>
-                    <th className="px-3 sm:px-6 py-3 sm:py-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-sm">
-                  {(groupedTemplates.length > 1
-                    ? (groupedTemplates.find((g) => String(g.category.id || 'uncategorized') === activeCategoryTab)?.templates || [])
-                    : filteredItems
-                  ).map((item) => {
-                    const isEmail = String(item.channel || '').toLowerCase() === 'email';
-                    const categoryName = categories.find((c) => String(c.id) === String(item.category))?.name || 'Transactional';
-                    const branchName = branches.find((b) => String(b.id) === String(item.branch))?.name || (item.branch ? `Branch #${item.branch}` : 'All Branches');
-                    return (
-                      <tr
-                        key={item.id}
-                        onDragOver={(e) => handleTemplateDragOver(e, item)}
-                        onDrop={(e) => handleTemplateDrop(e, item)}
-                        className={`hover:bg-slate-50/60 transition-colors ${
-                          draggedTemplateId === item.id ? 'bg-blue-50/50 opacity-70' : ''
-                        } ${dragOverTemplateId === item.id ? 'ring-2 ring-blue-500/20 bg-blue-50/30' : ''}`}
-                      >
-                        <td className="px-3 sm:px-6 py-3 sm:py-4">
-                          <div className="flex items-center gap-2 sm:gap-3">
-                            <button
-                              type="button"
-                              draggable={canSortTemplates && !isReordering}
-                              onDragStart={(e) => handleTemplateDragStart(e, item)}
-                              onDragEnd={handleTemplateDragEnd}
-                              className={`p-1 text-slate-300 hover:text-slate-500 transition-colors ${
-                                canSortTemplates && !isReordering ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed opacity-40'
-                              }`}
-                              title={canSortTemplates ? 'Drag to reorder' : 'Clear search to reorder'}
-                              aria-label={`Drag ${item.name} to reorder`}
-                            >
-                              <GripVertical size={14} />
-                            </button>
-                            <div className={`p-1.5 sm:p-2 rounded-xl shrink-0 ${isEmail ? 'bg-blue-50 text-blue-600' : 'bg-emerald-50 text-emerald-600'}`}>
-                              {isEmail ? <Mail size={16} /> : <MessageSquare size={16} />}
-                            </div>
-                            <div className="min-w-0">
-                              <div className="font-bold text-slate-800 text-xs sm:text-sm truncate max-w-[140px] xs:max-w-[180px] sm:max-w-none">{item.name}</div>
-                              <div className="text-[11px] font-normal text-slate-500 truncate max-w-[140px] xs:max-w-[180px] sm:max-w-none">{item.subject || item.template_key || 'No subject'}</div>
-                              {/* Mobile Sub-Badges for Category & Branch */}
-                              <div className="flex flex-wrap gap-1 mt-1 md:hidden">
-                                <span className="text-[10px] font-semibold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
-                                  {categoryName}
-                                </span>
-                                <span className="text-[10px] font-semibold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded lg:hidden">
-                                  {branchName}
-                                </span>
+      {filteredItems.length === 0 ? (
+        <Card className="overflow-hidden border-none shadow-xl bg-card rounded-2xl p-12 text-center text-muted">
+          No templates found. Create a new one or click "Load Starter".
+        </Card>
+      ) : (
+        <div className="space-y-6">
+          {/* Category Tabs */}
+          <div className="flex flex-wrap gap-2 border-b border-border pb-4">
+            {groupedTemplates.map((group) => {
+              const tabId = String(group.category.id || 'uncategorized');
+              const isActive = activeCategoryTab === tabId;
+              return (
+                <button
+                  key={tabId}
+                  onClick={() => setActiveCategoryTab(tabId)}
+                  className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+                    isActive ? 'bg-primary text-white shadow-md' : 'bg-subtle text-muted hover:bg-border'
+                  }`}
+                >
+                  {group.category.name} ({group.templates.length})
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="space-y-8">
+            {groupedTemplates
+              .filter(group => String(group.category.id || 'uncategorized') === activeCategoryTab)
+              .map((group) => (
+              <div key={group.category.id || 'uncategorized'} className="space-y-3">
+                <div className="flex items-center justify-between px-2">
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-xs font-black text-heading uppercase tracking-wider">
+                      {group.category.name}
+                    </h4>
+                    {group.category.description && (
+                    <span className="text-[10px] text-muted font-bold">
+                      · {group.category.description}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[10px] text-muted font-black uppercase tracking-wider">
+                  {group.templates.length} {group.templates.length === 1 ? 'template' : 'templates'}
+                </span>
+              </div>
+
+              <Card className="overflow-hidden border-none shadow-xl shadow-border/50 bg-card rounded-2xl">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-subtle/50 border-b border-border">
+                        <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Template</th>
+                        <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Channel</th>
+                        <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Order</th>
+                        <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted">Status</th>
+                        <th className="px-6 py-4 text-[0.625rem] font-bold uppercase tracking-widest text-muted text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-subtle">
+                      {group.templates.map((item) => (
+                        <tr
+                          key={item.id}
+                          onDragOver={(e) => handleTemplateDragOver(e, item)}
+                          onDrop={(e) => handleTemplateDrop(e, item)}
+                          className={`group transition-colors ${
+                            draggedTemplateId === item.id ? 'bg-primary-tint/10 opacity-70' : 'hover:bg-subtle/50'
+                          } ${dragOverTemplateId === item.id ? 'ring-2 ring-primary/20 bg-primary/5' : ''}`}
+                        >
+                          <td className="px-6 py-4">
+                            <div className="flex items-start gap-3">
+                              <button
+                                type="button"
+                                draggable={canSortTemplates && !isReordering}
+                                onDragStart={(e) => handleTemplateDragStart(e, item)}
+                                onDragEnd={handleTemplateDragEnd}
+                                className={`mt-0.5 inline-flex items-center justify-center rounded-md p-1 text-muted transition-colors ${
+                                  canSortTemplates && !isReordering ? 'cursor-grab active:cursor-grabbing hover:bg-card' : 'cursor-not-allowed opacity-50'
+                                }`}
+                                title={canSortTemplates ? 'Drag to reorder' : 'Clear search to reorder templates'}
+                                aria-label={`Drag ${item.name} to reorder`}
+                                aria-disabled={!canSortTemplates || isReordering}
+                              >
+                                <GripVertical size={14} />
+                              </button>
+                              <div className="flex flex-col">
+                                <span className="text-sm font-bold text-body">{item.name}</span>
+                                <span className="text-[0.625rem] font-mono text-muted uppercase">{item.template_key}</span>
                               </div>
                             </div>
-                          </div>
-                        </td>
-                        <td className="px-3 sm:px-6 py-3 sm:py-4">
-                          <span className={`px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-[11px] font-bold uppercase tracking-wider ${
-                            isEmail ? 'bg-blue-50 text-blue-700' : 'bg-emerald-50 text-emerald-700'
-                          }`}>
-                            {getChannelLabel(item.channel)}
-                          </span>
-                        </td>
-                        <td className="hidden md:table-cell px-6 py-4">
-                          <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 text-[11px] font-bold">
-                            {categoryName}
-                          </span>
-                        </td>
-                        <td className="hidden lg:table-cell px-6 py-4 text-xs font-semibold text-slate-600">
-                          {branchName}
-                        </td>
-                        <td className="px-3 sm:px-6 py-3 sm:py-4">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleActive(item)}
-                            disabled={isSaving}
-                            title={`Click to ${item.is_active ? 'deactivate' : 'activate'}`}
-                            className="focus:outline-hidden"
-                          >
-                            {item.is_active ? (
-                              <span className="inline-flex items-center gap-1.5 text-[11px] sm:text-xs font-bold text-emerald-600 bg-emerald-50 hover:bg-emerald-100 cursor-pointer px-2 sm:px-2.5 py-1 rounded-full transition-colors">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Active
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1.5 text-[11px] sm:text-xs font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 cursor-pointer px-2 sm:px-2.5 py-1 rounded-full transition-colors">
-                                <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span> Inactive
-                              </span>
-                            )}
-                          </button>
-                        </td>
-                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-right space-x-1 sm:space-x-2 whitespace-nowrap">
+                          </td>
+	                          <td className="px-6 py-4">
+                            {(() => {
+                              const channelLabel = getChannelLabel(item.channel);
+                              const normalizedChannel = String(item.channel || '').toLowerCase();
+                              const isEmail = normalizedChannel === 'email';
+                              const isMultiChannel = normalizedChannel === 'email_sms';
+                              return (
+	                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.625rem] font-bold uppercase tracking-wider ${
+	                              isMultiChannel
+                                    ? 'bg-violet-100 text-violet-700'
+                                    : isEmail
+                                        ? 'bg-primary-tint text-primary'
+                                        : 'bg-status-booked-bg text-status-booked-text'
+	                            }`}>
+	                              {isMultiChannel ? (
+                                    <>
+                                      <Mail size={12} />
+                                      <MessageSquare size={12} />
+                                    </>
+                                  ) : isEmail ? (
+                                    <Mail size={12} />
+                                  ) : (
+                                    <MessageSquare size={12} />
+                                  )}
+	                              {channelLabel}
+	                            </span>
+                              );
+                            })()}
+	                          </td>
+                          <td className="px-6 py-4">
+                            <span className="inline-flex items-center rounded-full bg-subtle px-2.5 py-1 text-[0.625rem] font-bold uppercase tracking-wider text-body">
+                              #{Number(item.sort_order ?? 0)}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleActive(item)}
+                              disabled={isSaving}
+                              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${item.is_active ? 'bg-primary' : 'bg-disabled'}`}
+                            >
+                              <span className={`inline-block h-3 w-3 transform rounded-full bg-card transition-transform ${item.is_active ? 'translate-x-5' : 'translate-x-1'}`} />
+                            </button>
+                          </td>
+                          <td className="px-6 py-4 text-right relative">
                           <button
                             type="button"
                             onClick={() => handleOpenModal(item, item.channel || 'email')}
@@ -2164,7 +2246,7 @@ const CommunicationTemplates = ({
                         aria-invalid={Boolean(formErrors.name)}
                       />
                     </Field>
-                    {!isAutomationBuilder && (
+                    {!isAutomationBuilder && !isGeneralTemplateLibrary && (
                       <Field label="Branch" error={formErrors.branch}>
                         <div className="relative">
                           <button
@@ -2325,7 +2407,8 @@ const CommunicationTemplates = ({
 
 
                   {/* Testing Group */}
-                    {(isAutomationBuilder ? automationEditorTab === 'email' : draft.channel === 'email') && (
+                    {!isNotificationTemplateLibrary &&
+                      (isAutomationBuilder ? automationEditorTab === 'email' : draft.channel === 'email') && (
                     <div className="space-y-4">
                       <h4 className="text-xs font-black uppercase tracking-wider text-heading flex items-center gap-2 pb-2 border-b border-border">
                         <Mail size={16} className="text-primary"/> Testing

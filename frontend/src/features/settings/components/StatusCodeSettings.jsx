@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Plus, Search, Edit2, Trash2, Loader2, Tag, Check, X } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Plus, Search, Edit2, Trash2, Loader2, Tag, X } from 'lucide-react';
 import Card from '../../../shared/ui/Card';
 import useCan from '../../../shared/auth/useCan';
 import { useToast } from '../../../shared/context/ToastContext';
@@ -8,7 +8,6 @@ import {
   createStatusCode,
   updateStatusCode,
   deleteStatusCode,
-  seedStatusCodes,
 } from '../../../services/api';
 import { PERMISSIONS } from '../../../shared/permissions/registry';
 
@@ -16,7 +15,6 @@ const INITIAL_FORM = {
   code: '',
   label: '',
   color_hex: '#888780',
-  maps_to_workflow_stage: 'opportunity',
   is_default: false,
   sort_order: 0,
   is_active: true,
@@ -43,23 +41,15 @@ const StatusCodeSettings = () => {
   const [codes, setCodes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [offset, setOffset] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCode, setEditingCode] = useState(null);
   const [formData, setFormData] = useState(INITIAL_FORM);
-  const [isSeeding, setIsSeeding] = useState(false);
   const colorPickerRef = useRef(null);
   const dragItem = useRef(null);
   const dragOverItem = useRef(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
 
-  useEffect(() => {
-    fetchCodes(0, false);
-  }, [searchTerm]);
-
-  const fetchCodes = async (nextOffset = 0, append = false) => {
-    setLoading(true);
+  const fetchCodes = useCallback(async (nextOffset = 0, append = false) => {
     try {
       const response = await getStatusCodes({
         search: searchTerm || undefined,
@@ -71,8 +61,6 @@ const StatusCodeSettings = () => {
         : Array.isArray(response)
           ? response
           : [];
-      setHasMore(Boolean(response?.next || response?.hasMore));
-      setOffset(nextOffset);
       setCodes((prev) => {
         if (!append) return rows;
         const existingIds = new Set(prev.map((item) => item.id));
@@ -83,7 +71,13 @@ const StatusCodeSettings = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [searchTerm]);
+
+  useEffect(() => {
+    // The fetch updates state only after the API resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchCodes(0, false);
+  }, [fetchCodes]);
 
   const resetForm = () => {
     setEditingCode(null);
@@ -102,7 +96,14 @@ const StatusCodeSettings = () => {
         showToast('Color must be a valid hex value like #000000.', 'warning');
         return;
       }
-      const payload = { ...formData, color_hex: normalizedColorHex, entity_type: 'shared' };
+      const payload = {
+        label: formData.label.trim(),
+        code: formData.code.trim() || formData.label.trim().toLowerCase().replace(/[^a-z0-9 _.-]/g, '_'),
+        color_hex: normalizedColorHex,
+        is_default: formData.is_default,
+        sort_order: Number(formData.sort_order) || 0,
+        is_active: formData.is_active,
+      };
       if (editingCode) {
         const updated = await updateStatusCode(editingCode.id, payload);
         setCodes((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
@@ -134,24 +135,6 @@ const StatusCodeSettings = () => {
     } catch (err) {
       console.error('Failed to delete status code:', err);
       showToast('Failed to delete status code.', 'error');
-    }
-  };
-
-  const handleSeedDefaults = async () => {
-    if (!canAll([PERMISSIONS.SALES_ADD_STATUS_CODE])) {
-      showToast('You do not have permission to seed status codes.', 'warning');
-      return;
-    }
-    setIsSeeding(true);
-    try {
-      await seedStatusCodes({});
-      await fetchCodes(0, false);
-      showToast('Company default statuses seeded successfully.', 'success');
-    } catch (err) {
-      console.error('Failed to seed default status codes:', err);
-      showToast('Failed to seed default status codes.', 'error');
-    } finally {
-      setIsSeeding(false);
     }
   };
 
@@ -253,16 +236,6 @@ const StatusCodeSettings = () => {
         <div className="flex items-center gap-2">
           {canAll([PERMISSIONS.SALES_ADD_STATUS_CODE]) && (
             <button
-              onClick={handleSeedDefaults}
-              disabled={isSeeding}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-            >
-              {isSeeding ? <Loader2 size={12} className="animate-spin" /> : <Tag size={12} />}
-              Seed Defaults
-            </button>
-          )}
-          {canAll([PERMISSIONS.SALES_ADD_STATUS_CODE]) && (
-            <button
               onClick={() => openModal()}
               className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-primary/90"
             >
@@ -280,7 +253,6 @@ const StatusCodeSettings = () => {
               <tr className="border-b border-slate-100 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-body dark:border-slate-800 dark:bg-slate-900">
                 <th className="px-3.5 py-2.5">Badge & Label</th>
                 <th className="px-3.5 py-2.5">Code Key</th>
-                <th className="px-3.5 py-2.5">Stage Mapping</th>
                 <th className="px-3.5 py-2.5 text-center">Default</th>
                 <th className="px-3.5 py-2.5 text-center">Status</th>
                 <th className="px-3.5 py-2.5 text-right">Actions</th>
@@ -313,9 +285,6 @@ const StatusCodeSettings = () => {
                     </div>
                   </td>
                   <td className="px-3.5 py-2 font-mono text-xs text-body">{item.code || '-'}</td>
-                  <td className="px-3.5 py-2 text-xs font-semibold capitalize text-heading dark:text-white">
-                    {item.maps_to_workflow_stage || 'opportunity'}
-                  </td>
                   <td className="px-3.5 py-2 text-center">
                     {item.is_default && (
                       <span className="rounded bg-primary-tint/40 px-1.5 py-0.5 text-[9px] font-bold uppercase text-primary">
@@ -342,27 +311,27 @@ const StatusCodeSettings = () => {
                   </td>
                   <td className="px-3.5 py-2 text-right">
                     <div className="flex items-center justify-end gap-1">
-                      <button
+                      {canAll([PERMISSIONS.SALES_CHANGE_STATUS_CODE]) && <button
                         onClick={() => openModal(item)}
                         className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-primary dark:hover:bg-slate-800"
                         title="Edit"
                       >
                         <Edit2 size={13} />
-                      </button>
-                      <button
+                      </button>}
+                      {canAll([PERMISSIONS.SALES_DELETE_STATUS_CODE]) && <button
                         onClick={() => handleDelete(item.id)}
                         className="rounded-lg p-1 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/30"
                         title="Delete"
                       >
                         <Trash2 size={13} />
-                      </button>
+                      </button>}
                     </div>
                   </td>
                 </tr>
               ))}
               {filteredCodes.length === 0 && (
                 <tr>
-                  <td colSpan="6" className="px-3.5 py-6 text-center text-xs text-body">
+                  <td colSpan="5" className="px-3.5 py-6 text-center text-xs text-body">
                     No status codes found.
                   </td>
                 </tr>
@@ -408,21 +377,7 @@ const StatusCodeSettings = () => {
                 </label>
               </div>
 
-              <div className="grid grid-cols-2 gap-2.5">
-                <label className="block space-y-1">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-body">Workflow Stage</span>
-                  <select
-                    value={formData.maps_to_workflow_stage}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, maps_to_workflow_stage: e.target.value }))}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium outline-none focus:border-primary dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                  >
-                    <option value="lead">Lead</option>
-                    <option value="opportunity">Opportunity</option>
-                    <option value="booked">Booked</option>
-                    <option value="closed">Closed</option>
-                  </select>
-                </label>
-
+              <div>
                 <div className="block space-y-1">
                   <span className="text-[10px] font-bold uppercase tracking-widest text-body">Badge Color</span>
                   <div className="flex items-center gap-2">
@@ -457,7 +412,7 @@ const StatusCodeSettings = () => {
                     onChange={(e) => setFormData((prev) => ({ ...prev, is_default: e.target.checked }))}
                     className="h-3.5 w-3.5 rounded border-slate-300 text-primary focus:ring-primary focus:ring-offset-0"
                   />
-                  <span>Default Stage</span>
+                  <span>Default Status</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-heading dark:text-white select-none">
                   <input

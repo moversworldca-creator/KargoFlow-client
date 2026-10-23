@@ -121,20 +121,57 @@ export const FEATURE_PERMISSION_CATALOG = {
     allowedScopes: ['own', 'branch', 'company'],
     legacyAliases: ['crm.communications.email.send', 'crm.communications.sms.send'],
   },
+  'communications.automations.view': {
+    label: 'View Custom Automations',
+    module: 'Communications',
+    allowedScopes: ['own', 'branch', 'company'],
+    legacyAliases: ['crm.settings.automations.view'],
+  },
+  'communications.automations.manage': {
+    label: 'Manage Custom Automations',
+    module: 'Communications',
+    allowedScopes: ['branch', 'company'],
+    legacyAliases: ['crm.settings.automations.manage'],
+  },
+  'communications.branch_settings.update': {
+    label: 'Configure Branch Notifications',
+    module: 'Communications',
+    allowedScopes: ['branch', 'company'],
+    legacyAliases: [],
+  },
+  'communications.notification_templates.update': {
+    label: 'Manage Notification Templates',
+    module: 'Communications',
+    allowedScopes: ['branch', 'company'],
+    legacyAliases: [],
+  },
+  'communications.general_templates.update': {
+    label: 'Manage General Templates',
+    module: 'Communications',
+    allowedScopes: ['branch', 'company'],
+    legacyAliases: [],
+  },
 };
 
 export const FEATURE_PERMISSIONS = {
   WORKSPACE: {
     ADMIN: 'crm.admin',
-    AUDIT_VIEW: 'crm.audit.view',
-    TEAM_VIEW: 'crm.settings.users.view',
-    TEAM_CREATE: 'crm.settings.users.manage',
-    TEAM_EDIT: 'crm.settings.users.manage',
-    TEAM_DELETE: 'crm.settings.users.manage',
-    ROLE_VIEW: 'crm.settings.roles.view',
-    ROLE_CREATE: 'crm.settings.roles.manage',
-    ROLE_EDIT: 'crm.settings.roles.manage',
-    ROLE_DELETE: 'crm.settings.roles.manage',
+    AUDIT_VIEW: 'audit_logs.view',
+    // Backend keys (users / employees / RBAC administration).
+    TEAM_VIEW: 'users.view',
+    TEAM_CREATE: 'users.manage',
+    TEAM_EDIT: 'users.manage',
+    TEAM_DELETE: 'users.manage',
+    EMPLOYEE_VIEW: 'employees.view',
+    EMPLOYEE_MANAGE: 'employees.manage',
+    USER_ASSIGN_ROLE: 'users.assign_role',
+    ROLE_VIEW: 'rbac_roles.view',
+    ROLE_CREATE: 'rbac_roles.create',
+    ROLE_EDIT: 'rbac_roles.manage',
+    ROLE_DELETE: 'rbac_roles.manage',
+    OVERRIDE_VIEW: 'rbac_overrides.view',
+    OVERRIDE_MANAGE: 'rbac_overrides.manage',
+    PERMISSION_VIEW: 'rbac_permissions.view',
   },
   CRM: {
     DASHBOARD_VIEW: 'crm.dashboard.view',
@@ -153,10 +190,10 @@ export const FEATURE_PERMISSIONS = {
     REPORTS_VIEW: 'crm.reports.view',
     TASK_VIEW: 'crm.tasks.view',
     TASK_EDIT: 'crm.tasks.edit',
-    STATUS_VIEW: 'crm.settings.status_codes.view',
-    STATUS_CREATE: 'crm.settings.status_codes.manage',
-    STATUS_EDIT: 'crm.settings.status_codes.manage',
-    STATUS_DELETE: 'crm.settings.status_codes.manage',
+    STATUS_VIEW: 'opportunities.view',
+    STATUS_CREATE: 'opportunity_settings.manage',
+    STATUS_EDIT: 'opportunity_settings.manage',
+    STATUS_DELETE: 'opportunity_settings.manage',
   },
   INTEGRATIONS: {
     PAYMENT_GATEWAY_VIEW: 'crm.settings.integrations.view',
@@ -200,6 +237,12 @@ export const PERMISSIONS = {
   ROLE_CREATE: FEATURE_PERMISSIONS.WORKSPACE.ROLE_CREATE,
   ROLE_EDIT: FEATURE_PERMISSIONS.WORKSPACE.ROLE_EDIT,
   ROLE_DELETE: FEATURE_PERMISSIONS.WORKSPACE.ROLE_DELETE,
+  EMPLOYEE_VIEW: FEATURE_PERMISSIONS.WORKSPACE.EMPLOYEE_VIEW,
+  EMPLOYEE_MANAGE: FEATURE_PERMISSIONS.WORKSPACE.EMPLOYEE_MANAGE,
+  USER_ASSIGN_ROLE: FEATURE_PERMISSIONS.WORKSPACE.USER_ASSIGN_ROLE,
+  OVERRIDE_VIEW: FEATURE_PERMISSIONS.WORKSPACE.OVERRIDE_VIEW,
+  OVERRIDE_MANAGE: FEATURE_PERMISSIONS.WORKSPACE.OVERRIDE_MANAGE,
+  PERMISSION_VIEW: FEATURE_PERMISSIONS.WORKSPACE.PERMISSION_VIEW,
 
   FLEET_VIEW: 'crm.settings.fleet.view',
   FLEET_MANAGE: 'crm.settings.fleet.manage',
@@ -230,8 +273,11 @@ export const PERMISSIONS = {
   INTEGRATIONS_CHANGE_TELNYX: FEATURE_PERMISSIONS.INTEGRATIONS.TELNYX_EDIT,
   INTEGRATIONS_ADD_TELNYX: FEATURE_PERMISSIONS.INTEGRATIONS.TELNYX_ADD,
 
-  AUTOMATIONS_VIEW: 'crm.settings.automations.view',
-  AUTOMATIONS_MANAGE: 'crm.settings.automations.manage',
+  AUTOMATIONS_VIEW: 'communications.automations.view',
+  AUTOMATIONS_MANAGE: 'communications.automations.manage',
+  BRANCH_SETTINGS_UPDATE: 'communications.branch_settings.update',
+  NOTIFICATION_TEMPLATES_UPDATE: 'communications.notification_templates.update',
+  GENERAL_TEMPLATES_UPDATE: 'communications.general_templates.update',
   COMMUNICATIONS_EMAIL_SEND: 'communications.conversations.send',
   COMMUNICATIONS_SMS_SEND: 'communications.conversations.send',
   COMMUNICATIONS_CALL_LOG: 'communications.conversations.send',
@@ -274,7 +320,6 @@ export const ROUTE_PERMISSIONS = {
   '/jobs': [PERMISSIONS.SALES_VIEW_OPPORTUNITY],
   '/jobs/:id': [PERMISSIONS.SALES_VIEW_OPPORTUNITY],
   '/payments': [PERMISSIONS.INTEGRATIONS_VIEW_PAYMENT_GATEWAY],
-  '/analytics': [PERMISSIONS.SALES_VIEW_REPORTS],
 };
 
 export const NAV_ITEMS = [
@@ -298,13 +343,19 @@ export const SETTINGS_TAB_PERMISSIONS = {
   company: [PERMISSIONS.COMPANY_ADMIN],
   branches: [PERMISSIONS.COMPANY_ADMIN],
   branding: [PERMISSIONS.COMPANY_ADMIN],
-  team: [PERMISSIONS.USER_VIEW],
+  // Team & Security (settings hub tab ids). "any" of these opens the tab;
+  // each action inside checks its own key.
+  team: [PERMISSIONS.EMPLOYEE_VIEW, PERMISSIONS.USER_VIEW],
+  members: [PERMISSIONS.EMPLOYEE_VIEW, PERMISSIONS.USER_VIEW],
+  access: [PERMISSIONS.OVERRIDE_VIEW, PERMISSIONS.PERMISSION_VIEW],
+  'audit-logs': [PERMISSIONS.AUDIT_VIEW],
   crew: [PERMISSIONS.USER_VIEW],
   trucks: [PERMISSIONS.FLEET_VIEW],
   roles: [PERMISSIONS.ROLE_VIEW],
-  'mover-types': [PERMISSIONS.SALES_VIEW_OPPORTUNITY],
-  'service-types': [PERMISSIONS.SALES_VIEW_OPPORTUNITY],
-  'mover-sizes': [PERMISSIONS.FLEET_VIEW],
+  'mover-types': [PERMISSIONS.SALES_VIEW_OPPORTUNITY, PERMISSIONS.COMPANY_ADMIN],
+  'service-types': [PERMISSIONS.SALES_VIEW_OPPORTUNITY, PERMISSIONS.COMPANY_ADMIN],
+  'mover-sizes': [PERMISSIONS.SALES_VIEW_OPPORTUNITY, PERMISSIONS.COMPANY_ADMIN, PERMISSIONS.FLEET_VIEW],
+  'move-sizes': [PERMISSIONS.SALES_VIEW_OPPORTUNITY, PERMISSIONS.COMPANY_ADMIN, PERMISSIONS.FLEET_VIEW],
   'estimate-catalog': [PERMISSIONS.CATALOG_VIEW],
   'catalog-packages': [PERMISSIONS.CATALOG_VIEW],
   inventory: [PERMISSIONS.CATALOG_VIEW],
@@ -331,6 +382,14 @@ export const SETTINGS_TAB_PERMISSIONS = {
   communications: [PERMISSIONS.COMPANY_ADMIN],
   'communication-setup': [PERMISSIONS.COMPANY_ADMIN],
   audit: [PERMISSIONS.AUDIT_VIEW],
+  // Pricing & Tariffs (backend keys; each action inside checks its own key).
+  tariffs: ['pricing.view'],
+  'pricing-skills': ['pricing.view'],
+  'contract-pricing': ['pricing.view'],
+  'pricing-taxes': ['pricing.view'],
+  'pricing-policy': ['pricing.view'],
+  'pricing-approvals': ['pricing.view'],
+  'price-simulator': ['pricing.simulate'],
 };
 
 export const SETTINGS_ENTRY_PERMISSIONS = Array.from(
@@ -377,14 +436,17 @@ const PERMISSION_ALIASES = {
   'crm.opportunities.create': ['opportunities.create'],
   'crm.opportunities.edit': ['opportunities.edit'],
   'crm.opportunities.book': ['opportunities.book'],
-  'crm.settings.users.view': ['users.view'],
-  'crm.settings.users.manage': ['users.manage'],
-  'crm.settings.roles.view': ['rbac_roles.view'],
-  'crm.audit.view': ['audit_logs.view'],
+  'communications.automations.view': ['crm.settings.automations.view'],
+  'crm.settings.automations.view': ['communications.automations.view'],
+  'communications.automations.manage': ['crm.settings.automations.manage'],
+  'crm.settings.automations.manage': ['communications.automations.manage'],
 };
 
+// Legacy frontend names (crm.*) only: a backend key is matched exactly, because
+// the backend keeps e.g. rbac_roles.create and rbac_roles.manage as separate
+// grants and one never implies the other.
 const buildSiblingCandidates = (perm) => {
-  if (!perm || typeof perm !== 'string') return [];
+  if (!perm || typeof perm !== 'string' || !perm.startsWith('crm.')) return [];
   const parts = perm.split('.');
   if (parts.length < 2) return [];
   const action = parts[parts.length - 1];
@@ -420,8 +482,8 @@ export const canAll = (required, ctx = {}) => {
   const needed = normalizeRequired(required);
   if (!needed.length) return true;
 
-  if (ctx.isSuperuser || ctx.isSystemAdmin || ctx.isCompanyAdmin) return true;
-
+  // No role or flag replaces a permission: the session's permission list is the
+  // only source. (The former "crm.admin" bypass named no backend permission.)
   const permissionSet = toSet(ctx.permissions);
   return needed.every((perm) => getPermissionCandidates(perm).some((candidate) => permissionSet.has(candidate)));
 };
@@ -429,8 +491,6 @@ export const canAll = (required, ctx = {}) => {
 export const canAny = (required, ctx = {}) => {
   const needed = normalizeRequired(required);
   if (!needed.length) return true;
-
-  if (ctx.isSuperuser || ctx.isSystemAdmin || ctx.isCompanyAdmin) return true;
 
   const permissionSet = toSet(ctx.permissions);
   return needed.some((perm) => getPermissionCandidates(perm).some((candidate) => permissionSet.has(candidate)));

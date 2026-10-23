@@ -5,14 +5,19 @@ import CommunicationTemplates from '../../settings/components/CommunicationTempl
 const TemplateEditor = () => {
   const { itemId = 'new' } = useParams();
   const location = useLocation();
-  const builderRouteItemId = itemId && itemId !== 'new' ? itemId : 'new';
+  const isTemplateLibraryRoute = /\/automation\/templates\/?$/.test(location.pathname);
+  const builderRouteItemId = isTemplateLibraryRoute
+    ? null
+    : itemId && itemId !== 'new'
+      ? itemId
+      : 'new';
 
   return (
     <div className="template-editor">
       <CommunicationTemplates
         basePath="/automation/templates"
         closePath="/automation"
-        builderRouteView="builder"
+        builderRouteView={isTemplateLibraryRoute ? '' : 'builder'}
         builderRouteItemId={builderRouteItemId}
         builderRouteState={location.state || null}
       />

@@ -14,6 +14,12 @@ const apiMocks = vi.hoisted(() => ({
   getCommunicationTemplateKeys: vi.fn(),
   getCommunicationTemplateVariables: vi.fn(),
   getCommunicationTemplates: vi.fn(),
+  getGeneralTemplates: vi.fn(),
+  getGeneralTemplate: vi.fn(),
+  getGeneralTemplateVariables: vi.fn(),
+  createGeneralTemplate: vi.fn(),
+  updateGeneralTemplate: vi.fn(),
+  deleteGeneralTemplate: vi.fn(),
   previewCommunicationTemplate: vi.fn(),
   seedCommunicationTemplates: vi.fn(),
   updateCommunicationTemplate: vi.fn(),
@@ -39,6 +45,12 @@ vi.mock('../../../services/api', () => ({
   getCommunicationTemplateKeys: apiMocks.getCommunicationTemplateKeys,
   getCommunicationTemplateVariables: apiMocks.getCommunicationTemplateVariables,
   getCommunicationTemplates: apiMocks.getCommunicationTemplates,
+  getGeneralTemplates: apiMocks.getGeneralTemplates,
+  getGeneralTemplate: apiMocks.getGeneralTemplate,
+  getGeneralTemplateVariables: apiMocks.getGeneralTemplateVariables,
+  createGeneralTemplate: apiMocks.createGeneralTemplate,
+  updateGeneralTemplate: apiMocks.updateGeneralTemplate,
+  deleteGeneralTemplate: apiMocks.deleteGeneralTemplate,
   previewCommunicationTemplate: apiMocks.previewCommunicationTemplate,
   seedCommunicationTemplates: apiMocks.seedCommunicationTemplates,
   updateAutomationStep: apiMocks.updateAutomationStep,
@@ -68,6 +80,10 @@ vi.mock('./EmailVisualBuilder', () => ({
 
 vi.mock('../../../shared/ui/RichTextEditor', () => ({
   default: ({ value = '', onChange }) => <textarea aria-label="Rich text editor" value={value} onChange={(e) => onChange?.(e.target.value)} />,
+}));
+
+vi.mock('../../../shared/auth/useCan', () => ({
+  default: () => ({ can: () => true }),
 }));
 
 vi.mock('react-router-dom', async () => {
@@ -100,7 +116,32 @@ describe('CommunicationTemplates', () => {
     apiMocks.getCommunicationTemplateCategories.mockResolvedValue([]);
     apiMocks.getCommunicationTemplateVariables.mockResolvedValue({ results: [] });
     apiMocks.getCommunicationTemplateKeys.mockResolvedValue({ results: [] });
+    apiMocks.getGeneralTemplateVariables.mockResolvedValue([]);
     apiMocks.seedCommunicationTemplates.mockResolvedValue({ message: 'Default templates loaded.' });
+    apiMocks.getGeneralTemplates.mockResolvedValue([
+      {
+        id: 1,
+        branch_id: 5,
+        name: 'General Follow Up',
+        description: 'General template',
+        channel: 'email',
+        subject: 'Subject',
+        body_text: 'Body',
+        body_html: '',
+        state: 'active',
+      },
+    ]);
+    apiMocks.getGeneralTemplate.mockImplementation(async (id) => ({
+      id,
+      branch_id: 5,
+      name: 'General Follow Up',
+      description: 'General template',
+      channel: 'email',
+      subject: 'Subject',
+      body_text: 'Body',
+      body_html: '',
+      state: 'active',
+    }));
     apiMocks.getCommunicationTemplates.mockResolvedValue([
       {
         id: 1,
@@ -142,45 +183,29 @@ describe('CommunicationTemplates', () => {
     queryClient = null;
   });
 
-  it('locks default templates and keeps custom templates deletable', async () => {
+  it('loads General templates from the tenant communications API', async () => {
     renderWithQueryClient(<CommunicationTemplates branchId={5} />);
 
     await waitFor(() => {
-      expect(apiMocks.getCommunicationTemplates).toHaveBeenCalled();
+      expect(apiMocks.getGeneralTemplates).toHaveBeenCalledWith({
+        include_inactive: true,
+        branch_id: 5,
+      });
     });
 
-    expect(await screen.findByText('Quote Sent')).toBeInTheDocument();
-    expect(await screen.findByText('Custom Follow Up')).toBeInTheDocument();
-    expect(screen.getByLabelText('Default template locked')).toBeInTheDocument();
+    expect(await screen.findByText('General Follow Up')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /delete template/i })).toBeInTheDocument();
   });
 
-  it('reorders templates when the drag handle is used', async () => {
+  it('does not expose unsupported General-template ordering', async () => {
     renderWithQueryClient(<CommunicationTemplates branchId={5} />);
 
     await waitFor(() => {
-      expect(apiMocks.getCommunicationTemplates).toHaveBeenCalled();
+      expect(apiMocks.getGeneralTemplates).toHaveBeenCalled();
     });
 
-    const dataTransfer = {
-      data: {},
-      setData(type, value) {
-        this.data[type] = value;
-      },
-      getData(type) {
-        return this.data[type] || '';
-      },
-      effectAllowed: '',
-    };
-
-    fireEvent.dragStart(screen.getByLabelText('Drag Custom Follow Up to reorder'), { dataTransfer });
-    fireEvent.dragOver(screen.getByText('Quote Sent').closest('tr'), { dataTransfer });
-    fireEvent.drop(screen.getByText('Quote Sent').closest('tr'), { dataTransfer });
-
-    await waitFor(() => {
-      expect(apiMocks.updateCommunicationTemplate).toHaveBeenCalledWith(2, { sort_order: 0 });
-      expect(apiMocks.updateCommunicationTemplate).toHaveBeenCalledWith(1, { sort_order: 1 });
-    });
+    expect(screen.queryByText('Order')).not.toBeInTheDocument();
+    expect(apiMocks.updateGeneralTemplate).not.toHaveBeenCalled();
   });
 
   it('inserts a quick variable into the email visual builder', async () => {

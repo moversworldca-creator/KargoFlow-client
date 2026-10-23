@@ -1,214 +1,134 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import Card from '../../../shared/ui/Card';
-import { 
-  ChevronRight, Lock, Layout, 
-  Search, Plus, Edit2, Loader2, CheckCircle2, 
-  AlertCircle, Trash2, XCircle, Save, Users
+import {
+  Search,
+  Plus,
+  Edit2,
+  Loader2,
+  AlertCircle,
+  XCircle,
+  Save,
+  Users,
+  Lock,
+  Power,
+  RotateCcw,
+  ShieldAlert,
+  ChevronRight,
+  Info,
 } from 'lucide-react';
-import { getRoles, getPermissions, updateRole, createRole, deleteRole , getBranches } from '../../../services/api';
-import useCan from '../../../shared/auth/useCan';
+import {
+  getRoles,
+  getPermissions,
+  getRolePermissions,
+  grantRolePermission,
+  revokeRolePermission,
+  createRole,
+  updateRole,
+  deactivateRole,
+  reactivateRole,
+} from '../../../services/api';
 import { useToast } from '../../../shared/context/ToastContext';
-import { filterAccessibleBranches, resolveRoleBranchId } from '../../../shared/utils/branchScope';
-import { useAuth } from '../../auth/context/AuthContext';
-import { FEATURE_PERMISSION_CATALOG, PERMISSIONS } from '../../../shared/permissions/registry';
+import { useUserAdminAccess } from '../userManagement/permissions';
+import PermissionMatrix from '../userManagement/PermissionMatrix';
+import { defaultScope } from '../userManagement/matrixModel';
+import RolePeople from '../userManagement/RolePeople';
+import { describeError } from '../userManagement/errors';
+import { featureMode, isReadOnlyMode, useEntitlements, useRefreshAfterChange } from '../userManagement/queries';
+import {
+  SCOPE_LABELS,
+  normalizeListResponse,
+  computePermissionDiffs,
+  areGrantsEqual,
+  SCOPE_HELP,
+} from './rolesPermissionsUtils';
 
-// --- LOGIC HELPER FUNCTIONS ---
-const ACTION_KEYS = ['view', 'create', 'edit', 'delete', 'other'];
-const ACTION_LABEL = {
-  view: 'View',
-  create: 'Create',
-  edit: 'Edit',
-  delete: 'Delete',
-  other: 'Other',
-};
-
-const LEAD_ACTION_CODENAMES = new Set([
-  PERMISSIONS.LEAD_VIEW,
-  PERMISSIONS.LEAD_CREATE,
-  PERMISSIONS.LEAD_EDIT,
-  PERMISSIONS.LEAD_ASSIGN,
-  PERMISSIONS.LEAD_CONVERT,
-]);
-
-const actionFromCodename = (codename) => {
-  if (!codename) return 'other';
-  const tail = codename.includes('.') ? codename.split('.').pop() : codename;
-  const head = tail.includes('_') ? tail.split('_')[0] : tail;
-  const normalized = String(head).toLowerCase();
-  if (normalized === 'view' || normalized === 'read' || normalized === 'list') return 'view';
-  if (normalized === 'add' || normalized === 'create') return 'create';
-  if (normalized === 'change' || normalized === 'edit' || normalized === 'update') return 'edit';
-  if (normalized === 'delete' || normalized === 'remove') return 'delete';
-  return 'other';
-};
-
-const groupPermissionsByModule = (permissions, query) => {
-  const q = (query || '').trim().toLowerCase();
-  const filtered = q
-    ? permissions.filter(p =>
-        String(p.module || '').toLowerCase().includes(q) ||
-        String(p.name || '').toLowerCase().includes(q) ||
-        String(p.codename || p.permission_key || '').toLowerCase().includes(q)
-      )
-    : permissions;
-
-  const modules = new Map();
-  for (const perm of filtered) {
-    const key = perm.codename || perm.permission_key || '';
-    const canonical = FEATURE_PERMISSION_CATALOG[key] || {};
-    const moduleName = canonical.module || perm.module || 'Other';
-    const label = canonical.label || perm.name || perm.label || perm.description || key;
-    if (!modules.has(moduleName)) {
-      modules.set(moduleName, {
-        module: moduleName,
-        actions: { view: [], create: [], edit: [], delete: [], other: [] },
-        all: [],
-      });
-    }
-    const group = modules.get(moduleName);
-    const normalizedPerm = {
-      ...perm,
-      codename: key,
-      module: moduleName,
-      name: label,
-      label,
-    };
-    group.all.push(normalizedPerm);
-    group.actions[actionFromCodename(key)].push(normalizedPerm);
-  }
-
-  return Array.from(modules.values())
-    .map(m => ({
-      ...m,
-      all: m.all.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))),
-      actions: Object.fromEntries(
-        ACTION_KEYS.map(k => [k, m.actions[k].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))])
-      ),
-    }))
-    .sort((a, b) => String(a.module).localeCompare(String(b.module)));
-};
-
-const normalizeListResponse = (value) => {
-  if (Array.isArray(value)) return value;
-  return value?.results || [];
-};
-
-const resolveRoleBranchLabel = (role, branchNameById) => {
-  const branchId = resolveRoleBranchId(role);
-  if (branchId !== null && !Number.isNaN(Number(branchId))) {
-    return branchNameById.get(Number(branchId)) || `Branch #${branchId}`;
-  }
-
-  const inlineName =
-    role?.branch_name ||
-    role?.branch_label ||
-    role?.branch_details?.name ||
-    (Array.isArray(role?.branch_details) ? role.branch_details[0]?.name : null);
-
-  return inlineName || 'Unassigned Branch';
-};
-
-const normalizeRoleDisplayName = (role) => {
-  const rawName = String(role?.name || '').trim();
-  if (!rawName) return 'Untitled Role';
-
-  const lower = rawName.toLowerCase();
-  if (lower === 'lead') return 'Leads';
-
-  const perms = Array.isArray(role?.permissions_details) ? role.permissions_details : [];
-  const hasLeadView = perms.some((perm) => perm?.codename === PERMISSIONS.LEAD_VIEW);
-  const hasLeadActions = perms.some((perm) =>
-    [
-      PERMISSIONS.LEAD_CREATE,
-      PERMISSIONS.LEAD_EDIT,
-      PERMISSIONS.LEAD_ASSIGN,
-      PERMISSIONS.LEAD_CONVERT,
-    ].includes(perm?.codename)
-  );
-
-  if (lower === 'lead' || (hasLeadView && hasLeadActions)) {
-    return 'Leads';
-  }
-
-  return rawName;
-};
-
-// --- UI COMPONENTS ---
-
-const PermissionPill = ({ label, isGranted, onToggle, disabled }) => (
-  <button
-    type="button"
-    onClick={onToggle}
-    disabled={disabled}
-    className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 flex items-center gap-1.5 ${
-      disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer active:scale-95'
-    } ${
-      isGranted 
-        ? 'bg-primary/10 text-primary ring-1 ring-primary/30 shadow-sm' 
-        : 'bg-card text-muted ring-1 ring-border hover:ring-disabled hover:bg-subtle hover:text-body'
-    }`}
-  >
-    {isGranted && <span className="w-1.5 h-1.5 rounded-full bg-primary" />}
-    {label}
-  </button>
-);
-
-const RoleFormModal = ({ title, initialData, branches, onSave, onCancel, isSaving }) => {
-  const [formData, setFormData] = useState({
-    name: initialData?.name || '',
-    description: initialData?.description || '',
-  });
-
-  const handleChange = (e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+// Modal: Create or Edit Role Name & Description
+const RoleFormModal = ({ title, initialData, onSave, onCancel, isSaving }) => {
+  const [name, setName] = useState(initialData?.name || '');
+  const [description, setDescription] = useState(initialData?.description || '');
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onSave({
-      name: formData.name,
-      description: formData.description,
-    });
+    if (!name.trim()) return;
+    onSave({ name: name.trim(), description: description.trim() });
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex justify-center items-center z-[60] p-4 backdrop-blur-sm">
-      <Card className="max-w-md w-full p-6 space-y-6 rounded-3xl shadow-2xl">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="role-form-modal-title"
+      className="fixed inset-0 bg-black/50 flex justify-center items-center z-[60] p-4 backdrop-blur-sm"
+    >
+      <Card className="max-w-md w-full p-6 space-y-5 rounded-2xl shadow-2xl bg-card">
         <div className="flex items-start justify-between">
-          <h3 className="text-xl font-bold text-heading">{title}</h3>
-          <button type="button" onClick={onCancel} className="text-muted hover:text-body transition-colors">
-            <XCircle size={24} />
+          <h3 id="role-form-modal-title" className="text-xl font-bold text-heading">
+            {title}
+          </h3>
+          <button
+            type="button"
+            onClick={onCancel}
+            aria-label="Close dialog"
+            className="text-muted hover:text-body transition-colors"
+          >
+            <XCircle size={22} />
           </button>
         </div>
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-[0.625rem] font-bold uppercase tracking-widest text-muted">Role Name</label>
-            <input 
+            <label htmlFor="role-name-input" className="text-xs font-bold uppercase tracking-wider text-muted">
+              Role Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              id="role-name-input"
               name="name"
-              value={formData.name}
-              onChange={handleChange}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Sales Representative"
               required
-              className="w-full px-4 py-3 bg-subtle border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" 
+              autoFocus
+              className="w-full px-4 py-2.5 bg-subtle border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all text-body"
             />
           </div>
+
           <div className="space-y-1.5">
-            <label className="text-[0.625rem] font-bold uppercase tracking-widest text-muted">Description</label>
-            <input 
+            <label htmlFor="role-description-input" className="text-xs font-bold uppercase tracking-wider text-muted">
+              Description
+            </label>
+            <textarea
+              id="role-description-input"
               name="description"
-              value={formData.description}
-              onChange={handleChange}
-              className="w-full px-4 py-3 bg-subtle border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" 
-              
+              rows={3}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Brief description of this role's purpose..."
+              className="w-full px-4 py-2.5 bg-subtle border border-border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all text-body resize-none"
             />
           </div>
-          <div className="rounded-xl border border-border bg-subtle px-4 py-3 text-sm text-body">
-            Roles apply across this tenant. Permission scopes control what the role can access.
+
+          <div className="rounded-xl border border-border bg-subtle p-3 text-xs text-muted flex items-start gap-2">
+            <Info size={16} className="text-primary mt-0.5 shrink-0" />
+            <span>
+              Roles are tenant-wide. Individual permissions granted to this role specify their scope (own, assigned, branch, or company).
+            </span>
           </div>
-          <div className="flex gap-3 pt-4">
-            <button type="button" onClick={onCancel} className="flex-1 py-3 rounded-xl font-bold bg-border text-body hover:bg-border transition-all">
+
+          <div className="flex gap-3 pt-3">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="flex-1 py-2.5 rounded-xl font-bold bg-subtle text-body border border-border hover:bg-border transition-all"
+            >
               Cancel
             </button>
-            <button type="submit" disabled={isSaving} className="flex-1 flex items-center justify-center gap-2 py-3 bg-primary text-white rounded-xl font-bold hover:bg-[#003d2f] transition-all disabled:opacity-70">
-              {isSaving ? <Loader2 size={18} className="animate-spin" /> : null}
-              Save Role
+            <button
+              type="submit"
+              disabled={isSaving || !name.trim()}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-all disabled:opacity-50"
+            >
+              {isSaving ? <Loader2 size={16} className="animate-spin" /> : null}
+              {initialData?.id ? 'Save Changes' : 'Create Role'}
             </button>
           </div>
         </form>
@@ -217,454 +137,847 @@ const RoleFormModal = ({ title, initialData, branches, onSave, onCancel, isSavin
   );
 };
 
-const ConfirmDelete = ({ name, onConfirm, onCancel, isLoading }) => (
-  <div className="fixed inset-0 bg-black/50 flex justify-center items-center z-[60] p-4 backdrop-blur-sm">
-    <Card className="max-w-sm w-full p-6 space-y-4 text-center rounded-3xl shadow-2xl">
-      <AlertCircle size={48} className="text-[#791F1F] mx-auto" />
-      <h3 className="text-xl font-bold text-heading">Confirm Deletion</h3>
+// Modal: Confirm Deactivate or Reactivate
+const ConfirmDeactivateModal = ({ role, onConfirm, onCancel, isLoading }) => {
+  const isDeactivating = role?.is_active;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-deactivate-title"
+      className="fixed inset-0 bg-black/50 flex justify-center items-center z-[60] p-4 backdrop-blur-sm"
+    >
+      <Card className="max-w-md w-full p-6 space-y-4 text-center rounded-2xl shadow-2xl bg-card">
+        {isDeactivating ? (
+          <ShieldAlert size={44} className="text-amber-600 mx-auto" />
+        ) : (
+          <Power size={44} className="text-primary mx-auto" />
+        )}
+        <h3 id="confirm-deactivate-title" className="text-lg font-bold text-heading">
+          {isDeactivating ? 'Deactivate Role' : 'Reactivate Role'}
+        </h3>
+        <p className="text-sm text-muted">
+          {isDeactivating ? (
+            <>
+              Are you sure you want to deactivate <span className="font-bold text-body">{role?.name}</span>? Users assigned to this role will no longer receive its permissions until it is reactivated.
+            </>
+          ) : (
+            <>
+              Are you sure you want to reactivate <span className="font-bold text-body">{role?.name}</span>? Users assigned to this role will resume having its granted permissions.
+            </>
+          )}
+        </p>
+        <div className="flex justify-center gap-3 mt-6">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2.5 rounded-xl text-body bg-subtle border border-border hover:bg-border transition-colors font-bold text-sm"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={isLoading}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-white font-bold text-sm transition-all disabled:opacity-70 ${
+              isDeactivating ? 'bg-amber-600 hover:bg-amber-700' : 'bg-primary hover:bg-primary/90'
+            }`}
+          >
+            {isLoading ? <Loader2 size={16} className="animate-spin" /> : null}
+            {isDeactivating ? 'Deactivate' : 'Reactivate'}
+          </button>
+        </div>
+      </Card>
+    </div>
+  );
+};
+
+// Modal: Confirm Discard Unsaved Changes
+const ConfirmDiscardModal = ({ roleName, onConfirm, onCancel }) => (
+  <div
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="confirm-discard-title"
+    className="fixed inset-0 bg-black/50 flex justify-center items-center z-[60] p-4 backdrop-blur-sm"
+  >
+    <Card className="max-w-sm w-full p-6 space-y-4 text-center rounded-2xl shadow-2xl bg-card">
+      <AlertCircle size={44} className="text-amber-500 mx-auto" />
+      <h3 id="confirm-discard-title" className="text-lg font-bold text-heading">
+        Unsaved Changes
+      </h3>
       <p className="text-sm text-muted">
-        Are you sure you want to delete the role: <span className="font-bold text-body">{name}</span>? This action cannot be undone.
+        You have unsaved permission changes for <span className="font-bold text-body">{roleName}</span>. Switching roles will discard these changes.
       </p>
       <div className="flex justify-center gap-3 mt-6">
-        <button type="button" onClick={onCancel} className="px-4 py-2 rounded-xl text-body bg-border hover:bg-border transition-colors font-bold">Cancel</button>
-        <button type="button" onClick={onConfirm} disabled={isLoading} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#791F1F] text-white font-bold hover:bg-[#b0000a] transition-all disabled:opacity-70">
-          {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
-          {isLoading ? 'Deleting...' : 'Delete'}
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-4 py-2.5 rounded-xl text-body bg-subtle border border-border hover:bg-border transition-colors font-bold text-sm"
+        >
+          Keep Editing
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          className="px-4 py-2.5 rounded-xl bg-amber-600 text-white font-bold text-sm hover:bg-amber-700 transition-all"
+        >
+          Discard & Switch
         </button>
       </div>
     </Card>
   </div>
 );
 
-// --- MAIN COMPONENT ---
-
-const RolesPermissions = ({ branchId }) => {
-  const { user } = useAuth();
-  const { canAll } = useCan();
+// Main Component
+const RolesPermissions = () => {
   const { showToast } = useToast();
+  const access = useUserAdminAccess();
+  const refreshAfterChange = useRefreshAfterChange();
+  const entitlements = useEntitlements(access.viewEntitlements).data;
+  const readOnly = isReadOnlyMode(entitlements);
+  // null when the plan cannot be read (no entitlements.view): the server's answer decides.
+  const customRolesMode = featureMode(entitlements, 'crm.custom_roles');
+  const customRolesEntitled = customRolesMode === null ? null : customRolesMode === 'write';
+
+  // Editing a role (name, active state, permission grants) is rbac_roles.manage;
+  // creating one is rbac_roles.create. Neither implies the other.
+  const canManageRoles = access.manageRoles && !readOnly;
+  const canCreateRoles = access.createRoles && !readOnly && customRolesEntitled !== false;
+
+  // Data state
   const [roles, setRoles] = useState([]);
-  const [permissions, setPermissions] = useState([]);
-  const [selectedRoleId, setSelectedRole] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsLoadingSaving] = useState(false);
-  const [message, setMessage] = useState({ type: '', text: '' });
-  const [rolePerms, setRolePerms] = useState([]);
-  const [permSearch, setPermSearch] = useState('');
-  const [isRolesOpen, setIsRolesOpen] = useState(false);
-  
+  const [permissionsCatalog, setPermissionsCatalog] = useState([]);
+  const [selectedRoleId, setSelectedRoleId] = useState(null);
+
+  // Grants state: Map<permission_key, scope>
+  const [currentGrants, setCurrentGrants] = useState(new Map());
+  const [draftGrants, setDraftGrants] = useState(new Map());
+
+  // Loading & status states
+  const [isLoadingInit, setIsLoadingInit] = useState(true);
+  const [initError, setInitError] = useState(null);
+  const [isLoadingGrants, setIsLoadingGrants] = useState(false);
+  const [grantsError, setGrantsError] = useState(null);
+  const [isSavingGrants, setIsSavingGrants] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+
+  // Search & filter states
+  const [roleSearch, setRoleSearch] = useState('');
+  const [roleTab, setRoleTab] = useState('permissions');
+
+  // Modals state
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [roleDraft, setRoleDraft] = useState(null);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [roleToDelete, setRoleToDelete] = useState(null);
-  const [branches, setBranches] = useState([]);
-  const [branchFilter, setBranchFilter] = useState('');
+  const [isSavingRole, setIsSavingRole] = useState(false);
 
-  useEffect(() => {
-    if (branchId) {
-      setBranchFilter(String(branchId));
+  const [showDeactivateModal, setShowDeactivateModal] = useState(false);
+  const [roleToToggleActive, setRoleToToggleActive] = useState(null);
+  const [isTogglingActive, setIsTogglingActive] = useState(false);
+
+  const [pendingSwitchRoleId, setPendingSwitchRoleId] = useState(null);
+
+  // Request race guard for role grants loading
+  const grantRequestRef = useRef(0);
+  // Scopes held besides the one shown, per permission key (see loadRoleGrants).
+  const extraScopesRef = useRef(new Map());
+
+  // Initial load
+  const loadInitialData = useCallback(async () => {
+    try {
+      const [rolesRes, permsRes] = await Promise.all([getRoles(), getPermissions()]);
+      const roleRows = normalizeListResponse(rolesRes);
+      const permRows = normalizeListResponse(permsRes);
+
+      setRoles(roleRows);
+      setPermissionsCatalog(permRows);
+      setInitError(null);
+
+      setSelectedRoleId((prevSelected) => {
+        if (prevSelected && roleRows.some((r) => r.id === prevSelected)) {
+          return prevSelected;
+        }
+        return roleRows.length > 0 ? roleRows[0].id : null;
+      });
+    } catch (err) {
+      setInitError(describeError(err, 'Failed to load roles or permissions catalog. Please try again.').message);
+    } finally {
+      setIsLoadingInit(false);
     }
-  }, [branchId]);
+  }, []);
+
+  const handleRetryInitial = () => {
+    setIsLoadingInit(true);
+    setInitError(null);
+    loadInitialData();
+  };
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [rolesRes, permsRes, branchesRes] = await Promise.all([
-          getRoles(branchFilter ? { branch: branchFilter } : undefined),
-          getPermissions(),
-          getBranches(),
-        ]);
-        const roleRows = normalizeListResponse(rolesRes);
-        const permissionRows = normalizeListResponse(permsRes);
-        const branchRows = filterAccessibleBranches(user, normalizeListResponse(branchesRes));
-        setRoles(roleRows);
-        setPermissions(permissionRows);
-        setBranches(branchRows);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadInitialData();
+  }, [loadInitialData]);
 
-        if (!branchFilter && branchRows.length) {
-          const defaultBranchId = branchId ? String(branchId) : String(branchRows[0].id);
-          setBranchFilter(defaultBranchId);
-        }
-
-        if (roleRows.length > 0) {
-          const nextRole = roleRows[0];
-          setSelectedRole(nextRole.id);
-          setRolePerms(nextRole.permissions_details?.map((p) => p.codename || p.permission_key) || []);
-        } else {
-          setSelectedRole(null);
-          setRolePerms([]);
-        }
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchFilter, user, branchId]);
-
-  const handleTogglePerm = (codename) => {
-    setRolePerms(prev => prev.includes(codename) ? prev.filter(p => p !== codename) : [...prev, codename]);
-  };
-
-  const setManyRolePerms = (codenames, enabled) => {
-    setRolePerms(prev => {
-      const next = new Set(prev || []);
-      for (const c of codenames) {
-        if (enabled) next.add(c);
-        else next.delete(c);
-      }
-      return Array.from(next);
-    });
-  };
-
-  const handleUpdatePermissions = async () => {
-    if (!canAll([PERMISSIONS.ROLE_EDIT])) {
-      showToast('You do not have permission to edit roles.', 'warning');
+  // Load grants for selected role with stale-response protection
+  const loadRoleGrants = useCallback(async (roleId) => {
+    if (!roleId) {
+      setCurrentGrants(new Map());
+      setDraftGrants(new Map());
+      setIsLoadingGrants(false);
       return;
     }
-    setIsLoadingSaving(true);
+
+    const reqId = ++grantRequestRef.current;
+
     try {
-      const permIds = permissions.filter(p => rolePerms.includes(p.codename || p.permission_key)).map(p => p.id || p.permission_key);
-      const response = await updateRole(selectedRoleId, { permissions: permIds });
-      setRoles((prev) => prev.map(r => r.id === selectedRoleId ? response : r));
-      setMessage({ type: 'success', text: 'Changes updated!' });
-      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
-    } catch (err) { setMessage({ type: 'error', text: 'Error syncing.' }); }
-    finally { setIsLoadingSaving(false); }
+      const res = await getRolePermissions(roleId);
+      if (reqId !== grantRequestRef.current) return;
+
+      const items = normalizeListResponse(res);
+      // A role may hold one permission at several scopes (one row each). The
+      // editor shows the broadest; the others are remembered so that changing
+      // or removing the permission revokes every row, not just one.
+      const rank = { own: 0, assigned: 1, branch: 2, company: 3 };
+      const scopesByKey = new Map();
+      for (const item of items) {
+        const key = item.permission_key || item.codename || item;
+        if (!key) continue;
+        if (!scopesByKey.has(key)) scopesByKey.set(key, []);
+        scopesByKey.get(key).push(item.scope || 'company');
+      }
+      const grantsMap = new Map();
+      const extra = new Map();
+      for (const [key, scopes] of scopesByKey) {
+        const sorted = [...scopes].sort((a, b) => (rank[b] ?? 0) - (rank[a] ?? 0));
+        grantsMap.set(key, sorted[0]);
+        if (sorted.length > 1) extra.set(key, sorted.slice(1));
+      }
+      extraScopesRef.current = extra;
+      setCurrentGrants(grantsMap);
+      setDraftGrants(new Map(grantsMap));
+      setGrantsError(null);
+    } catch (err) {
+      if (reqId !== grantRequestRef.current) return;
+      setGrantsError(describeError(err, 'Could not load permissions for this role.').message);
+    } finally {
+      if (reqId === grantRequestRef.current) {
+        setIsLoadingGrants(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadRoleGrants(selectedRoleId);
+  }, [selectedRoleId, loadRoleGrants]);
+
+  const handleRetryGrants = () => {
+    setIsLoadingGrants(true);
+    setGrantsError(null);
+    loadRoleGrants(selectedRoleId);
   };
 
-  const moduleGroups = useMemo(() => groupPermissionsByModule(permissions, permSearch), [permissions, permSearch]);
-  const currentRole = roles.find(r => r.id === selectedRoleId);
-  const currentRoleLeadPerms = useMemo(
-    () => (Array.isArray(currentRole?.permissions_details) ? currentRole.permissions_details : [])
-      .map((perm) => perm?.codename)
-      .filter((codename) => LEAD_ACTION_CODENAMES.has(codename)),
-    [currentRole]
-  );
-  const hasLeadView = useMemo(
-    () => currentRoleLeadPerms.includes(PERMISSIONS.LEAD_VIEW),
-    [currentRoleLeadPerms]
-  );
-  const hasLeadActionsWithoutView = useMemo(
-    () => currentRoleLeadPerms.some((codename) => codename !== PERMISSIONS.LEAD_VIEW) && !hasLeadView,
-    [currentRoleLeadPerms, hasLeadView]
-  );
-  const branchNameById = useMemo(
-    () => new Map((branches || []).map((b) => [Number(b.id), b.name])),
-    [branches]
-  );
-  const selectedBranchRoles = useMemo(() => {
-    if (!branchFilter) return roles;
-    return roles.filter((role) => {
-      const roleBranchId = resolveRoleBranchId(role);
-      return roleBranchId === null || String(roleBranchId) === String(branchFilter);
-    });
-  }, [roles, branchFilter]);
+  const selectedRole = useMemo(() => {
+    return roles.find((r) => r.id === selectedRoleId) || null;
+  }, [roles, selectedRoleId]);
 
-  if (isLoading) return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-primary" /></div>;
+  const isDirty = useMemo(() => {
+    return !areGrantsEqual(currentGrants, draftGrants);
+  }, [currentGrants, draftGrants]);
+
+  // Handle Role selection with dirty check
+  const handleSelectRole = (newRoleId) => {
+    if (newRoleId === selectedRoleId) return;
+    if (isDirty) {
+      setPendingSwitchRoleId(newRoleId);
+    } else {
+      setSaveError(null);
+      setSelectedRoleId(newRoleId);
+    }
+  };
+
+  const handleConfirmDiscardSwitch = () => {
+    if (pendingSwitchRoleId !== null) {
+      setSaveError(null);
+      setSelectedRoleId(pendingSwitchRoleId);
+      setPendingSwitchRoleId(null);
+    }
+  };
+
+  // Permission matrix toggle & scope change
+  const handleTogglePermission = (meta, currentGranted) => {
+    if (!canManageRoles || selectedRole?.is_system_role) return;
+
+    setDraftGrants((prev) => {
+      const next = new Map(prev);
+      if (currentGranted) {
+        next.delete(meta.key);
+      } else {
+        // Default scope: prefer 'company' if allowed, otherwise first allowed scope
+        const defaultScope = meta.allowedScopes.includes('company')
+          ? 'company'
+          : meta.allowedScopes[0] || 'company';
+        next.set(meta.key, defaultScope);
+      }
+      return next;
+    });
+  };
+
+  const handleChangeScope = (permKey, newScope) => {
+    if (!canManageRoles || selectedRole?.is_system_role) return;
+
+    setDraftGrants((prev) => {
+      const next = new Map(prev);
+      if (next.has(permKey)) {
+        next.set(permKey, newScope);
+      }
+      return next;
+    });
+  };
+
+  // Page presets from the matrix: none / view only / everything on that page.
+  const handleSetPage = (items, level) => {
+    if (!canManageRoles || selectedRole?.is_system_role) return;
+    setDraftGrants((prev) => {
+      const next = new Map(prev);
+      for (const item of items) {
+        const wanted = level === 'all' || (level === 'view' && item.action === 'view');
+        if (!wanted) next.delete(item.permission_key);
+        else if (!next.has(item.permission_key)) next.set(item.permission_key, defaultScope(item.scopes));
+      }
+      return next;
+    });
+  };
+
+  // Discard changes
+  const handleDiscardChanges = () => {
+    setDraftGrants(new Map(currentGrants));
+    setSaveError(null);
+  };
+
+  // Save changes via diff engine
+  const handleSaveGrants = async () => {
+    if (!canManageRoles || selectedRole?.is_system_role || !selectedRoleId) return;
+
+    const { toGrant, toRevoke } = computePermissionDiffs(currentGrants, draftGrants);
+    if (toGrant.length === 0 && toRevoke.length === 0) return;
+    // A changed or removed permission loses all of its rows on this role.
+    for (const key of new Set(toRevoke.map((item) => item.permission_key))) {
+      for (const scope of extraScopesRef.current.get(key) || []) {
+        if (!(draftGrants.get(key) === scope)) toRevoke.push({ permission_key: key, scope });
+      }
+    }
+
+    setIsSavingGrants(true);
+    setSaveError(null);
+
+    const ops = [
+      ...toRevoke.map((item) => ({ type: 'revoke', item, promise: revokeRolePermission(selectedRoleId, item) })),
+      ...toGrant.map((item) => ({ type: 'grant', item, promise: grantRolePermission(selectedRoleId, item) })),
+    ];
+
+    const settled = await Promise.allSettled(ops.map((o) => o.promise));
+    const failures = [];
+
+    settled.forEach((res, idx) => {
+      if (res.status === 'rejected') {
+        const op = ops[idx];
+        failures.push({
+          type: op.type,
+          item: op.item,
+          error: describeError(res.reason, 'Server error').message,
+        });
+      }
+    });
+
+    if (failures.length === 0) {
+      showToast('Permissions updated successfully.', 'success');
+      await loadRoleGrants(selectedRoleId);
+      await refreshAfterChange();
+    } else {
+      console.error('Some permission operations failed:', failures);
+      const detail = failures.map((f) => `${f.type} ${f.item.permission_key}: ${f.error}`).join('; ');
+      setSaveError(`Failed to save ${failures.length} permission change(s). ${detail}`);
+      showToast('Partial failure saving permissions. Reloaded latest grants.', 'error');
+      // Reload grants to reflect actual server state
+      await loadRoleGrants(selectedRoleId);
+      await refreshAfterChange();
+    }
+
+    setIsSavingGrants(false);
+  };
+
+  // Create or Update Role Metadata
+  const handleSaveRoleMetadata = async (data) => {
+    setIsSavingRole(true);
+    try {
+      let savedRole;
+      if (roleDraft?.id) {
+        savedRole = await updateRole(roleDraft.id, data);
+        showToast(`Role "${data.name}" updated.`, 'success');
+      } else {
+        savedRole = await createRole(data);
+        showToast(`Role "${data.name}" created.`, 'success');
+      }
+
+      const rolesRes = await getRoles();
+      const updatedRoles = normalizeListResponse(rolesRes);
+      setRoles(updatedRoles);
+
+      if (savedRole?.id) {
+        setSelectedRoleId(savedRole.id);
+      }
+      setShowRoleModal(false);
+      setRoleDraft(null);
+      await refreshAfterChange();
+    } catch (err) {
+      const described = describeError(err, 'Failed to save role.');
+      const creatingDenied = !roleDraft?.id && described.kind === 'denied';
+      // The server reports a missing custom-roles plan feature and a missing
+      // permission the same way; say so instead of guessing.
+      showToast(creatingDenied
+        ? `${described.message} Creating roles needs the rbac_roles.create permission and a plan that includes custom roles.`
+        : described.message, 'error');
+    } finally {
+      setIsSavingRole(false);
+    }
+  };
+
+  // Deactivate or Reactivate Role
+  const handleToggleRoleActive = async () => {
+    if (!roleToToggleActive) return;
+    setIsTogglingActive(true);
+    try {
+      const willBeActive = !roleToToggleActive.is_active;
+      if (willBeActive) {
+        await reactivateRole(roleToToggleActive.id);
+        showToast(`Role "${roleToToggleActive.name}" reactivated.`, 'success');
+      } else {
+        await deactivateRole(roleToToggleActive.id);
+        showToast(`Role "${roleToToggleActive.name}" deactivated.`, 'success');
+      }
+
+      const rolesRes = await getRoles();
+      const updatedRoles = normalizeListResponse(rolesRes);
+      setRoles(updatedRoles);
+
+      setShowDeactivateModal(false);
+      setRoleToToggleActive(null);
+      await refreshAfterChange();
+    } catch (err) {
+      showToast(describeError(err, 'Action failed.').message, 'error');
+    } finally {
+      setIsTogglingActive(false);
+    }
+  };
+
+  // Filtered Roles
+  const filteredRoles = useMemo(() => {
+    const q = roleSearch.trim().toLowerCase();
+    if (!q) return roles;
+    return roles.filter(
+      (r) =>
+        String(r.name || '').toLowerCase().includes(q) ||
+        String(r.description || '').toLowerCase().includes(q)
+    );
+  }, [roles, roleSearch]);
+
+
+  if (isLoadingInit) {
+    return (
+      <div className="flex h-72 items-center justify-center">
+        <Loader2 className="animate-spin text-primary" size={32} />
+      </div>
+    );
+  }
+
+  if (initError) {
+    return (
+      <Card className="p-8 text-center space-y-4 max-w-md mx-auto my-12 bg-card rounded-2xl">
+        <AlertCircle size={44} className="text-red-500 mx-auto" />
+        <h3 className="text-lg font-bold text-heading">Failed to Load Roles</h3>
+        <p className="text-sm text-muted">{initError}</p>
+        <button
+          type="button"
+          onClick={handleRetryInitial}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-white font-bold text-sm rounded-xl hover:bg-primary/90 transition-all"
+        >
+          <RotateCcw size={16} />
+          Retry
+        </button>
+      </Card>
+    );
+  }
 
   return (
-    <div className="relative flex flex-col gap-6 p-2 bg-[#f8fafc] min-h-screen animate-in fade-in duration-300 overflow-hidden">
-
-      {/* MAIN CONTENT Area */}
-      <div className="flex-1 min-w-0 z-0">
-        <Card className="border-none shadow-xl shadow-border/50 overflow-hidden bg-card rounded-2xl h-full flex flex-col">
-          
-          {/* Header */}
-          <div className="p-6 border-b border-border flex flex-col xl:flex-row xl:items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div>
-                <div className="flex items-center gap-3 mb-1">
-                  <h3 className="text-xl font-bold text-heading tracking-tight">{currentRole?.name}</h3>
-                  <span className="px-2.5 py-0.5 bg-border text-muted text-[0.625rem] font-bold rounded-full uppercase tracking-wider">
-                    Permissions
-                  </span>
-                  {hasLeadActionsWithoutView && (
-                    <span className="px-2.5 py-0.5 bg-amber-100 text-amber-800 text-[0.625rem] font-bold rounded-full uppercase tracking-wider">
-                      Missing View Leads
-                    </span>
-                  )}
-                </div>
-                <p className="text-sm text-muted">Manage feature-level access control.</p>
-                {hasLeadActionsWithoutView && (
-                  <p className="mt-1 text-xs text-amber-700">
-                    This role can modify leads but cannot open the Leads page until `View Leads` is granted.
-                  </p>
-                )}
-              </div>
-            </div>
-            
-            <div className="flex flex-col md:flex-row md:items-center gap-3">
-              <div className="relative w-full md:w-64">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
-                <input
-                  value={permSearch}
-                  onChange={(e) => setPermSearch(e.target.value)}
-                  placeholder="Search features or permissions..."
-                  className="w-full pl-9 pr-3 py-2 bg-subtle border border-border focus:bg-card focus:ring-2 focus:ring-primary/10 outline-none rounded-xl text-sm"
-                />
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                {!branchId && (
-                  <select
-                    value={branchFilter}
-                    onChange={(e) => setBranchFilter(e.target.value)}
-                    className="px-3 py-2 bg-card border border-border text-body rounded-xl text-sm font-semibold"
-                  >
-                    {branches.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                <button 
-                  onClick={() => setIsRolesOpen(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-card border border-border text-body rounded-xl text-sm font-bold shadow-sm hover:bg-subtle transition-all active:scale-95"
-                >
-                  <Users size={18} />
-                  Available Roles
-                </button>
-
-                {!currentRole?.is_system_role && canAll([PERMISSIONS.ROLE_EDIT]) && (
-                  <button 
-                    onClick={handleUpdatePermissions} disabled={isSaving}
-                    className="flex items-center gap-2 px-5 py-2 bg-primary text-white rounded-xl text-sm font-bold shadow-md hover:bg-[#003d2f] transition-all disabled:opacity-50"
-                  >
-                    {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                    Update Changes
-                  </button>
-                )}
-              </div>
-            </div>
+    <div className="flex flex-col gap-5 min-h-[calc(100vh-140px)]">
+      {/* Top Banner: Tenant-wide notice */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 bg-card rounded-2xl border border-border shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-subtle flex items-center justify-center text-primary shrink-0">
+            <Users size={20} />
           </div>
+          <div>
+            <h2 className="text-base font-bold text-heading">Roles &amp; Permissions</h2>
+            <p className="text-xs text-muted">
+              People get one role per branch, and a role acts only inside that branch. Scopes on each grant (Own, Assigned, Branch) narrow it further; Company scope only reaches past one branch for the system Company Admin.
+            </p>
+          </div>
+        </div>
 
-          {/* Feature Grid Area */}
-          <div className="p-4 space-y-3 overflow-y-auto max-h-[calc(100vh-200px)] bg-subtle/50">
-            {moduleGroups.map((group) => {
-              const allCodenames = group.all.map(p => p.codename);
-              const selectedCount = group.all.filter(p => rolePerms.includes(p.codename)).length;
-              const isAllSelected = selectedCount === group.all.length && group.all.length > 0;
+        {!canManageRoles && (
+          <div className="px-3 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-700 text-xs font-semibold rounded-lg flex items-center gap-1.5 shrink-0">
+            <Lock size={14} />
+            <span>Read-only access</span>
+          </div>
+        )}
+      </div>
 
-              return (
-                <div key={group.module} className="flex flex-col md:flex-row md:items-center justify-between p-4 sm:p-5 rounded-2xl border border-border bg-card hover:border-disabled hover:shadow-sm transition-all gap-3 md:gap-4 min-w-0">
-                  <div className="flex items-center gap-3 sm:gap-4 w-full md:w-1/3 min-w-0 shrink-0">
-                    <div className="w-10 h-10 rounded-xl bg-subtle flex items-center justify-center text-muted shrink-0">
-                      <Layout size={18} />
+      {/* Two-Pane Responsive Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 items-start">
+        {/* LEFT PANE: Role List (cols 1..4 on lg, 1..3 on xl) */}
+        <div className="lg:col-span-5 xl:col-span-4 flex flex-col gap-3">
+          <Card className="p-4 bg-card rounded-2xl border border-border shadow-sm flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-heading uppercase tracking-wider">Roles</h3>
+                <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-subtle text-muted border border-border">
+                  {roles.length}
+                </span>
+              </div>
+
+              {canCreateRoles && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRoleDraft(null);
+                    setShowRoleModal(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary text-white text-xs font-bold hover:bg-primary/90 transition-all shadow-sm"
+                >
+                  <Plus size={14} />
+                  <span>New Role</span>
+                </button>
+              )}
+            </div>
+
+            {access.createRoles && customRolesEntitled === false && (
+              <p role="note" className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-900">
+                <Lock size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+                Your plan does not include custom roles. System roles can still be assigned to people.
+              </p>
+            )}
+            {readOnly && (
+              <p role="note" className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-900">
+                <Lock size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+                The subscription is read-only: roles and grants cannot be changed.
+              </p>
+            )}
+
+            {/* Role Search */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={15} />
+              <input
+                aria-label="Search roles"
+                value={roleSearch}
+                onChange={(e) => setRoleSearch(e.target.value)}
+                placeholder="Search roles..."
+                className="w-full pl-9 pr-3 py-2 bg-subtle border border-border rounded-xl text-xs text-body focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+              />
+            </div>
+
+            {/* Role Cards List */}
+            <div
+              role="listbox"
+              aria-label="Available Roles"
+              className="space-y-2 max-h-[calc(100vh-290px)] overflow-y-auto pr-1"
+            >
+              {filteredRoles.map((role) => {
+                const isSelected = selectedRoleId === role.id;
+                return (
+                  <div
+                    key={role.id}
+                    role="option"
+                    aria-selected={isSelected}
+                    tabIndex={0}
+                    onClick={() => handleSelectRole(role.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleSelectRole(role.id);
+                      }
+                    }}
+                    className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer relative select-none ${
+                      isSelected
+                        ? 'bg-subtle border-primary shadow-sm ring-1 ring-primary/20'
+                        : 'bg-card border-border hover:border-disabled hover:bg-subtle/50'
+                    }`}
+                  >
+                    {isSelected && (
+                      <div className="absolute left-0 top-2 bottom-2 w-1 bg-primary rounded-r" />
+                    )}
+
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span
+                            className={`text-sm font-bold truncate ${
+                              isSelected ? 'text-primary' : 'text-heading'
+                            }`}
+                          >
+                            {role.name}
+                          </span>
+                          {role.is_system_role && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.625rem] font-bold bg-subtle border border-border text-muted">
+                              <Lock size={10} />
+                              System
+                            </span>
+                          )}
+                          {!role.is_active && (
+                            <span className="px-1.5 py-0.5 rounded text-[0.625rem] font-bold bg-amber-500/10 text-amber-700 border border-amber-500/20">
+                              Inactive
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted mt-1 line-clamp-2">
+                          {role.description || 'No description.'}
+                        </p>
+                      </div>
+
+                      <ChevronRight
+                        size={16}
+                        className={`shrink-0 transition-transform ${
+                          isSelected ? 'text-primary translate-x-0.5' : 'text-muted'
+                        }`}
+                      />
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <span className="block font-bold text-body text-sm sm:text-base break-words [overflow-wrap:anywhere] leading-snug">{group.module}</span>
-                      <span className="text-[0.625rem] font-bold text-muted uppercase tracking-widest block mt-0.5 whitespace-nowrap">
-                        {selectedCount}/{group.all.length} active
+                  </div>
+                );
+              })}
+
+              {filteredRoles.length === 0 && (
+                <div className="p-6 text-center text-xs text-muted border border-dashed border-border rounded-xl">
+                  No roles match your search.
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+
+        {/* RIGHT PANE: Grouped Permission Matrix (cols 5..12 on lg, 4..12 on xl) */}
+        <div className="lg:col-span-7 xl:col-span-8 flex flex-col gap-4">
+          {!selectedRole ? (
+            <Card className="p-12 text-center text-muted bg-card rounded-2xl border border-border">
+              Select a role to inspect and configure its permission matrix.
+            </Card>
+          ) : (
+            <Card className="p-5 bg-card rounded-2xl border border-border shadow-sm flex flex-col gap-4">
+              {/* Selected Role Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-border">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <h3 className="text-lg font-bold text-heading truncate">{selectedRole.name}</h3>
+                    {selectedRole.is_system_role ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-subtle border border-border text-muted">
+                        <Lock size={12} />
+                        System Role (Read-Only)
                       </span>
-                    </div>
-                  </div>
+                    ) : (
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-primary/10 text-primary border border-primary/20">
+                        Custom Role
+                      </span>
+                    )}
 
-                  <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
-                    {ACTION_KEYS.map((action) => {
-                      const perms = group.actions[action] || [];
-                      if (!perms.length) return null;
-                      return perms.map((perm) => (
-                        <PermissionPill
-                          key={perm.codename}
-                          label={perm.name || `${ACTION_LABEL[action]}: ${perm.codename}`}
-                          isGranted={rolePerms.includes(perm.codename)}
-                          onToggle={() => handleTogglePerm(perm.codename)}
-                          disabled={currentRole?.is_system_role}
-                        />
-                      ));
-                    })}
+                    {!selectedRole.is_active ? (
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-700 border border-amber-500/20">
+                        Deactivated
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-700 border border-emerald-500/20">
+                        Active
+                      </span>
+                    )}
                   </div>
+                  <p className="text-xs text-muted mt-1">{selectedRole.description || 'No description provided.'}</p>
+                </div>
 
-                  <div className="w-full md:w-auto mt-2 md:mt-0 flex justify-end md:pl-4 md:border-l border-border shrink-0">
+                {/* Role Lifecycle Actions */}
+                {!selectedRole.is_system_role && canManageRoles && (
+                  <div className="flex items-center gap-2 shrink-0">
                     <button
-                      type="button" disabled={currentRole?.is_system_role}
-                      onClick={() => setManyRolePerms(allCodenames, !isAllSelected)}
-                      className={`text-xs font-bold px-4 py-2 rounded-lg transition-all ${
-                        isAllSelected ? 'bg-border text-muted' : 'bg-card border border-border text-body hover:border-disabled'
+                      type="button"
+                      onClick={() => {
+                        setRoleDraft(selectedRole);
+                        setShowRoleModal(true);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-subtle border border-border text-body hover:bg-border transition-all"
+                    >
+                      <Edit2 size={13} />
+                      <span>Edit Details</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRoleToToggleActive(selectedRole);
+                        setShowDeactivateModal(true);
+                      }}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl border transition-all ${
+                        selectedRole.is_active
+                          ? 'bg-amber-500/10 text-amber-700 border-amber-500/20 hover:bg-amber-500/20'
+                          : 'bg-primary/10 text-primary border-primary/20 hover:bg-primary/20'
                       }`}
                     >
-                      {isAllSelected ? 'Clear All' : 'Select All'}
+                      <Power size={13} />
+                      <span>{selectedRole.is_active ? 'Deactivate Role' : 'Reactivate Role'}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Dirty-State Bar */}
+              {isDirty && !selectedRole.is_system_role && canManageRoles && (
+                <div className="p-3.5 bg-primary/5 border border-primary/20 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in duration-200">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-primary animate-pulse" />
+                    <span className="text-xs font-bold text-heading">
+                      You have unsaved changes to this role&apos;s permissions.
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleDiscardChanges}
+                      disabled={isSavingGrants}
+                      className="px-3 py-1.5 text-xs font-bold rounded-xl bg-card border border-border text-body hover:bg-subtle transition-all"
+                    >
+                      Discard
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveGrants}
+                      disabled={isSavingGrants}
+                      className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-xl bg-primary text-white hover:bg-primary/90 transition-all shadow-sm disabled:opacity-50"
+                    >
+                      {isSavingGrants ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                      <span>Save Changes</span>
                     </button>
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        </Card>
-      </div>
+              )}
 
-      {/* ROLES DRAWER */}
-      <div className={`fixed inset-y-0 right-0 w-full max-w-80 bg-card shadow-2xl z-50 transform transition-transform duration-300 ease-in-out ${isRolesOpen ? 'translate-x-0' : 'translate-x-full'} flex flex-col`}>
-        <div className="p-6 border-b border-border flex items-center justify-between bg-subtle/50">
-          <div className="flex items-center gap-2">
-            <Users className="text-primary" size={20} />
-            <h3 className="text-sm font-bold text-heading uppercase tracking-wider">Available Roles</h3>
-          </div>
-          <button 
-            onClick={() => setIsRolesOpen(false)}
-            className="p-2 hover:bg-border rounded-full transition-colors"
-          >
-            <XCircle size={20} className="text-muted" />
-          </button>
-        </div>
-
-        <div className="p-4 flex-1 overflow-y-auto space-y-3">
-          {canAll([PERMISSIONS.ROLE_CREATE]) && (
-            <button 
-              onClick={() => { setRoleDraft(null); setShowRoleModal(true); }}
-              className="w-full flex items-center justify-center gap-2 p-3 border-2 border-dashed border-border rounded-xl text-primary font-bold hover:bg-subtle transition-all"
-            >
-              <Plus size={18} /> Create New Role
-            </button>
-          )}
-
-          {selectedBranchRoles.map((role) => {
-            const isSelected = selectedRoleId === role.id;
-            return (
-              <div
-                key={role.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => { 
-                  setSelectedRole(role.id); 
-                  setRolePerms(role.permissions_details?.map((p) => p.codename || p.permission_key) || []);
-                  setIsRolesOpen(false);
-                }}
-                className={`w-full text-left p-4 rounded-xl transition-all border relative overflow-hidden group cursor-pointer min-h-[88px] ${
-                  isSelected ? 'bg-card border-primary shadow-md ring-1 ring-primary/10' : 'bg-transparent border-transparent hover:bg-border'
-                }`}
-              >
-                {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary" />}
-                <div className="flex items-center justify-between mb-1">
-                  <span className={`text-sm font-bold truncate ${isSelected ? 'text-primary' : 'text-body'}`}>
-                    {normalizeRoleDisplayName(role)}
-                  </span>
-                  {role.is_system_role && <Lock size={12} className="text-disabled" />}
-                </div>
-                <p className="text-[0.625rem] text-muted line-clamp-2">
-                  {role.description || 'No description provided.'}
-                </p>
-                <p className="mt-1 text-[0.625rem] font-bold uppercase tracking-widest text-body/70">
-                  {resolveRoleBranchLabel(role, branchNameById)}
-                </p>
-                {String(role.name || '').toLowerCase().includes('lead') && (
-                  <p className="mt-2 text-[0.625rem] font-semibold text-amber-700">
-                    Leads access requires `View Leads` for sidebar and route access.
-                  </p>
-                )}
-                
-                {!role.is_system_role && (
-                  <div className="flex items-center gap-1.5 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                    {canAll([PERMISSIONS.ROLE_EDIT]) && (
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); setRoleDraft(role); setShowRoleModal(true); }}
-                        className="p-1.5 rounded-lg bg-subtle text-primary hover:bg-[#d4e9f4]"
-                      >
-                        <Edit2 size={12} />
-                      </button>
-                    )}
-                    {canAll([PERMISSIONS.ROLE_DELETE]) && (
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); setRoleToDelete(role); setShowDeleteConfirm(true); }}
-                        className="p-1.5 rounded-lg bg-[#FDE8E8]/30 text-[#791F1F] hover:bg-[#FDE8E8]/50"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    )}
+              {/* Partial Save Error Banner */}
+              {saveError && (
+                <div className="p-3.5 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start justify-between gap-3 text-red-700 text-xs">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                    <div>
+                      <p className="font-bold">Error Saving Permissions</p>
+                      <p className="mt-0.5">{saveError}</p>
+                    </div>
                   </div>
-                )}
+                  <button
+                    type="button"
+                    onClick={() => setSaveError(null)}
+                    aria-label="Dismiss error banner"
+                    className="text-red-600 hover:text-red-800"
+                  >
+                    <XCircle size={16} />
+                  </button>
+                </div>
+              )}
+
+              {/* Grants Load Error */}
+              {grantsError && (
+                <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center justify-between gap-3 text-amber-800 text-xs">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle size={16} />
+                    <span>{grantsError}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRetryGrants}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-600 text-white font-bold rounded-lg hover:bg-amber-700 transition-all"
+                  >
+                    <RotateCcw size={12} />
+                    <span>Retry</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Permissions | People */}
+              <div role="tablist" aria-label="Role sections" className="flex gap-1 border-b border-border">
+                {[['permissions', `Permissions (${draftGrants.size})`], ['people', 'People']].map(([id, label]) => (
+                  <button key={id} type="button" role="tab" aria-selected={roleTab === id} onClick={() => setRoleTab(id)}
+                    className={`-mb-px border-b-2 px-3 py-2 text-xs font-semibold ${roleTab === id ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-heading'}`}>
+                    {label}
+                  </button>
+                ))}
               </div>
-            );
-          })}
-          {!selectedBranchRoles.length && (
-            <div className="rounded-xl border border-dashed border-border bg-subtle px-4 py-6 text-center text-sm text-muted">
-              No roles found for the selected branch.
-            </div>
+
+              {roleTab === 'people' ? (
+                <RolePeople role={selectedRole} readOnly={readOnly} />
+              ) : isLoadingGrants ? (
+                <div className="flex h-56 items-center justify-center">
+                  <Loader2 className="animate-spin text-primary" size={28} />
+                </div>
+              ) : (
+                <div className="max-h-[calc(100vh-370px)] overflow-y-auto pr-1">
+                  {(selectedRole.is_system_role || !canManageRoles) && (
+                    <p className="mb-2 text-[11px] text-muted">
+                      {selectedRole.is_system_role ? 'System roles are managed by Kargo and cannot be changed. ' : 'You can view this role but not change it. '}
+                      Tick boxes show what the role grants; the small label under a tick is where it applies.
+                    </p>
+                  )}
+                  <PermissionMatrix
+                    mode="role"
+                    catalog={permissionsCatalog}
+                    grants={draftGrants}
+                    editable={!selectedRole.is_system_role && canManageRoles}
+                    onToggle={(item, granted) => handleTogglePermission({ key: item.permission_key, allowedScopes: item.scopes }, granted)}
+                    onScope={handleChangeScope}
+                    onSetPage={handleSetPage}
+                  />
+                </div>
+              )}
+            </Card>
           )}
         </div>
       </div>
 
-      {/* Backdrop for Drawer */}
-      {isRolesOpen && (
-        <div 
-          className="fixed inset-0 bg-black/20 z-40 backdrop-blur-sm transition-all animate-in fade-in"
-          onClick={() => setIsRolesOpen(false)}
-        />
-      )}
-
-      {/* Modals */}
+      {/* Role Form Modal (Create or Edit Name/Desc) */}
       {showRoleModal && (
         <RoleFormModal
-          title={roleDraft?.id ? 'Edit Role' : 'Create Role'}
-          initialData={roleDraft || { branch: branchFilter ? Number(branchFilter) : null }}
-          branches={branches}
-          isSaving={isSaving}
-          onCancel={() => { setShowRoleModal(false); setRoleDraft(null); }}
-          onSave={async (payload) => {
-            if (roleDraft?.id && !canAll([PERMISSIONS.ROLE_EDIT])) {
-              showToast('You do not have permission to edit roles.', 'warning');
-              return;
-            }
-            if (!roleDraft?.id && !canAll([PERMISSIONS.ROLE_CREATE])) {
-              showToast('You do not have permission to create roles.', 'warning');
-              return;
-            }
-            setIsLoadingSaving(true);
-            try {
-              let res;
-              if (roleDraft?.id) {
-                res = await updateRole(roleDraft.id, payload);
-              } else {
-                res = await createRole(payload);
-              }
-              const rolesRes = await getRoles(branchFilter ? { branch: branchFilter } : undefined);
-              setRoles(Array.isArray(rolesRes) ? rolesRes : rolesRes?.results || []);
-              if (res?.id) {
-                setSelectedRole(res.id);
-                setRolePerms(res.permissions_details?.map(p => p.codename) || []);
-              }
-              setShowRoleModal(false);
-              setRoleDraft(null);
-            } catch (err) { 
-              console.error(err); 
-            } finally { 
-              setIsLoadingSaving(false); 
-            }
+          title={roleDraft?.id ? 'Edit Role Details' : 'Create Role'}
+          initialData={roleDraft}
+          isSaving={isSavingRole}
+          onCancel={() => {
+            setShowRoleModal(false);
+            setRoleDraft(null);
           }}
+          onSave={handleSaveRoleMetadata}
         />
       )}
 
-      {showDeleteConfirm && (
-        <ConfirmDelete
-          name={roleToDelete?.name}
-          isLoading={isSaving}
-          onCancel={() => { setShowDeleteConfirm(false); setRoleToDelete(null); }}
-          onConfirm={async () => {
-            if (!canAll([PERMISSIONS.ROLE_DELETE])) {
-              showToast('You do not have permission to delete roles.', 'warning');
-              return;
-            }
-            setIsLoadingSaving(true);
-            try {
-              await deleteRole(roleToDelete.id);
-              const rolesRes = await getRoles(branchFilter ? { branch: branchFilter } : undefined);
-              const rolesArray = Array.isArray(rolesRes) ? rolesRes : rolesRes?.results || [];
-              setRoles(rolesArray);
-              const nextRole = rolesArray[0];
-              setSelectedRole(nextRole?.id || null);
-              setRolePerms(nextRole?.permissions_details?.map(p => p.codename) || []);
-              setShowDeleteConfirm(false);
-              setRoleToDelete(null);
-              setIsRolesOpen(false); 
-            } catch (err) {
-              console.error(err);
-            } finally {
-              setIsLoadingSaving(false);
-            }
+      {/* Confirm Deactivate / Reactivate Modal */}
+      {showDeactivateModal && roleToToggleActive && (
+        <ConfirmDeactivateModal
+          role={roleToToggleActive}
+          isLoading={isTogglingActive}
+          onCancel={() => {
+            setShowDeactivateModal(false);
+            setRoleToToggleActive(null);
           }}
+          onConfirm={handleToggleRoleActive}
+        />
+      )}
+
+      {/* Confirm Discard Modal when switching roles with unsaved changes */}
+      {pendingSwitchRoleId !== null && (
+        <ConfirmDiscardModal
+          roleName={selectedRole?.name || 'this role'}
+          onCancel={() => setPendingSwitchRoleId(null)}
+          onConfirm={handleConfirmDiscardSwitch}
         />
       )}
     </div>
