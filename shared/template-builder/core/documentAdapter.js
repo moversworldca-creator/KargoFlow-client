@@ -41,7 +41,14 @@ function fromBackendHeadingStyle(props = {}) {
   return style;
 }
 
+const HEADER_TITLES = { estimate_portal: 'Estimate', invoice: 'Invoice', document: 'Agreement' };
+
 const BLOCK_DEFAULTS = {
+  doc_header: (_id, kind) => ({ title: HEADER_TITLES[kind] || 'Agreement', show_logo: true, show_contact: true, show_license: true, show_document_info: true, show_customer: true }),
+  move_overview: () => ({ show_customer: true, show_schedule: true, show_access: true, show_stops: true, show_size: true }),
+  job_timeline: () => ({ title: 'Schedule', show_crew: true, show_hours: true }),
+  doc_footer: () => ({ text: 'Thank you for choosing {{company.name}}.', show_contact: true, show_license: true, align: 'center' }),
+  paid_stamp: () => ({ label: 'PAID' }),
   columns: () => ({ count: 2, gap: 16 }),
   spacer: () => ({ height: 24 }),
   divider: () => ({ style: 'solid', color: '#CBD5E1' }),
@@ -59,9 +66,9 @@ const BLOCK_DEFAULTS = {
   move_details: () => ({ show_dates: true, show_stops: true, show_move_size: true }),
   crew_trucks: () => ({ show_names: true, show_trucks: true }),
   estimate_summary: () => ({ show_discount: true, show_tax: true, show_deposit: true, show_binding_note: true }),
-  charges: () => ({ group_by: 'none', show_tax: true, show_quantity: true }),
+  charges: () => ({ title: 'Estimated charges', layout: 'wide', filter: 'all', group_by: 'none', show_tax: true, show_quantity: true, show_total: false }),
   inventory: () => ({ mode: 'summary', show_volume: true, show_weight: true }),
-  line_items: () => ({ group_by: 'none', show_tax: true }),
+  line_items: () => ({ title: '', layout: 'wide', filter: 'all', group_by: 'none', show_tax: true, show_total: false }),
   totals: () => ({ show_discount: true, show_tax: true, show_balance: true }),
   payment_history: () => ({ show_method: true }),
   options: () => ({ selection: 'single', required: true }),
@@ -70,6 +77,63 @@ const BLOCK_DEFAULTS = {
   initial: (id) => ({ field_key: `initial_${id}`, signer_role: 'customer', label: 'Initials', required: true }),
   form_field: (id) => ({ field_key: `field_${id}`, signer_role: 'customer', label: 'Enter a value', required: false, field_type: 'text' }),
 };
+
+const MAX_TABLE_COLUMNS = 12;
+
+function escapeText(value) {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** Plain text of a canvas cell: the backend table holds text and merge fields, not markup. */
+function cellText(cell) {
+  const raw = cell?.content || (cell?.items || []).map((entry) => entry.text || entry.content || '').join(' ');
+  return String(raw || '')
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+    .trim();
+}
+
+function tableProps(item) {
+  if (Array.isArray(item.tableRows) && item.tableRows.length) {
+    const grid = item.tableRows.map((row) => (row.cells || []).map(cellText));
+    const width = Math.min(MAX_TABLE_COLUMNS, Math.max(1, ...grid.map((row) => row.length)));
+    const rows = grid.map((row) => Array.from({ length: width }, (_, index) => row[index] ?? ''));
+    return item.tableSettings?.headerRow
+      ? { columns: rows[0], rows: rows.slice(1) }
+      : { columns: Array(width).fill(''), rows };
+  }
+  const columns = (item.columns || []).map((column) => (typeof column === 'string' ? column : column?.label || ''));
+  return { columns: columns.length ? columns.slice(0, MAX_TABLE_COLUMNS) : ['Item', 'Amount'], rows: Array.isArray(item.rows) ? item.rows : [] };
+}
+
+/** A legacy content-layout grid becomes a columns block; each cell's headings and text stay in its column. */
+function layoutToColumns(item, key, kind) {
+  const count = Math.max(2, Math.min(4, item.tableSettings?.colCount || item.tableRows?.[0]?.cells?.length || 2));
+  const children = [];
+  (item.tableRows || []).forEach((row) => (row.cells || []).forEach((cell, cellIndex) => {
+    const column = Math.min(cellIndex, count - 1);
+    const entries = cell.items?.length ? cell.items : (cell.content ? [{ type: 'text', text: cell.content }] : []);
+    entries.forEach((entry) => {
+      const childKey = `${key}_${children.length + 1}`.slice(0, 60);
+      if (entry.type === 'heading' && entry.text) {
+        children.push({ key: childKey, type: 'heading', column, props: normalizeBlockProps('heading', { text: String(entry.text), level: Math.max(1, Math.min(4, Number(entry.level) || 2)), align: 'left' }, childKey, kind) });
+      } else if (entry.type !== 'image' && (entry.text || entry.content)) {
+        const html = String(entry.content || entry.text);
+        children.push({ key: childKey, type: 'text', column, props: { html: /<[a-z][\s\S]*>/i.test(html) ? html : `<p>${escapeText(html)}</p>` } });
+      }
+    });
+  }));
+  return { key, type: 'columns', props: { count, gap: 16 }, children };
+}
+
+/** Label/value widgets (custom fields, information panels) as readable text with their merge fields. */
+function metaHtml(item) {
+  const fields = (item.fields || []).filter((field) => field.visible !== false);
+  const rows = fields.map((field) => `<p><strong>${escapeText(field.label)}:</strong> ${escapeText(field.value || item.variable || '')}</p>`);
+  return rows.join('') || `<p>${escapeText(item.content || item.label || '')}</p>`;
+}
 
 export function createBackendWidget(block, kind = 'document') {
   const id = `block_${createWidgetId()}`;
@@ -273,7 +337,10 @@ function toBackendBlock(item, index, kind) {
     if (Object.keys(style).length) props.style = style;
     return { key, type, props };
   }
-  if (type === 'table') return { key, type, props: { columns: item.columns || ['Item', 'Amount'], rows: item.rows || item.tableRows || [] } };
+  if (type === 'table' && item.tableSettings?.isLayout) return layoutToColumns(item, key, kind);
+  if (type === 'table') return { key, type, props: tableProps(item) };
+  if (type === 'notes') return { key, type: 'text', props: { html: String(item.content || '').trim() || '<p></p>', ...customFieldProps } };
+  if (type === 'meta' || type === 'shipment') return { key, type: 'text', props: { html: metaHtml(item), ...customFieldProps } };
   if (type === 'divider') return { key, type, props: { style: item.style?.borderStyle || 'solid', color: item.style?.borderColor || item.color || '#CBD5E1' } };
   if (type === 'spacer') return { key, type, props: { height: Math.max(4, Math.min(400, Number(item.height) || 20)) } };
   if (type === 'signature') return {

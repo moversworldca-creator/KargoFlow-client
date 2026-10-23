@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createBackendWidget, fromBackendDocument, toBackendDocument } from "./documentAdapter";
+import { createContentLayoutWidget, createTableWidget, createWidget } from "../model/templateModel";
 
 const kinds = {
   document: [
@@ -66,5 +67,35 @@ describe("backend document widgets", () => {
     expect(saved.header).toEqual(document.header);
     expect(saved.footer).toEqual(document.footer);
     expect(saved.attachments).toEqual(document.attachments);
+  });
+});
+
+describe("palette widgets keep their content when saved", () => {
+  const save = (item) => toBackendDocument({ items: [item], pages: [{ id: "p1", items: [item] }] }, "contract")
+    .sections.flatMap((section) => section.blocks)[0];
+
+  it("saves custom table cells as text and merge fields", () => {
+    const table = createTableWidget(2, 2, "");
+    table.tableRows[0].cells[0].content = "Packing date";
+    table.tableRows[0].cells[1].content = "<b>{{move.date}}</b>";
+    table.tableRows[1].cells[0].content = "Crew";
+    table.tableRows[1].cells[1].content = "{{estimate.crew_size}}";
+    expect(save(table)).toMatchObject({ type: "table", props: {
+      columns: ["", ""], rows: [["Packing date", "{{move.date}}"], ["Crew", "{{estimate.crew_size}}"]] } });
+
+    table.tableSettings.headerRow = true;
+    expect(save(table).props).toEqual({ columns: ["Packing date", "{{move.date}}"], rows: [["Crew", "{{estimate.crew_size}}"]] });
+  });
+
+  it("saves a legacy content layout as columns with its headings and text", () => {
+    const block = save(createContentLayoutWidget("50-50", 1, 2, "Content Layout"));
+    expect(block).toMatchObject({ type: "columns", props: { count: 2 } });
+    expect(block.children.map((child) => [child.type, child.column])).toEqual([["heading", 1], ["text", 1]]);
+  });
+
+  it("keeps an empty notes widget valid and a custom field's label and value", () => {
+    expect(save(createWidget("Notes", { type: "notes" }))).toMatchObject({ type: "text", props: { html: "<p></p>" } });
+    expect(save(createWidget("Custom Field", { fieldLabel: "PO <number>", value: "{{opportunity.number}}" })).props.html)
+      .toBe("<p><strong>PO &lt;number&gt;:</strong> {{opportunity.number}}</p>");
   });
 });

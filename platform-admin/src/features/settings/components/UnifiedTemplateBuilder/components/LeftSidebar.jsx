@@ -108,6 +108,26 @@ const ICON_MAP = {
   X,
 };
 
+// Palette groups in SmartMoving order: ready-made sections first, then data, signer actions and building blocks.
+const PALETTE_GROUPS = [
+  ["section", "Prebuilt sections"],
+  ["data", "Move data"],
+  ["interactive", "Signatures & customer actions"],
+  ["content", "Content"],
+  ["layout", "Layout"],
+];
+
+function groupPaletteWidgets(widgets, mode) {
+  if (["email", "sms"].includes(mode)) {
+    return [{ key: mode, label: mode === "email" ? "Email Widgets" : "SMS Widgets", widgets }];
+  }
+  const known = new Set(PALETTE_GROUPS.map(([key]) => key));
+  return [
+    ...PALETTE_GROUPS.map(([key, label]) => ({ key, label, widgets: widgets.filter((widget) => widget.category === key) })),
+    { key: "other", label: "Document Widgets", widgets: widgets.filter((widget) => !known.has(widget.category)) },
+  ].filter((group) => group.widgets.length > 0);
+}
+
 export default function LeftSidebar({
   mode,
   pageSize = "A4",
@@ -133,7 +153,9 @@ export default function LeftSidebar({
   const [searchTerm, setSearchTerm] = useState("");
   const [copiedTag, setCopiedTag] = useState(null);
 
-  const { common = [], specific = [] } = getWidgetsForMode(mode) || {};
+  const { common: toolboxCommon = [], specific = [] } = getWidgetsForMode(mode) || {};
+  // Saved (native) templates use the Builder "Columns" widget; the legacy layout grid cannot be stored.
+  const common = ["email", "sms"].includes(mode) ? toolboxCommon : toolboxCommon.filter((widget) => widget.type !== "layout");
   const defaultGroups = [];
   const [variableGroups, setVariableGroups] = useState(defaultGroups);
   const savedBlocks = [];
@@ -289,11 +311,7 @@ export default function LeftSidebar({
             {/* Feature-Specific Widgets */}
             {(!["email", "sms"].includes(mode) ? backendWidgets.length > 0 : specific.length > 0) && (
               <div>
-                <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2 px-1">
-                  {["email", "sms"].includes(mode) ? (mode === "email" ? "Email Widgets" : "SMS Widgets") : "Document Widgets"}
-                </h3>
-                <div className="grid grid-cols-1 gap-1.5">
-                  {(!["email", "sms"].includes(mode)
+                {groupPaletteWidgets(!["email", "sms"].includes(mode)
                     ? backendWidgets.map((block) => ({
                         id: `backend_${block.type}`,
                         type: "builder_block",
@@ -307,9 +325,16 @@ export default function LeftSidebar({
                         pdf_only: block.pdf_only,
                         icon: BACKEND_WIDGET_ICONS[block.type],
                       }))
-                    : specific)
-                    .filter((w) => filterItem(w.label))
-                    .map((widget) => (
+                    : specific, mode)
+                  .map((group) => ({ ...group, widgets: group.widgets.filter((w) => filterItem(w.label)) }))
+                  .filter((group) => group.widgets.length > 0)
+                  .map((group) => (
+                  <div key={group.key} className="mb-3">
+                <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2 px-1">
+                  {group.label}
+                </h3>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {group.widgets.map((widget) => (
                       <button
                         key={widget.id}
                         type="button"
@@ -332,6 +357,8 @@ export default function LeftSidebar({
                       </button>
                     ))}
                 </div>
+                  </div>
+                ))}
                 {backendWidgetsError && !["email", "sms"].includes(mode) && (
                   <p role="alert" className="mt-2 text-[11px] text-red-600">{backendWidgetsError}</p>
                 )}

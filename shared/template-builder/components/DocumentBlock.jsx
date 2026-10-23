@@ -18,76 +18,14 @@ import EditableHtmlBlock from "./EditableHtmlBlock";
 import InteractiveTableBlock from "./InteractiveTableBlock";
 
 import { sanitizeHtml } from "../core/htmlSanitizer";
+import { SAMPLE_VARIABLES } from "../config/sampleVariables.js";
+import { chargeMatches, headingBar, prebuiltSectionHtml } from "../model/prebuiltSections.js";
 
 export function createDocumentBlockRenderer({ downloadFile, getBuilderBlock } = {}) {
-const SAMPLE_VARIABLES = {
-  "company.name": "KargoFlow Moving",
-  "company.phone": "(800) 555-0199",
-  "company.email": "dispatch@kargoflow.example",
-  "company.website": "https://kargoflow.example",
-  "company.address": "100 Main Street, Vancouver, BC",
-  "company.logo_url": "https://kargoflow.example/logo.png",
-  "branch.name": "Vancouver Branch",
-  "branch.phone": "(800) 555-0188",
-  "branch.email": "vancouver@kargoflow.example",
-  "branch.address": "100 Main Street, Vancouver, BC",
-  "customer.full_name": "Alex Customer",
-  "customer.first_name": "Alex",
-  "customer.last_name": "Customer",
-  "customer.email": "alex.customer@example.com",
-  "customer.phone": "(555) 019-2834",
-  "opportunity.number": "OPP-0042",
-  "opportunity.service_type": "Residential move",
-  "opportunity.move_type": "Local",
-  "opportunity.binding_type": "Binding",
-  "opportunity.has_storage": false,
-  "move.date": "June 15, 2026",
-  "move.size": "3 bedroom home",
-  "move.estimated_weight": "3,200",
-  "move.origin_address": "123 Main Street, Vancouver, BC",
-  "move.destination_address": "456 Oak Avenue, Burnaby, BC",
-  "move.distance_miles": "12",
-  "sales_rep.name": "Jordan Lee",
-  "sales_rep.email": "jordan.lee@kargoflow.example",
-  "sales_rep.phone": "(800) 555-0177",
-  "estimate.number": "EST-00042",
-  "estimate.binding_type": "Non-binding",
-  "estimate.subtotal": "$1,475.00",
-  "estimate.discount": "$50.00",
-  "estimate.tax": "$77.63",
-  "estimate.tax_amount": "$77.63",
-  "estimate.grand_total": "$1,502.63",
-  "estimate.deposit_amount": "$300.00",
-  "estimate.deposit_due": "$300.00",
-  "estimate.portal_url": "https://example.com/estimates/EST-00042",
-  "estimate.hourly_rate": "$185.00",
-  "estimate.crew_size": "3",
-  "estimate.truck_count": "1",
-  "estimate.estimated_hours": "6",
-  "estimate.total_volume_cuft": "620",
-  "estimate.total_weight_lbs": "3,200",
-  "invoice.number": "INV-00128",
-  "invoice.issued_at": "June 15, 2026",
-  "invoice.due_at": "June 30, 2026",
-  "invoice.subtotal": "$1,475.00",
-  "invoice.discount": "$50.00",
-  "invoice.tax": "$77.63",
-  "invoice.tax_amount": "$77.63",
-  "invoice.total": "$1,502.63",
-  "invoice.amount_paid": "$300.00",
-  "invoice.balance_due": "$1,202.63",
-  "job.number": "JOB-00042",
-  "job.start_time": "June 15, 2026, 8:00 AM",
-  "links.estimate_portal": "https://example.com/estimates/EST-00042",
-  "links.pay_now": "https://example.com/pay/INV-00128",
-  "links.sign_document": "https://example.com/sign/CON-00042",
-  "system.today": "June 15, 2026",
-  "system.now": "June 15, 2026, 8:00 AM",
-};
 
 const SAMPLE_CHARGES = [
   { name: "Moving labor", category: "Labor", description: "3 movers × 5 hours", quantity: "5", unit_price: "$185.00", total: "$925.00" },
-  { name: "Moving truck", category: "Transportation", description: "Truck and fuel", quantity: "1", unit_price: "$350.00", total: "$350.00" },
+  { name: "Moving truck", category: "Travel", description: "Truck and fuel", quantity: "1", unit_price: "$350.00", total: "$350.00" },
   { name: "Packing materials", category: "Materials", description: "Boxes and wrapping", quantity: "1", unit_price: "$200.00", total: "$200.00" },
 ];
 
@@ -328,6 +266,9 @@ function BackendWidgetPreview({ block, sampleData = true, scope = {}, customerPr
     };
   }, [block.type, props.block_id]);
 
+  const prebuilt = prebuiltSectionHtml(block.type, props);
+  // Built only from escaped sample values and the widget's own escaped settings.
+  if (prebuilt !== null) return <div className="text-slate-800" dangerouslySetInnerHTML={{ __html: prebuilt }} />;
   if (block.type === "heading") {
     const HeadingTag = `h${Math.min(4, Math.max(1, Number(props.level) || 2))}`;
     const headingStyle = props.style || {};
@@ -513,8 +454,11 @@ function BackendWidgetPreview({ block, sampleData = true, scope = {}, customerPr
   }
   if (block.type === "charges" || block.type === "line_items") {
     const isCharges = block.type === "charges";
-    const title = getConfiguredField(props, "section_title", block.label || (isCharges ? "Estimate charges" : "Invoice line items"), "", sampleData, scope).label;
-    const rows = SAMPLE_CHARGES.map((row, index) => {
+    const title = props.title ? resolvePreviewText(props.title, sampleData, scope)
+      : getConfiguredField(props, "section_title", block.label || (isCharges ? "Estimate charges" : "Invoice line items"), "", sampleData, scope).label;
+    const narrow = props.layout === "narrow";
+    const listed = SAMPLE_CHARGES.map((row, index) => [row, index]).filter(([row]) => chargeMatches(row.category, props.filter));
+    const rows = listed.map(([row, index]) => {
       const rate = getConfiguredField(
         props,
         `charge_${index}_unit_price`,
@@ -538,15 +482,21 @@ function BackendWidgetPreview({ block, sampleData = true, scope = {}, customerPr
       total: row.total,
     };
     });
+    if (props.show_total && rows.length) {
+      const sum = listed.reduce((total, [row]) => total + (Number(String(row.total).replace(/[^0-9.-]/g, "")) || 0), 0);
+      rows.push({ description: "Total", quantity: "", unit_price: "", total: new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(sum) });
+    }
     return (
       <div className="space-y-1">
-        <p className="text-xs font-semibold text-slate-700">{title}</p>
-        <PreviewTable columns={[
+        {props.title
+          ? <div dangerouslySetInnerHTML={{ __html: headingBar(props.title) }} />
+          : <p className="text-xs font-semibold text-slate-700">{title}</p>}
+        {rows.length ? <PreviewTable columns={[
           { key: "description", label: getConfiguredField(props, "description_label", "Description", "", sampleData, scope).label },
-          ...(!isCharges || props.show_quantity !== false ? [{ key: "quantity", label: getConfiguredField(props, "quantity_label", "Qty", "", sampleData, scope).label }] : []),
-          { key: "unit_price", label: getConfiguredField(props, "rate_label", "Rate", "", sampleData, scope).label },
+          ...(!narrow && (!isCharges || props.show_quantity !== false) ? [{ key: "quantity", label: getConfiguredField(props, "quantity_label", "Qty", "", sampleData, scope).label }] : []),
+          ...(!narrow ? [{ key: "unit_price", label: getConfiguredField(props, "rate_label", "Rate", "", sampleData, scope).label }] : []),
           { key: "total", label: getConfiguredField(props, "amount_label", "Amount", "", sampleData, scope).label },
-        ]} rows={rows} />
+        ]} rows={rows} /> : <p className="text-xs text-slate-500">No items.</p>}
       </div>
     );
   }

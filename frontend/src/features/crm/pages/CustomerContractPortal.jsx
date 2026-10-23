@@ -175,6 +175,23 @@ const InlineSignField = ({
     );
   }
 
+  if (type === 'textarea') {
+    return (
+      <InlineFieldShell>
+        <textarea
+          aria-label={label}
+          value={value?.value_text || ''}
+          onChange={(e) => onChangeText(fieldKey, e.target.value)}
+          disabled={disabled}
+          rows={3}
+          maxLength={4000}
+          className="w-full sm:w-80 max-w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-[#0f172a] outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 disabled:opacity-60"
+          placeholder="Enter details"
+        />
+      </InlineFieldShell>
+    );
+  }
+
   return (
     <InlineFieldShell>
       <div className="flex flex-wrap items-center gap-2 max-w-full">
@@ -290,7 +307,7 @@ export default function CustomerContractPortal() {
       const value = fieldValues?.[key] || {};
       if (!key) return false;
       if (isSignatureFieldType(type)) return Boolean(value.signature_payload);
-      if (type === 'date' || type === 'text') return Boolean(String(value.value_text || '').trim());
+      if (type === 'date' || type === 'text' || type === 'textarea') return Boolean(String(value.value_text || '').trim());
       return false;
     },
     [fieldValues]

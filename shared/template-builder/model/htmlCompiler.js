@@ -10,31 +10,9 @@ import {
   sanitizeHtml,
 } from "../core/htmlSanitizer";
 import { normalizeLegacyMergeFieldAliases } from "../config/mergeFieldAliases";
+import { SAMPLE_VARIABLES } from "../config/sampleVariables.js";
+import { chargeMatches, headingBar, prebuiltSectionHtml } from "./prebuiltSections.js";
 
-const BACKEND_PREVIEW_VALUES = {
-  "company.name": "KargoFlow Moving",
-  "customer.full_name": "Alex Customer",
-  "customer.first_name": "Alex",
-  "customer.email": "alex.customer@example.com",
-  "customer.phone": "(555) 019-2834",
-  "move.date": "June 15, 2026",
-  "move.size": "3 bedroom home",
-  "move.estimated_weight": "3,200",
-  "move.origin_address": "123 Main Street, Vancouver, BC",
-  "move.destination_address": "456 Oak Avenue, Burnaby, BC",
-  "estimate.number": "EST-00042",
-  "estimate.subtotal": "$1,475.00",
-  "estimate.discount": "$50.00",
-  "estimate.tax": "$77.63",
-  "estimate.grand_total": "$1,502.63",
-  "estimate.deposit_amount": "$300.00",
-  "invoice.number": "INV-00128",
-  "invoice.subtotal": "$1,475.00",
-  "invoice.discount": "$50.00",
-  "invoice.tax": "$77.63",
-  "invoice.total": "$1,502.63",
-  "invoice.balance_due": "$1,202.63",
-};
 
 function escapePreviewHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -44,7 +22,7 @@ function escapePreviewHtml(value) {
 
 function previewMergeFields(value) {
   return String(value ?? "").replace(/\{\{\s*([a-zA-Z0-9_.]+)(?:\|([^}]+))?\s*\}\}/g, (token, name) =>
-    BACKEND_PREVIEW_VALUES[name] === undefined ? token : BACKEND_PREVIEW_VALUES[name]
+    SAMPLE_VARIABLES[name] === undefined ? token : SAMPLE_VARIABLES[name]
   );
 }
 
@@ -191,12 +169,26 @@ function compileBackendWidgetContent(item) {
   const props = item.props || {};
   const children = Array.isArray(item.children) ? item.children : [];
   const childHtml = children.map(compileBackendWidget).join("");
-  const table = (columns, rows, columnWidths) => `<table style="width:100%;border-collapse:collapse;font-size:12px">${columnWidths ? `<colgroup>${columnWidths.map((width) => `<col style="width:${width}">`).join("")}</colgroup>` : ""}<thead><tr>${columns.map((column) => `<th style="padding:6px;border-bottom:2px solid #cbd5e1;text-align:left">${escapePreviewHtml(column)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td style="padding:6px;border-bottom:1px solid #e2e8f0">${escapePreviewHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  // Quantities and money align right, and a total row is bold, as in the rendered document.
+  const NUMERIC_COLUMN = /^(qty|quantity|rate|amount|price|total|tax)$/i;
+  const table = (columns, rows, columnWidths, style = "width:100%") => {
+    const numeric = columns.map((column) => NUMERIC_COLUMN.test(String(column).trim()));
+    const align = (index) => (numeric[index] ? "right" : "left");
+    const head = columns.map((column, index) => `<th style="padding:6px;border-bottom:2px solid #1E40AF;text-align:${align(index)}">${escapePreviewHtml(column)}</th>`).join("");
+    const body = rows.map((row) => {
+      const isTotal = /total/i.test(String(row[0])) && !/sub/i.test(String(row[0]));
+      const cellStyle = isTotal ? "font-weight:700;border-top:2px solid #1E40AF" : "";
+      return `<tr>${row.map((cell, index) => `<td style="padding:6px;border-bottom:1px solid #e2e8f0;text-align:${align(index)};${cellStyle}">${escapePreviewHtml(cell)}</td>`).join("")}</tr>`;
+    }).join("");
+    return `<table style="${style};border-collapse:collapse;font-size:12px">${columnWidths ? `<colgroup>${columnWidths.map((width) => `<col style="width:${width}">`).join("")}</colgroup>` : ""}<thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  };
   const charges = [
-    ["Moving labor", "5", "$185.00", "$925.00"],
-    ["Moving truck", "1", "$350.00", "$350.00"],
-    ["Packing materials", "1", "$200.00", "$200.00"],
+    ["Moving labor", "5", "$185.00", "$925.00", "Labor"],
+    ["Moving truck", "1", "$350.00", "$350.00", "Travel"],
+    ["Packing materials", "1", "$200.00", "$200.00", "Materials"],
   ];
+  const prebuilt = prebuiltSectionHtml(type, props);
+  if (prebuilt !== null) return prebuilt;
   switch (type) {
     case "heading": {
       const level = Math.min(4, Math.max(1, Number(props.level) || 2));
@@ -306,15 +298,23 @@ function compileBackendWidgetContent(item) {
         ]] : []),
       ]);
     case "charges":
-    case "line_items":
-      return table(
+    case "line_items": {
+      const narrow = props.layout === "narrow";
+      const showQuantity = !narrow && (type === "line_items" || props.show_quantity !== false);
+      const listed = charges.map((row, index) => [row, index]).filter(([row]) => chargeMatches(row[4], props.filter));
+      if (!listed.length) return `${headingBar(props.title)}<p style="color:#6b7280;font-size:12px">No items.</p>`;
+      const totalRow = props.show_total
+        ? [["Total", ...(showQuantity ? [""] : []), ...(narrow ? [] : [""]), new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })
+          .format(listed.reduce((sum, [row]) => sum + Number(row[3].replace(/[^0-9.-]/g, "")), 0))]]
+        : [];
+      return headingBar(props.title) + table(
         [
           configuredField(props, "description_label", "Description", "Description").label,
-          ...(type === "line_items" || props.show_quantity !== false ? [configuredField(props, "quantity_label", "Qty", "Qty").label] : []),
-          configuredField(props, "rate_label", "Rate", "Rate").label,
+          ...(showQuantity ? [configuredField(props, "quantity_label", "Qty", "Qty").label] : []),
+          ...(narrow ? [] : [configuredField(props, "rate_label", "Rate", "Rate").label]),
           configuredField(props, "amount_label", "Amount", "Amount").label,
         ],
-        charges.map(([name, quantity, rate, total], index) => {
+        [...listed.map(([[name, quantity, rate, total], index]) => {
           const displayRate = configuredField(
             props,
             `charge_${index}_unit_price`,
@@ -330,12 +330,13 @@ function compileBackendWidgetContent(item) {
           ).value;
           return [
             displayName,
-            ...(type === "line_items" || props.show_quantity !== false ? [quantity] : []),
-            displayRate,
+            ...(showQuantity ? [quantity] : []),
+            ...(narrow ? [] : [displayRate]),
             total,
           ];
-        }),
+        }), ...totalRow],
       );
+    }
     case "estimate_summary":
     case "totals": {
       const estimate = type === "estimate_summary";
@@ -357,7 +358,7 @@ function compileBackendWidgetContent(item) {
       return table([
         configuredField(props, "section_title", estimate ? "Estimate summary" : "Invoice totals", "").label,
         "Amount",
-      ], values.map(({ label, value }) => [label, value]));
+      ], values.map(({ label, value }) => [label, value]), null, "width:55%;margin-left:auto");
     }
     case "inventory":
       return props.mode === "detailed"

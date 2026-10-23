@@ -71,6 +71,23 @@ function plainTextToHtml(value) {
     .replace(/\n/g, "<br>");
 }
 
+// Readable names for widget setting choices.
+const ENUM_LABELS = {
+  wide: "Wide (quantity, rate and amount)",
+  narrow: "Narrow (description and amount)",
+  all: "All charges",
+  labor: "Labour",
+  materials: "Materials",
+  services: "Additional services",
+  fees: "Fees",
+  none: "None",
+  category: "Category",
+  textarea: "Multi-line text",
+  text: "Single-line text",
+  checkbox: "Checkbox",
+  date: "Date",
+}
+
 function SchemaField({ name, schema = {}, value, onChange, placeholderGroups = [] }) {
   const currentJsonValue = JSON.stringify(value ?? (schema.type === "array" ? [] : {}), null, 2);
   const [jsonValue, setJsonValue] = useState(currentJsonValue);
@@ -124,7 +141,7 @@ function SchemaField({ name, schema = {}, value, onChange, placeholderGroups = [
         </select>
       ) : schema.enum ? (
         <select className={inputClass} value={value ?? ""} onChange={(event) => onChange(event.target.value)}>
-          {schema.enum.map((option) => <option key={option} value={option}>{option}</option>)}
+          {schema.enum.map((option) => <option key={option} value={option}>{ENUM_LABELS[option] || option}</option>)}
         </select>
       ) : schema.type === "integer" || schema.type === "number" ? (
         <input

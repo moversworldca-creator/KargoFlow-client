@@ -13,16 +13,21 @@ describe("backend document widget icons", () => {
       "conditional",
       "crew_trucks",
       "divider",
+      "doc_footer",
+      "doc_header",
       "estimate_summary",
       "form_field",
       "heading",
       "image",
       "initial",
       "inventory",
+      "job_timeline",
       "line_items",
       "move_details",
+      "move_overview",
       "options",
       "page_break",
+      "paid_stamp",
       "payment",
       "payment_history",
       "repeater",
@@ -34,7 +39,7 @@ describe("backend document widget icons", () => {
       "totals",
       "variable",
     ]);
-    expect(new Set(Object.values(BACKEND_WIDGET_ICONS)).size).toBe(27);
+    expect(new Set(Object.values(BACKEND_WIDGET_ICONS)).size).toBe(32);
     expect(BACKEND_WIDGET_ICONS.payment).toBeTruthy();
     expect(BACKEND_WIDGET_ICONS.button).toBeTruthy();
     expect(BACKEND_WIDGET_ICONS.options).toBeTruthy();
@@ -49,7 +54,7 @@ describe("backend document widget icons", () => {
       </div>
     );
 
-    expect(container.querySelectorAll("svg")).toHaveLength(27);
+    expect(container.querySelectorAll("svg")).toHaveLength(32);
     expect(container.querySelector('[data-widget-icon="page_break"]')).not.toBeNull();
     expect(container.querySelector('[data-widget-icon="form_field"]')).not.toBeNull();
   });

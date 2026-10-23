@@ -1,5 +1,10 @@
 import {
   BadgeDollarSign,
+  CalendarClock,
+  PanelBottom,
+  PanelTop,
+  Route,
+  Stamp,
   BookmarkCheck,
   BookOpen,
   Boxes,
@@ -29,6 +34,11 @@ import {
 } from "lucide-react";
 
 export const BACKEND_WIDGET_ICONS = Object.freeze({
+  doc_header: PanelTop,
+  move_overview: Route,
+  job_timeline: CalendarClock,
+  doc_footer: PanelBottom,
+  paid_stamp: Stamp,
   columns: Columns3,
   spacer: MoveVertical,
   divider: SeparatorHorizontal,
