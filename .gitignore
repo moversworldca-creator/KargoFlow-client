@@ -80,7 +80,7 @@ yarn-error.log*
 .worktrees/
 docs/*
 redesign/
-
+platform-admin-dist
 # Keep product specs/design docs tracked.
 docs/
 !docs/

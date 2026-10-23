@@ -16,6 +16,8 @@ RUN npm install
 # Copy source code
 COPY frontend/ ./frontend/
 COPY platform-admin/ ./platform-admin/
+# Both apps import the shared template builder from ../../shared.
+COPY shared/ ./shared/
 
 # Build arguments
 ARG VITE_API_URL=/api
