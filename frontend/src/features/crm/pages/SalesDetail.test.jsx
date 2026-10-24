@@ -89,6 +89,9 @@ vi.mock('../components/RedesignSalesComponents', () => ({
   )
 }));
 
+vi.mock('../components/SalesLifecyclePanel', () => ({
+  default: ({ opportunityId }) => <div data-testid="sales-lifecycle-panel" data-opportunity-id={opportunityId} />,
+}));
 vi.mock('../components/EstimateView', () => {
   return {
     default: ({ initialSubTab }) => (
@@ -326,6 +329,12 @@ vi.mock('../../../services/api', () => {
     getStatusCodes: vi.fn().mockResolvedValue([]),
     getStatusCodeLookups: vi.fn().mockResolvedValue([]),
     getOpportunityLossReasonLookups: vi.fn().mockResolvedValue([]),
+    getCancellationReasons: vi.fn().mockResolvedValue([]),
+    getDisqualificationReasons: vi.fn().mockResolvedValue([]),
+    disqualifyLead: vi.fn().mockResolvedValue({ id: 123, system_state: 'disqualified' }),
+    restoreLead: vi.fn().mockResolvedValue({ id: 123, system_state: 'in_progress' }),
+    archiveLead: vi.fn().mockResolvedValue({ id: 123, system_state: 'archived' }),
+    getOpportunityBookingReadiness: vi.fn().mockResolvedValue({ ready: true, missing: [], overridable_missing: [] }),
     getOpportunityLossReasonLookupsPage: vi.fn().mockResolvedValue({ results: [] }),
     getBranches: vi.fn().mockResolvedValue([]),
     getBranchLookups: vi.fn().mockResolvedValue([]),
@@ -871,6 +880,8 @@ describe('SalesDetail Component Tests', () => {
   });
 
   it('loads, updates, and creates from the estimate requirements modal', async () => {
+    apiService.getMoveTypeLookups.mockResolvedValue([{ id: 31, name: 'Company Move' }]);
+    apiService.getServices.mockResolvedValue([{ id: 21, name: 'Company Service' }]);
     apiService.getOpportunityBySalesNumber.mockResolvedValueOnce({
       id: 123,
       workflow_stage: 'opportunity',
@@ -898,13 +909,18 @@ describe('SalesDetail Component Tests', () => {
     expect(screen.getByDisplayValue('Dinesh')).toBeInTheDocument();
     fireEvent.change(document.querySelector('input[type="date"]'), { target: { value: '2026-08-10' } });
     const requirementSelects = requirementsHeading.closest('.fixed').querySelectorAll('select');
+    await waitFor(() => expect(screen.getByRole('option', { name: 'Company Move' })).toHaveValue('31'));
+    expect(screen.getByRole('option', { name: 'Company Service' })).toHaveValue('21');
+    expect(apiService.getMoveTypeLookups).toHaveBeenCalledWith();
+    expect(apiService.getServices).toHaveBeenCalledWith();
+    expect(screen.queryByRole('option', { name: 'Long Distance' })).not.toBeInTheDocument();
     fireEvent.change(requirementSelects[0], { target: { value: '7' } });
     fireEvent.change(requirementSelects[1], { target: { value: requirementSelects[1].options[1].value } });
     fireEvent.change(requirementSelects[2], { target: { value: requirementSelects[2].options[1].value } });
     fireEvent.click(screen.getByRole('button', { name: 'Save And Create Estimate' }));
 
     await waitFor(() => expect(apiService.updateOpportunity).toHaveBeenCalledWith(123, expect.objectContaining({
-      move_date: '2026-08-10',
+      move_date: '2026-08-10', service_type: '21', move_type: '31',
     })));
     expect(apiService.createEstimate).toHaveBeenCalledWith({ opportunity: 123, method: 'manual' });
   });
@@ -1415,6 +1431,107 @@ describe('SalesDetail Component Tests', () => {
     expect(await screen.findByText('Ada Lead')).toBeInTheDocument();
   });
 
+  it.each([
+    ['new', ['Start lead', 'Qualify lead', 'Mark Lost', 'Disqualify Lead', 'Archive Lead']],
+    ['in_progress', ['Qualify lead', 'Mark Lost', 'Disqualify Lead', 'Archive Lead']],
+    ['qualified', ['Convert to Opportunity', 'Mark Lost', 'Disqualify Lead']],
+    ['lost', ['Reopen Lead']],
+    ['archived', ['Restore Lead']],
+    ['disqualified', ['Restore Lead']],
+    ['converted', []],
+  ])('shows only valid lead lifecycle actions for %s', async (state, expected) => {
+    apiService.getLead.mockResolvedValue({ ...leadFixture, system_state: state, status: state });
+    renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
+    await screen.findByText('Ada Lead');
+    fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
+    for (const label of ['Start lead', 'Qualify lead', 'Convert to Opportunity', 'Mark Lost', 'Disqualify Lead', 'Archive Lead', 'Restore Lead', 'Reopen Lead', 'Book Job']) {
+      expect(screen.queryAllByRole('button', { name: label }).length > 0).toBe(expected.includes(label));
+    }
+  });
+
+  it('requires a lead lost reason and its required notes, and sends the reason ID', async () => {
+    apiService.getLead.mockResolvedValue(leadFixture);
+    apiService.getOpportunityLossReasonLookups.mockResolvedValue([
+      { id: 41, name: 'Other lead loss', applies_to: 'lead', is_active: true, requires_note: true },
+      { id: 42, name: 'Opportunity only', applies_to: 'opportunity', is_active: true },
+      { id: 43, name: 'Inactive reason', applies_to: 'both', is_active: false },
+    ]);
+    apiService.markLeadLost.mockImplementation(async () => {
+      const updated = { ...leadFixture, system_state: 'lost', status: 'lost' };
+      apiService.getLead.mockResolvedValue(updated);
+      return updated;
+    });
+    renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
+    await screen.findByText('Ada Lead');
+    fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mark Lost' }));
+    await screen.findByText('Mark as Lost');
+    expect(screen.queryByRole('option', { name: 'Opportunity only' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Inactive reason' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Loss' }));
+    expect(apiService.markLeadLost).not.toHaveBeenCalled();
+    const reasonSelect = screen.getByRole('option', { name: 'Other lead loss' }).closest('select');
+    fireEvent.change(reasonSelect, { target: { value: '41' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Loss' }));
+    expect(apiService.markLeadLost).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByPlaceholderText('Add notes (required for some reasons)...'), { target: { value: 'Customer stopped responding' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Loss' }));
+    await waitFor(() => expect(apiService.markLeadLost).toHaveBeenCalledWith(123, { lost_reason_id: 41, note: 'Customer stopped responding' }));
+  });
+
+  it('uses the disqualification catalog and command for an unsuitable lead', async () => {
+    apiService.getLead.mockResolvedValue(leadFixture);
+    apiService.getDisqualificationReasons.mockResolvedValue([{ id: 51, name: 'Outside service area', is_active: true }]);
+    renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
+    await screen.findByText('Ada Lead');
+    fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Disqualify Lead' }));
+    const option = await screen.findByRole('option', { name: 'Outside service area' });
+    fireEvent.change(option.closest('select'), { target: { value: '51' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Disqualification' }));
+    await waitFor(() => expect(apiService.disqualifyLead).toHaveBeenCalledWith(123, { disqualification_reason_id: 51, note: '' }));
+    expect(apiService.markLeadLost).not.toHaveBeenCalled();
+  });
+
+  it.each(['archived', 'disqualified'])('requires an explanation to restore a %s lead', async (state) => {
+    apiService.getLead.mockResolvedValue({ ...leadFixture, system_state: state, status: state });
+    renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
+    await screen.findByText('Ada Lead');
+    fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore Lead' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm Restore' }));
+    expect(apiService.restoreLead).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByPlaceholderText('Enter restoration reason...'), { target: { value: 'Customer confirmed a valid move' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Restore' }));
+    await waitFor(() => expect(apiService.restoreLead).toHaveBeenCalledWith(123, { reason: 'Customer confirmed a valid move' }));
+    expect(apiService.reopenLead).not.toHaveBeenCalled();
+  });
+
+  it('does not duplicate the primary Start lead action in the Actions menu', async () => {
+    apiService.getLead.mockResolvedValue(leadFixture);
+    renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
+    await screen.findByRole('button', { name: 'Start lead' });
+    fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
+    expect(screen.getAllByRole('button', { name: 'Start lead' })).toHaveLength(1);
+  });
+
+  it('keeps the persisted state after qualifying through Actions without refetching the old state', async () => {
+    apiService.getLead.mockResolvedValue(leadFixture);
+    apiService.qualifyLead.mockResolvedValue({ ...leadFixture, status: 'qualified', system_state: 'qualified' });
+    renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
+    await screen.findByRole('button', { name: 'Start lead' });
+    const readsBeforeTransition = apiService.getLead.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Qualify lead' }));
+    await screen.findByRole('button', { name: 'Convert to Opportunity' });
+    expect(screen.queryByRole('button', { name: 'Start lead' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Actions' }));
+    expect(screen.queryByRole('button', { name: 'Start lead' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Qualify lead' })).not.toBeInTheDocument();
+    expect(apiService.getLead).toHaveBeenCalledTimes(readsBeforeTransition);
+    expect(screen.getByText('Ada Lead')).toBeInTheDocument();
+  });
+
   it('offers explicit workflow steps before converting a lead', async () => {
     apiService.getLead.mockResolvedValue(leadFixture);
     apiService.startLead.mockResolvedValue({ ...leadFixture, status: 'in_progress', system_state: 'in_progress' });
@@ -1422,7 +1539,7 @@ describe('SalesDetail Component Tests', () => {
     renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
     fireEvent.click(await screen.findByRole('button', { name: 'Start lead' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Qualify lead' }));
-    expect(await screen.findByRole('button', { name: 'Create Estimate' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Convert to Opportunity' })).toBeInTheDocument();
     expect(apiService.startLead).toHaveBeenCalledWith(123);
     expect(apiService.qualifyLead).toHaveBeenCalledWith(123);
     expect(apiService.convertLead).not.toHaveBeenCalled();
@@ -1435,7 +1552,7 @@ describe('SalesDetail Component Tests', () => {
     apiService.convertLead.mockRejectedValueOnce({ response: { status: 422, data: { error: 'customer_review_required', candidates: [{ id: 321, profile_name: 'Existing Customer' }] } } })
       .mockResolvedValue({ opportunity: { id: 999, sales_number: 999 } });
     renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
-    fireEvent.click(await screen.findByRole('button', { name: 'Create Estimate' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Convert to Opportunity' }));
     expect(await screen.findByRole('dialog', { name: 'Review matching customers' })).toBeInTheDocument();
     expect(apiService.convertLead).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: buttonName }));

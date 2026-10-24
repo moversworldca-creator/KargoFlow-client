@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import api from './axios';
-import { updateLead, getActivities, getTasks, createSalesActivity, updateSalesActivity, createTask, updateTask, getLookupEmployeesPage, getLookupUsersPage, sendRecordSms, convertLead, getOpportunity } from './api';
+import { startLead, qualifyLead, archiveLead, reopenLead, restoreLead, disqualifyLead, markLeadLost, updateLead, getActivities, getTasks, createSalesActivity, updateSalesActivity, createTask, updateTask, getLookupEmployeesPage, getLookupUsersPage, sendRecordSms, convertLead, getOpportunity } from './api';
 vi.mock('./axios', () => ({ default: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() } }));
 beforeEach(() => vi.resetAllMocks());
 
@@ -62,4 +62,48 @@ describe('lead detail API contracts', () => {
     expect(api.get).toHaveBeenCalledWith('/tenant/pipeline/opportunity/42/');
   });
 
+});
+
+
+it.each([
+  [startLead, 'start', ''], [qualifyLead, 'qualify', ''],
+  [archiveLead, 'archive', 'Archive duplicate inquiry'],
+])('uses dedicated lead lifecycle commands', async (command, action, reason) => {
+  api.post.mockResolvedValue({ id: 7, system_state: action === 'qualify' ? 'qualified' : action === 'start' ? 'in_progress' : 'archived' });
+  await command(7, reason);
+  expect(api.post).toHaveBeenCalledWith(`/tenant/leads/7/${action}/`, { reason });
+  expect(api.patch).not.toHaveBeenCalled();
+});
+
+it.each([
+  [reopenLead, 'reopen', { reason: 'Customer returned' }],
+  [restoreLead, 'restore', { reason: 'Verified valid inquiry' }],
+  [markLeadLost, 'lost', { lost_reason_id: 4, note: 'No response' }],
+  [disqualifyLead, 'disqualify', { disqualification_reason_id: 5, note: 'Spam' }],
+])('preserves structured lead disposition and restore payloads', async (command, action, body) => {
+  api.post.mockResolvedValue({ id: 7, system_state: 'in_progress' });
+  await command(7, body);
+  expect(api.post).toHaveBeenCalledWith(`/tenant/leads/7/${action}/`, body);
+  expect(api.patch).not.toHaveBeenCalled();
+});
+
+it('rejects invalid lifecycle changes before editing any lead fields', async () => {
+  api.get.mockResolvedValue({ id: 7, system_state: 'converted' });
+  await expect(updateLead(7, { status: 'in_progress', notes: 'Must not be saved' })).rejects.toThrow('Invalid lead transition');
+  expect(api.patch).not.toHaveBeenCalled();
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it.each(['archived', 'disqualified'])('restores %s through the privileged restore command', async (system_state) => {
+  api.get.mockResolvedValue({ id: 7, system_state });
+  api.post.mockResolvedValue({ id: 7, system_state: 'in_progress' });
+  await updateLead(7, { status: 'in_progress', reason: 'Confirmed valid inquiry' });
+  expect(api.post).toHaveBeenCalledWith('/tenant/leads/7/restore/', { reason: 'Confirmed valid inquiry' });
+});
+
+it('requires a restore explanation before saving other lead changes', async () => {
+  api.get.mockResolvedValue({ id: 7, system_state: 'archived' });
+  await expect(updateLead(7, { status: 'in_progress', notes: 'Do not save yet' })).rejects.toThrow('A reason is required to restore a lead.');
+  expect(api.patch).not.toHaveBeenCalled();
+  expect(api.post).not.toHaveBeenCalled();
 });

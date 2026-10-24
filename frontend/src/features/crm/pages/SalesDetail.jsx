@@ -39,6 +39,7 @@ import { getLookupEmployeesPage, getLeadStatusCodeLookups, getLookupUsersPage, g
 import { useMoverSizesLookup } from '../../../shared/queries/sharedQueries';
 
 import EstimateView from '../components/EstimateView';
+import SalesLifecyclePanel from '../components/SalesLifecyclePanel';
 const OpportunityTariffPanel = React.lazy(() => import('../../pricing/components/OpportunityTariffPanel'));
 import PaymentsPanel from '../components/PaymentsPanel';
 import StorageView from '../components/StorageView';
@@ -121,8 +122,13 @@ import api, {
   recordRecordSmsConsent,
   markOpportunityEstimateCreated,
   bookOpportunityJob,
+  getOpportunityBookingReadiness,
   unbookOpportunityJob,
-  confirmOpportunityJob,
+  getCancellationReasons,
+  getDisqualificationReasons,
+  disqualifyLead,
+  restoreLead,
+  archiveLead,
   cancelOpportunityJob,
   completeOpportunityJob,
   markOpportunityLost,
@@ -182,7 +188,7 @@ import {
   getRecordTabLabelFromSegment,
   isLeadRecordType,
 } from '../utils/recordRoutes';
-import { getWorkflowStageLabel } from '../utils/statusWorkflow';
+import { getWorkflowStageLabel, getRecordSystemState, getRecordWorkflowActions } from '../utils/statusWorkflow';
 import { getPortalBaseUrl } from '../../../shared/utils/portalBaseUrl';
 import {
   buildDefaultDraftEstimate,
@@ -252,15 +258,15 @@ const safeDateTime = (iso) => {
 
 const toneForWorkflowStage = (stage) => {
   const normalized = String(stage || '').toLowerCase();
-  if (['completed', 'job'].includes(normalized)) return 'green';
+  if (['completed', 'closed', 'converted', 'job'].includes(normalized)) return 'green';
   if (['confirmed'].includes(normalized)) return 'teal';
   if (['booked'].includes(normalized)) return 'amber';
   if (['estimate_ready', 'quoted', 'estimate'].includes(normalized)) return 'violet';
   if (['lead_in_progress', 'in_progress'].includes(normalized)) return 'indigo';
-  if (['opportunity'].includes(normalized)) return 'blue';
+  if (['open', 'opportunity'].includes(normalized)) return 'blue';
   if (['new_lead', 'new'].includes(normalized)) return 'sky';
   if (['lost'].includes(normalized)) return 'rose';
-  if (['canceled'].includes(normalized)) return 'red';
+  if (['canceled', 'cancelled', 'disqualified'].includes(normalized)) return 'red';
   if (['draft', 'pending'].includes(normalized)) return 'cyan';
   return 'amber';
 };
@@ -1745,60 +1751,6 @@ const oppView = (opportunity, isLeadRecord = null) => {
   };
 };
 
-const buildWorkflowActions = ({
-  isLead,
-  isNewRecord,
-  workflowStage,
-  estimateSummary,
-  canDuplicateOpportunity = false,
-  canBookOpportunity = false,
-  canMarkOpportunityLost = false,
-  canCreateOpportunity = false,
-  canEditOpportunity = false,
-}) => {
-  if (isNewRecord) return [];
-
-  const stage = String(workflowStage || '').toLowerCase();
-
-  if (isLead) {
-    if (stage === 'converted') return [];
-    if (stage === 'lost') return [{ key: 'reopen', label: 'Reopen Lead', tone: 'primary' }];
-    return [
-      ...(canBookOpportunity ? [{ key: 'book', label: 'Book Job', tone: 'primary' }] : []),
-      ...(canMarkOpportunityLost ? [{ key: 'lost', label: 'Mark Lost', tone: 'secondary' }] : []),
-    ];
-  }
-
-  const estimateStatus = String(estimateSummary?.status || '').toLowerCase();
-  const isEstimateSigned = estimateStatus === 'signed';
-  const canSendEstimate = Boolean(estimateSummary) && !isEstimateSigned;
-  const actions = [];
-
-  if (['lost', 'canceled', 'completed'].includes(stage)) {
-    if (canEditOpportunity) actions.push({ key: 'reopen', label: 'Reopen Opportunity', tone: 'primary' });
-    return actions;
-  }
-
-  if (['opportunity', 'estimate_ready'].includes(stage)) {
-    if (canSendEstimate && canCreateOpportunity) {
-      actions.push({ key: 'send_estimate', label: 'Send Estimate', tone: 'primary' });
-    }
-    if (canBookOpportunity) actions.push({ key: 'book', label: 'Book Job', tone: 'primary' });
-    if (canMarkOpportunityLost) actions.push({ key: 'lost', label: 'Mark Lost', tone: 'secondary' });
-  } else if (stage === 'booked') {
-    if (canEditOpportunity) {
-      actions.push({ key: 'confirm', label: 'Confirm Job', tone: 'primary' });
-      actions.push({ key: 'cancel', label: 'Cancel Job', tone: 'secondary' });
-    }
-  } else if (stage === 'confirmed') {
-    if (canEditOpportunity) {
-      actions.push({ key: 'complete', label: 'Complete Job', tone: 'primary' });
-      actions.push({ key: 'cancel', label: 'Cancel Job', tone: 'secondary' });
-    }
-  }
-
-  return actions;
-};
 
 const omitBlankStrings = (payload) => {
   if (!payload || typeof payload !== 'object') return payload;
@@ -2453,14 +2405,6 @@ const TIMELINE_FETCH_LIMIT = 20;
 const DETAIL_TAB_IDS = ['Sales', 'Estimate', 'Files & Photos', 'Documents', 'Accounting', 'Payments'];
 const DEFAULT_DETAIL_TAB = 'Sales';
 const DEFAULT_ESTIMATE_TAB = 'charges';
-const SUB_JOB_SERVICE_OPTIONS = [
-  { value: 'move', label: 'Move' },
-  { value: 'packing', label: 'Packing' },
-  { value: 'loading', label: 'Loading' },
-  { value: 'unloading', label: 'Unloading' },
-  { value: 'storage', label: 'Storage' },
-  { value: 'other', label: 'Other' },
-];
 
 const resolveDetailTab = ({ tabSegment, stateTab, search, fallback = DEFAULT_DETAIL_TAB }) => {
   const routeTab = getRecordTabLabelFromSegment(tabSegment);
@@ -2535,7 +2479,8 @@ const SalesDetail = () => {
   const canDuplicateOpportunity = useCallback(() => hasPermission(PERMISSIONS.OPPORTUNITY_DUPLICATE), [hasPermission]);
   const canBookOpportunity = useCallback(() => hasPermission(PERMISSIONS.OPPORTUNITY_BOOK), [hasPermission]);
   const canMarkOpportunityLost = useCallback(() => hasPermission(PERMISSIONS.OPPORTUNITY_MARK_LOST), [hasPermission]);
-  const canEditOpportunity = useCallback(() => hasPermission(PERMISSIONS.OPPORTUNITY_EDIT), [hasPermission]);
+  const canEditOpportunity = useCallback(() => isLeadPath ? hasPermission(PERMISSIONS.LEAD_EDIT) : hasPermission(PERMISSIONS.OPPORTUNITY_EDIT) &&
+    (!opportunity?.id || opportunity.id === 'new' || ['open', 'booked'].includes(getRecordSystemState(opportunity))), [hasPermission, opportunity, isLeadPath]);
   const canManageActivityHistory = useCallback(
     () => hasPermission(PERMISSIONS.COMMUNICATIONS_HISTORY_VIEW),
     [hasPermission]
@@ -2559,119 +2504,26 @@ const SalesDetail = () => {
 
   // Book Job Modal State
   const [isBookJobModalOpen, setIsBookJobModalOpen] = useState(false);
-  const [bookJobSendEmail, setBookJobSendEmail] = useState(true);
-  const [bookJobSendSms, setBookJobSendSms] = useState(false);
-  const [bookJobEmail, setBookJobEmail] = useState('');
-  const [bookJobPhone, setBookJobPhone] = useState('');
+  const [bookingReadiness, setBookingReadiness] = useState(null);
+  const [bookingOverrides, setBookingOverrides] = useState([]);
+  const [bookingOverrideReason, setBookingOverrideReason] = useState('');
+  const canSubmitBooking = Boolean(bookingReadiness) &&
+    (bookingReadiness.missing || []).every((name) => bookingOverrides.includes(name) &&
+      bookingReadiness.overridable_missing?.includes(name) && hasPermission(`opportunities.book_without_${name}`)) &&
+    (!bookingOverrides.length || Boolean(bookingOverrideReason.trim()));
   const [isBookingJob, setIsBookingJob] = useState(false);
 
-  const availableEmails = useMemo(() => {
-    const list = [];
-    const seen = new Set();
-    const addEmail = (email, label) => {
-      if (!email) return;
-      const cleaned = email.trim();
-      if (!cleaned || seen.has(cleaned.toLowerCase())) return;
-      seen.add(cleaned.toLowerCase());
-      list.push({ label, value: cleaned });
-    };
-    if (opportunity?.customer_details?.email) {
-      addEmail(opportunity.customer_details.email, `Customer Primary: ${opportunity.customer_details.email}`);
-    }
-    if (opportunity?.email) {
-      addEmail(opportunity.email, `Opportunity Email: ${opportunity.email}`);
-    }
-    if (opportunity?.customer_details?.contacts && Array.isArray(opportunity.customer_details.contacts)) {
-      opportunity.customer_details.contacts.forEach((contact) => {
-        if (contact.email) {
-          addEmail(contact.email, contact.relationship ? `${contact.name} (${contact.relationship}): ${contact.email}` : `${contact.name}: ${contact.email}`);
-        }
-      });
-    }
-    if (opportunity?.additional_contacts && Array.isArray(opportunity.additional_contacts)) {
-      opportunity.additional_contacts.forEach((contact) => {
-        if (contact.email) {
-          addEmail(contact.email, contact.relationship ? `${contact.name} (${contact.relationship}): ${contact.email}` : `${contact.name}: ${contact.email}`);
-        }
-      });
-    }
-    return list;
-  }, [opportunity]);
-
-  const availablePhones = useMemo(() => {
-    const list = [];
-    const seen = new Set();
-    const addPhone = (phone, label) => {
-      if (!phone) return;
-      const cleaned = phone.trim();
-      if (!cleaned || seen.has(cleaned)) return;
-      seen.add(cleaned);
-      list.push({ label, value: cleaned });
-    };
-    if (opportunity?.customer_details?.phone) {
-      addPhone(opportunity.customer_details.phone, `Customer Primary: ${opportunity.customer_details.phone}`);
-    }
-    if (opportunity?.phone) {
-      addPhone(opportunity.phone, `Opportunity Phone: ${opportunity.phone}`);
-    }
-    if (opportunity?.customer_details?.contacts && Array.isArray(opportunity.customer_details.contacts)) {
-      opportunity.customer_details.contacts.forEach((contact) => {
-        if (contact.phone) {
-          addPhone(contact.phone, contact.relationship ? `${contact.name} (${contact.relationship}): ${contact.phone}` : `${contact.name}: ${contact.phone}`);
-        }
-      });
-    }
-    if (opportunity?.additional_contacts && Array.isArray(opportunity.additional_contacts)) {
-      opportunity.additional_contacts.forEach((contact) => {
-        if (contact.phone) {
-          addPhone(contact.phone, contact.relationship ? `${contact.name} (${contact.relationship}): ${contact.phone}` : `${contact.name}: ${contact.phone}`);
-        }
-      });
-    }
-    return list;
-  }, [opportunity]);
-
-  useEffect(() => {
-    if (isBookJobModalOpen) {
-      if (availableEmails.length > 0 && !bookJobEmail) setBookJobEmail(availableEmails[0].value);
-      if (availablePhones.length > 0 && !bookJobPhone) setBookJobPhone(availablePhones[0].value);
-    }
-  }, [isBookJobModalOpen, availableEmails, availablePhones]);
-
-  const confirmBookJob = async (allowWithoutDeposit = false, overrideSendEmail = null, overrideSendSms = null) => {
+  const confirmBookJob = async () => {
+    if (!canSubmitBooking || getRecordSystemState(opportunity) !== 'open' || !hasPermission('opportunities.book')) return;
     setIsBookingJob(true);
     try {
-      const sendEmail = overrideSendEmail !== null ? overrideSendEmail : bookJobSendEmail;
-      const sendSms = overrideSendSms !== null ? overrideSendSms : bookJobSendSms;
-      const payload = {
-        send_email: sendEmail,
-        send_sms: sendSms,
-        to_email: sendEmail ? (bookJobEmail || '') : '',
-        to_phone: sendSms ? (bookJobPhone || '') : '',
-      };
-      if (allowWithoutDeposit) {
-        payload.allow_without_deposit = true;
-      }
-      
-      const updated = await bookOpportunityJob(opportunity.id, payload);
-      setOpportunity((prev) => ({ ...prev, ...(updated?.data || updated || {}) }));
+      await bookOpportunityJob(opportunity.id, { override_requirements: bookingOverrides, override_reason: bookingOverrideReason.trim() });
+      await fetchOpportunity();
       setIsBookJobModalOpen(false);
-      setToast({ type: 'success', text: 'Job successfully booked.' });
-    } catch (err) {
-      const code = err?.response?.data?.code;
-      const canOverride = Boolean(err?.response?.data?.can_override);
-      if (code === 'deposit_required' && canOverride) {
-        const confirmOverride = window.confirm('Deposit payment is not recorded. Book this job anyway?');
-        if (confirmOverride) {
-          return confirmBookJob(true);
-        }
-      } else {
-        const msg = err?.response?.data?.detail || 'Failed to book job.';
-        setToast({ type: 'error', text: String(msg) });
-      }
-    } finally {
-      setIsBookingJob(false);
-    }
+      setToast({ type: 'success', text: 'Opportunity booked.' });
+    } catch (error) {
+      setToast({ type: 'error', text: getErrorMessage(error, 'Could not book this opportunity. Check booking requirements.') });
+    } finally { setIsBookingJob(false); }
   };
 
   // Tracks display labels for async-selected spec fields so the panel shows
@@ -3019,7 +2871,7 @@ const SalesDetail = () => {
         label: st.name ?? st.label ?? 'Unknown'
       }));
     }
-    return SUB_JOB_SERVICE_OPTIONS;
+    return [];
   }, [serviceTypes]);
 
   const [referralSources, setReferralSources] = useState([]);
@@ -4132,6 +3984,8 @@ const SalesDetail = () => {
       // Further options are fetched on demand via AsyncSelect pagination
       fetchSafe(getReferralSourceLookups, setReferralSources, 'referral sources'),
       fetchSafe(getMoverSizeLookups, setMoverSizes, 'move sizes'),
+      fetchSafe(getMoveTypeLookups, setMoverTypes, 'company move types'),
+      fetchSafe(getServices, setServiceTypes, 'company service types'),
       fetchSafe(getBranchLookups, setBranches, 'branches'),
     ]);
   };
@@ -4199,65 +4053,6 @@ const SalesDetail = () => {
     };
   }, [statusBranchId, isLeadPath, id]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const recordId = recordRequestRef.current;
-    const loadBranchTypes = async () => {
-      try {
-        const params = statusBranchId ? { branch: statusBranchId } : {};
-        const [moverTypesRes, servicesRes] = await Promise.allSettled([
-          getMoveTypeLookups(params),
-          getServices(params)
-        ]);
-        if (cancelled || recordId !== recordRequestRef.current) return;
-        
-        if (moverTypesRes.status === 'fulfilled') {
-          setMoverTypes(asList(moverTypesRes.value));
-        } else {
-          setMoverTypes([]);
-        }
-        
-        if (servicesRes.status === 'fulfilled') {
-          setServiceTypes(asList(servicesRes.value));
-        } else {
-          setServiceTypes([]);
-        }
-      } catch (err) {
-        console.warn('Failed to load branch types:', err);
-      }
-    };
-    loadBranchTypes();
-    return () => {
-      cancelled = true;
-    };
-  }, [statusBranchId, isLeadPath, id]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const recordId = recordRequestRef.current;
-    const loadOpportunityLossReasons = async () => {
-      try {
-        const response = await getOpportunityLossReasonLookups({ limit: 100 });
-        if (cancelled || recordId !== recordRequestRef.current) return;
-        const rows = asList(response);
-        setLostReasonOptions(rows);
-      } catch (err) {
-        console.warn('Failed to load opportunity loss reasons:', err);
-        try {
-          const fallback = await getOpportunityLossReasonLookupsPage('', 0, 100);
-          if (cancelled || recordId !== recordRequestRef.current) return;
-          setLostReasonOptions(asList(fallback));
-        } catch (fallbackErr) {
-          console.warn('Fallback opportunity loss reason lookup failed:', fallbackErr);
-          if (!cancelled && recordId === recordRequestRef.current) setLostReasonOptions([]);
-        }
-      }
-    };
-    loadOpportunityLossReasons();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
 
   const loadEmailProviderStatus = async () => {
@@ -5545,30 +5340,15 @@ const SalesDetail = () => {
     }
   };
 
-  const workflowActions = useMemo(
-    () => {
-      const actions = buildWorkflowActions({
-        isLead: view.isLead,
-        isNewRecord: opportunity?.id === 'new',
-        workflowStage: opportunity?.workflow_stage,
-        estimateSummary,
-        canDuplicateOpportunity: canDuplicateOpportunity(),
-        canBookOpportunity: canBookOpportunity(),
-        canMarkOpportunityLost: canMarkOpportunityLost(),
-        canCreateOpportunity: canCreateOpportunity(),
-        canEditOpportunity: canEditOpportunity(),
-      });
-      return actions;
-    },
-    [canBookOpportunity, canCreateOpportunity, canDuplicateOpportunity, canEditOpportunity, canMarkOpportunityLost, estimateSummary, opportunity?.id, opportunity?.workflow_stage, view.isLead]
-  );
+  const workflowActions = useMemo(() => getRecordWorkflowActions(opportunity, {
+    isLead: view.isLead, hasPermission,
+  }), [opportunity, view.isLead, hasPermission]);
 
   const accountingEnabled = useMemo(() => {
     if (isCreation) return false;
-    const stage = String(opportunity?.workflow_stage || '').toLowerCase();
-    // Accounting is only relevant once the opportunity is booked into a job (and later stages).
-    return ['booked', 'confirmed', 'completed', 'canceled'].includes(stage);
-  }, [isCreation, opportunity?.workflow_stage]);
+    const stage = getRecordSystemState(opportunity);
+    return ['booked', 'completed', 'closed', 'cancelled'].includes(stage);
+  }, [isCreation, opportunity]);
 
   useEffect(() => {
     if (activeTab !== 'Accounting') return;
@@ -6955,11 +6735,27 @@ const SalesDetail = () => {
       return;
     }
 
-    if ((actionKey === 'lost' || actionKey === 'cancel') && !String(reasonOverride || '').trim()) {
+    const permitted = getRecordWorkflowActions(opportunity, { isLead: view.isLead, hasPermission });
+    if (!permitted.some((action) => action.key === actionKey)) {
+      setToast({ type: 'error', text: 'This action is not available for the current status or permissions.' });
+      return;
+    }
+    if (['lost', 'cancel', 'disqualify', 'restore'].includes(actionKey) && !String(reasonOverride || '').trim()) {
       setSelectedLostReason('');
       setReasonText('');
       setReasonAction(actionKey);
-      setIsReasonModalOpen(true);
+      setLostReasonOptions([]);
+      if (actionKey === 'restore') { setIsReasonModalOpen(true); return; }
+      try {
+        const response = await (actionKey === 'cancel' ? getCancellationReasons()
+          : actionKey === 'disqualify' ? getDisqualificationReasons()
+          : getOpportunityLossReasonLookups({ active: true }));
+        setLostReasonOptions(asList(response).filter((row) => row.is_active !== false &&
+          (actionKey !== 'lost' || !row.applies_to || row.applies_to === 'both' || row.applies_to === (view.isLead ? 'lead' : 'opportunity'))));
+        setIsReasonModalOpen(true);
+      } catch (error) {
+        setToast({ type: 'error', text: getErrorMessage(error, 'Could not load reasons. Please retry.') });
+      }
       return;
     }
 
@@ -6975,31 +6771,27 @@ const SalesDetail = () => {
           lost_reason_id: Number(selectedLostReason),
           note: String(reasonText || '').trim(),
         });
+      } else if (view.isLead && actionKey === 'disqualify') {
+        updated = await disqualifyLead(opportunity.id, { disqualification_reason_id: Number(selectedLostReason), note: String(reasonText || '').trim() });
+      } else if (view.isLead && actionKey === 'restore') {
+        updated = await restoreLead(opportunity.id, { reason: workflowReason });
+      } else if (view.isLead && actionKey === 'archive') {
+        updated = await archiveLead(opportunity.id, 'Archived from CRM detail page');
+      } else if (view.isLead && ['start', 'qualify'].includes(actionKey)) {
+        updated = await (actionKey === 'start' ? startLead(opportunity.id) : qualifyLead(opportunity.id));
       } else if (view.isLead && actionKey === 'reopen') {
         setLostReasonOverride('');
         updated = await reopenLead(opportunity.id, { reason: 'Reopened from CRM detail page' });
       } else if (actionKey === 'book') {
+        setBookingOverrides([]);
+        setBookingOverrideReason('');
+        setBookingReadiness(await getOpportunityBookingReadiness(opportunity.id));
         setIsBookJobModalOpen(true);
         setIsSaving(false);
         return;
-      } else if (actionKey === 'confirm') {
-        updated = await confirmOpportunityJob(opportunity.id);
-        try {
-          const jobs = await api.jobs.getJobs({ opportunity: opportunity.id });
-          const rows = Array.isArray(jobs?.results) ? jobs.results : Array.isArray(jobs) ? jobs : [];
-          const job = rows[0] || null;
-          if (job?.id) {
-            navigate(`/jobs/${job.id}`);
-            return;
-          }
-          navigate('/jobs');
-          return;
-        } catch {
-          // If dispatch lookup fails, fall back to current page and normal refresh.
-        }
       } else if (actionKey === 'cancel') {
         updated = await cancelOpportunityJob(opportunity.id, {
-          reason: workflowReason || 'Canceled from CRM detail page',
+          cancellation_reason_id: Number(selectedLostReason), note: String(reasonText || '').trim(),
         });
       } else if (actionKey === 'unbook') {
         setUnbookReason(workflowReason || '');
@@ -7012,7 +6804,7 @@ const SalesDetail = () => {
       } else if (actionKey === 'lost') {
         setLostReasonOverride(workflowReason || 'Marked lost from CRM detail page');
         updated = await markOpportunityLost(opportunity.id, {
-          reason: workflowReason || 'Marked lost from CRM detail page',
+          lost_reason_id: Number(selectedLostReason), note: String(reasonText || '').trim(),
         });
       } else if (actionKey === 'reopen') {
         setLostReasonOverride('');
@@ -7021,15 +6813,21 @@ const SalesDetail = () => {
         return;
       }
 
-      if (actionKey === 'lost' || actionKey === 'cancel') {
+      if (['lost', 'cancel', 'disqualify', 'restore'].includes(actionKey)) {
         setIsReasonModalOpen(false);
         setReasonAction('');
         setSelectedLostReason('');
         setReasonText('');
       }
 
-      setOpportunity(updated);
-      await fetchOpportunity();
+      if (view.isLead) {
+        // The command returns the persisted lifecycle state. Preserve detail
+        // fields and avoid replacing it with an older follow-up GET response.
+        setOpportunity((previous) => ({ ...previous, ...updated }));
+      } else {
+        setOpportunity(updated);
+        await fetchOpportunity();
+      }
       setToast({ type: 'success', text: 'Workflow updated successfully.' });
       setTimeout(() => setToast({ type: '', text: '' }), 2500);
     } catch (err) {
@@ -7042,17 +6840,20 @@ const SalesDetail = () => {
   const handleAdvanceLead = useCallback(async () => {
     setIsSaving(true);
     try {
-      const state = opportunity?.system_state || opportunity?.status;
+      const state = getRecordSystemState(opportunity, true);
+      const allowed = getRecordWorkflowActions(opportunity, { isLead: true, hasPermission }).some((action) => action.key === (state === 'new' ? 'start' : 'qualify'));
+      if (!allowed) throw new Error('This lead transition is not available.');
       const updated = await (state === 'new' ? startLead(opportunity.id) : qualifyLead(opportunity.id));
-      setOpportunity(updated);
-      setToast({ type: 'success', text: state === 'new' ? 'Lead started.' : 'Lead qualified. You can now create an estimate.' });
+      setOpportunity((previous) => ({ ...previous, ...updated }));
+      setToast({ type: 'success', text: state === 'new' ? 'Lead started.' : 'Lead qualified. You can now convert it to an opportunity.' });
     } catch (error) { setToast({ type: 'error', text: getErrorMessage(error, 'Could not update the lead workflow.') }); }
     finally { setIsSaving(false); }
-  }, [opportunity?.id, opportunity?.status, opportunity?.system_state]);
+  }, [opportunity, hasPermission]);
 
   const handleCreateEstimate = useCallback(async (options = {}) => {
     if (!opportunity?.id || opportunity.id === 'new') return;
-    if ((opportunity.system_state || opportunity.status) !== 'qualified') { setToast({ type: 'error', text: 'Qualify this lead before creating an estimate.' }); return; }
+    if (!hasPermission('leads.convert')) { setToast({ type: 'error', text: 'You do not have permission to convert this lead.' }); return; }
+    if (getRecordSystemState(opportunity, true) !== 'qualified') { setToast({ type: 'error', text: 'Qualify this lead before converting it to an opportunity.' }); return; }
     setIsSaving(true);
     setToast({ type: '', text: '' });
     try {
@@ -7061,7 +6862,7 @@ const SalesDetail = () => {
       setConversionReview(null);
       const convertedOpportunity = res?.opportunity || res?.data?.opportunity || null;
       const oppId = convertedOpportunity?.id;
-      setToast({ type: 'success', text: 'Lead converted! Opening estimate...' });
+      setToast({ type: 'success', text: 'Lead converted. Opening the opportunity...' });
       if (convertedOpportunity) {
         navigate(getLegacyRecordEstimateTabPath('opportunity', convertedOpportunity.id, 'charges'));
       } else if (oppId) {
@@ -7083,7 +6884,7 @@ const SalesDetail = () => {
       setToast({ type: 'error', text: getErrorMessage(err, 'Failed to convert lead.') });
       setIsSaving(false);
     }
-  }, [navigate, opportunity?.id, opportunity?.system_state, opportunity?.status]);
+  }, [navigate, opportunity, hasPermission]);
 
   const saveEstimateRequirementsToOpportunity = useCallback(async (target) => {
     if (isLeadPath || !opportunity?.id || opportunity.id === 'new') {
@@ -7322,7 +7123,7 @@ const SalesDetail = () => {
       value: activeSpecs.move_type, 
       displayValue: opportunity?.move_type_name || resolveSpecLookupLabel(activeSpecs.move_type, moverTypes) || resolveSpecLookupLabel(activeSpecs.move_type, MOVE_TYPE_OPTIONS), 
       icon: "map", 
-      options: moverTypes.length ? moverTypes : isLeadPath ? [] : MOVE_TYPE_OPTIONS 
+      options: moverTypes
     },
     { 
       id: "service_type", 
@@ -7330,7 +7131,7 @@ const SalesDetail = () => {
       value: activeSpecs.service_type, 
       displayValue: opportunity?.service_type_name || resolveSpecLookupLabel(activeSpecs.service_type, serviceTypes) || resolveSpecLookupLabel(activeSpecs.service_type, SERVICE_TYPE_OPTIONS), 
       icon: "package", 
-      options: serviceTypes.length ? serviceTypes : isLeadPath ? [] : SERVICE_TYPE_OPTIONS 
+      options: serviceTypes
     },
     { 
       id: "branch", 
@@ -7406,28 +7207,27 @@ const SalesDetail = () => {
 
 	  const headerActions = useMemo(() => {
 	    if (opportunity?.id === 'new') return [];
-	    if (!canViewOpportunity()) return [];
+	    if (!(view.isLead ? hasPermission(PERMISSIONS.LEAD_VIEW) : canViewOpportunity())) return [];
 
 	    if (view.isLead) {
 	      if (String(opportunity?.workflow_stage || '').toLowerCase() === 'opportunity' || opportunity?.opportunity_id || opportunity?.opportunity) {
 	        return [];
 	      } else {
-	        if (!canCreateOpportunity()) return [];
           const leadState = opportunity.system_state || opportunity.status;
-          if (['new', 'in_progress'].includes(leadState)) return [{ type: 'primary', label: leadState === 'new' ? 'Start lead' : 'Qualify lead', icon: 'check', onClick: handleAdvanceLead }];
-          if (leadState !== 'qualified') return [];
+          if (['new', 'in_progress'].includes(leadState)) return hasPermission(leadState === 'new' ? 'leads.update' : 'leads.qualify') ? [{ type: 'primary', label: leadState === 'new' ? 'Start lead' : 'Qualify lead', icon: 'check', onClick: handleAdvanceLead }] : [];
+          if (leadState !== 'qualified' || !hasPermission('leads.convert')) return [];
 
 	        return [
 	          {
 	            type: 'primary',
-	            label: 'Create Estimate',
+	            label: 'Convert to Opportunity',
 	            icon: 'plus',
 	            onClick: handleCreateEstimate,
 	          },
 	        ];
 	      }
 	    } else {
-	      if (!estimateSummary) {
+	      if (!estimateSummary && ['open', 'booked'].includes(getRecordSystemState(opportunity))) {
 	        return [
 	          {
 	            type: 'primary',
@@ -7445,6 +7245,9 @@ const SalesDetail = () => {
 	    handleCreateOpportunityEstimate,
 	    opportunity?.id,
 	    opportunity?.workflow_stage,
+      opportunity?.system_state,
+      opportunity?.status,
+      hasPermission,
 	    opportunity?.opportunity_id,
 	    opportunity?.opportunity,
 	    view.isLead,
@@ -7480,9 +7283,9 @@ const SalesDetail = () => {
     if (canCreateTask()) {
       items.push({ label: 'Add Follow-up', icon: 'calendar-plus', onClick: openCreateFollowUpModal });
     }
-    if (!estimateSummary && canCreateOpportunity()) {
+    if (!estimateSummary && (view.isLead ? getRecordSystemState(opportunity, true) === 'qualified' && hasPermission('leads.convert') : ['open', 'booked'].includes(getRecordSystemState(opportunity)) && canCreateOpportunity())) {
       items.push({ 
-        label: "Create Estimate", 
+        label: view.isLead ? "Convert to Opportunity" : "Create Estimate",
         icon: "plus", 
         onClick: () => {
           if (view.isLead) {
@@ -7518,20 +7321,6 @@ const SalesDetail = () => {
       },
     });
 
-    if (canEditOpportunity() && String(opportunity?.workflow_stage || '').toLowerCase() === 'booked') {
-      items.push({ type: 'separator' });
-      items.push({ type: 'label', label: 'Booking' });
-      items.push({
-        label: 'Unbook Job',
-        icon: 'calendar-x',
-        onClick: () => {
-          setUnbookReason('');
-          setUnbookNote('');
-          setIsUnbookModalOpen(true);
-        },
-      });
-    }
-
     if (opportunity?.id && opportunity.id !== 'new' && canDuplicateOpportunity()) {
       items.push({ type: 'separator' });
       items.push({ type: 'label', label: 'Record' });
@@ -7545,10 +7334,12 @@ const SalesDetail = () => {
       });
     }
 
-    if (workflowActions?.length) {
+    const menuWorkflowActions = workflowActions.filter((action) =>
+      !headerActions.some((primary) => primary.label === action.label));
+    if (menuWorkflowActions.length) {
       items.push({ type: 'separator' });
       items.push({ type: 'label', label: 'Workflow' });
-      workflowActions.forEach((action) => {
+      menuWorkflowActions.forEach((action) => {
         const icon =
           action.key === 'lost'
             ? 'x-circle'
@@ -7601,7 +7392,7 @@ const SalesDetail = () => {
         return canBookOpportunity();
       }
       if (item.label === 'Mark Lost') {
-        return canMarkOpportunityLost();
+        return view.isLead ? hasPermission('leads.close') : canMarkOpportunityLost();
       }
       if (item.label === 'Activities') {
         return canManageActivityHistory();
@@ -7624,6 +7415,7 @@ const SalesDetail = () => {
     estimateSummary,
     handleCreateEstimate,
     handleCreateOpportunityEstimate,
+    headerActions,
     handleOpenOpportunityInvoicePreview,
     handleRefinalizeInvoice,
     handleWorkflowAction,
@@ -7990,33 +7782,23 @@ const SalesDetail = () => {
   };
 
   const submitWorkflowReason = async () => {
-    const trimmedReason = String(reasonText || '').trim();
-    if (view.isLead && reasonAction === 'lost' && !selectedLostReason) {
-      setToast({ type: 'error', text: 'Select a lost reason.' });
+    if (reasonAction === 'restore') {
+      const reason = String(reasonText || '').trim();
+      if (!reason) { setToast({ type: 'error', text: 'Enter a reason to restore this lead.' }); return; }
+      await handleWorkflowAction('restore', reason);
       return;
     }
-    const selectedReasonLabel = view.isLead
-      ? String(lostReasonOptions.find((option) => String(option.id) === String(selectedLostReason))?.name || '').trim()
-      : String(selectedLostReason || '').trim();
-    const finalReason = reasonAction === 'cancel'
-      ? trimmedReason
-      : [selectedReasonLabel, trimmedReason].filter(Boolean).join(': ');
-
-    if (!finalReason) {
-      setToast({
-        type: 'error',
-        text: reasonAction === 'cancel'
-          ? 'Please enter a reason before canceling this job.'
-          : 'Please select or enter a reason before marking this as lost.',
-      });
-      return;
+    const selected = lostReasonOptions.find((row) => String(row.id) === String(selectedLostReason));
+    if (!selected) { setToast({ type: 'error', text: 'Select a reason.' }); return; }
+    if (selected.requires_note && !String(reasonText || '').trim()) {
+      setToast({ type: 'error', text: 'Notes are required for this reason.' }); return;
     }
-
-    await handleWorkflowAction(reasonAction || 'lost', finalReason);
+    await handleWorkflowAction(reasonAction, selected.name || selected.label || 'Selected reason');
   };
 
   const submitUnbook = async () => {
     if (!opportunity?.id || opportunity.id === 'new') return;
+    if (getRecordSystemState(opportunity) !== 'booked' || !hasPermission('opportunities.reopen')) return;
 
     const reason = String(unbookReason || '').trim();
     const note = String(unbookNote || '').trim();
@@ -8547,7 +8329,7 @@ const SalesDetail = () => {
   const mainColumnClass = showSidebarCards
     ? 'col-span-12 lg:col-span-8 space-y-2'
     : 'col-span-12 space-y-2';
-  const isOpportunityLost = String(opportunity?.workflow_stage || opportunity?.status || '').toLowerCase() === 'lost';
+  const isOpportunityLost = getRecordSystemState(opportunity, isLeadPath) === 'lost';
   const lockedOpportunityReason = 'This opportunity is lost, so estimate and related tabs are locked.';
   const filesTargetSpec = resolveFilesTargetSpec({
     isLeadPath,
@@ -8604,8 +8386,8 @@ const SalesDetail = () => {
           }
 	        subtitle=""
 	        branchLogoUrl={selectedBranchLogoUrl}
-	        status={getWorkflowStageLabel(opportunity?.workflow_stage || (isLeadPath ? 'new_lead' : 'opportunity'))}
-	        statusTone={toneForWorkflowStage(opportunity?.workflow_stage)}
+	        status={getWorkflowStageLabel(getRecordSystemState(opportunity, isLeadPath))}
+	        statusTone={toneForWorkflowStage(getRecordSystemState(opportunity, isLeadPath))}
 	        statusColor={undefined}
 	        id=""
 	        onBack={handleBack}
@@ -10382,7 +10164,7 @@ const SalesDetail = () => {
                           className={`${workspaceInputCls} cursor-pointer`}
                         >
                           <option value="">Select service type...</option>
-                          {(serviceTypes.length ? serviceTypes : SERVICE_TYPE_OPTIONS).map((option) => (
+                          {serviceTypes.map((option) => (
                             <option key={String(option.id ?? option.value ?? option.code ?? option.label ?? option.name)} value={String(option.id ?? option.value ?? option.code ?? option.label ?? option.name)}>
                               {String(option.name || option.label || option.value || option.id)}
                             </option>
@@ -10399,7 +10181,7 @@ const SalesDetail = () => {
                           className={`${workspaceInputCls} cursor-pointer`}
                         >
                           <option value="">Select move type...</option>
-                          {(moverTypes.length ? moverTypes : MOVE_TYPE_OPTIONS).map((option) => (
+                          {moverTypes.map((option) => (
                             <option key={String(option.id ?? option.value ?? option.code ?? option.label ?? option.name)} value={String(option.id ?? option.value ?? option.code ?? option.label ?? option.name)}>
                               {String(option.name || option.label || option.value || option.id)}
                             </option>
@@ -10572,18 +10354,20 @@ const SalesDetail = () => {
           <Card className="w-full max-w-lg p-0 overflow-hidden rounded-3xl border-0 shadow-2xl">
              <div className={reasonAction === 'cancel' ? 'bg-amber-600 text-white px-6 py-4' : 'bg-rose-600 text-white px-6 py-4'}>
                 <h3 className="font-black uppercase tracking-tight">
-                  {reasonAction === 'cancel' ? 'Cancel Job' : 'Mark as Lost'}
+                  {reasonAction === 'cancel' ? 'Cancel Job' : reasonAction === 'disqualify' ? 'Disqualify Lead' : reasonAction === 'restore' ? 'Restore Lead' : 'Mark as Lost'}
                 </h3>
              </div>
              <div className="p-6 space-y-4">
                 <p className="text-sm text-ink-500">
                   {reasonAction === 'cancel'
                     ? 'Please provide a reason why this job is being canceled. This helps us keep records accurate.'
-                    : 'Please provide a reason why this deal was lost. This helps us improve our sales process.'}
+                    : reasonAction === 'restore' ? 'Explain why this lead should be restored to In Progress.'
+                    : reasonAction === 'disqualify' ? 'Select why this inquiry is not a valid sales lead.'
+                    : 'Select why this lead or opportunity was lost.'}
                 </p>
-                {reasonAction !== 'cancel' && (
+                {reasonAction !== 'restore' && (
                   <label className="block space-y-1">
-                    <span className="label-eyebrow text-ink-400">Why was the opportunity lost?</span>
+                    <span className="label-eyebrow text-ink-400">Reason</span>
                     <select
                       value={selectedLostReason}
                       onChange={(e) => setSelectedLostReason(e.target.value)}
@@ -10591,9 +10375,9 @@ const SalesDetail = () => {
                     >
                       <option value="">Please select one...</option>
                       {lostReasonOptions
-                        .filter((option) => !view.isLead || option.applies_to === 'lead' || option.applies_to === 'both')
+                        .filter((option) => option.is_active !== false)
                         .map((option) => (
-                          <option key={String(option?.id || option?.label || '')} value={String(view.isLead ? option.id : option.label || option.name || '')}>
+                          <option key={String(option?.id || option?.label || '')} value={String(option.id)}>
                             {String(option?.label || option?.name || '')}
                           </option>
                         ))}
@@ -10604,7 +10388,7 @@ const SalesDetail = () => {
                   value={reasonText} 
                   onChange={e => setReasonText(e.target.value)} 
                   className={inputCls + " h-32"} 
-                  placeholder={reasonAction === 'cancel' ? 'Enter cancellation reason...' : 'Add optional notes...'}
+                  placeholder={reasonAction === 'restore' ? 'Enter restoration reason...' : 'Add notes (required for some reasons)...'}
                 />
                 <div className="flex justify-end gap-2">
                   <GhostBtn onClick={() => {
@@ -10618,7 +10402,7 @@ const SalesDetail = () => {
                     onClick={submitWorkflowReason}
                     loading={isSaving}
                   >
-                    {reasonAction === 'cancel' ? 'Confirm Cancel' : 'Confirm Loss'}
+                    {reasonAction === 'cancel' ? 'Confirm Cancel' : reasonAction === 'disqualify' ? 'Confirm Disqualification' : reasonAction === 'restore' ? 'Confirm Restore' : 'Confirm Loss'}
                   </PrimaryBtn>
                 </div>
              </div>
@@ -11569,144 +11353,30 @@ const SalesDetail = () => {
       ) : null}
 
       {isBookJobModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/20 p-4">
-            <div className="w-full max-w-lg bg-white rounded-3xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
-                <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-white">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2.5 bg-blue-50 text-blue-600 rounded-2xl">
-                            <Send size={24} strokeWidth={2} />
-                        </div>
-                        <div>
-                            <h2 className="text-xl font-black text-slate-900 tracking-tight">Book Move</h2>
-                            <p className="text-xs text-slate-500 font-semibold mt-0.5">Send booking confirmation instantly</p>
-                        </div>
-                    </div>
-                    <button 
-                        onClick={() => setIsBookJobModalOpen(false)}
-                        className="p-2.5 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-2xl transition-colors"
-                    >
-                        <X size={20} strokeWidth={2.5} />
-                    </button>
-                </div>
-                
-                <div className="p-6 space-y-6 overflow-y-auto">
-                    <div className="space-y-3">
-                        <label className="text-xs font-bold uppercase tracking-wider text-black">Delivery Channels</label>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <label className={`flex items-center gap-3 rounded-2xl border p-4 text-sm font-bold cursor-pointer transition-all ${
-                                bookJobSendEmail 
-                                    ? 'border-blue-200 bg-blue-50/50 text-blue-800' 
-                                    : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
-                            }`}>
-                                <input
-                                    type="checkbox"
-                                    checked={bookJobSendEmail}
-                                    onChange={(e) => setBookJobSendEmail(e.target.checked)}
-                                    className="h-5 w-5 rounded border-slate-300 text-blue-600 focus:ring-blue-600"
-                                />
-                                <span>Email</span>
-                            </label>
-                            <label className={`flex items-center gap-3 rounded-2xl border p-4 text-sm font-bold cursor-pointer transition-all ${
-                                bookJobSendSms 
-                                    ? 'border-blue-200 bg-blue-50/50 text-blue-800' 
-                                    : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
-                            }`}>
-                                <input
-                                    type="checkbox"
-                                    checked={bookJobSendSms}
-                                    onChange={(e) => setBookJobSendSms(e.target.checked)}
-                                    className="h-5 w-5 rounded border-slate-300 text-blue-600 focus:ring-blue-600"
-                                />
-                                <span>SMS</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    {bookJobSendEmail && (
-                        <div className="space-y-3">
-                            <div className="space-y-2">
-                                <label className="text-xs font-bold uppercase tracking-wider text-black">Recipient Email</label>
-                                {availableEmails.length > 0 && (
-                                    <select
-                                        value={bookJobEmail}
-                                        onChange={(e) => setBookJobEmail(e.target.value)}
-                                        className="w-full rounded-2xl border-2 border-slate-200 px-4 py-3 text-sm font-bold text-black focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 transition-all mb-2 bg-white"
-                                    >
-                                        {availableEmails.map((item) => (
-                                            <option key={item.value} value={item.value}>
-                                                {item.label}
-                                            </option>
-                                        ))}
-                                        <option value="">Custom Email...</option>
-                                    </select>
-                                )}
-                                {(!availableEmails.length || !availableEmails.some(e => e.value === bookJobEmail)) && (
-                                    <input
-                                        type="email"
-                                        value={bookJobEmail}
-                                        onChange={(e) => setBookJobEmail(e.target.value)}
-                                        placeholder="Enter recipient email"
-                                        className="w-full rounded-2xl border-2 border-slate-200 px-4 py-3 text-sm font-bold text-black placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 transition-all"
-                                    />
-                                )}
-                            </div>
-                        </div>
-                    )}
-
-                    {bookJobSendSms && (
-                        <div className="space-y-3">
-                            <div className="space-y-2">
-                                <label className="text-xs font-bold uppercase tracking-wider text-black">Recipient Phone</label>
-                                {availablePhones.length > 0 && (
-                                    <select
-                                        value={bookJobPhone}
-                                        onChange={(e) => setBookJobPhone(e.target.value)}
-                                        className="w-full rounded-2xl border-2 border-slate-200 px-4 py-3 text-sm font-bold text-black focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 transition-all mb-2 bg-white"
-                                    >
-                                        {availablePhones.map((item) => (
-                                            <option key={item.value} value={item.value}>
-                                                {item.label}
-                                            </option>
-                                        ))}
-                                        <option value="">Custom Phone...</option>
-                                    </select>
-                                )}
-                                {(!availablePhones.length || !availablePhones.some(p => p.value === bookJobPhone)) && (
-                                    <input
-                                        type="tel"
-                                        value={bookJobPhone}
-                                        onChange={(e) => setBookJobPhone(e.target.value)}
-                                        placeholder="Enter recipient phone"
-                                        className="w-full rounded-2xl border-2 border-slate-200 px-4 py-3 text-sm font-bold text-black placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 transition-all"
-                                    />
-                                )}
-                            </div>
-                        </div>
-                    )}
-
-                    {(bookJobSendEmail || bookJobSendSms) && (
-                        <p className="text-xs text-slate-500 font-semibold mt-1 px-1">
-                            The booking confirmation template will be used.
-                        </p>
-                    )}
-                </div>
-                <div className="flex items-center justify-end gap-3 p-6 bg-slate-50 border-t border-slate-100">
-                    <GhostBtn onClick={() => setIsBookJobModalOpen(false)}>Cancel</GhostBtn>
-                    <GhostBtn 
-                        onClick={() => confirmBookJob(false, false, false)}
-                        disabled={isBookingJob}
-                    >
-                        Skip & Book
-                    </GhostBtn>
-                    <PrimaryBtn
-                        onClick={() => confirmBookJob(false)}
-                        disabled={isBookingJob || (!bookJobSendEmail && !bookJobSendSms)}
-                        loading={isBookingJob}
-                    >
-                        Send & Book Job
-                    </PrimaryBtn>
-                </div>
-          </div>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-heading/25 p-4">
+          <Card className="w-full max-w-lg space-y-4 p-6">
+            <h2 className="text-xl font-bold">Book Opportunity</h2>
+            <p>Booking creates operational jobs from the planned jobs.</p>
+            {bookingReadiness?.ready ? <p>All booking requirements are satisfied.</p> : (
+              <div role="alert">
+                <p>Complete these requirements before booking:</p>
+                <ul>{(bookingReadiness?.missing || []).map((requirement) => <li key={requirement}>{getWorkflowStageLabel(requirement)}</li>)}</ul>
+              </div>
+            )}
+            {(bookingReadiness?.overridable_missing || []).filter((name) => hasPermission(`opportunities.book_without_${name}`)).map((name) => (
+              <label key={name} className="flex gap-2">
+                <input type="checkbox" checked={bookingOverrides.includes(name)} onChange={(event) => setBookingOverrides((previous) => event.target.checked ? [...previous, name] : previous.filter((item) => item !== name))} />
+                Override {getWorkflowStageLabel(name)} requirement
+              </label>
+            ))}
+            {bookingOverrides.length > 0 && <label className="block">Override reason
+              <textarea aria-label="Booking override reason" value={bookingOverrideReason} onChange={(event) => setBookingOverrideReason(event.target.value)} className={inputCls} />
+            </label>}
+            <div className="flex justify-end gap-2">
+              <GhostBtn onClick={() => setIsBookJobModalOpen(false)} disabled={isBookingJob}>Cancel</GhostBtn>
+              <PrimaryBtn onClick={confirmBookJob} disabled={!canSubmitBooking} loading={isBookingJob}>Book Opportunity</PrimaryBtn>
+            </div>
+          </Card>
         </div>
       )}
 

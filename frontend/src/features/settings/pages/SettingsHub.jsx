@@ -18,6 +18,7 @@ import {
   Mail,
   MapPin,
   MessageSquare,
+  Package,
   PackageOpen,
   Plug,
   Search,
@@ -40,6 +41,7 @@ import { SETTINGS_TAB_PERMISSIONS } from "../../../shared/permissions/registry";
 // Keep default landing tab synchronously loaded for zero-delay initial paint
 import CompanySettings from "../components/CompanySettings";
 import IntegrationSettings from "../components/IntegrationSettings";
+import InventoryWorkflowSettings from "../components/InventoryWorkflowSettings";
 
 // Lazy-load all non-default tabs to dramatically reduce initial Settings bundle size and load time
 const BranchSettings = React.lazy(() => import("../components/BranchSettings"));
@@ -167,9 +169,10 @@ const SETTINGS_GROUPS = [
     shortLabel: "Moves",
     icon: Boxes,
     tabs: [
-      { id: "mover-types", label: "Mover Types", description: "Residential and commercial rules.", icon: Truck, render: (branchId) => <MoverTypeSettings branchId={branchId} /> },
-      { id: "service-types", label: "Service Types", description: "Moving and packing services.", icon: Boxes, render: (branchId) => <ServiceTypeSettings branchId={branchId} /> },
+      { id: "mover-types", label: "Mover Types", description: "Residential and commercial rules.", icon: Truck, render: () => <MoverTypeSettings /> },
+      { id: "service-types", label: "Service Types", description: "Moving and packing services.", icon: Boxes, render: () => <ServiceTypeSettings /> },
       { id: "move-sizes", label: "Move Sizes", description: "Home volume classifications.", icon: SlidersHorizontal, render: (branchId) => <MoverSizeSettings branchId={branchId} /> },
+      { id: "inventory", label: "Inventory Helpers", description: "Room templates, item catalog helpers, and default weights.", icon: Package, render: (branchId) => <InventoryWorkflowSettings branchId={branchId} /> },
     ],
   },
   {
@@ -229,6 +232,9 @@ const LEGACY_ROUTES = {
   "service-types": ["moves", "service-types"],
   "mover-sizes": ["moves", "move-sizes"],
   "move-sizes": ["moves", "move-sizes"],
+  inventory: ["moves", "inventory"],
+  "room-templates": ["moves", "inventory"],
+  "item-templates": ["moves", "inventory"],
   communications: ["communications", "setup"],
   "communication-templates": ["communications", "templates"],
 };
@@ -304,7 +310,7 @@ export default function SettingsHub() {
       return;
     }
     const legacy = LEGACY_ROUTES[effectiveMainGroup];
-    if (legacy && !effectiveSubTab) {
+    if (legacy && (!effectiveSubTab || !visibleGroups.some((item) => item.id === effectiveMainGroup))) {
       navigate(`/settings/${legacy[0]}/${legacy[1]}`, { replace: true });
       return;
     }
