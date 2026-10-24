@@ -16,54 +16,49 @@ export const usePlatformAuth = () => {
 // Aliased export for compatibility with components expecting useAuth
 export const useAuth = usePlatformAuth;
 
+// Storage keys from before cookie sessions; removed, never read.
+const LEGACY_KEYS = ['platform_access_token', 'platform_user'];
+
 export const PlatformAuthProvider = ({ children }) => {
-  const [platformUser, setPlatformUser] = useState(() => {
-    try {
-      const stored = localStorage.getItem('platform_user');
-      return stored ? JSON.parse(stored) : null;
-    } catch {
-      return null;
-    }
-  });
+  // The session is an HttpOnly cookie; the profile is kept in memory only,
+  // so nothing about the signed-in staff member outlives the browser.
+  const [platformUser, setPlatformUser] = useState(null);
   const [permissions, setPermissions] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const verificationStarted = useRef(false);
   const navigate = useNavigate();
 
-  const logout = useCallback(() => {
-    localStorage.removeItem('platform_access_token');
-    localStorage.removeItem('platform_user');
+  const clearLocalSession = useCallback(() => {
+    for (const key of LEGACY_KEYS) localStorage.removeItem(key);
     setPlatformUser(null);
     setPermissions([]);
+  }, []);
+
+  const logout = useCallback(() => {
+    clearLocalSession();
     navigate('/login');
-  }, [navigate]);
+    // The server revokes the session and deletes the cookie.
+    platformApi.logout().catch(() => {});
+  }, [clearLocalSession, navigate]);
 
   const verifyAndRefreshUser = useCallback(async () => {
-    const token = localStorage.getItem('platform_access_token');
-    if (!token) {
-      setPlatformUser(null);
-      setPermissions([]);
-      setIsLoading(false);
-      return;
-    }
-
     try {
-      const res = await platformApi.getPlatformAuthMe();
+      // A 401 here just means "not signed in"; it must not fire session expiry.
+      const res = await platformApi.getPlatformAuthMe({ skipSessionExpiry: true });
       if (res?.data?.user) {
         setPlatformUser(res.data.user);
         setPermissions(Array.isArray(res.data.permissions) ? res.data.permissions : null);
-        localStorage.setItem('platform_user', JSON.stringify(res.data.user));
+      } else {
+        setPlatformUser(null);
+        setPermissions(null);
       }
     } catch (err) {
-      console.warn('Platform authentication verification failed:', err?.response?.data || err?.message);
-      // Never keep protected routes mounted when the server cannot verify the cached user.
-      localStorage.removeItem('platform_user');
+      if (err?.response?.status !== 401) {
+        console.warn('Platform authentication verification failed:', err?.response?.data || err?.message);
+      }
+      // Never keep protected routes mounted when the server cannot verify the user.
       setPlatformUser(null);
       setPermissions(null);
-
-      if (err?.response?.status === 401 || err?.response?.status === 403) {
-        localStorage.removeItem('platform_access_token');
-      }
     } finally {
       setIsLoading(false);
     }
@@ -72,38 +67,36 @@ export const PlatformAuthProvider = ({ children }) => {
   useEffect(() => {
     if (!verificationStarted.current) {
       verificationStarted.current = true;
+      for (const key of LEGACY_KEYS) localStorage.removeItem(key);
       verifyAndRefreshUser();
     }
 
-    const handleSessionExpired = (e) => {
-      logout();
+    const handleSessionExpired = () => {
+      clearLocalSession();
+      navigate('/login');
     };
 
     window.addEventListener('platform:session_expired', handleSessionExpired);
     return () => {
       window.removeEventListener('platform:session_expired', handleSessionExpired);
     };
-  }, [verifyAndRefreshUser, logout]);
+  }, [verifyAndRefreshUser, clearLocalSession, navigate]);
 
   const login = async (email, password) => {
+    await platformApi.ensureCsrf();
     const res = await platformApi.login({ email, password });
     if (res.status === 202 || res.data?.mfa_required) {
       return res.data;
     }
 
-    const token = res.data.access_token || res.data.token;
-    const { user, permissions: perms } = res.data;
-    if (!token) {
-      throw new Error('Login response did not include an access token.');
-    }
-
-    localStorage.setItem('platform_access_token', token);
+    // The session token is set as an HttpOnly cookie and never reaches this code.
+    const { user, permissions: perms } = res.data || {};
     if (user) {
-      localStorage.setItem('platform_user', JSON.stringify(user));
+      setPlatformUser(user);
+      setPermissions(Array.isArray(perms) ? perms : null);
+    } else {
+      await verifyAndRefreshUser();
     }
-
-    setPlatformUser(user || null);
-    setPermissions(Array.isArray(perms) ? perms : null);
     return res.data;
   };
 
@@ -118,13 +111,9 @@ export const PlatformAuthProvider = ({ children }) => {
 
   const switchPersona = async (userId) => {
     const res = await platformApi.switchPlatformUser(userId);
-    const { token, active_user } = res.data;
+    const { active_user } = res.data;
 
-    if (token) {
-      localStorage.setItem('platform_access_token', token);
-    }
     if (active_user) {
-      localStorage.setItem('platform_user', JSON.stringify(active_user));
       setPlatformUser(active_user);
     }
     // Refresh to get full permissions, scope, and company details

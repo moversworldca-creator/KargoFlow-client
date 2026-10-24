@@ -1,16 +1,25 @@
 import axios from 'axios';
-import { getTenantToken, expireTenantSession } from './tenantSession';
+import {
+  expireTenantSession,
+  getClientMode,
+  getSessionGeneration,
+  readCsrfToken,
+} from './tenantSession';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 const axiosInstance = axios.create({
   baseURL: API_BASE_URL,
+  // The session travels in an HttpOnly cookie the browser attaches itself.
+  withCredentials: true,
   headers: {
     Accept: 'application/json',
   },
 });
 
-// Interceptor to add the access token to the request headers
+const SAFE_METHODS = new Set(['get', 'head', 'options']);
+
+// Interceptor to name this client's session cookie and add CSRF protection
 axiosInstance.interceptors.request.use(
   (config) => {
     const readBranchId = () => {
@@ -47,9 +56,13 @@ axiosInstance.interceptors.request.use(
       return '';
     };
 
-    const token = config.skipAuth ? null : getTenantToken();
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    // Names which HttpOnly session cookie the server should read for this
+    // tab (tenant or support console). It is not a credential.
+    config.headers['X-KF-Client'] = getClientMode();
+    config._sessionGeneration = getSessionGeneration();
+    if (!SAFE_METHODS.has(String(config.method || 'get').toLowerCase())) {
+      const csrf = readCsrfToken();
+      if (csrf) config.headers['X-CSRFToken'] = csrf;
     }
     const branchId = readBranchId();
     if (branchId) {
@@ -85,7 +98,7 @@ axiosInstance.interceptors.response.use(
     const accountUnavailable = error.response?.status === 403 &&
       ['tenant_user_not_found', 'tenant_employee_inactive', 'tenant_blocked'].includes(error.response?.data?.error);
     if ((error.response?.status === 401 || accountUnavailable) && !originalRequest?.skipAuth &&
-        originalRequest?.headers?.Authorization === `Bearer ${getTenantToken()}`) {
+        originalRequest?._sessionGeneration === getSessionGeneration()) {
       expireTenantSession();
     }
     

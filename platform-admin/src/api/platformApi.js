@@ -2,11 +2,19 @@ import platformAxios from './platformAxios';
 
 export const platformApi = {
   // Auth
+  // Sets the CSRF cookie that state-changing requests echo back.
+  ensureCsrf: async () => {
+    return platformAxios.get('/auth/csrf/');
+  },
   login: async (credentials) => {
     return platformAxios.post('/auth/login/', { identity_type: 'platform', ...credentials });
   },
-  getPlatformAuthMe: async () => {
-    return platformAxios.get('/auth/me/');
+  // Revokes the session server-side and deletes the HttpOnly cookie.
+  logout: async () => {
+    return platformAxios.post('/auth/logout/', {}, { skipSessionExpiry: true, timeout: 10000 });
+  },
+  getPlatformAuthMe: async (options = {}) => {
+    return platformAxios.get('/auth/me/', options);
   },
   switchPlatformUser: async (userId) => {
     return platformAxios.post('/auth/switch/', { user_id: userId });

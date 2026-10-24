@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
 import { queryClient } from '../../../shared/queries/queryClient';
 import { authService } from '../../../services/auth';
-import { clearTenantSession, getTenantToken } from '../../../services/tenantSession';
+import { clearTenantSession, getClientMode, setClientMode } from '../../../services/tenantSession';
 import { canAll } from '../../../shared/permissions/registry';
 
 const AuthContext = createContext(null);
@@ -11,26 +11,40 @@ function clearCaches() {
   window.dispatchEvent(new Event('app:tenant-changed'));
 }
 
+// The platform admin opens this app with a one-time support code in the URL
+// fragment (never sent to any server). It is removed from the address bar at
+// once and exchanged for an HttpOnly support-console cookie.
 function consumeSupportConsoleHandoff() {
   if (typeof window === 'undefined' || !window.location.hash) return null;
 
   const params = new URLSearchParams(window.location.hash.slice(1));
-  const token = params.get('support_token');
-  if (!token) return null;
+  const code = params.get('support_code');
+  if (!code && !params.has('support_token')) return null;
 
-  const context = {
-    tenantId: params.get('tenant_id') || '',
-    tenantName: params.get('tenant_name') || '',
-    accessMode: params.get('access_mode') || 'read',
-    expiresAt: params.get('expires_at') || '',
-  };
-  sessionStorage.setItem('tenant_access_token', token);
   window.history.replaceState(null, document.title, `${window.location.pathname}${window.location.search}`);
-  return context;
+  // Links from before cookie sessions carried a bearer token; it is dropped unused.
+  if (!code) return null;
+  return {
+    code,
+    context: {
+      tenantId: params.get('tenant_id') || '',
+      tenantName: params.get('tenant_name') || '',
+      accessMode: params.get('access_mode') || 'read',
+      expiresAt: params.get('expires_at') || '',
+    },
+  };
+}
+
+// A support code works once; StrictMode and remounts must reuse one exchange.
+const supportExchanges = new Map();
+function exchangeSupportHandoffOnce(code) {
+  if (!supportExchanges.has(code)) supportExchanges.set(code, authService.exchangeSupportHandoff(code));
+  return supportExchanges.get(code);
 }
 
 export const AuthProvider = ({ children }) => {
-  const [supportConsoleContext] = useState(() => consumeSupportConsoleHandoff());
+  const [supportHandoff] = useState(() => consumeSupportConsoleHandoff());
+  const supportConsoleContext = supportHandoff ? supportHandoff.context : null;
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const operation = useRef(0);
@@ -48,11 +62,13 @@ export const AuthProvider = ({ children }) => {
     window.addEventListener('tenant:session-expired', expire);
     const init = async () => {
       // Retire legacy demo credentials; only server-validated sessions restore access.
-      const token = getTenantToken();
+      const mode = getClientMode();
       clearTenantSession();
-      if (token) sessionStorage.setItem('tenant_access_token', token);
+      setClientMode(mode);
       try {
-        const profile = token ? await authService.me() : null;
+        if (supportHandoff) await exchangeSupportHandoffOnce(supportHandoff.code);
+        // The session cookie is invisible to JavaScript, so ask the server.
+        const profile = await authService.me(undefined, { probe: true });
         if (!cancelled && attempt === operation.current) {
           window.__activeCompanyId = profile?.company?.id ?? null;
           setUser(profile);

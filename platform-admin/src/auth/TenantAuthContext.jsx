@@ -1,8 +1,11 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import tenantApi from '../api/tenantApi';
 
 const TenantAuthContext = createContext(null);
+// Storage keys from before cookie sessions; removed, never read.
+const LEGACY_KEYS = ['tenant_access_token', 'tenant_user'];
+const isTenantRoute = (pathname) => pathname === '/tenant' || pathname.startsWith('/tenant/');
 
 export function useTenantAuth() {
   const value = useContext(TenantAuthContext);
@@ -11,29 +14,28 @@ export function useTenantAuth() {
 }
 
 export function TenantAuthProvider({ children }) {
-  const [user, setUser] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('tenant_user') || 'null'); } catch { return null; }
-  });
+  const location = useLocation();
+  // The session is an HttpOnly cookie; the profile is kept in memory only.
+  const [user, setUser] = useState(null);
   const [permissions, setPermissions] = useState([]);
-  const [isLoading, setIsLoading] = useState(Boolean(localStorage.getItem('tenant_access_token')));
+  const [isLoading, setIsLoading] = useState(() => isTenantRoute(location.pathname));
+  const checked = useRef(false);
   const navigate = useNavigate();
 
   const clearSession = useCallback((redirect = true) => {
-    localStorage.removeItem('tenant_access_token');
-    localStorage.removeItem('tenant_user');
+    for (const key of LEGACY_KEYS) localStorage.removeItem(key);
     setUser(null);
     setPermissions([]);
     if (redirect) navigate('/tenant/login');
   }, [navigate]);
 
   const refresh = useCallback(async () => {
-    if (!localStorage.getItem('tenant_access_token')) { setIsLoading(false); return; }
     try {
-      const response = await tenantApi.me();
+      // A 401 here just means "not signed in"; it must not fire session expiry.
+      const response = await tenantApi.me({ skipSessionExpiry: true });
       if (response?.user?.identity_type !== 'tenant') throw new Error('Not a tenant session');
       setUser(response.user);
       setPermissions(response.permissions || []);
-      localStorage.setItem('tenant_user', JSON.stringify(response.user));
       return true;
     } catch {
       clearSession(false);
@@ -42,20 +44,28 @@ export function TenantAuthProvider({ children }) {
   }, [clearSession]);
 
   useEffect(() => {
-    refresh();
     const onExpired = () => clearSession();
     window.addEventListener('tenant:session_expired', onExpired);
     return () => window.removeEventListener('tenant:session_expired', onExpired);
-  }, [refresh, clearSession]);
+  }, [clearSession]);
+
+  // Only the company-admin portal (/tenant/*) uses this session; platform
+  // pages do not ask the server about it.
+  useEffect(() => {
+    if (checked.current || !isTenantRoute(location.pathname)) return;
+    checked.current = true;
+    for (const key of LEGACY_KEYS) localStorage.removeItem(key);
+    setIsLoading(true);
+    refresh();
+  }, [location.pathname, refresh]);
 
   const login = async (email, password) => {
+    await tenantApi.ensureCsrf();
+    // The session token is set as an HttpOnly cookie and never reaches this code.
     const response = await tenantApi.login({ email, password });
-    const token = response.access_token || response.token;
-    if (!token || response.identity_type !== 'tenant') throw new Error('A tenant session was not returned.');
-    localStorage.setItem('tenant_access_token', token);
-    const nextUser = { id: response.user_id, email, identity_type: 'tenant' };
-    localStorage.setItem('tenant_user', JSON.stringify(nextUser));
-    setUser(nextUser);
+    if (response.identity_type !== 'tenant') throw new Error('A tenant session was not returned.');
+    checked.current = true;
+    setUser({ id: response.user_id, email, identity_type: 'tenant' });
     if (!await refresh()) throw new Error('Sign in succeeded, but the tenant session could not be verified. Try again.');
     return response;
   };
@@ -66,6 +76,9 @@ export function TenantAuthProvider({ children }) {
     try { await tenantApi.logout(); } finally { clearSession(); }
   };
 
-  const value = useMemo(() => ({ user, permissions, isLoading, isAuthenticated: Boolean(user), login, logout, refresh, acceptInvitation }), [user, permissions, isLoading, login, logout, refresh]);
+  // On first arrival at /tenant the check has not started yet; report loading
+  // so the guard does not bounce a signed-in user to the login page.
+  const loading = isLoading || (!checked.current && isTenantRoute(location.pathname));
+  const value = useMemo(() => ({ user, permissions, isLoading: loading, isAuthenticated: Boolean(user), login, logout, refresh, acceptInvitation }), [user, permissions, loading, login, logout, refresh]);
   return <TenantAuthContext.Provider value={value}>{children}</TenantAuthContext.Provider>;
 }

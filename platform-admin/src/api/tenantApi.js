@@ -3,9 +3,10 @@ import tenantAxios from './tenantAxios';
 const data = (request) => request.then((response) => response.data);
 
 export const tenantApi = {
+  ensureCsrf: () => data(tenantAxios.get('/auth/csrf/')),
   login: (credentials) => data(tenantAxios.post('/auth/login/', { identity_type: 'tenant', ...credentials })),
-  me: () => data(tenantAxios.get('/auth/me/')),
-  logout: () => data(tenantAxios.post('/auth/logout/')),
+  me: (options = {}) => data(tenantAxios.get('/auth/me/', options)),
+  logout: () => data(tenantAxios.post('/auth/logout/', {}, { skipSessionExpiry: true })),
   company: () => data(tenantAxios.get('/tenant/companies/')),
   companySettings: () => data(tenantAxios.get('/tenant/company-settings/')),
   saveCompanySettings: (id, values) => data(tenantAxios.patch(`/tenant/company-settings/${id}/`, { values })),
