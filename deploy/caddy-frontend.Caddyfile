@@ -1,3 +1,24 @@
+# Security headers for the web applications (tenant app and platform admin).
+#
+# Content-Security-Policy: scripts, styles, frames and network calls may only
+# come from this origin and the third parties the apps use (Google Maps/Fonts,
+# Square payments, RingCentral, the Tailwind CDN used inside document
+# previews). 'unsafe-inline' scripts remain allowed because document-template
+# previews render as srcdoc iframes, which inherit this policy and contain
+# inline scripts (e.g. the signature pad). Removing it requires serving those
+# previews from a separate sandbox origin.
+(app_security_headers) {
+    header {
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.squarecdn.com https://js.squareup.com https://js.squareupsandbox.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.squareup.com https://*.squareupsandbox.com https://*.squarecdn.com https://*.cardinalcommerce.com; frame-src 'self' blob: data: https://apps.ringcentral.com https://*.google.com https://*.squarecdn.com https://*.squareup.com https://*.squareupsandbox.com https://*.cardinalcommerce.com; media-src 'self' blob: data: https:; worker-src 'self' blob:; manifest-src 'self'; object-src 'self' blob:; base-uri 'self'; form-action 'self'; frame-ancestors 'self'; upgrade-insecure-requests"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(self \"https://apps.ringcentral.com\"), microphone=(self \"https://apps.ringcentral.com\"), speaker-selection=(self \"https://apps.ringcentral.com\"), autoplay=(self \"https://apps.ringcentral.com\"), geolocation=(self), payment=(self), usb=(), serial=(), bluetooth=()"
+        Cross-Origin-Opener-Policy "same-origin-allow-popups"
+        -Server
+    }
+}
+
 :80 {
     encode zstd gzip
 
@@ -6,22 +27,31 @@
     }
 
     handle /static/* {
+        header X-Content-Type-Options "nosniff"
         root * /staticfiles
         file_server
     }
 
+    # User uploads are served from this origin, so an uploaded HTML or SVG
+    # file must never run script here.
     handle /media/* {
+        header {
+            X-Content-Type-Options "nosniff"
+            Content-Security-Policy "script-src 'none'; frame-ancestors 'self'"
+        }
         root * /media
         file_server
     }
 
     handle_path /platform-admin* {
+        import app_security_headers
         root * /usr/share/caddy/platform-admin
         try_files {path} /index.html
         file_server
     }
 
     handle {
+        import app_security_headers
         root * /usr/share/caddy
         try_files {path} /index.html
         file_server

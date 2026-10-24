@@ -5,6 +5,14 @@
 test.kargoflow.net {
   encode zstd gzip
 
+  # Transport security for every response; per-application headers (CSP)
+  # come from the frontend and backend that serve each path.
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Content-Type-Options "nosniff"
+    -Server
+  }
+
   reverse_proxy /api/* backend:8000
   reverse_proxy /admin* backend:8000
   reverse_proxy /media/* backend:8000
