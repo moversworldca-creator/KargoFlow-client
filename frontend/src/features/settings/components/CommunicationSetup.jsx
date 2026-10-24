@@ -26,6 +26,7 @@ import {
   getCommunicationEmailDomains,
   getCommunicationMailboxes,
   getEmployees,
+  getOwnedAvailableSmsNumbers,
   getSmsNumberOrders,
   getSmsNumbers,
   importSmsNumber,
@@ -181,6 +182,9 @@ export default function CommunicationSetup({ branchId = null }) {
   const [selectedNumbers, setSelectedNumbers] = useState([]);
   const [quotedOrder, setQuotedOrder] = useState(null);
   const [existingNumber, setExistingNumber] = useState('');
+  const [manualNumber, setManualNumber] = useState('');
+  const [isManualMode, setIsManualMode] = useState(false);
+  const [ownedAvailableNumbers, setOwnedAvailableNumbers] = useState([]);
   const [assignmentForm, setAssignmentForm] = useState({ phone_number_id: '', branch_id: branchId || '', employee_id: '' });
   // Must match the backend's mailbox providers (enums.OAUTH_MAILBOX_PROVIDERS): gmail | microsoft365.
   const [mailboxProvider, setMailboxProvider] = useState('gmail');
@@ -191,13 +195,14 @@ export default function CommunicationSetup({ branchId = null }) {
     setLoading(true);
     setBranchSettings(null);
     try {
-      const [domainRes, numberRes, orderRes, mailboxRes, employeeRes, branchRes] = await Promise.all([
+      const [domainRes, numberRes, orderRes, mailboxRes, employeeRes, branchRes, ownedAvailableRes] = await Promise.all([
         getCommunicationEmailDomains().catch(() => []),
-        getSmsNumbers(branchId ? { branch_id: branchId } : undefined).catch(() => []),
+        getSmsNumbers().catch(() => []),
         getSmsNumberOrders().catch(() => []),
         getCommunicationMailboxes().catch(() => []),
         getEmployees({ active: true, limit: 200 }).catch(() => []),
         branchId ? getBranchCommunicationSettings(branchId).catch(() => null) : Promise.resolve(null),
+        getOwnedAvailableSmsNumbers().catch(() => []),
       ]);
       if (requestId !== refreshSequence.current) return;
       setDomains(asList(domainRes));
@@ -206,6 +211,11 @@ export default function CommunicationSetup({ branchId = null }) {
       setMailboxes(asList(mailboxRes));
       setEmployees(asList(employeeRes));
       setBranchSettings(getData(branchRes));
+      const availableList = asList(ownedAvailableRes);
+      setOwnedAvailableNumbers(availableList);
+      if (availableList.length > 0) {
+        setExistingNumber((prev) => prev || availableList[0].phone_e164);
+      }
     } catch (err) {
       if (requestId === refreshSequence.current) showToast(errorMessage(err, 'Failed to load communication setup.'), 'error');
     } finally {
@@ -371,14 +381,27 @@ export default function CommunicationSetup({ branchId = null }) {
     }, 'Number purchase submitted.');
   };
 
-  const importExistingNumber = (e) => {
-    e.preventDefault();
-    if (!existingNumber.trim()) return showToast('Enter the existing Telnyx number in E.164 format.', 'warning');
+  const importExistingNumber = (e, explicitNumber = null) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const rawNumber = explicitNumber || (isManualMode ? manualNumber : existingNumber);
+    let cleanNumber = (rawNumber || '').trim();
+    if (!cleanNumber) return showToast('Enter or select an existing Telnyx number to import.', 'warning');
+    const digitsOnly = cleanNumber.replace(/\D/g, '');
+    if (!cleanNumber.startsWith('+')) {
+      if (digitsOnly.length === 10) cleanNumber = `+1${digitsOnly}`;
+      else if (digitsOnly.length === 11 && digitsOnly.startsWith('1')) cleanNumber = `+${digitsOnly}`;
+      else if (digitsOnly.length > 0) cleanNumber = `+${digitsOnly}`;
+    }
     return withSaving('import-number', async () => {
-      await importSmsNumber({ phone_number: existingNumber.trim() });
+      await importSmsNumber({
+        phone_number: cleanNumber,
+        branch_id: branchId ? Number(branchId) : undefined,
+      });
       setExistingNumber('');
+      setManualNumber('');
+      setIsManualMode(false);
       await refreshAll();
-    }, 'Existing Telnyx number imported.');
+    }, `Existing Telnyx number ${cleanNumber} imported successfully.`);
   };
 
   const refreshOrder = (orderId) => withSaving(`order-${orderId}`, () => refreshSmsNumberOrder(orderId), 'Order status refreshed.');
@@ -678,12 +701,129 @@ export default function CommunicationSetup({ branchId = null }) {
             </form>
           </Card>
 
-          <Card className="!p-3.5 !rounded-xl">
-            <form onSubmit={importExistingNumber} className="flex flex-wrap items-end gap-2.5">
-              <div className="min-w-[260px] flex-1"><TextInput label="Import existing Telnyx number" value={existingNumber} onChange={setExistingNumber} placeholder="+14155550123" /></div>
-              <ActionButton type="submit" icon={Plus} size="sm" disabled={savingKey === 'import-number'}>Import number</ActionButton>
+          <Card className="!p-3.5 !rounded-xl space-y-3">
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-black uppercase tracking-wider text-heading">Import Existing Telnyx Number</span>
+                {ownedAvailableNumbers.length > 0 && (
+                  <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
+                    {ownedAvailableNumbers.length} Telnyx number{ownedAvailableNumbers.length === 1 ? '' : 's'} ready in account
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-[11px] text-body">
+                The number must already belong to the configured Telnyx account. You can select one detected from your account or enter it manually.
+              </p>
+            </div>
+
+            {ownedAvailableNumbers.length > 0 && (
+              <div className="rounded-lg border border-slate-200/80 bg-slate-50/70 p-2.5 dark:border-slate-800 dark:bg-slate-900/40 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] font-bold text-heading">Detected Telnyx numbers ready to import:</p>
+                  <span className="text-[10px] text-muted font-medium">Click to select or click &quot;+ Import&quot;</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {ownedAvailableNumbers.map((num) => {
+                    const phone = num.phone_e164;
+                    const isSelected = !isManualMode && existingNumber === phone;
+                    return (
+                      <div
+                        key={phone}
+                        className={`group flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-all ${
+                          isSelected
+                            ? 'border-primary bg-primary/10 text-primary ring-1 ring-primary/20'
+                            : 'border-slate-200 bg-white hover:border-primary/50 text-heading dark:border-slate-800 dark:bg-slate-800/80'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsManualMode(false);
+                            setExistingNumber(phone);
+                          }}
+                          className="flex items-center gap-1.5 text-left font-mono"
+                          title="Click to select this number"
+                        >
+                          <Phone className="h-3 w-3 text-primary" />
+                          <span>{phone}</span>
+                          <span className="text-[10px] font-normal text-muted capitalize">({num.number_type || 'local'})</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={savingKey === 'import-number'}
+                          onClick={(e) => importExistingNumber(e, phone)}
+                          className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary hover:bg-primary hover:text-white transition-colors"
+                          title={`Import ${phone} now`}
+                        >
+                          + Import
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <form onSubmit={importExistingNumber} className="space-y-2">
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-[1fr_auto] items-end">
+                {ownedAvailableNumbers.length > 0 && !isManualMode ? (
+                  <div className="space-y-1">
+                    <SelectField
+                      label="Select Telnyx number to import"
+                      value={existingNumber}
+                      onChange={(val) => {
+                        if (val === '__manual__') {
+                          setIsManualMode(true);
+                          setManualNumber('');
+                        } else {
+                          setExistingNumber(val);
+                        }
+                      }}
+                    >
+                      {ownedAvailableNumbers.map((num) => (
+                        <option key={num.phone_e164} value={num.phone_e164}>
+                          {num.phone_e164} ({num.number_type || 'local'}) — Telnyx Account
+                        </option>
+                      ))}
+                      <option value="__manual__">+ Enter manual phone number...</option>
+                    </SelectField>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    {ownedAvailableNumbers.length > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-body">Manual phone number</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsManualMode(false);
+                            if (ownedAvailableNumbers.length > 0) setExistingNumber(ownedAvailableNumbers[0].phone_e164);
+                          }}
+                          className="text-[10px] font-bold text-primary hover:underline"
+                        >
+                          ← Pick from detected numbers
+                        </button>
+                      </div>
+                    )}
+                    <TextInput
+                      label={ownedAvailableNumbers.length === 0 ? "Import existing Telnyx number" : undefined}
+                      value={isManualMode ? manualNumber : existingNumber}
+                      onChange={isManualMode ? setManualNumber : setExistingNumber}
+                      placeholder={ownedAvailableNumbers.length > 0 ? `e.g. ${ownedAvailableNumbers[0].phone_e164}` : 'e.g. +14375247672'}
+                    />
+                  </div>
+                )}
+                <ActionButton
+                  type="submit"
+                  icon={Plus}
+                  size="sm"
+                  disabled={savingKey === 'import-number'}
+                  className="whitespace-nowrap"
+                >
+                  {savingKey === 'import-number' ? 'Importing...' : 'Import number'}
+                </ActionButton>
+              </div>
             </form>
-            <p className="mt-1.5 text-[11px] text-body">The number must already belong to the configured Telnyx account.</p>
           </Card>
 
           {availableNumbers.length > 0 && (

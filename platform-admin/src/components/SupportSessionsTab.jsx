@@ -31,7 +31,10 @@ export default function SupportSessionsTab({
   tenants = [], 
   onRefresh,
   onInvalidateSessions,
-  initialTargetTenant = null 
+  initialTargetTenant = null,
+  showCreateModal: externalShowCreateModal,
+  setShowCreateModal: externalSetShowCreateModal,
+  hideTopAction = false,
 }) {
   const { showToast } = useToast();
   const { platformUser, hasPermission } = usePlatformAuth();
@@ -47,7 +50,9 @@ export default function SupportSessionsTab({
     return () => clearInterval(timer);
   }, []);
 
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [internalShowCreateModal, setInternalShowCreateModal] = useState(false);
+  const showCreateModal = externalShowCreateModal !== undefined ? externalShowCreateModal : internalShowCreateModal;
+  const setShowCreateModal = externalSetShowCreateModal || setInternalShowCreateModal;
   const [targetTenantId, setTargetTenantId] = useState(
     initialTargetTenant?.id || tenants[0]?.id || ''
   );
@@ -145,7 +150,7 @@ export default function SupportSessionsTab({
 
     setIsSubmitting(true);
     try {
-      await platformApi.createSupportSession({
+      const response = await platformApi.createSupportSession({
         tenant_company_id: Number(targetTenantId),
         tenant_id: Number(targetTenantId),
         access_mode: mode,
@@ -154,13 +159,44 @@ export default function SupportSessionsTab({
         duration_minutes: parsedDuration,
       });
 
-      showToast('Controlled support session authorized and initiated.', 'success');
+      const createdSession = response.data;
+      const createdSessionId = String(createdSession?.id || '');
+      const isReadOnly = mode === 'read' || mode === 'support_read';
+      const modeLabel = isReadOnly ? 'Read-only' : 'Write';
+
+      showToast(`Controlled support session authorized (${modeLabel}). Launching workspace...`, 'success');
       setShowCreateModal(false);
       setReason('');
       setTicketRef('');
       setDurationMinutes(240);
       onInvalidateSessions?.();
       onRefresh?.();
+
+      // Launch the tenant workspace immediately as declared by "Authorize & Launch Session"
+      if (createdSessionId) {
+        try {
+          const targetTenant = tenants.find((t) => String(t.id) === String(targetTenantId));
+          const tenantName = targetTenant?.name || createdSession?.tenant_name || `Tenant #${targetTenantId}`;
+          const tokenRes = await platformApi.createTenantConsoleToken(createdSessionId);
+          const token = tokenRes.data?.access_token;
+          if (token) {
+            const crmUrl = window.location.port === '5174'
+              ? 'http://localhost:3000/dashboard'
+              : `${window.location.origin}/dashboard`;
+            const handoff = new URL(crmUrl, window.location.origin);
+            handoff.hash = new URLSearchParams({
+              support_token: token,
+              tenant_id: String(targetTenantId),
+              tenant_name: tenantName,
+              access_mode: tokenRes.data?.access_mode || createdSession?.access_mode || mode,
+              expires_at: tokenRes.data?.expires_at || createdSession?.expires_at,
+            }).toString();
+            window.open(handoff.toString(), '_blank', 'noopener');
+          }
+        } catch (launchErr) {
+          showToast(launchErr?.message || 'Session created, but automatic launch failed. Click "Enter Tenant" in the table.', 'warning');
+        }
+      }
     } catch (err) {
       const errDetail = err?.response?.data?.detail || err?.response?.data?.error || err?.message || 'Failed to start support session';
       showToast(errDetail, 'error');
@@ -220,24 +256,18 @@ export default function SupportSessionsTab({
 
   return (
     <div className="space-y-3 animate-in fade-in duration-150">
-      {/* Top Banner Notice */}
-      <div className="p-3 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-900 dark:text-amber-300">
-        <div className="flex items-center gap-2.5">
-          <Shield size={18} className="text-amber-600 shrink-0" />
-          <span>
-            <strong>Controlled Platform Support Governance (Section 1.9):</strong> Just-in-time impersonation sessions require explicit justification reasons, ticket references, and duration limits (15m - 8h).
-          </span>
-        </div>
-        {canCreate && (
+      {/* Top Actions */}
+      {canCreate && !hideTopAction && (
+        <div className="flex justify-end items-center">
           <button
             onClick={() => setShowCreateModal(true)}
-            className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors shrink-0 cursor-pointer"
+            className="px-3.5 py-1.5 bg-[#F25900] hover:bg-[#D94F00] text-white rounded-md text-xs sm:text-sm font-semibold flex items-center gap-1.5 shadow-sm transition-colors shrink-0 cursor-pointer"
           >
-            <Plus size={15} />
+            <Plus size={14} strokeWidth={2.5} />
             <span>New Support Session</span>
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Active Sessions List */}
       <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-2xs overflow-hidden">
@@ -419,25 +449,47 @@ export default function SupportSessionsTab({
               </div>
 
               <div>
-                <label className="block text-slate-700 dark:text-slate-300 font-bold uppercase tracking-wider mb-1.5">
-                  Access Mode *
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-slate-700 dark:text-slate-300 font-bold uppercase tracking-wider">
+                    Access Mode *
+                  </label>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                    mode === 'read' || mode === 'support_read'
+                      ? 'bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300'
+                      : 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300'
+                  }`}>
+                    {mode === 'read' || mode === 'support_read' ? 'Read-Only (No Edits)' : 'Elevated Write Access'}
+                  </span>
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setMode('support_write')}
-                    className={`py-2 rounded-xl font-bold transition-colors cursor-pointer ${mode === 'support_write' ? 'bg-amber-600 text-white shadow-2xs' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'}`}
+                    className={`py-2 rounded-xl font-bold transition-all cursor-pointer ${
+                      mode === 'support_write'
+                        ? 'bg-[#F25900] text-white shadow-sm ring-2 ring-[#F25900]/30'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    }`}
                   >
                     Support Write (Modify)
                   </button>
                   <button
                     type="button"
                     onClick={() => setMode('read')}
-                    className={`py-2 rounded-xl font-bold transition-colors cursor-pointer ${mode === 'read' || mode === 'support_read' ? 'bg-blue-600 text-white shadow-2xs' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'}`}
+                    className={`py-2 rounded-xl font-bold transition-all cursor-pointer ${
+                      mode === 'read' || mode === 'support_read'
+                        ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-600/30'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    }`}
                   >
                     Support Read-Only
                   </button>
                 </div>
+                <p className="mt-1 text-[11px] text-slate-500">
+                  {mode === 'read' || mode === 'support_read'
+                    ? 'Audited read-only session: browsing is permitted, mutations/edits are blocked.'
+                    : 'Audited modify session: allows operational troubleshooting and data correction.'}
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
@@ -498,10 +550,18 @@ export default function SupportSessionsTab({
                 <button
                   type="submit"
                   disabled={isSubmitting || tenants.length === 0}
-                  className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+                  className={`px-5 py-2.5 rounded-xl font-bold flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50 transition-all ${
+                    mode === 'read' || mode === 'support_read'
+                      ? 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white shadow-blue-500/20'
+                      : 'bg-[#F25900] hover:bg-[#D94F00] active:bg-[#B84300] text-white shadow-orange-500/20'
+                  }`}
                 >
                   {isSubmitting ? <Loader2 size={14} className="animate-spin" /> : null}
-                  <span>Authorize & Launch Session</span>
+                  <span>
+                    {mode === 'read' || mode === 'support_read'
+                      ? 'Authorize & Launch Read-Only Session'
+                      : 'Authorize & Launch Session'}
+                  </span>
                 </button>
               </div>
             </form>

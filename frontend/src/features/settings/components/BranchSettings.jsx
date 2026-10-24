@@ -10,6 +10,7 @@ import {
   Image as ImageIcon,
   Info,
   Loader2,
+  Lock,
   Mail,
   MapPin,
   Phone,
@@ -21,12 +22,10 @@ import {
 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import Card from '../../../shared/ui/Card';
-import API from '../../../services/api';
+import API, { getEntitlementSnapshot } from '../../../services/api';
 import { useAuth } from '../../auth/context/AuthContext';
 import { useToast } from '../../../shared/context/ToastContext';
-import { filterAccessibleBranches } from '../../../shared/utils/branchScope';
-
-const isBranchActive = (branch) => branch?.is_active !== false;
+import { filterAccessibleBranches, getOverQuotaBranchIds, isBranchActive } from '../../../shared/utils/branchScope';
 
 const emptyBranchForm = {
   name: '',
@@ -278,7 +277,7 @@ const BranchViewModal = ({ branch, onClose }) => {
   );
 };
 
-const BranchModalForm = ({ initialData = {}, onSave, onCancel, isLoading, mainBranch, companyId }) => {
+const BranchModalForm = ({ initialData = {}, onSave, onCancel, isLoading, mainBranch, companyId, isReadOnly = false, readOnlyReason = '' }) => {
   const [formData, setFormData] = useState(() => normalizeFormState(initialData));
 
   useEffect(() => {
@@ -339,6 +338,12 @@ const BranchModalForm = ({ initialData = {}, onSave, onCancel, isLoading, mainBr
             </button>
           )}
         </div>
+        {isReadOnly && (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+            <Lock size={14} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span>{readOnlyReason || 'Active branch limit reached or add-on expired. Modifying branches is disabled.'}</span>
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <InputField
@@ -539,10 +544,11 @@ const BranchModalForm = ({ initialData = {}, onSave, onCancel, isLoading, mainBr
             </button>
             <button
               type="submit"
-              disabled={isLoading}
-              className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 font-bold text-white transition-all hover:bg-primary-dark disabled:opacity-70"
+              disabled={isLoading || isReadOnly}
+              title={isReadOnly ? readOnlyReason : undefined}
+              className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 font-bold text-white transition-all hover:bg-primary-dark disabled:opacity-70 disabled:cursor-not-allowed"
             >
-              {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+              {isLoading ? <Loader2 size={18} className="animate-spin" /> : isReadOnly ? <Lock size={18} /> : <Save size={18} />}
               {isLoading ? 'Saving...' : 'Save Branch'}
             </button>
           </div>
@@ -579,11 +585,18 @@ const ConfirmDelete = ({ name, onConfirm, onCancel, isLoading }) => (
 );
 
 const BranchSettings = ({ activeBranchId = null, view = null }) => {
-  const { user } = useAuth();
-  const { showToast } = useToast();
+  const { user, isReadOnly, isSupportReadOnly, hasPermission } = useAuth();
+  let showToast = null;
+  try {
+    const toast = useToast();
+    showToast = toast?.showToast;
+  } catch {
+    // Graceful fallback for test or unprovided contexts
+  }
   const queryClient = useQueryClient();
 
   const [branches, setBranches] = useState([]);
+  const [entitlements, setEntitlements] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
@@ -608,12 +621,12 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
       const list = Array.isArray(response)
         ? response
         : Array.isArray(response?.results)
-        ? response.results
-        : Array.isArray(response?.data)
-        ? response.data
-        : [];
-      const accessible = filterAccessibleBranches(user, list);
-      setBranches(accessible.length ? accessible : list);
+          ? response.results
+          : Array.isArray(response?.data)
+            ? response.data
+            : [];
+      // Branch Directory and settings manages all operating company branches
+      setBranches(list);
     } catch (err) {
       console.error('Failed to load branches:', err);
       setMessage({ type: 'error', text: 'Failed to load branches.' });
@@ -622,8 +635,22 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
     }
   };
 
+  const fetchEntitlements = async () => {
+    try {
+      const fn = API?.general?.getEntitlementSnapshot || getEntitlementSnapshot;
+      if (fn) {
+        const res = await fn();
+        const snap = res?.data || res;
+        setEntitlements(snap || null);
+      }
+    } catch {
+      // Graceful fallback
+    }
+  };
+
   useEffect(() => {
     fetchBranches();
+    fetchEntitlements();
   }, []);
 
   const mainBranch = useMemo(() => {
@@ -645,12 +672,63 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
     }
   }, [selectedBranch]);
 
+  const activeBranchesCount = useMemo(() => branches.filter(isBranchActive).length, [branches]);
+  const branchLimit = entitlements?.limits?.['branches.max_active'] ?? entitlements?.resource_access?.branch_limit ?? null;
+  const isMultiBranchDisabled = entitlements?.features?.['crm.multi_branch'] === 'none';
+  const hasExpiredBranchAddon = Boolean(entitlements?.resource_access?.has_expired_branch_addon);
+  const isOverQuota = Boolean(branchLimit != null && activeBranchesCount > branchLimit);
+  const isCapacityReached = Boolean(branchLimit != null && activeBranchesCount >= branchLimit);
+  const isBranchAddonExpired = Boolean(hasExpiredBranchAddon && isCapacityReached);
+  const isOverallReadOnly = Boolean(entitlements?.access_mode && ['read_only', 'blocked'].includes(entitlements.access_mode));
+
+  const overQuotaBranchIds = useMemo(() => getOverQuotaBranchIds(branches, branchLimit), [branches, branchLimit]);
+
+  const isSessionReadOnly = Boolean(isReadOnly || isSupportReadOnly || (hasPermission ? !hasPermission('branches.create') : false));
+  const isMutationReadOnly = Boolean(isReadOnly || isSupportReadOnly || (hasPermission ? !hasPermission('branches.manage') : false));
+
+  const isBranchReadOnly = Boolean(
+    isSessionReadOnly ||
+    isOverallReadOnly ||
+    entitlements?.resource_access?.branches_read_only ||
+    (isMultiBranchDisabled && activeBranchesCount >= 1) ||
+    isCapacityReached
+  );
+
+  const branchReadOnlyReason = useMemo(() => {
+    if (isSessionReadOnly) {
+      return 'Controlled support session is in read-only mode. Adding or modifying branches is disabled.';
+    }
+    if (isOverallReadOnly) {
+      return "Your company's subscription is in read-only mode. Adding or modifying branches is disabled.";
+    }
+    if (isBranchAddonExpired) {
+      return `Your branch add-on plan has expired. Active branches (${activeBranchesCount} / ${branchLimit}) exceed or meet your current plan limit. Branch management is in read-only mode until the add-on is renewed.`;
+    }
+    if (isOverQuota) {
+      return `Current active branches (${activeBranchesCount} / ${branchLimit}) exceed your allowed quota. Adding or modifying branches is restricted to read-only mode until an add-on plan is renewed.`;
+    }
+    if (isCapacityReached) {
+      return `Active branch limit reached (${activeBranchesCount} / ${branchLimit}). Adding new branches is disabled until an additional branch add-on package is acquired.`;
+    }
+    if (isMultiBranchDisabled && activeBranchesCount >= 1) {
+      return 'Multi-branch is not included in your current subscription tier or the multi-branch add-on has expired.';
+    }
+    return '';
+  }, [isSessionReadOnly, isOverallReadOnly, isBranchAddonExpired, isOverQuota, isCapacityReached, isMultiBranchDisabled, activeBranchesCount, branchLimit]);
+
   const refreshAndInvalidate = async () => {
-    await fetchBranches();
+    await Promise.all([fetchBranches(), fetchEntitlements()]);
     queryClient.invalidateQueries({ queryKey: ['branches'] });
+    window.dispatchEvent(new CustomEvent('app:branches-changed'));
   };
 
   const handleCreateBranch = async (payload) => {
+    if (isBranchReadOnly) {
+      const err = branchReadOnlyReason || 'Branch creation is disabled in read-only mode.';
+      showToast?.(err, 'warning');
+      setMessage({ type: 'error', text: err });
+      return;
+    }
     setIsSaving(true);
     setMessage({ type: '', text: '' });
     try {
@@ -671,6 +749,15 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
 
   const handleUpdateModalBranch = async (payload) => {
     if (!branchToEdit?.id) return;
+    const isThisBranchOverQuota = overQuotaBranchIds.has(String(branchToEdit.id));
+    if (isOverallReadOnly || isThisBranchOverQuota) {
+      const err = isOverallReadOnly
+        ? (branchReadOnlyReason || 'Branch editing is disabled in read-only mode.')
+        : 'This add-on branch is over quota and in read-only mode until an add-on plan is renewed.';
+      showToast?.(err, 'warning');
+      setMessage({ type: 'error', text: err });
+      return;
+    }
     setIsSaving(true);
     setMessage({ type: '', text: '' });
     try {
@@ -692,6 +779,12 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
 
   const handleDeleteBranch = async () => {
     if (!branchToDelete?.id) return;
+    if (isOverallReadOnly) {
+      const err = branchReadOnlyReason || 'Branch deletion is disabled in read-only mode.';
+      showToast?.(err, 'warning');
+      setMessage({ type: 'error', text: err });
+      return;
+    }
     setIsSaving(true);
     setMessage({ type: '', text: '' });
     try {
@@ -713,6 +806,15 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
 
   const handleSaveActiveBranch = async () => {
     if (!selectedBranch?.id || !currentBranchForm) return;
+    const isSelectedBranchOverQuota = Boolean(selectedBranch?.id && overQuotaBranchIds.has(String(selectedBranch.id)));
+    if (isOverallReadOnly || isSelectedBranchOverQuota) {
+      const err = isOverallReadOnly
+        ? (branchReadOnlyReason || 'Branch saving is disabled in read-only mode.')
+        : 'This add-on branch is over quota and in read-only mode until an add-on is renewed.';
+      showToast?.(err, 'warning');
+      setMessage({ type: 'error', text: err });
+      return;
+    }
     setIsSaving(true);
     setMessage({ type: '', text: '' });
     try {
@@ -772,18 +874,35 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
             />
             <button
               onClick={() => setShowAddModal(true)}
-              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-primary/90"
+              disabled={isBranchReadOnly}
+              title={isBranchReadOnly ? branchReadOnlyReason : undefined}
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              <Plus size={14} /> Add Branch
+              {isBranchReadOnly ? <Lock size={14} /> : <Plus size={14} />} Add Branch
             </button>
           </div>
         </div>
 
+        {isBranchReadOnly && (
+          <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+            <Lock size={16} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <div className="space-y-0.5">
+              <p className="font-semibold">
+                {isSessionReadOnly
+                  ? 'Support Read-Only Mode'
+                  : isBranchAddonExpired || isOverQuota
+                  ? 'Add-On Expired (Read-Only Mode)'
+                  : 'Branch Management (Read-Only)'}
+              </p>
+              <p className="text-[11px] leading-relaxed text-amber-800 dark:text-amber-300">{branchReadOnlyReason}</p>
+            </div>
+          </div>
+        )}
+
         {message.text && (
           <div
-            className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium ${
-              message.type === 'success' ? 'bg-primary-tint/30 text-primary' : 'bg-[#FDE8E8]/30 text-[#791F1F]'
-            }`}
+            className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium ${message.type === 'success' ? 'bg-primary-tint/30 text-primary' : 'bg-[#FDE8E8]/30 text-[#791F1F]'
+              }`}
           >
             {message.type === 'success' ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
             {message.text}
@@ -824,11 +943,36 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
                 <button
                   onClick={(event) => {
                     event.stopPropagation();
+                    const isThisBranchOverQuota = overQuotaBranchIds.has(String(branch.id));
+                    if (isOverallReadOnly || isMutationReadOnly || isThisBranchOverQuota) {
+                      showToast?.(
+                        isSessionReadOnly
+                          ? 'Branch editing is disabled in read-only support session.'
+                          : isOverallReadOnly
+                          ? (branchReadOnlyReason || 'Editing branches is disabled in read-only mode.')
+                          : 'This add-on branch is over quota and in read-only mode until an add-on plan is renewed.',
+                        'warning'
+                      );
+                      return;
+                    }
                     setBranchToEdit(branch);
                     setShowEditModal(true);
                   }}
-                  className="rounded-lg p-1.5 text-body transition-colors hover:bg-subtle hover:text-primary"
-                  title="Edit"
+                  disabled={isOverallReadOnly || isMutationReadOnly || overQuotaBranchIds.has(String(branch.id))}
+                  className={`rounded-lg p-1.5 transition-colors ${
+                    isOverallReadOnly || isMutationReadOnly || overQuotaBranchIds.has(String(branch.id))
+                      ? 'opacity-40 cursor-not-allowed text-disabled'
+                      : 'text-body hover:bg-subtle hover:text-primary'
+                  }`}
+                  title={
+                    isSessionReadOnly
+                      ? 'Support session read-only'
+                      : isOverallReadOnly
+                      ? 'Subscription read-only'
+                      : overQuotaBranchIds.has(String(branch.id))
+                      ? 'Over quota add-on branch (read-only)'
+                      : 'Edit'
+                  }
                 >
                   <Edit2 size={14} />
                 </button>
@@ -836,11 +980,31 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
                   <button
                     onClick={(event) => {
                       event.stopPropagation();
+                      if (isOverallReadOnly || isMutationReadOnly) {
+                        showToast?.(
+                          isSessionReadOnly
+                            ? 'Deleting branches is disabled in read-only support session.'
+                            : (branchReadOnlyReason || 'Deleting branches is disabled in read-only mode.'),
+                          'warning'
+                        );
+                        return;
+                      }
                       setBranchToDelete(branch);
                       setShowDeleteConfirm(true);
                     }}
-                    className="rounded-lg p-1.5 text-body transition-colors hover:bg-[#FDE8E8]/30 hover:text-[#791F1F]"
-                    title="Delete"
+                    disabled={isOverallReadOnly || isMutationReadOnly}
+                    className={`rounded-lg p-1.5 transition-colors ${
+                      isOverallReadOnly || isMutationReadOnly
+                        ? 'opacity-40 cursor-not-allowed text-disabled'
+                        : 'text-body hover:bg-[#FDE8E8]/30 hover:text-[#791F1F]'
+                    }`}
+                    title={
+                      isSessionReadOnly
+                        ? 'Support session read-only'
+                        : isOverallReadOnly
+                        ? 'Subscription read-only'
+                        : 'Delete'
+                    }
                   >
                     <Trash2 size={14} />
                   </button>
@@ -864,12 +1028,16 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
                       </span>
                     )}
                     <span
-                      className={`rounded px-2 py-0.5 text-[0.625rem] font-bold uppercase ${
-                        isBranchActive(branch) ? 'bg-primary-tint/30 text-primary' : 'bg-[#FDE8E8]/30 text-[#791F1F]'
-                      }`}
+                      className={`rounded px-2 py-0.5 text-[0.625rem] font-bold uppercase ${isBranchActive(branch) ? 'bg-primary-tint/30 text-primary' : 'bg-[#FDE8E8]/30 text-[#791F1F]'
+                        }`}
                     >
                       {isBranchActive(branch) ? 'Active' : 'Inactive'}
                     </span>
+                    {overQuotaBranchIds.has(String(branch.id)) && (
+                      <span className="flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-[0.625rem] font-bold uppercase text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                        <Lock size={10} /> Over Quota
+                      </span>
+                    )}
                   </div>
                   <div className="space-y-1 text-sm text-body">
                     <p className="flex items-center gap-2">
@@ -904,6 +1072,8 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
             isLoading={isSaving}
             mainBranch={mainBranch}
             companyId={user?.company}
+            isReadOnly={isBranchReadOnly}
+            readOnlyReason={branchReadOnlyReason}
           />
         )}
         {showEditModal && (
@@ -917,6 +1087,12 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
             isLoading={isSaving}
             mainBranch={mainBranch}
             companyId={user?.company}
+            isReadOnly={isOverallReadOnly || (branchToEdit?.id && overQuotaBranchIds.has(String(branchToEdit.id)))}
+            readOnlyReason={
+              overQuotaBranchIds.has(String(branchToEdit?.id))
+                ? 'This add-on branch is over quota and in read-only mode.'
+                : branchReadOnlyReason
+            }
           />
         )}
         {showDeleteConfirm && (
@@ -988,19 +1164,45 @@ const BranchSettings = ({ activeBranchId = null, view = null }) => {
         </div>
         <button
           onClick={handleSaveActiveBranch}
-          disabled={isSaving}
-          className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-primary/90 disabled:opacity-70"
+          disabled={isSaving || isOverallReadOnly || (selectedBranch?.id && overQuotaBranchIds.has(String(selectedBranch.id)))}
+          title={
+            isOverallReadOnly
+              ? branchReadOnlyReason
+              : overQuotaBranchIds.has(String(selectedBranch?.id))
+              ? 'This add-on branch is over quota and in read-only mode'
+              : undefined
+          }
+          className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          {isSaving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+          {isSaving ? (
+            <Loader2 size={13} className="animate-spin" />
+          ) : isOverallReadOnly || (selectedBranch?.id && overQuotaBranchIds.has(String(selectedBranch.id))) ? (
+            <Lock size={13} />
+          ) : (
+            <Save size={13} />
+          )}
           {isSaving ? 'Saving...' : 'Save Settings'}
         </button>
       </div>
 
+      {(isOverallReadOnly || (selectedBranch?.id && overQuotaBranchIds.has(String(selectedBranch.id)))) && (
+        <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+          <Lock size={16} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <div className="space-y-0.5">
+            <p className="font-semibold">{isOverallReadOnly ? 'Subscription (Read-Only Mode)' : 'Add-On Branch (Over Quota - Read-Only)'}</p>
+            <p className="text-[11px] leading-relaxed text-amber-800 dark:text-amber-300">
+              {isOverallReadOnly
+                ? branchReadOnlyReason
+                : `This branch was added with an add-on pack and is currently over your plan limit (${activeBranchesCount} / ${branchLimit}). Settings are in read-only mode until the add-on is renewed.`}
+            </p>
+          </div>
+        </div>
+      )}
+
       {message.text && (
         <div
-          className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium ${
-            message.type === 'success' ? 'bg-primary-tint/30 text-primary' : 'bg-[#FDE8E8]/30 text-[#791F1F]'
-          }`}
+          className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium ${message.type === 'success' ? 'bg-primary-tint/30 text-primary' : 'bg-[#FDE8E8]/30 text-[#791F1F]'
+            }`}
         >
           {message.type === 'success' ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
           {message.text}

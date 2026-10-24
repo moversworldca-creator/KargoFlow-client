@@ -50,7 +50,7 @@ export default function ProvisionTenantModal({ isOpen, onClose, onTenantProvisio
     country: 'US',
     
     // Subscription & Plan
-    plan_id: 'plan-professional',
+    plan_id: '',
     billing_interval: 'month',
 
     // Primary Branch
@@ -69,7 +69,7 @@ export default function ProvisionTenantModal({ isOpen, onClose, onTenantProvisio
   // Default plan_id to the first active/available plan if present
   React.useEffect(() => {
     if (plans && plans.length > 0) {
-      const activePlan = plans.find((p) => p.status === 'active' || p.is_current) || plans[0];
+      const activePlan = plans.find((p) => (p.status === 'active' || p.is_current) && p.code !== 'trial') || plans[0];
       if (activePlan && (!formData.plan_id || formData.plan_id === 'plan-professional')) {
         setFormData((prev) => ({ ...prev, plan_id: activePlan.id }));
       }
@@ -167,6 +167,7 @@ export default function ProvisionTenantModal({ isOpen, onClose, onTenantProvisio
           state: formData.state.trim(),
           zip_code: formData.zip_code.trim(),
           country: formData.country,
+          plan_id: formData.plan_id,
         },
         plan_id: formData.plan_id,
         billing_interval: formData.billing_interval,
@@ -427,7 +428,8 @@ export default function ProvisionTenantModal({ isOpen, onClose, onTenantProvisio
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {plans.map((p) => {
                   const isSelected = String(formData.plan_id) === String(p.id);
-                  const price = Math.round((p.base_price_cents ?? p.base_price_minor ?? 0) / 100);
+                  const rawCents = p.base_price_cents ?? p.base_price_minor ?? 0;
+                  const price = (rawCents / 100).toFixed(rawCents % 100 === 0 ? 0 : 2);
 
                   const getL = (key) => {
                     if (Array.isArray(p.limits)) {

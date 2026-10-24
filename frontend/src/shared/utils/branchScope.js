@@ -30,16 +30,63 @@ export const getUserBranchIds = (user) => {
   return Array.from(ids);
 };
 
+export const isCompanyWideUser = (user) => {
+  if (!user || typeof user !== 'object') return false;
+  if (user.is_superuser || user.is_system_admin) return true;
+  if (user.is_owner || user.is_admin || user.is_company_admin) return true;
+  const workerType = String(user.worker_type || user.employee_type || '').toLowerCase();
+  if (['owner', 'admin', 'company_admin', 'super_admin'].includes(workerType)) return true;
+
+  const roleStr = typeof user.role === 'string' ? user.role.toLowerCase().replace(/_/g, ' ') : '';
+  if (['admin', 'owner', 'super admin', 'company admin', 'company owner'].includes(roleStr)) return true;
+  if (user.role && typeof user.role === 'object') {
+    const roleObjName = String(user.role.name || user.role.label || '').toLowerCase().replace(/_/g, ' ');
+    if (['admin', 'owner', 'super admin', 'company admin', 'company owner'].includes(roleObjName)) return true;
+  }
+
+  if (Array.isArray(user.roles) && user.roles.some((r) => typeof r === 'string' && ['admin', 'owner', 'company admin', 'company owner', 'super admin'].includes(r.toLowerCase().replace(/_/g, ' ')))) {
+    return true;
+  }
+  if (Array.isArray(user.role_details)) {
+    const isCompanyRole = user.role_details.some(
+      (r) =>
+        r &&
+        (r.branch_id === null ||
+          r.branch_id === undefined ||
+          r.scope === 'company' ||
+          ['company admin', 'company owner', 'super admin', 'admin', 'owner'].includes(String(r.name || r.label || r.codename || '').trim().toLowerCase().replace(/_/g, ' ')))
+    );
+    if (isCompanyRole) return true;
+  }
+  if (Array.isArray(user.permissions)) {
+    const hasAdminPerm = user.permissions.some((p) =>
+      ['crm.admin', 'branches.manage', 'branches.view', 'branches.create', 'settings.manage', 'company.manage', 'company.admin'].includes(String(p).trim().toLowerCase())
+    );
+    if (hasAdminPerm) return true;
+  }
+  return false;
+};
+
 export const getAccessibleBranchIds = (user, branches = []) => {
+  const allBranches = Array.isArray(branches) ? branches : [];
+  if (!user) return [];
+  if (isCompanyWideUser(user)) {
+    return allBranches.map((branch) => resolveBranchId(branch));
+  }
   const userBranchIds = new Set(getUserBranchIds(user));
   if (!userBranchIds.size) return [];
-  return (Array.isArray(branches) ? branches : []).filter((branch) => userBranchIds.has(String(resolveBranchId(branch)))).map((branch) => resolveBranchId(branch));
+  return allBranches.filter((branch) => userBranchIds.has(String(resolveBranchId(branch)))).map((branch) => resolveBranchId(branch));
 };
 
 export const filterAccessibleBranches = (user, branches = []) => {
+  const allBranches = Array.isArray(branches) ? branches : [];
+  if (!user) return [];
+  if (isCompanyWideUser(user)) {
+    return allBranches;
+  }
   const userBranchIds = new Set(getUserBranchIds(user));
   if (!userBranchIds.size) return [];
-  return (Array.isArray(branches) ? branches : []).filter((branch) => userBranchIds.has(String(resolveBranchId(branch))));
+  return allBranches.filter((branch) => userBranchIds.has(String(resolveBranchId(branch))));
 };
 
 export const resolveBranchId = (branch) => {
@@ -62,3 +109,60 @@ export const resolveRoleName = (role) => {
   if (typeof role === 'string') return role;
   return role.name || role.label || role.codename || 'No Role';
 };
+
+export const isBranchActive = (branch) => branch?.is_active !== false;
+
+export const getOverQuotaBranchIds = (branches = [], branchLimit = null) => {
+  if (branchLimit == null || !Array.isArray(branches)) return new Set();
+  const limit = Number(branchLimit);
+  if (isNaN(limit) || limit <= 0) return new Set();
+
+  const activeBranches = branches
+    .filter(isBranchActive)
+    .slice()
+    .sort((a, b) => {
+      if (a.is_main && !b.is_main) return -1;
+      if (!a.is_main && b.is_main) return 1;
+      return (Number(a.id) || 0) - (Number(b.id) || 0);
+    });
+
+  if (activeBranches.length <= limit) return new Set();
+
+  const excessBranches = activeBranches.slice(limit);
+  return new Set(excessBranches.map((b) => String(resolveBranchId(b))));
+};
+
+export const isBranchOverQuota = (branchId, overQuotaBranchIds) => {
+  if (!branchId || !overQuotaBranchIds || !(overQuotaBranchIds instanceof Set)) return false;
+  return overQuotaBranchIds.has(String(resolveBranchId(branchId)));
+};
+
+export const isUserActive = (user) => user?.is_active !== false;
+
+export const getOverQuotaUserIds = (users = [], userLimit = null) => {
+  if (userLimit == null || !Array.isArray(users)) return new Set();
+  const limit = Number(userLimit);
+  if (isNaN(limit) || limit <= 0) return new Set();
+
+  const activeUsers = users
+    .filter(isUserActive)
+    .slice()
+    .sort((a, b) => {
+      const aAdmin = Boolean(a?.is_superuser || a?.is_system_admin || a?.is_owner);
+      const bAdmin = Boolean(b?.is_superuser || b?.is_system_admin || b?.is_owner);
+      if (aAdmin && !bAdmin) return -1;
+      if (!aAdmin && bAdmin) return 1;
+      return (Number(a?.id ?? a?.user_id) || 0) - (Number(b?.id ?? b?.user_id) || 0);
+    });
+
+  if (activeUsers.length <= limit) return new Set();
+
+  const excessUsers = activeUsers.slice(limit);
+  return new Set(excessUsers.map((u) => String(u?.id ?? u?.user_id)));
+};
+
+export const isUserOverQuota = (userId, overQuotaUserIds) => {
+  if (!userId || !overQuotaUserIds || !(overQuotaUserIds instanceof Set)) return false;
+  return overQuotaUserIds.has(String(userId));
+};
+

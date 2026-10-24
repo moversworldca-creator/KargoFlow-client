@@ -4,6 +4,7 @@ export const getTenantToken = () => sessionStorage.getItem('tenant_access_token'
 
 export function clearTenantSession() {
   sessionStorage.removeItem('tenant_access_token');
+  sessionStorage.removeItem('support_console_context');
   for (const key of LEGACY_KEYS) localStorage.removeItem(key);
   window.__activeCompanyId = null;
 }

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { useAuth } from '../../auth/context/AuthContext';
+import { isCompanyWideUser } from '../../../shared/utils/branchScope';
 import { format, formatDistanceToNowStrict, parseISO, isValid } from 'date-fns';
 import {
   Plus, Search, SlidersHorizontal,
@@ -3434,8 +3435,9 @@ const Sales = () => {
   const [selectedRecordKeys, setSelectedRecordKeys] = useState(() => new Set());
   const [branchLeadOrders, setBranchLeadOrders] = useState(() => readSavedBranchLeadOrders());
   const dragSourceLeadIdRef = useRef(null);
+  const isCompanyWide = isCompanyWideUser(user);
   const accessibleBranchIds = useMemo(() => new Set(getUserBranchIds(user)), [user]);
-  const restrictToAccessibleBranches = accessibleBranchIds.size > 0 && !user?.is_superuser && !user?.is_system_admin;
+  const restrictToAccessibleBranches = !isCompanyWide && accessibleBranchIds.size > 0;
   const [bulkAssignOpen, setBulkAssignOpen] = useState(false);
   const [bulkAssignForm, setBulkAssignForm] = useState({ branch: '', assigned_to: '' });
   const [bulkEmailOpen, setBulkEmailOpen] = useState(false);

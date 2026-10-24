@@ -342,4 +342,53 @@ describe('employee flows', () => {
     expect(within(form).getByRole('radio', { name: /block a permission/i })).toBeChecked();
     expect(within(form).getByLabelText(/which permission/i)).toHaveValue('leads.view');
   });
+
+  it('shows expired add-on banner and disables adding employees when user add-on is expired and seat limit is reached', async () => {
+    grant('employees.view', 'employees.manage', 'entitlements.view', 'users.view');
+    api.getEntitlementSnapshot.mockResolvedValue({
+      limits: { 'users.max_active': 1 },
+      resource_access: {
+        user_limit: 1,
+        active_users: 1,
+        has_expired_user_addon: true,
+        users_read_only: true,
+      },
+    });
+
+    renderWithProviders(<EmployeeDirectory />);
+    expect(await screen.findByText(/User Add-on Expired \(Read-Only Mode\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/user add-on pack has expired/i)).toBeInTheDocument();
+
+    const addBtn = screen.getByRole('button', { name: /Add employee/i });
+    expect(addBtn).toBeDisabled();
+  });
+
+  it('only shows Over Quota badge on users added beyond user limit', async () => {
+    grant('employees.view', 'entitlements.view', 'users.view');
+    // Set 2 active users in the system
+    api.getUsers.mockResolvedValue([
+      { id: 21, is_active: true, role_details: [] },
+      { id: 22, is_active: true, role_details: [] },
+    ]);
+    // Dee Disabled (user_id: 22) and Ada Active (user_id: 21)
+    api.getEntitlementSnapshot.mockResolvedValue({
+      limits: { 'users.max_active': 1 },
+      resource_access: {
+        user_limit: 1,
+        active_users: 2,
+        has_expired_user_addon: true,
+      },
+    });
+
+    renderWithProviders(<EmployeeDirectory />);
+    expect(await screen.findByText('Ada Active')).toBeInTheDocument();
+
+    // User 21 (Ada Active) is within quota: should NOT have Over Quota badge
+    const adaRow = await row('Ada Active');
+    expect(within(adaRow).queryByText(/Over Quota/i)).not.toBeInTheDocument();
+
+    // User 22 (Dee Disabled) is the 2nd user, exceeding limit of 1: MUST have Over Quota badge
+    const deeRow = await row('Dee Disabled');
+    expect(within(deeRow).getByText(/Over Quota/i)).toBeInTheDocument();
+  });
 });

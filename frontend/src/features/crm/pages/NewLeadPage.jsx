@@ -9,6 +9,7 @@ import {
   useReferralSourcesLookup,
   useMoverSizesLookup,
   useStatusLookups,
+  useEntitlementsSnapshot,
 } from '../../../shared/queries/sharedQueries';
 import { getRecordDetailPath } from '../utils/recordRoutes';
 
@@ -21,12 +22,14 @@ const NewLeadPage = () => {
   const { data: referralSources = [] } = useReferralSourcesLookup();
   const { data: moverSizes = [] } = useMoverSizesLookup();
   const { data: statusCodes = [] } = useStatusLookups();
+  const { data: entitlements = null } = useEntitlementsSnapshot();
   const metadata = {
     branches,
     users,
     moverSizes,
     referralSources,
     statusCodes,
+    entitlements,
   };
 
   return (

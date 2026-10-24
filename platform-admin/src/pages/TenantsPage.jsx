@@ -24,12 +24,17 @@ export default function TenantsPage() {
 
   const isLoading = isTenantsLoading || isPlansLoading;
 
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
   const handleRefresh = async () => {
+    setIsRefreshing(true);
     try {
       await Promise.all([refetchTenants(), refetchPlans()]);
       showToast('Tenant directory refreshed.', 'success');
     } catch {
       showToast('Error syncing tenants directory.', 'error');
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -53,12 +58,10 @@ export default function TenantsPage() {
   }
 
   return (
-    <div className="space-y-3.5 max-w-7xl mx-auto pb-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div className="space-y-2.5 max-w-7xl mx-auto pb-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
-          <div className="flex items-center gap-2">
-          </div>
-          <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+          <h1 className="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight">
             Tenants Management
           </h1>
         </div>
@@ -66,18 +69,19 @@ export default function TenantsPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={handleRefresh}
-            className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5 text-xs font-bold cursor-pointer"
+            disabled={isRefreshing}
+            className="px-3.5 py-1.5 rounded-full border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-xs font-semibold cursor-pointer shadow-2xs inline-flex items-center gap-1.5"
             title="Reload tenants list"
           >
-            <RefreshCw size={14} />
-            <span className="hidden sm:inline">Refresh</span>
+            <RefreshCw size={13} className={`text-slate-500 dark:text-slate-400 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
           </button>
 
           <button
             onClick={() => setShowProvisionModal(true)}
-            className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+            className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
           >
-            <Plus size={15} />
+            <Plus size={14} />
             <span>Provision Tenant</span>
           </button>
         </div>

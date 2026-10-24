@@ -1902,7 +1902,7 @@ export function setupPlatformRoutes(app, db, nextId, nowIso) {
     }
 
     const companyId = nextId();
-    const selectedPlan = platformPlans.find((p) => p.id === plan_id) || platformPlans[1];
+    const selectedPlan = platformPlans.find((p) => String(p.id) === String(plan_id) || p.code?.toLowerCase() === String(plan_id).toLowerCase()) || platformPlans[0] || { id: plan_id, code: 'custom' };
 
     const newCompany = {
       id: companyId,

@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth/context/AuthContext';
-import { getUserBranchIds } from '../../../shared/utils/branchScope';
+import { getUserBranchIds, isCompanyWideUser } from '../../../shared/utils/branchScope';
 import {
   Activity,
   Zap,
@@ -1004,8 +1004,9 @@ const Dashboard = () => {
   const { user } = useAuth();
   const dashboardRequestRef = useRef(0);
   const [branches, setBranches] = useState([]);
+  const isCompanyWide = isCompanyWideUser(user);
   const accessibleBranchIds = useMemo(() => getUserBranchIds(user), [user]);
-  const restrictToAccessibleBranches = accessibleBranchIds.length > 0 && !user?.is_superuser && !user?.is_system_admin;
+  const restrictToAccessibleBranches = !isCompanyWide && accessibleBranchIds.length > 0;
   const defaultBranchId = restrictToAccessibleBranches && accessibleBranchIds.length === 1 ? accessibleBranchIds[0] : ALL_BRANCHES;
   const [selectedBranchId, setSelectedBranchId] = useState(defaultBranchId);
   const [dashboardStats, setDashboardStats] = useState(null);
@@ -1046,12 +1047,10 @@ const Dashboard = () => {
         ? nextBranches.filter((branch) => accessibleBranchIds.includes(String(branch.id)))
         : nextBranches;
       setBranches(scopedBranches);
-      if (restrictToAccessibleBranches) {
-        const currentBranchIsAllowed = selectedBranchId === ALL_BRANCHES
-          || scopedBranches.some((branch) => String(branch.id) === String(selectedBranchId));
-        if (!currentBranchIsAllowed) {
-          setSelectedBranchId(scopedBranches.length === 1 ? String(scopedBranches[0].id) : ALL_BRANCHES);
-        }
+      const currentBranchIsAllowed = selectedBranchId === ALL_BRANCHES
+        || scopedBranches.some((branch) => String(branch.id) === String(selectedBranchId));
+      if (!currentBranchIsAllowed) {
+        setSelectedBranchId(restrictToAccessibleBranches && scopedBranches.length === 1 ? String(scopedBranches[0].id) : ALL_BRANCHES);
       }
       setDashboardStats(payload.stats || null);
       setLastUpdated(new Date());
@@ -1077,6 +1076,14 @@ const Dashboard = () => {
   useEffect(() => {
     loadDashboardData();
     return () => { dashboardRequestRef.current += 1; };
+  }, [loadDashboardData]);
+
+  useEffect(() => {
+    const handleBranchesChanged = () => {
+      loadDashboardData({ silent: true });
+    };
+    window.addEventListener('app:branches-changed', handleBranchesChanged);
+    return () => window.removeEventListener('app:branches-changed', handleBranchesChanged);
   }, [loadDashboardData]);
 
   useEffect(() => {

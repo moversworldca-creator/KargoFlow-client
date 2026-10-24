@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { X, Loader2, Save, User, MapPin, Calendar, Building2, Phone, Mail, Truck, Box as BoxIcon } from 'lucide-react';
-import { createLead, getMoveTypeLookups, getServices } from '../../../services/api';
+import { X, Loader2, Save, User, MapPin, Calendar, Building2, Phone, Mail, Truck, Box as BoxIcon, AlertCircle } from 'lucide-react';
+import { createLead, getMoveTypeLookups, getServices, getEntitlementSnapshot } from '../../../services/api';
 import AddressAutocomplete from '../../../shared/ui/AddressAutocomplete';
+import { getOverQuotaBranchIds, isBranchOverQuota } from '../../../shared/utils/branchScope';
 
 const CANADIAN_PROVINCES = [
   { code: 'AB', name: 'Alberta' },
@@ -154,13 +155,45 @@ const NewLeadForm = ({ isOpen, onClose, metadata = {}, onSuccess, canCreateLead 
     };
   }, [isOpen]);
 
+  const [entitlements, setEntitlements] = useState(metadata.entitlements || null);
+
+  useEffect(() => {
+    if (metadata.entitlements) {
+      setEntitlements(metadata.entitlements);
+      return undefined;
+    }
+    let cancelled = false;
+    const loadEntitlements = async () => {
+      try {
+        const snap = await getEntitlementSnapshot();
+        if (!cancelled && snap) {
+          setEntitlements(snap?.data || snap);
+        }
+      } catch {
+        // Fallback gracefully without breaking form
+      }
+    };
+    loadEntitlements();
+    return () => {
+      cancelled = true;
+    };
+  }, [metadata.entitlements]);
+
   const branches = useMemo(() => asList(metadata.branches), [metadata.branches]);
+  const branchLimit = metadata.branchLimit ?? entitlements?.limits?.['branches.max_active'] ?? entitlements?.resource_access?.branch_limit ?? null;
+
+  const overQuotaBranchIds = useMemo(
+    () => getOverQuotaBranchIds(branches, branchLimit),
+    [branches, branchLimit]
+  );
+
   const users = useMemo(() => asList(metadata.users), [metadata.users]);
   const moverSizes = useMemo(() => asList(metadata.moverSizes), [metadata.moverSizes]);
   const referralSources = useMemo(() => asList(metadata.referralSources), [metadata.referralSources]);
-
   const moveSizeOptions = useMemo(() => moverSizes.filter((size) => size?.id && size.is_active !== false), [moverSizes]);
+
   const selectedBranchId = form.branch ? String(form.branch) : '';
+  const isSelectedBranchOverQuota = Boolean(selectedBranchId && isBranchOverQuota(selectedBranchId, overQuotaBranchIds));
 
   const assignableUsers = useMemo(() => {
     if (!selectedBranchId) return users;
@@ -195,6 +228,9 @@ const NewLeadForm = ({ isOpen, onClose, metadata = {}, onSuccess, canCreateLead 
 
   const validateForm = () => {
     if (!form.branch) return 'Select a branch.';
+    if (isSelectedBranchOverQuota) {
+      return 'Selected branch is over quota (read-only). Creating leads on an over-quota branch is not allowed.';
+    }
     if (!form.first_name.trim()) return 'First name is required.';
     if (!form.email.trim() && !form.phone.trim()) return 'At least one contact method (Email or Phone) is required.';
 
@@ -516,13 +552,24 @@ const NewLeadForm = ({ isOpen, onClose, metadata = {}, onSuccess, canCreateLead 
                       className="w-full px-3 py-2 rounded-xl border border-ink-200 bg-brand-tint/30 text-sm font-semibold text-ink-800 outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 transition-all cursor-pointer"
                     >
                       <option value="">Select Branch</option>
-                      {branches.map((branch) => (
-                        <option key={branch.id} value={String(branch.id)}>
-                          {branch.name || `Branch #${branch.id}`}
-                        </option>
-                      ))}
+                      {branches.map((branch) => {
+                        const isOver = overQuotaBranchIds.has(String(branch.id));
+                        return (
+                          <option key={branch.id} value={String(branch.id)} disabled={isOver}>
+                            {branch.name || `Branch #${branch.id}`}
+                            {isOver ? ' (Over Quota - Read-Only)' : ''}
+                          </option>
+                        );
+                      })}
                     </select>
                   </label>
+
+                  {isSelectedBranchOverQuota && (
+                    <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-800 flex items-center gap-2">
+                      <AlertCircle size={16} className="shrink-0 text-amber-600" />
+                      <span>This branch is over quota (read-only). Creating leads on this branch is blocked.</span>
+                    </div>
+                  )}
 
                   <label className="block">
                     <span className="text-xs font-bold text-ink-600 block mb-1">Move Manager</span>
@@ -539,6 +586,7 @@ const NewLeadForm = ({ isOpen, onClose, metadata = {}, onSuccess, canCreateLead 
                       ))}
                     </select>
                   </label>
+
                 </div>
               </div>
 
@@ -573,11 +621,18 @@ const NewLeadForm = ({ isOpen, onClose, metadata = {}, onSuccess, canCreateLead 
               {canCreateLead ? (
                 <button
                   type="submit"
-                  disabled={isSaving}
+                  disabled={isSaving || isSelectedBranchOverQuota}
+                  title={
+                    isSelectedBranchOverQuota
+                      ? 'Selected branch is over quota (read-only)'
+                      : undefined
+                  }
                   className="px-6 py-2 rounded-xl bg-primary text-white text-sm font-bold hover:bg-primary-dark transition-colors disabled:opacity-60 inline-flex items-center gap-2 cursor-pointer shadow-md"
                 >
                   {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                  Create Lead
+                  {isSelectedBranchOverQuota
+                    ? 'Branch Over Quota (Read-Only)'
+                    : 'Create Lead'}
                 </button>
               ) : null}
             </div>

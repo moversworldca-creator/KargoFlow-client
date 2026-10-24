@@ -18,7 +18,7 @@ export const platformApi = {
     return platformAxios.put('/auth/profile/', data);
   },
   changePassword: async (data = {}) => {
-    return platformAxios.post('/auth/change-password/', data);
+    return platformAxios.post('/auth/password-change/', data);
   },
 
   // Dashboard
@@ -105,13 +105,23 @@ export const platformApi = {
     const effective = data.effective_timing || data.effective || 'immediate';
     const reason = data.reason || 'Commercial plan change';
 
+    const targetStatus = data.new_status || data.status || 'active';
+    const trialEnds = data.trial_ends_at !== undefined ? data.trial_ends_at : (targetStatus === 'active' ? null : undefined);
+
     if (companyId) {
       try {
-        return await platformAxios.post(`/core/subscriptions/${companyId}/change-plan/`, {
+        const payload = {
           plan_id: Number(planId),
           effective,
           reason,
-        });
+          new_status: targetStatus,
+          status: targetStatus,
+        };
+        if (trialEnds !== undefined) payload.trial_ends_at = trialEnds;
+        if (data.current_period_start) payload.current_period_start = data.current_period_start;
+        if (data.current_period_end) payload.current_period_end = data.current_period_end;
+
+        return await platformAxios.post(`/core/subscriptions/${companyId}/change-plan/`, payload);
       } catch (err) {
         if (err?.response?.status !== 400 && err?.response?.status !== 404) {
           throw err;
@@ -119,13 +129,18 @@ export const platformApi = {
       }
     }
 
+    const fields = {
+      plan_id: Number(planId),
+    };
+    if (trialEnds !== undefined) fields.trial_ends_at = trialEnds;
+    if (data.current_period_start) fields.current_period_start = data.current_period_start;
+    if (data.current_period_end) fields.current_period_end = data.current_period_end;
+
     return platformAxios.post('/core/subscriptions/transition/', {
       subscription_id: id,
-      new_status: data.current_status || 'active',
+      new_status: targetStatus,
       reason,
-      fields: {
-        plan_id: Number(planId),
-      },
+      fields,
     });
   },
   cancelSubscription: async (id, data = {}) => {
@@ -192,6 +207,14 @@ export const platformApi = {
   },
   assignTenantAddon: async (tenantId, data = {}) => {
     return platformAxios.post('/core/add-ons/assign/', { tenant_company_id: tenantId, ...data });
+  },
+  removeTenantAddon: async (tenantId, addonId, reason = 'Administrative cancellation') => {
+    return platformAxios.post('/core/add-ons/assign/', {
+      tenant_company_id: Number(tenantId),
+      addon_id: Number(addonId),
+      enable: false,
+      reason,
+    });
   },
 
   // Support Sessions

@@ -78,7 +78,8 @@ export default function TenantLifecycleModal({
   isOpen, 
   onClose, 
   tenant, 
-  onTenantUpdated 
+  onTenantUpdated,
+  initialTargetState = null,
 }) {
   useModal(isOpen, onClose);
   const { showToast } = useToast();
@@ -88,13 +89,17 @@ export default function TenantLifecycleModal({
   const [reason, setReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // A fresh dialog per tenant: preselect the usual next step (activate a
-  // provisioning or deactivated tenant; nothing preselected for an active one).
+  // A fresh dialog per tenant: preselect initialTargetState if valid & allowed,
+  // else preselect the usual next step (activate a provisioning or deactivated tenant; nothing preselected for an active one).
   useEffect(() => {
     if (!isOpen) return;
-    setSelectedState(targets.includes('Active') ? 'Active' : null);
+    if (initialTargetState && targets.includes(initialTargetState)) {
+      setSelectedState(initialTargetState);
+    } else {
+      setSelectedState(targets.includes('Active') ? 'Active' : null);
+    }
     setReason('');
-  }, [isOpen, tenant?.id, fromState]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isOpen, tenant?.id, fromState, initialTargetState]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!isOpen || !tenant) return null;
 

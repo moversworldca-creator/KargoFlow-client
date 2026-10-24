@@ -24,7 +24,7 @@ vi.mock('../../../services/api', () => ({
 vi.mock('../leads/pipelineApi', () => ({ getPipelineQueue: vi.fn() }));
 import { getPipelineQueue } from '../leads/pipelineApi';
 
-const mockUser = {
+let currentUser = {
   id: 1,
   branches: [{ id: 5 }],
   is_superuser: false,
@@ -33,7 +33,7 @@ const mockUser = {
 
 vi.mock('../../auth/context/AuthContext', () => ({
   useAuth: () => ({
-    user: mockUser,
+    user: currentUser,
   }),
 }));
 
@@ -103,6 +103,12 @@ const baseStats = {
 
 describe('Dashboard', () => {
   beforeEach(() => {
+    currentUser = {
+      id: 1,
+      branches: [{ id: 5 }],
+      is_superuser: false,
+      is_system_admin: false,
+    };
     vi.clearAllMocks();
     vi.mocked(getDashboardSummary).mockResolvedValue({
       data: {
@@ -179,6 +185,7 @@ describe('Dashboard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /open leads pipeline/i }));
   });
+
   it('shows supported pipeline metrics when the legacy dashboard is absent', async () => {
     vi.mocked(getDashboardSummary).mockRejectedValue({ response: { status: 404 } });
     vi.mocked(getBranchLookups).mockResolvedValue([{ id: 5, name: 'Main Branch' }]);
@@ -188,6 +195,39 @@ describe('Dashboard', () => {
     expect(screen.getByText('12')).toBeInTheDocument();
     expect(screen.getByText(/Revenue, payments, dispatch and historical performance are not available/)).toBeInTheDocument();
     expect(getPipelineQueue).toHaveBeenCalledWith({ branch: '5', all: true });
+  });
+
+  it('displays all created branches in the branch selector when the user is company-wide', async () => {
+    currentUser = {
+      id: 2,
+      worker_type: 'owner',
+      branches: [{ id: 1 }],
+      is_superuser: false,
+      is_system_admin: false,
+    };
+    vi.mocked(getDashboardSummary).mockResolvedValue({
+      data: {
+        branches: [
+          { id: 1, name: 'Main Headquarters' },
+          { id: 2, name: 'Downtown Branch' },
+          { id: 3, name: 'Airport Branch' },
+        ],
+        stats: baseStats,
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <Dashboard />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText('$4,250')).toBeInTheDocument();
+    const branchSelect = screen.getByLabelText(/branch/i);
+    expect(branchSelect).toBeInTheDocument();
+
+    const options = Array.from(branchSelect.querySelectorAll('option')).map((o) => o.textContent);
+    expect(options).toEqual(['All Branches', 'Main Headquarters', 'Downtown Branch', 'Airport Branch']);
   });
 
 });

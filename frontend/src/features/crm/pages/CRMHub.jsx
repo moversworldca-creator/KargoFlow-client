@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth/context/AuthContext';
-import { getUserBranchIds } from '../../../shared/utils/branchScope';
+import { getUserBranchIds, isCompanyWideUser, getOverQuotaBranchIds, isBranchOverQuota } from '../../../shared/utils/branchScope';
 import useCan from '../../../shared/auth/useCan';
 import { PERMISSIONS } from '../../../shared/permissions/registry';
 import {
@@ -43,6 +43,7 @@ import {
   setLeadCustomStatus,
   updateOpportunity,
   createSalesActivity,
+  getEntitlementSnapshot,
 } from '../../../services/api';
 import {
   LEAD_STATUS_OPTIONS,
@@ -170,17 +171,15 @@ const SegmentedTabs = ({ value, onChange, items }) => (
         key={it.value}
         type="button"
         onClick={() => onChange(it.value)}
-        className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${
-          value === it.value ? 'bg-heading text-white shadow-sm' : 'text-body hover:bg-page'
-        }`}
+        className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${value === it.value ? 'bg-heading text-white shadow-sm' : 'text-body hover:bg-page'
+          }`}
       >
         <span className="inline-flex items-center gap-2">
           {it.icon && <it.icon size={14} />}
           {it.label}
           {typeof it.count === 'number' && (
-            <span className={`ml-1 inline-flex items-center justify-center min-w-[24px] h-5 px-1 rounded-full text-[0.625rem] font-bold ${
-              value === it.value ? 'bg-card/15 text-white' : 'bg-page text-body'
-            }`}>
+            <span className={`ml-1 inline-flex items-center justify-center min-w-[24px] h-5 px-1 rounded-full text-[0.625rem] font-bold ${value === it.value ? 'bg-card/15 text-white' : 'bg-page text-body'
+              }`}>
               {it.count}
             </span>
           )}
@@ -381,9 +380,20 @@ const CRMHub = ({ defaultTab }) => {
   });
 
   const [branches, setBranches] = useState([]);
+  const [allBranches, setAllBranches] = useState([]);
+  const [entitlements, setEntitlements] = useState(null);
   const [users, setUsers] = useState([]);
+
+  const branchLimit = entitlements?.limits?.['branches.max_active'] ?? entitlements?.resource_access?.branch_limit ?? null;
+
+  const overQuotaBranchIds = useMemo(
+    () => getOverQuotaBranchIds(allBranches.length ? allBranches : branches, branchLimit),
+    [allBranches, branches, branchLimit]
+  );
+
+  const isCompanyWide = isCompanyWideUser(user);
   const accessibleBranchIds = useMemo(() => new Set(getUserBranchIds(user)), [user]);
-  const restrictToAccessibleBranches = accessibleBranchIds.size > 0 && !user?.is_superuser && !user?.is_system_admin;
+  const restrictToAccessibleBranches = !isCompanyWide && accessibleBranchIds.size > 0;
   const [assignLoading, setAssignLoading] = useState(false);
   const [assignForm, setAssignForm] = useState({ branch: '', assigned_to: '' });
 
@@ -432,6 +442,23 @@ const CRMHub = ({ defaultTab }) => {
   }, [leads, leadBucket, leadStatus, leadTempBucket, leadSourceFilter, leadBranchFilter, q]);
 
   const selectedLead = useMemo(() => filteredLeads.find(l => l?.id === selectedLeadId) || leads.find(l => l?.id === selectedLeadId) || null, [filteredLeads, leads, selectedLeadId]);
+
+  const selectedLeadBranchId = useMemo(() => {
+    return String(selectedLead?.branch_details?.id ?? selectedLead?.branch ?? '').trim();
+  }, [selectedLead]);
+
+  const selectedLeadAssignedUserId = useMemo(() => {
+    return String(selectedLead?.assigned_to ?? selectedLead?.assigned_to_id ?? selectedLead?.assigned_user ?? '').trim();
+  }, [selectedLead]);
+
+  const isSelectedLeadBranchOverQuota = useMemo(() => {
+    if (!selectedLead) return false;
+    if (selectedLead.branch_is_over_quota || selectedLead.branch_details?.is_over_quota) return true;
+    if (!selectedLeadBranchId) return false;
+    return isBranchOverQuota(selectedLeadBranchId, overQuotaBranchIds);
+  }, [selectedLead, selectedLeadBranchId, overQuotaBranchIds]);
+
+  const isSelectedLeadOverQuota = isSelectedLeadBranchOverQuota;
 
   useEffect(() => {
     if (!selectedLead) return;
@@ -723,6 +750,7 @@ const CRMHub = ({ defaultTab }) => {
     fetchLeads();
     fetchOpps();
     fetchStatusConfigs(leadBranchFilter || null);
+    ensureAssigneesLoaded();
   }, []);
 
   useEffect(() => {
@@ -730,11 +758,20 @@ const CRMHub = ({ defaultTab }) => {
   }, [leadBranchFilter]);
 
   const ensureAssigneesLoaded = async () => {
-    if (branches.length > 0 && users.length > 0) return;
+    if (branches.length > 0 && users.length > 0 && entitlements) return;
     try {
-      const [b, u] = await Promise.all([getBranchLookups(), getLookupUsers({ limit: 100 })]);
+      const [b, u, ent] = await Promise.all([
+        getBranchLookups(),
+        getLookupUsers({ limit: 100 }),
+        getEntitlementSnapshot ? getEntitlementSnapshot().catch(() => null) : Promise.resolve(null),
+      ]);
       const nextBranches = asList(b);
       const nextUsers = asList(u);
+      setAllBranches(nextBranches);
+      if (ent) {
+        const payload = ent?.data && typeof ent.data === 'object' && !Array.isArray(ent.data) ? ent.data : ent;
+        setEntitlements(payload);
+      }
       setBranches(
         restrictToAccessibleBranches
           ? nextBranches.filter((branch) => accessibleBranchIds.has(String(branch.id)))
@@ -746,7 +783,7 @@ const CRMHub = ({ defaultTab }) => {
           : nextUsers,
       );
     } catch (err) {
-      console.error('Failed to load branches/users:', err);
+      console.error('Failed to load branches/users/entitlements:', err);
       setBranches([]);
       setUsers([]);
     }
@@ -783,6 +820,14 @@ const CRMHub = ({ defaultTab }) => {
   const bulkGrab = async () => {
     const ids = Array.from(selectedLeadIds);
     if (ids.length === 0) return;
+    const hasOverQuota = ids.some(id => {
+      const l = leads.find(item => item.id === id);
+      const bOver = isBranchOverQuota(l?.branch_details?.id ?? l?.branch, overQuotaBranchIds) || l?.branch_is_over_quota;
+      return bOver;
+    });
+    if (hasOverQuota) {
+      return denyHubAction('Some selected leads belong to over-quota branches and cannot be grabbed (read-only mode).');
+    }
     if (!canAssignHubRecords) return denyHubAction('You do not have permission to assign leads.');
     if (!user?.id) {
       alert('Current user not available.');
@@ -803,6 +848,17 @@ const CRMHub = ({ defaultTab }) => {
   const bulkAssign = async () => {
     const ids = Array.from(selectedLeadIds);
     if (ids.length === 0) return;
+    if (bulkAssignForm.branch && isBranchOverQuota(bulkAssignForm.branch, overQuotaBranchIds)) {
+      return denyHubAction('Cannot assign leads to an over-quota branch (read-only).');
+    }
+    const hasOverQuota = ids.some(id => {
+      const l = leads.find(item => item.id === id);
+      const bOver = isBranchOverQuota(l?.branch_details?.id ?? l?.branch, overQuotaBranchIds) || l?.branch_is_over_quota;
+      return bOver;
+    });
+    if (hasOverQuota) {
+      return denyHubAction('Some selected leads belong to over-quota branches and cannot be reassigned (read-only mode).');
+    }
     if (!canAssignHubRecords) return denyHubAction('You do not have permission to assign leads.');
     setAssignLoading(true);
     try {
@@ -824,6 +880,14 @@ const CRMHub = ({ defaultTab }) => {
   const bulkChangeStatus = async () => {
     const ids = Array.from(selectedLeadIds);
     if (ids.length === 0) return;
+    const hasOverQuota = ids.some(id => {
+      const l = leads.find(item => item.id === id);
+      const bOver = isBranchOverQuota(l?.branch_details?.id ?? l?.branch, overQuotaBranchIds) || l?.branch_is_over_quota;
+      return bOver;
+    });
+    if (hasOverQuota) {
+      return denyHubAction('Some selected leads belong to over-quota branches and cannot be modified (read-only mode).');
+    }
     if (!canManageHubRecords) return denyHubAction('You do not have permission to change lead status.');
     setIsSaving(true);
     try {
@@ -880,6 +944,10 @@ const CRMHub = ({ defaultTab }) => {
 
   const handleConvert = async (lead) => {
     if (!lead?.id) return;
+    const leadBranch = lead.branch_details?.id ?? lead.branch;
+    if (isBranchOverQuota(leadBranch, overQuotaBranchIds) || lead.branch_is_over_quota) {
+      return denyHubAction('This lead belongs to an over-quota branch (read-only mode). Converting leads is disabled.');
+    }
     if (!hasPermission('leads.convert')) return denyHubAction('You do not have permission to convert leads.');
     if (getRecordSystemState(lead, true) !== 'qualified') return denyHubAction('Qualify this lead before converting it.');
     if (!window.confirm('Convert this lead to a customer and create an opportunity?')) return;
@@ -907,6 +975,12 @@ const CRMHub = ({ defaultTab }) => {
 
   const saveAssignment = async () => {
     if (!selectedLead?.id) return;
+    if (isSelectedLeadOverQuota) {
+      return denyHubAction('This lead belongs to an over-quota branch (read-only mode). Reassigning is disabled.');
+    }
+    if (assignForm.branch && isBranchOverQuota(assignForm.branch, overQuotaBranchIds)) {
+      return denyHubAction('Cannot assign to an over-quota branch (read-only).');
+    }
     if (!canAssignHubRecords) return denyHubAction('You do not have permission to assign leads.');
     setAssignLoading(true);
     try {
@@ -927,6 +1001,19 @@ const CRMHub = ({ defaultTab }) => {
 
   const openActivity = (targetType, targetId, presetType) => {
     if (!targetId) return;
+    if (targetType === 'lead') {
+      const targetLead = leads.find(l => l.id === targetId) || (selectedLead?.id === targetId ? selectedLead : null);
+      const bId = targetLead?.branch_details?.id ?? targetLead?.branch;
+      if (isBranchOverQuota(bId, overQuotaBranchIds) || targetLead?.branch_is_over_quota) {
+        return denyHubAction('This lead belongs to an over-quota branch (read-only mode). Logging activities is disabled.');
+      }
+    } else if (targetType === 'opportunity') {
+      const targetOpp = opps.find(o => o.id === targetId);
+      const bId = targetOpp?.branch?.id ?? targetOpp?.branch_id ?? targetOpp?.branch;
+      if (isBranchOverQuota(bId, overQuotaBranchIds) || targetOpp?.branch_is_over_quota) {
+        return denyHubAction('This opportunity belongs to an over-quota branch (read-only mode). Logging activities is disabled.');
+      }
+    }
     setActivityModal({ open: true, targetType, targetId });
     setActivityForm({
       type: presetType || 'note',
@@ -939,6 +1026,19 @@ const CRMHub = ({ defaultTab }) => {
   const submitActivity = async (e) => {
     e.preventDefault();
     if (!activityModal.targetId) return;
+    if (activityModal.targetType === 'lead') {
+      const targetLead = leads.find(l => l.id === activityModal.targetId) || (selectedLead?.id === activityModal.targetId ? selectedLead : null);
+      const bId = targetLead?.branch_details?.id ?? targetLead?.branch;
+      if (isBranchOverQuota(bId, overQuotaBranchIds) || targetLead?.branch_is_over_quota) {
+        return denyHubAction('This lead belongs to an over-quota branch (read-only mode). Creating activities is disabled.');
+      }
+    } else {
+      const targetOpp = opps.find(o => o.id === activityModal.targetId);
+      const bId = targetOpp?.branch?.id ?? targetOpp?.branch_id ?? targetOpp?.branch;
+      if (isBranchOverQuota(bId, overQuotaBranchIds) || targetOpp?.branch_is_over_quota) {
+        return denyHubAction('This opportunity belongs to an over-quota branch (read-only mode). Creating activities is disabled.');
+      }
+    }
     if (!canManageHubRecords) return denyHubAction('You do not have permission to create activities.');
     setIsSaving(true);
     try {
@@ -983,6 +1083,10 @@ const CRMHub = ({ defaultTab }) => {
 
   const openLeadEdit = async (lead) => {
     if (!lead) return;
+    const bId = lead.branch_details?.id ?? lead.branch;
+    if (isBranchOverQuota(bId, overQuotaBranchIds) || lead.branch_is_over_quota) {
+      return denyHubAction('This lead belongs to an over-quota branch (read-only mode). Edits cannot be made.');
+    }
     let fullLead;
     try {
       fullLead = await getLead(lead.id);
@@ -1007,6 +1111,12 @@ const CRMHub = ({ defaultTab }) => {
 
   const submitLead = async (e) => {
     e.preventDefault();
+    if (leadModal.mode === 'edit' && leadModal.initial) {
+      const bId = leadModal.initial.branch_details?.id ?? leadModal.initial.branch;
+      if (isBranchOverQuota(bId, overQuotaBranchIds) || leadModal.initial.branch_is_over_quota) {
+        return denyHubAction('This lead belongs to an over-quota branch (read-only mode). Edits cannot be saved.');
+      }
+    }
     if (!canCreateHubRecords && leadModal.mode !== 'edit') return denyHubAction('You do not have permission to create leads.');
     if (!canManageHubRecords && leadModal.mode === 'edit') return denyHubAction('You do not have permission to edit leads.');
     setIsSaving(true);
@@ -1135,6 +1245,10 @@ const CRMHub = ({ defaultTab }) => {
         return;
       }
       if (oppModal.mode === 'edit' && oppModal.initial?.id) {
+        const bId = oppModal.initial.branch?.id ?? oppModal.initial.branch_id ?? oppModal.initial.branch;
+        if (isBranchOverQuota(bId, overQuotaBranchIds) || oppModal.initial?.branch_is_over_quota) {
+          return denyHubAction('This opportunity belongs to an over-quota branch (read-only mode). Edits cannot be saved.');
+        }
         const updated = await updateOpportunity(oppModal.initial.id, payload);
         setOpps(prev => prev.map(o => (o.id === updated.id ? updated : o)));
       } else {
@@ -1153,6 +1267,12 @@ const CRMHub = ({ defaultTab }) => {
 
   const doDelete = async () => {
     if (!confirmDelete?.item?.id) return;
+    const bId = confirmDelete.type === 'lead'
+      ? (confirmDelete.item.branch_details?.id ?? confirmDelete.item.branch)
+      : (confirmDelete.item.branch?.id ?? confirmDelete.item.branch_id ?? confirmDelete.item.branch);
+    if (isBranchOverQuota(bId, overQuotaBranchIds) || confirmDelete.item?.branch_is_over_quota) {
+      return denyHubAction('Cannot delete records belonging to an over-quota branch (read-only mode).');
+    }
     if (!canDeleteHubRecords) return denyHubAction('You do not have permission to delete records.');
     setIsSaving(true);
     try {
@@ -1243,18 +1363,16 @@ const CRMHub = ({ defaultTab }) => {
                 <button
                   type="button"
                   onClick={() => setLeadTempBucket('all')}
-                  className={`w-full text-left px-3 py-2 rounded-xl text-sm font-bold transition-all ${
-                    leadTempBucket === 'all' ? 'bg-heading text-white' : 'text-body hover:bg-page'
-                  }`}
+                  className={`w-full text-left px-3 py-2 rounded-xl text-sm font-bold transition-all ${leadTempBucket === 'all' ? 'bg-heading text-white' : 'text-body hover:bg-page'
+                    }`}
                 >
                   All
                 </button>
                 <button
                   type="button"
                   onClick={() => setLeadTempBucket('hot')}
-                  className={`w-full text-left px-3 py-2 rounded-xl text-sm font-bold transition-all ${
-                    leadTempBucket === 'hot' ? 'bg-heading text-white' : 'text-body hover:bg-page'
-                  }`}
+                  className={`w-full text-left px-3 py-2 rounded-xl text-sm font-bold transition-all ${leadTempBucket === 'hot' ? 'bg-heading text-white' : 'text-body hover:bg-page'
+                    }`}
                 >
                   Hot
                 </button>
@@ -1485,16 +1603,14 @@ const CRMHub = ({ defaultTab }) => {
                         key={lead.id}
                         type="button"
                         onClick={() => setSelectedLeadId(lead.id)}
-                        className={`w-full text-left px-6 py-5 transition-all ${
-                          active ? 'bg-heading text-white' : 'bg-card hover:bg-page/60'
-                        }`}
+                        className={`w-full text-left px-6 py-5 transition-all ${active ? 'bg-heading text-white' : 'bg-card hover:bg-page/60'
+                          }`}
                       >
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0">
                             <div className="flex items-center gap-3">
-                              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-heading font-bold text-sm ${
-                                active ? 'bg-card/10 text-white' : 'bg-page text-primary'
-                              }`}>
+                              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-heading font-bold text-sm ${active ? 'bg-card/10 text-white' : 'bg-page text-primary'
+                                }`}>
                                 {initials(d.fullName)}
                               </div>
                               <div className="min-w-0">
@@ -1507,24 +1623,21 @@ const CRMHub = ({ defaultTab }) => {
                             </div>
                             <div className="mt-3 flex flex-wrap gap-2">
                               <span
-                                className={`inline-flex items-center px-2.5 py-1 rounded-full text-[0.625rem] font-bold uppercase tracking-widest border ${
-                                  active ? 'border-white/15 text-white/90 bg-card/5' : 'border-subtle text-body bg-page'
-                                }`}
+                                className={`inline-flex items-center px-2.5 py-1 rounded-full text-[0.625rem] font-bold uppercase tracking-widest border ${active ? 'border-white/15 text-white/90 bg-card/5' : 'border-subtle text-body bg-page'
+                                  }`}
                                 style={!active ? (getStatusPillStyle(lead?.custom_status_code_details?.color_hex) || undefined) : undefined}
                               >
                                 {lead?.custom_status_code_details?.label || getLeadStatusLabel(d.status || 'new')}
                               </span>
                               {d.priority && (
-                                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[0.625rem] font-bold uppercase tracking-widest border ${
-                                  active ? 'border-white/15 text-white/90 bg-card/5' : 'border-subtle text-body bg-page'
-                                }`}>
+                                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[0.625rem] font-bold uppercase tracking-widest border ${active ? 'border-white/15 text-white/90 bg-card/5' : 'border-subtle text-body bg-page'
+                                  }`}>
                                   {d.priority}
                                 </span>
                               )}
                               {lead.move_size && (
-                                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[0.625rem] font-bold uppercase tracking-widest border ${
-                                  active ? 'border-white/15 text-white/90 bg-card/5' : 'border-subtle text-body bg-page'
-                                }`}>
+                                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[0.625rem] font-bold uppercase tracking-widest border ${active ? 'border-white/15 text-white/90 bg-card/5' : 'border-subtle text-body bg-page'
+                                  }`}>
                                   {lead.move_size}
                                 </span>
                               )}
@@ -1560,6 +1673,17 @@ const CRMHub = ({ defaultTab }) => {
                     const d = leadDisplay(selectedLead);
                     return (
                       <div className="space-y-3">
+                        {isSelectedLeadOverQuota && (
+                          <div data-testid="crmhub-lead-over-quota-banner" className="p-3.5 rounded-2xl border border-amber-300 bg-amber-50 text-amber-900 text-xs shadow-sm">
+                            <div className="flex items-center gap-2 font-bold text-amber-950">
+                              <AlertCircle size={16} className="text-amber-600 shrink-0" />
+                              <span>Branch Over Quota (Read-Only Mode)</span>
+                            </div>
+                            <p className="mt-1 text-amber-800">
+                              {`This lead belongs to an over-quota branch (${selectedLead.branch_details?.name || `Branch #${selectedLead.branch}`}). Assignments, edits, conversions, and activity logs are in read-only format.`}
+                            </p>
+                          </div>
+                        )}
                         <div className="flex items-start gap-4">
                           <div className="w-12 h-12 rounded-2xl bg-heading text-white flex items-center justify-center font-heading font-bold">
                             {initials(d.fullName)}
@@ -1611,9 +1735,14 @@ const CRMHub = ({ defaultTab }) => {
                                 className="w-full bg-page border border-subtle px-4 py-3 rounded-xl outline-none text-sm font-medium"
                               >
                                 <option value="">Unassigned</option>
-                                {branches.map(b => (
-                                  <option key={b.id} value={b.id}>{b.name}</option>
-                                ))}
+                                {branches.map(b => {
+                                  const isOver = isBranchOverQuota(b.id, overQuotaBranchIds);
+                                  return (
+                                    <option key={b.id} value={b.id} disabled={isOver}>
+                                      {b.name || `Branch #${b.id}`}{isOver ? ' (Over Quota - Read-Only)' : ''}
+                                    </option>
+                                  );
+                                })}
                               </select>
                             </div>
                             <div className="space-y-1.5">
@@ -1626,12 +1755,10 @@ const CRMHub = ({ defaultTab }) => {
                                 <option value="">Unassigned</option>
                                 {users
                                   .filter(u => {
-                                    const bid = assignForm.branch ? Number(assignForm.branch) : null;
+                                    const bid = assignForm.branch ? String(assignForm.branch) : null;
                                     if (!bid) return true;
-                                    const branchIds = Array.isArray(u.branches)
-                                      ? u.branches
-                                      : (Array.isArray(u.branch_details) ? u.branch_details.map(b => b.id) : []);
-                                    return branchIds.includes(bid);
+                                    const branchIds = getUserBranchIds(u);
+                                    return branchIds.length === 0 || branchIds.includes(bid);
                                   })
                                   .map(u => (
                                     <option key={u.id} value={u.id}>
@@ -1643,11 +1770,19 @@ const CRMHub = ({ defaultTab }) => {
                           </div>
                           <button
                             type="button"
-                            disabled={assignLoading}
+                            disabled={
+                              assignLoading ||
+                              isSelectedLeadOverQuota ||
+                              isBranchOverQuota(assignForm.branch, overQuotaBranchIds)
+                            }
                             onClick={saveAssignment}
-                            className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-heading text-white text-sm font-bold hover:opacity-95 transition-all disabled:opacity-70"
+                            className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-heading text-white text-sm font-bold hover:opacity-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            {assignLoading ? 'Saving...' : 'Save Assignment'}
+                            {assignLoading
+                              ? 'Saving...'
+                              : (isSelectedLeadBranchOverQuota || isBranchOverQuota(assignForm.branch, overQuotaBranchIds))
+                                ? 'Branch Over Quota (Read-Only)'
+                                : 'Save Assignment'}
                           </button>
                         </div>
 
@@ -1661,16 +1796,18 @@ const CRMHub = ({ defaultTab }) => {
                           </button>
                           <button
                             type="button"
+                            disabled={isSelectedLeadOverQuota}
                             onClick={() => openLeadEdit(selectedLead)}
-                            className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-card border border-subtle text-sm font-bold text-body hover:text-primary hover:border-primary/20 transition-all"
+                            className={`flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-card border border-subtle text-sm font-bold text-body hover:text-primary hover:border-primary/20 transition-all ${isSelectedLeadOverQuota ? 'opacity-50 cursor-not-allowed' : ''}`}
                           >
                             Edit
                           </button>
                           {getRecordSystemState(selectedLead, true) === 'qualified' && hasPermission('leads.convert') && (
                             <button
                               type="button"
+                              disabled={isSelectedLeadOverQuota}
                               onClick={() => handleConvert(selectedLead)}
-                              className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-primary text-white font-bold shadow-sm hover:bg-primary-dark transition-all"
+                              className={`flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-primary text-white font-bold shadow-sm hover:bg-primary-dark transition-all ${isSelectedLeadOverQuota ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                               <Zap size={18} className="fill-current" /> Convert
                             </button>
@@ -1678,8 +1815,9 @@ const CRMHub = ({ defaultTab }) => {
                         </div>
                         {hasPermission('leads.update') && canTransition(true, getRecordSystemState(selectedLead, true), 'archived') && <button
                           type="button"
+                          disabled={isSelectedLeadOverQuota}
                           onClick={() => setConfirmDelete({ type: 'lead', item: selectedLead })}
-                          className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-[#FDE8E8]/30 border border-[#FDE8E8] text-sm font-bold text-[#791F1F] hover:bg-[#FDE8E8]/50 transition-all"
+                          className={`w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-[#FDE8E8]/30 border border-[#FDE8E8] text-sm font-bold text-[#791F1F] hover:bg-[#FDE8E8]/50 transition-all ${isSelectedLeadOverQuota ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                           Archive Lead
                         </button>}
@@ -1687,15 +1825,17 @@ const CRMHub = ({ defaultTab }) => {
                         <div className="flex gap-3">
                           <button
                             type="button"
+                            disabled={isSelectedLeadOverQuota}
                             onClick={() => openActivity('lead', selectedLead.id, 'call')}
-                            className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-card border border-subtle text-sm font-bold text-body hover:text-primary hover:border-primary/20 transition-all"
+                            className={`flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-card border border-subtle text-sm font-bold text-body hover:text-primary hover:border-primary/20 transition-all ${isSelectedLeadOverQuota ? 'opacity-50 cursor-not-allowed' : ''}`}
                           >
                             <Phone size={16} /> Log Call
                           </button>
                           <button
                             type="button"
+                            disabled={isSelectedLeadOverQuota}
                             onClick={() => openActivity('lead', selectedLead.id, 'email')}
-                            className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-card border border-subtle text-sm font-bold text-body hover:text-primary hover:border-primary/20 transition-all"
+                            className={`flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-card border border-subtle text-sm font-bold text-body hover:text-primary hover:border-primary/20 transition-all ${isSelectedLeadOverQuota ? 'opacity-50 cursor-not-allowed' : ''}`}
                           >
                             <Mail size={16} /> Log Email
                           </button>
@@ -1703,15 +1843,17 @@ const CRMHub = ({ defaultTab }) => {
                         <div className="flex gap-3">
                           <button
                             type="button"
+                            disabled={isSelectedLeadOverQuota}
                             onClick={() => openActivity('lead', selectedLead.id, 'sms')}
-                            className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-card border border-subtle text-sm font-bold text-body hover:text-primary hover:border-primary/20 transition-all"
+                            className={`flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-card border border-subtle text-sm font-bold text-body hover:text-primary hover:border-primary/20 transition-all ${isSelectedLeadOverQuota ? 'opacity-50 cursor-not-allowed' : ''}`}
                           >
                             Log SMS
                           </button>
                           <button
                             type="button"
+                            disabled={isSelectedLeadOverQuota}
                             onClick={() => openActivity('lead', selectedLead.id, 'note')}
-                            className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-card border border-subtle text-sm font-bold text-body hover:text-primary hover:border-primary/20 transition-all"
+                            className={`flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-card border border-subtle text-sm font-bold text-body hover:text-primary hover:border-primary/20 transition-all ${isSelectedLeadOverQuota ? 'opacity-50 cursor-not-allowed' : ''}`}
                           >
                             Log Note
                           </button>
@@ -1941,7 +2083,14 @@ const CRMHub = ({ defaultTab }) => {
                   className="w-full px-4 py-3 rounded-2xl bg-card border border-subtle outline-none focus:border-primary/30 focus:ring-2 focus:ring-primary/10"
                 >
                   <option value="">Unassigned</option>
-                  {branches.map(b => <option key={b.id} value={b.id}>{b.name || `Branch #${b.id}`}</option>)}
+                  {branches.map(b => {
+                    const isOver = isBranchOverQuota(b.id, overQuotaBranchIds);
+                    return (
+                      <option key={b.id} value={b.id} disabled={isOver}>
+                        {b.name || `Branch #${b.id}`}{isOver ? ' (Over Quota - Read-Only)' : ''}
+                      </option>
+                    );
+                  })}
                 </select>
               </Field>
               <Field label="User">
@@ -1953,12 +2102,10 @@ const CRMHub = ({ defaultTab }) => {
                   <option value="">Unassigned</option>
                   {users
                     .filter(u => {
-                      const bid = bulkAssignForm.branch ? Number(bulkAssignForm.branch) : null;
+                      const bid = bulkAssignForm.branch ? String(bulkAssignForm.branch) : null;
                       if (!bid) return true;
-                      const branchIds = Array.isArray(u.branches)
-                        ? u.branches
-                        : (Array.isArray(u.branch_details) ? u.branch_details.map(b => b.id) : []);
-                      return branchIds.includes(bid);
+                      const branchIds = getUserBranchIds(u);
+                      return branchIds.length === 0 || branchIds.includes(bid);
                     })
                     .map(u => (
                       <option key={u.id} value={u.id}>
@@ -1978,11 +2125,18 @@ const CRMHub = ({ defaultTab }) => {
               </button>
               <button
                 type="button"
-                disabled={assignLoading}
+                disabled={
+                  assignLoading ||
+                  (bulkAssignForm.branch && isBranchOverQuota(bulkAssignForm.branch, overQuotaBranchIds))
+                }
                 onClick={bulkAssign}
-                className="px-4 py-2 rounded-xl bg-heading text-white text-sm font-bold hover:opacity-95 transition-all disabled:opacity-60"
+                className="px-4 py-2 rounded-xl bg-heading text-white text-sm font-bold hover:opacity-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {assignLoading ? 'Assigning...' : 'Assign'}
+                {assignLoading
+                  ? 'Assigning...'
+                  : (bulkAssignForm.branch && isBranchOverQuota(bulkAssignForm.branch, overQuotaBranchIds))
+                    ? 'Branch Over Quota'
+                    : 'Assign'}
               </button>
             </div>
           </div>
