@@ -109,3 +109,60 @@ export const resolveRoleName = (role) => {
   if (typeof role === 'string') return role;
   return role.name || role.label || role.codename || 'No Role';
 };
+
+export const isBranchActive = (branch) => branch?.is_active !== false;
+
+export const getOverQuotaBranchIds = (branches = [], branchLimit = null) => {
+  if (branchLimit == null || !Array.isArray(branches)) return new Set();
+  const limit = Number(branchLimit);
+  if (isNaN(limit) || limit <= 0) return new Set();
+
+  const activeBranches = branches
+    .filter(isBranchActive)
+    .slice()
+    .sort((a, b) => {
+      if (a.is_main && !b.is_main) return -1;
+      if (!a.is_main && b.is_main) return 1;
+      return (Number(a.id) || 0) - (Number(b.id) || 0);
+    });
+
+  if (activeBranches.length <= limit) return new Set();
+
+  const excessBranches = activeBranches.slice(limit);
+  return new Set(excessBranches.map((b) => String(resolveBranchId(b))));
+};
+
+export const isBranchOverQuota = (branchId, overQuotaBranchIds) => {
+  if (!branchId || !overQuotaBranchIds || !(overQuotaBranchIds instanceof Set)) return false;
+  return overQuotaBranchIds.has(String(resolveBranchId(branchId)));
+};
+
+export const isUserActive = (user) => user?.is_active !== false;
+
+export const getOverQuotaUserIds = (users = [], userLimit = null) => {
+  if (userLimit == null || !Array.isArray(users)) return new Set();
+  const limit = Number(userLimit);
+  if (isNaN(limit) || limit <= 0) return new Set();
+
+  const activeUsers = users
+    .filter(isUserActive)
+    .slice()
+    .sort((a, b) => {
+      const aAdmin = Boolean(a?.is_superuser || a?.is_system_admin || a?.is_owner);
+      const bAdmin = Boolean(b?.is_superuser || b?.is_system_admin || b?.is_owner);
+      if (aAdmin && !bAdmin) return -1;
+      if (!aAdmin && bAdmin) return 1;
+      return (Number(a?.id ?? a?.user_id) || 0) - (Number(b?.id ?? b?.user_id) || 0);
+    });
+
+  if (activeUsers.length <= limit) return new Set();
+
+  const excessUsers = activeUsers.slice(limit);
+  return new Set(excessUsers.map((u) => String(u?.id ?? u?.user_id)));
+};
+
+export const isUserOverQuota = (userId, overQuotaUserIds) => {
+  if (!userId || !overQuotaUserIds || !(overQuotaUserIds instanceof Set)) return false;
+  return overQuotaUserIds.has(String(userId));
+};
+

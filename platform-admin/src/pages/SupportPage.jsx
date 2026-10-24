@@ -1,6 +1,6 @@
-import React, { useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Loader2, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Loader2, RefreshCw, AlertTriangle, Plus } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { usePlatformAuth } from '../auth/PlatformAuthContext';
 import { PLATFORM_PERMISSIONS, isTenantInScope } from '../rbac/platformRbac';
@@ -16,6 +16,8 @@ export default function SupportPage() {
   const { hasPermission, platformUser } = usePlatformAuth();
 
   const canView = hasPermission(PLATFORM_PERMISSIONS.SUPPORT_SESSIONS_VIEW);
+  const canCreate = hasPermission(PLATFORM_PERMISSIONS.SUPPORT_SESSIONS_CREATE);
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   const { data: sessions = [], isLoading: isSessionsLoading, refetch: refetchSessions } = useSupportSessions();
   const { data: allTenants = [], isLoading: isTenantsLoading, refetch: refetchTenants } = useTenants();
@@ -73,22 +75,34 @@ export default function SupportPage() {
   }
 
   return (
-    <div className="space-y-2 max-w-7xl mx-auto pb-3">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+    <div className="space-y-3 max-w-7xl mx-auto pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+          <h1 className="text-xl sm:text-2xl font-black text-[#0B132B] dark:text-white tracking-tight">
             Support Sessions & Tenant Impersonation
           </h1>
         </div>
 
-        <button
-          onClick={handleRefresh}
-          className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5 text-xs font-bold self-start sm:self-auto cursor-pointer shadow-2xs"
-          title="Reload support sessions"
-        >
-          <RefreshCw size={13} />
-          <span>Refresh</span>
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            onClick={handleRefresh}
+            className="px-3.5 py-1.5 rounded-md border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5 text-xs sm:text-sm font-semibold cursor-pointer shadow-xs"
+            title="Reload support sessions"
+          >
+            <RefreshCw size={13} className="text-slate-600 dark:text-slate-300" />
+            <span>Refresh</span>
+          </button>
+
+          {canCreate && (
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="px-3.5 py-1.5 rounded-md bg-[#F25900] hover:bg-[#D94F00] text-white text-xs sm:text-sm font-semibold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+            >
+              <Plus size={14} strokeWidth={2.5} />
+              <span>New Support Session</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {initialTenantId && !isRequestedTenantAuthorized && (
@@ -115,6 +129,9 @@ export default function SupportPage() {
         initialTargetTenant={initialTargetTenant}
         onRefresh={handleRefresh}
         onInvalidateSessions={invalidateSupportSessions}
+        showCreateModal={showCreateModal}
+        setShowCreateModal={setShowCreateModal}
+        hideTopAction={true}
       />
     </div>
   );

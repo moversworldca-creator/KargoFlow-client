@@ -358,6 +358,7 @@ vi.mock('../../../services/api', () => {
     getResendConfig: vi.fn().mockResolvedValue([]),
     getSMTPConfig: vi.fn().mockResolvedValue([]),
     getLead: vi.fn().mockResolvedValue({}),
+    getEntitlementSnapshot: vi.fn().mockResolvedValue(null),
     assignLead: vi.fn().mockResolvedValue({}),
     updateLead: vi.fn().mockResolvedValue({}),
     createLead: vi.fn().mockResolvedValue({}),
@@ -1443,6 +1444,57 @@ describe('SalesDetail Component Tests', () => {
     renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
     await screen.findByText('Ada Lead');
     await waitFor(() => expect(screen.getByRole('button', { name: /Retry/i })).toBeInTheDocument());
+  });
+
+  it('renders read-only mode and banner when lead belongs to an over-quota branch', async () => {
+    apiService.getLead.mockResolvedValue({
+      ...leadFixture,
+      id: 123,
+      branch: 2,
+      branch_details: { id: 2, name: 'Branch Two', is_main: false },
+    });
+    apiService.getBranchLookups.mockResolvedValue([
+      { id: 1, name: 'Main Branch', is_main: true, is_active: true },
+      { id: 2, name: 'Branch Two', is_main: false, is_active: true },
+    ]);
+    apiService.getEntitlementSnapshot.mockResolvedValue({
+      limits: { 'branches.max_active': 1 },
+      resource_access: { branch_limit: 1 },
+    });
+
+    renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
+
+    expect(await screen.findByTestId('branch-over-quota-banner')).toBeInTheDocument();
+    expect(screen.getByText(/Branch Over Quota \(Read-Only Mode\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/Branch Two/i)).toBeInTheDocument();
+  });
+
+  it('does not render over-quota banner when lead belongs to a within-quota branch', async () => {
+    apiService.getLead.mockResolvedValue({
+      ...leadFixture,
+      id: 123,
+      branch: 1,
+      branch_details: { id: 1, name: 'Main Branch', is_main: true },
+      assigned_to: 20,
+      assigned_to_details: { id: 20, email: 'user@example.com' },
+    });
+    apiService.getBranchLookups.mockResolvedValue([
+      { id: 1, name: 'Main Branch', is_main: true, is_active: true },
+    ]);
+    apiService.getLookupEmployeesPage.mockResolvedValue([
+      { id: 10, email: 'admin@example.com', is_active: true, is_superuser: true },
+      { id: 20, email: 'user@example.com', is_active: true, is_superuser: false },
+    ]);
+    apiService.getEntitlementSnapshot.mockResolvedValue({
+      limits: { 'branches.max_active': 1, 'users.max_active': 0 },
+      resource_access: { branch_limit: 1, user_limit: 0 },
+    });
+
+    renderComponent({ initialEntry: '/leads/123', routePath: '/leads/:id' });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('branch-over-quota-banner')).not.toBeInTheDocument();
+    });
   });
 
 });

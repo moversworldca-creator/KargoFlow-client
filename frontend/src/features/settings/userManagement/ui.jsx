@@ -167,11 +167,14 @@ export function EmptyState({ children }) {
     return <p className="py-8 text-center text-xs text-slate-500">{children}</p>;
 }
 
-export function ReadOnlyNotice() {
+export function ReadOnlyNotice({ title, message }) {
     return (
         <div role="status" className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
             <Lock size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
-            <span>Your company&apos;s subscription is read-only. You can review people and access, but changes are disabled.</span>
+            <div>
+                {title && <span className="font-bold block mb-0.5">{title}</span>}
+                <span>{message || "Your company's subscription is read-only. You can review people and access, but changes are disabled."}</span>
+            </div>
         </div>
     );
 }

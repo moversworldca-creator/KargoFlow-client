@@ -827,6 +827,7 @@ const API = {
   },
 
   general: {
+    getEntitlementSnapshot,
     getAuditLogs,
     getSecurityAuditLogs,
     getRbacDecisionLogs,

@@ -5,7 +5,7 @@
 // "Login disabled". Every action checks the single backend permission it
 // needs, and only actions valid for the record's state are offered.
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronRight, KeyRound, Search, UserPlus } from 'lucide-react';
+import { ChevronRight, KeyRound, Lock, Search, UserPlus } from 'lucide-react';
 import { useAuth } from '../../auth/context/AuthContext';
 import { EMPLOYMENT_STATUSES, useUserAdminAccess } from './permissions';
 import { describeError } from './errors';
@@ -21,6 +21,7 @@ import RoleAssignModal from './RoleAssignModal';
 import InvitationsList from './InvitationsList';
 import { assignmentLabel, invitationStatus, loginState, rowActions } from './logic';
 import { Badge, Button, DeniedState, EmptyState, ErrorBanner, LoadingState, ReadOnlyNotice, inputClass } from './ui';
+import { getOverQuotaUserIds, isUserOverQuota } from '../../../shared/utils/branchScope';
 
 const PAGE_SIZE = 25;
 const fullName = (e) => [e?.first_name, e?.last_name].filter(Boolean).join(' ') || e?.email || 'Unnamed employee';
@@ -58,7 +59,13 @@ export default function EmployeeDirectory({ branchId }) {
     const catalogQuery = usePermissionCatalog(can.viewPermissions || can.manageOverrides);
     const branchesQuery = useBranchCatalog(can.viewBranches);
     const entitlementsQuery = useEntitlements(can.viewEntitlements);
-    const readOnly = isReadOnlyMode(entitlementsQuery.data);
+    const activeUsersCount = useMemo(() => (usersQuery.data || []).filter((u) => u.is_active !== false).length, [usersQuery.data]);
+    const userLimit = entitlementsQuery.data?.limits?.['users.max_active'] ?? entitlementsQuery.data?.resource_access?.user_limit;
+    const hasExpiredUserAddon = Boolean(entitlementsQuery.data?.resource_access?.has_expired_user_addon);
+    const isSeatLimitReached = Boolean(userLimit != null && activeUsersCount >= userLimit);
+    const isUserAddonExpired = Boolean(hasExpiredUserAddon && isSeatLimitReached);
+    const isOverallReadOnly = isReadOnlyMode(entitlementsQuery.data);
+    const readOnly = Boolean(isOverallReadOnly || isSeatLimitReached || entitlementsQuery.data?.resource_access?.users_read_only);
 
     const loginsById = useMemo(() => new Map((usersQuery.data || []).map((u) => [String(u.id), u])), [usersQuery.data]);
     const pendingByEmployee = useMemo(() => new Map((invitationsQuery.data || [])
@@ -90,6 +97,10 @@ export default function EmployeeDirectory({ branchId }) {
     const currentUserId = user?.id;
     const waitingInvitations = (invitationsQuery.data || []).filter((i) => ['pending', 'expired'].includes(invitationStatus(i))).length;
 
+    const overQuotaUserIds = useMemo(() => {
+        return getOverQuotaUserIds(usersQuery.data || [], userLimit);
+    }, [usersQuery.data, userLimit]);
+
     const done = async (message) => {
         setModal(null);
         setNotice(message);
@@ -97,11 +108,13 @@ export default function EmployeeDirectory({ branchId }) {
     };
     const contextFor = (employee) => {
         const isSelf = employee.user_id != null && String(employee.user_id) === String(currentUserId);
+        const isOverQuota = Boolean(employee.user_id != null && isUserOverQuota(employee.user_id, overQuotaUserIds));
         return {
             login: loginState(employee, loginsById, pendingByEmployee),
             loginRow: loginsById.get(String(employee.user_id)),
             invitation: latestInvitationByEmployee.get(String(employee.id)),
             isSelf,
+            isOverQuota,
             actions: rowActions(employee, { can, isSelf, readOnly }),
         };
     };
@@ -109,7 +122,20 @@ export default function EmployeeDirectory({ branchId }) {
 
     return (
         <div className="space-y-3">
-            {readOnly && <ReadOnlyNotice />}
+            {readOnly && (
+                <ReadOnlyNotice
+                    title={isOverallReadOnly ? undefined : isUserAddonExpired ? "User Add-on Expired (Read-Only Mode)" : isSeatLimitReached ? "User Seat Limit Reached" : undefined}
+                    message={
+                        isOverallReadOnly
+                            ? undefined
+                            : isUserAddonExpired
+                              ? `Your user add-on pack has expired and active users (${activeUsersCount} / ${userLimit}) meet or exceed your allowed limit. User management is in read-only mode until the add-on is renewed.`
+                              : isSeatLimitReached
+                                ? `Active users (${activeUsersCount} / ${userLimit}) have reached the maximum allowed limit. Adding new employees or issuing new logins is disabled until an additional add-on pack is acquired.`
+                                : undefined
+                    }
+                />
+            )}
 
             {can.manageLogins && (
                 <div role="tablist" aria-label="Team members views" className="flex gap-1 rounded-xl bg-slate-100 p-1 text-xs dark:bg-slate-800">
@@ -142,7 +168,7 @@ export default function EmployeeDirectory({ branchId }) {
                             </select>
                         </div>
                         {can.manageEmployees && (
-                            <Button onClick={() => setModal({ kind: 'create' })} disabled={readOnly} title={readOnly ? 'Read-only subscription' : undefined}>
+                            <Button onClick={() => setModal({ kind: 'create' })} disabled={readOnly} title={readOnly ? (isUserAddonExpired ? 'User add-on expired' : isSeatLimitReached ? 'User seat limit reached' : 'Read-only subscription') : undefined}>
                                 <UserPlus size={14} aria-hidden="true" /> Add employee
                             </Button>
                         )}
@@ -191,7 +217,16 @@ export default function EmployeeDirectory({ branchId }) {
                                                         <Badge tone={statusMeta.tone}>{statusMeta.label}</Badge>
                                                         {employee.employment_status === 'terminated' && employee.rehire_eligible === false && <p className="mt-1 text-[11px] text-slate-500">Not eligible for rehire</p>}
                                                     </td>
-                                                    <td className="px-3 py-2"><Badge tone={ctx.login.tone}>{ctx.login.label}</Badge></td>
+                                                    <td className="px-3 py-2">
+                                                        <div className="flex flex-wrap items-center gap-1.5">
+                                                            <Badge tone={ctx.login.tone}>{ctx.login.label}</Badge>
+                                                            {ctx.isOverQuota && (
+                                                                <Badge tone="amber" title="This user account was added via an add-on pack that has expired or is over quota.">
+                                                                    <Lock size={10} className="mr-0.5 inline" /> Over Quota
+                                                                </Badge>
+                                                            )}
+                                                        </div>
+                                                    </td>
                                                     <td className="px-3 py-2">{employee.primary_branch_id ? branchName(employee.primary_branch_id) : '—'}</td>
                                                     {can.viewUsers && (
                                                         <td className="px-3 py-2">

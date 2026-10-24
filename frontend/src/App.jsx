@@ -2,6 +2,7 @@ import React, { Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Outlet, Navigate, useLocation } from 'react-router-dom';
 import Sidebar from './shared/layout/Sidebar';
 import Header from './shared/layout/Header';
+import SupportSessionBanner from './shared/layout/SupportSessionBanner';
 const Dashboard = React.lazy(() => import('./features/crm/pages/Dashboard'));
 const Sales = React.lazy(() => import('./features/crm/pages/Sales'));
 const SalesDetail = React.lazy(() => import('./features/crm/pages/SalesDetail'));
@@ -58,6 +59,7 @@ const MainLayout = () => {
     <div className="flex h-screen font-body text-heading bg-page overflow-hidden selection:bg-primary-tint selection:text-primary">
       <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
+        <SupportSessionBanner />
         <Header onLogout={logout} user={user} onMenuToggle={() => setIsSidebarOpen(true)} />
         <main className={`flex-1 ${isSettingsRoute ? 'overflow-hidden p-2 sm:p-3' : 'overflow-y-auto p-4 md:p-6 lg:p-10'}`}>
           <Suspense fallback={<div role="status" className="flex h-64 items-center justify-center text-slate-500">Loading...</div>}>

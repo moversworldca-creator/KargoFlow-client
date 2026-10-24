@@ -11,6 +11,7 @@ import {
   getCommunicationTemplateCategories,
   getTasks,
   getLeadActivities,
+  getEntitlementSnapshot,
 } from '../../services/api';
 import { getUserBranchIds, isCompanyWideUser } from '../utils/branchScope';
 
@@ -136,3 +137,20 @@ export const useTasksLookup = (params) =>
     refetchOnMount: false,
     refetchOnReconnect: false,
   });
+
+export const useEntitlementsSnapshot = (options = {}) =>
+  useQuery({
+    queryKey: ['entitlements', 'snapshot'],
+    queryFn: async () => {
+      try {
+        const snap = await getEntitlementSnapshot();
+        return snap?.data || snap || null;
+      } catch {
+        return null;
+      }
+    },
+    staleTime: 60 * 1000,
+    retry: false,
+    ...options,
+  });
+

@@ -30,8 +30,8 @@ import AsyncSelect from '../../../shared/ui/AsyncSelect';
 import useCan from '../../../shared/auth/useCan';
 import { useAuth } from '../../auth/context/AuthContext';
 import { PERMISSIONS } from '../../../shared/permissions/registry';
-import { getLookupEmployeesPage, getLeadStatusCodeLookups, getLookupUsersPage, getBranchLookupsPage, getStatusCodeLookupsPage, getOpportunityLossReasonLookupsPage, getMoveTypeLookups, getServices } from '../../../services/api';
-import { useMoverSizesLookup } from '../../../shared/queries/sharedQueries';
+import { getLookupEmployeesPage, getLeadStatusCodeLookups, getLookupUsersPage, getBranchLookupsPage, getStatusCodeLookupsPage, getOpportunityLossReasonLookupsPage, getMoveTypeLookups, getServices, getEntitlementSnapshot } from '../../../services/api';
+import { getOverQuotaBranchIds, isBranchOverQuota } from '../../../shared/utils/branchScope';
 
 import EstimateView from '../components/EstimateView';
 import PaymentsPanel from '../components/PaymentsPanel';
@@ -2184,6 +2184,52 @@ const SalesDetail = () => {
   
   const textareaRef = useRef(null);
   const [opportunity, setOpportunity] = useState(null);
+  const [branches, setBranches] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [entitlements, setEntitlements] = useState(null);
+
+  const branchLimit = entitlements?.limits?.['branches.max_active'] ?? entitlements?.resource_access?.branch_limit ?? null;
+
+  const overQuotaBranchIds = useMemo(
+    () => getOverQuotaBranchIds(branches, branchLimit),
+    [branches, branchLimit]
+  );
+
+  const recordBranchId = useMemo(() => {
+    return String(
+      opportunity?.branch_details?.id ??
+      opportunity?.branch_id ??
+      opportunity?.branch?.id ??
+      opportunity?.branch ??
+      ''
+    ).trim();
+  }, [opportunity]);
+
+  const recordAssignedUserId = useMemo(() => {
+    return String(
+      opportunity?.assigned_to?.id ??
+      opportunity?.assigned_to ??
+      opportunity?.assigned_to_id ??
+      opportunity?.assigned_employee?.id ??
+      opportunity?.assigned_employee ??
+      opportunity?.assigned_employee_id ??
+      opportunity?.assigned_user?.id ??
+      opportunity?.assigned_user ??
+      opportunity?.assigned_user_id ??
+      ''
+    ).trim();
+  }, [opportunity]);
+
+  const isRecordBranchOverQuota = useMemo(() => {
+    if (opportunity?.branch_is_over_quota || opportunity?.branch_details?.is_over_quota) {
+      return true;
+    }
+    if (!recordBranchId) return false;
+    return isBranchOverQuota(recordBranchId, overQuotaBranchIds);
+  }, [opportunity?.branch_is_over_quota, opportunity?.branch_details?.is_over_quota, recordBranchId, overQuotaBranchIds]);
+
+  const isRecordOverQuota = isRecordBranchOverQuota;
+
   const recordRequestRef = useRef(0);
   const timelineRequestRef = useRef(0);
   const followUpRequestRef = useRef(0);
@@ -2228,30 +2274,45 @@ const SalesDetail = () => {
     return false;
   }, []);
   const canViewOpportunity = useCallback(() => hasPermission(PERMISSIONS.SALES_VIEW_OPPORTUNITY), [hasPermission]);
-  const canCreateOpportunity = useCallback(() => hasPermission(PERMISSIONS.OPPORTUNITY_CREATE), [hasPermission]);
-  const canDuplicateOpportunity = useCallback(() => hasPermission(PERMISSIONS.OPPORTUNITY_DUPLICATE), [hasPermission]);
-  const canBookOpportunity = useCallback(() => hasPermission(PERMISSIONS.OPPORTUNITY_BOOK), [hasPermission]);
-  const canMarkOpportunityLost = useCallback(() => hasPermission(PERMISSIONS.OPPORTUNITY_MARK_LOST), [hasPermission]);
-  const canEditOpportunity = useCallback(() => hasPermission(PERMISSIONS.OPPORTUNITY_EDIT), [hasPermission]);
+  const canCreateOpportunity = useCallback(
+    () => !isRecordOverQuota && hasPermission(PERMISSIONS.OPPORTUNITY_CREATE),
+    [hasPermission, isRecordOverQuota]
+  );
+  const canDuplicateOpportunity = useCallback(
+    () => !isRecordOverQuota && hasPermission(PERMISSIONS.OPPORTUNITY_DUPLICATE),
+    [hasPermission, isRecordOverQuota]
+  );
+  const canBookOpportunity = useCallback(
+    () => !isRecordOverQuota && hasPermission(PERMISSIONS.OPPORTUNITY_BOOK),
+    [hasPermission, isRecordOverQuota]
+  );
+  const canMarkOpportunityLost = useCallback(
+    () => !isRecordOverQuota && hasPermission(PERMISSIONS.OPPORTUNITY_MARK_LOST),
+    [hasPermission, isRecordOverQuota]
+  );
+  const canEditOpportunity = useCallback(
+    () => !isRecordOverQuota && hasPermission(PERMISSIONS.OPPORTUNITY_EDIT),
+    [hasPermission, isRecordOverQuota]
+  );
   const canManageActivityHistory = useCallback(
-    () => hasPermission(PERMISSIONS.COMMUNICATIONS_HISTORY_VIEW),
-    [hasPermission]
+    () => !isRecordOverQuota && hasPermission(PERMISSIONS.COMMUNICATIONS_HISTORY_VIEW),
+    [hasPermission, isRecordOverQuota]
   );
   const canCreateTask = useCallback(
-    () => hasPermission(PERMISSIONS.SALES_VIEW_TASK) || hasPermission(PERMISSIONS.SALES_CHANGE_TASK),
-    [hasPermission]
+    () => !isRecordOverQuota && (hasPermission(PERMISSIONS.SALES_VIEW_TASK) || hasPermission(PERMISSIONS.SALES_CHANGE_TASK)),
+    [hasPermission, isRecordOverQuota]
   );
   const canSendEmail = useCallback(
-    () => hasPermission(PERMISSIONS.COMMUNICATIONS_EMAIL_SEND),
-    [hasPermission]
+    () => !isRecordOverQuota && hasPermission(PERMISSIONS.COMMUNICATIONS_EMAIL_SEND),
+    [hasPermission, isRecordOverQuota]
   );
   const canSendSms = useCallback(
-    () => hasPermission(PERMISSIONS.COMMUNICATIONS_SMS_SEND),
-    [hasPermission]
+    () => !isRecordOverQuota && hasPermission(PERMISSIONS.COMMUNICATIONS_SMS_SEND),
+    [hasPermission, isRecordOverQuota]
   );
   const canLogCall = useCallback(
-    () => hasPermission(PERMISSIONS.COMMUNICATIONS_CALL_LOG),
-    [hasPermission]
+    () => !isRecordOverQuota && hasPermission(PERMISSIONS.COMMUNICATIONS_CALL_LOG),
+    [hasPermission, isRecordOverQuota]
   );
 
   // Book Job Modal State
@@ -2696,9 +2757,7 @@ const SalesDetail = () => {
   const [estimateRequirementsError, setEstimateRequirementsError] = useState('');
   const [isSavingEstimateRequirements, setIsSavingEstimateRequirements] = useState(false);
   const [showRingCentral, setShowRingCentral] = useState(false);
-  
-  const [branches, setBranches] = useState([]);
-  const [users, setUsers] = useState([]);
+
   const [moverSizes, setMoverSizes] = useState([]);
   const [moverTypes, setMoverTypes] = useState([]);
   const [serviceTypes, setServiceTypes] = useState([]);
@@ -3897,6 +3956,18 @@ const SalesDetail = () => {
       fetchSafe(getReferralSourceLookups, setReferralSources, 'referral sources'),
       fetchSafe(getMoverSizeLookups, setMoverSizes, 'move sizes'),
       fetchSafe(getBranchLookups, setBranches, 'branches'),
+      (async () => {
+        try {
+          const snap = await (getEntitlementSnapshot ? getEntitlementSnapshot() : Promise.resolve(null));
+          if (requestId !== recordRequestRef.current) return;
+          const payload = snap?.data && typeof snap.data === 'object' && !Array.isArray(snap.data) ? snap.data : snap;
+          setEntitlements(payload || null);
+        } catch (err) {
+          console.warn('Failed to load entitlements:', err);
+          if (requestId !== recordRequestRef.current) return;
+          setEntitlements(null);
+        }
+      })(),
     ]);
   };
 
@@ -5899,6 +5970,10 @@ const SalesDetail = () => {
   };
 
   const saveCustomerSection = async (inlinePayload = null) => {
+    if (isRecordOverQuota) {
+      denyAction('This branch is over quota (read-only). Edits cannot be saved.');
+      return false;
+    }
     if (isCreation) {
       await handleSaveOpportunity();
       return true;
@@ -5995,6 +6070,10 @@ const SalesDetail = () => {
   };
 
   const saveRouteSection = async () => {
+    if (isRecordOverQuota) {
+      denyAction('This branch is over quota (read-only). Edits cannot be saved.');
+      return;
+    }
     if (isCreation) {
       await handleSaveOpportunity();
       return;
@@ -6236,6 +6315,10 @@ const SalesDetail = () => {
   };
 
   const saveSpecsSection = async (inlinePayload = null) => {
+    if (isRecordOverQuota) {
+      denyAction('This branch is over quota (read-only). Edits cannot be saved.');
+      return false;
+    }
     if (isCreation) {
       await handleSaveOpportunity();
       return;
@@ -6440,6 +6523,10 @@ const SalesDetail = () => {
   };
 
   const saveMoveDateSection = async () => {
+    if (isRecordOverQuota) {
+      denyAction('This branch is over quota (read-only). Edits cannot be saved.');
+      return false;
+    }
     if (isCreation) {
       await handleSaveOpportunity();
       return true;
@@ -6631,6 +6718,9 @@ const SalesDetail = () => {
 
   const handleWorkflowAction = async (actionKey, reasonOverride = '') => {
     if (!opportunity?.id || opportunity.id === 'new') return;
+    if (isRecordOverQuota) {
+      return denyAction('This branch is over quota (read-only). Workflow actions are disabled.');
+    }
 
     if (actionKey === 'send_estimate') {
       navigateToEstimateSubTab('charges');
@@ -6723,6 +6813,9 @@ const SalesDetail = () => {
   };
 
   const handleAdvanceLead = useCallback(async () => {
+    if (isRecordOverQuota) {
+      return denyAction('This branch is over quota (read-only). Workflow actions are disabled.');
+    }
     setIsSaving(true);
     try {
       const state = opportunity?.system_state || opportunity?.status;
@@ -6731,10 +6824,13 @@ const SalesDetail = () => {
       setToast({ type: 'success', text: state === 'new' ? 'Lead started.' : 'Lead qualified. You can now create an estimate.' });
     } catch (error) { setToast({ type: 'error', text: getErrorMessage(error, 'Could not update the lead workflow.') }); }
     finally { setIsSaving(false); }
-  }, [opportunity?.id, opportunity?.status, opportunity?.system_state]);
+  }, [denyAction, isRecordOverQuota, opportunity?.id, opportunity?.status, opportunity?.system_state]);
 
   const handleCreateEstimate = useCallback(async (options = {}) => {
     if (!opportunity?.id || opportunity.id === 'new') return;
+    if (isRecordOverQuota) {
+      return denyAction('This branch is over quota (read-only). Converting leads or creating estimates is disabled.');
+    }
     if ((opportunity.system_state || opportunity.status) !== 'qualified') { setToast({ type: 'error', text: 'Qualify this lead before creating an estimate.' }); return; }
     setIsSaving(true);
     setToast({ type: '', text: '' });
@@ -6952,9 +7048,10 @@ const SalesDetail = () => {
         const id = String(user?.id || '');
         if (!id || seen.has(id)) return null;
         seen.add(id);
+        const baseLabel = resolveUserLabel(user);
         return {
           ...user,
-          label: resolveUserLabel(user),
+          label: baseLabel,
         };
       })
       .filter(Boolean);
@@ -7088,7 +7185,7 @@ const SalesDetail = () => {
   ], [activeSpecs, opportunity, moverSizes, moverTypes, serviceTypes, isLeadPath, branches, selectedBranch, selectedBranchName, selectedReferralSource, selectedAssignedUser, referralSources, branchScopedUsers, customStatusCodes, selectedCustomStatusCode, titleCase, specsDraftLabels, committedSpecsLabels, statusBranchId]);
 
 	  const headerActions = useMemo(() => {
-	    if (opportunity?.id === 'new') return [];
+	    if (opportunity?.id === 'new' || isRecordOverQuota) return [];
 	    if (!canViewOpportunity()) return [];
 
 	    if (view.isLead) {
@@ -7138,6 +7235,8 @@ const SalesDetail = () => {
 	    navigateToEstimateSubTab,
 	    canViewOpportunity,
 	    canCreateOpportunity,
+	    isRecordBranchOverQuota,
+	    isRecordOverQuota,
 	  ]);
 
   useEffect(() => {
@@ -7391,6 +7490,12 @@ const SalesDetail = () => {
     const targetRoute = isCreation && routeDraft ? { ...form, ...routeDraft } : form;
     const targetSpecs = isCreation && specsDraft ? { ...form, ...specsDraft } : form;
     const targetMoveDate = isCreation && moveDateDraft ? { ...form, ...moveDateDraft } : form;
+
+    if (isCreation) {
+      if (targetSpecs.branch && isBranchOverQuota(targetSpecs.branch, overQuotaBranchIds)) {
+        return denyAction('Selected branch is over quota.');
+      }
+    }
 
     const validationError = validateOpportunityForm(targetCustomer, targetRoute, targetSpecs, targetMoveDate);
     if (validationError) {
@@ -7775,6 +7880,9 @@ const SalesDetail = () => {
 
   const handleSaveFollowUp = async () => {
     if (!opportunity?.id || opportunity.id === 'new') return;
+    if (isRecordOverQuota) {
+      return denyAction('This branch is over quota (read-only). Tasks cannot be created or modified.');
+    }
     if (!followUpSubject.trim() || !followUpAssignedTo || !followUpDueDate) return;
     if (!requiresAnyPermission([PERMISSIONS.SALES_CHANGE_TASK, PERMISSIONS.SALES_CHANGE_OPPORTUNITY])) {
       return denyAction('You do not have permission to manage follow-ups.');
@@ -7834,6 +7942,9 @@ const SalesDetail = () => {
   };
 
   const handleToggleFollowUpStatus = async (task) => {
+    if (isRecordOverQuota) {
+      return denyAction('This branch is over quota (read-only). Tasks cannot be updated.');
+    }
     const activityId = getFollowUpActivityId(task);
     if (!activityId) return;
     if (!requiresAnyPermission([PERMISSIONS.SALES_CHANGE_TASK, PERMISSIONS.SALES_CHANGE_OPPORTUNITY])) {
@@ -8077,6 +8188,9 @@ const SalesDetail = () => {
 
   const handlePostActivity = async () => {
     if (!opportunity?.id || opportunity.id === 'new') return;
+    if (isRecordOverQuota) {
+      return denyAction('This branch is over quota (read-only). Creating activities is disabled.');
+    }
     const activeBody = currentActivityBody;
 
     if (!activeBody.trim()) {
@@ -8349,6 +8463,23 @@ const SalesDetail = () => {
           </div>
         </div>
       ) : null}
+      {isRecordOverQuota && (
+        <div data-testid="branch-over-quota-banner" className="mx-2 my-2 rounded-2xl border border-amber-300 bg-amber-50/95 p-4 text-amber-900 shadow-sm backdrop-blur">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-200/80 text-amber-800">
+              <AlertCircle size={22} />
+            </div>
+            <div className="flex-1">
+              <h4 className="text-sm font-bold text-amber-950">
+                🔒 Branch Over Quota (Read-Only Mode)
+              </h4>
+              <p className="text-xs text-amber-800 mt-0.5">
+                {`This ${isLeadPath ? 'lead' : 'opportunity'} belongs to an over-quota branch (${selectedBranchName || `Branch #${recordBranchId}`}). All active operations, communications, notes, and tasks on this record are in read-only format.`}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 	      <StickyHeader 
 	        title={
             <div className="flex items-center gap-2">
@@ -8393,10 +8524,10 @@ const SalesDetail = () => {
                   email={customerDraft?.email ?? form.email}
                   phone={customerDraft?.phone ?? form.phone}
                   location={opportunity?.origin_address_details?.city || opportunity?.origin_city}
-                  onAddFollowup={canCreateTask() ? openCreateFollowUpModal : undefined}
-                  onInlineSave={handleCustomerInlineSave}
+                  onAddFollowup={!isRecordOverQuota && canCreateTask() ? openCreateFollowUpModal : undefined}
+                  onInlineSave={isRecordOverQuota ? undefined : handleCustomerInlineSave}
                   onCustomerChange={(id, val) => setCustomerDraft(p => ({ ...p, [id]: val }))}
-                  onManageContacts={openAdditionalContactsModal}
+                  onManageContacts={isRecordOverQuota ? undefined : openAdditionalContactsModal}
                   additionalContacts={customerAdditionalContacts}
                 />
                 <PlannedMoveCard
@@ -8518,6 +8649,12 @@ const SalesDetail = () => {
                       </button>
                     </div>
                   ) : null}
+                  {isRecordOverQuota && (
+                    <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800 flex items-center gap-2">
+                      <AlertCircle size={16} className="shrink-0 text-amber-600" />
+                      <span>This branch is over quota (read-only). Communication tools and activity logging are disabled.</span>
+                    </div>
+                  )}
 	                <CommsHub 
 	                  customerName={view.customerName}
 	                  customerPhone={activityCallRecipient || form.phone}
@@ -8589,9 +8726,9 @@ const SalesDetail = () => {
                         setCurrentActivityBody('');
                       }, 100);
                     },
-                onEditNote: startEditingNoteActivity,
-                onEditCall: openEditCallLog,
-                onDeleteCall: isLeadPath ? undefined : deleteCallLog,
+                onEditNote: isRecordOverQuota ? undefined : startEditingNoteActivity,
+                onEditCall: isRecordOverQuota ? undefined : openEditCallLog,
+                onDeleteCall: isLeadPath || isRecordOverQuota ? undefined : deleteCallLog,
                 canManageActivityHistory: canManageActivityHistory(),
                     onPreview: (act) => setSelectedActivityForPreview(act),
                     onLoadMore: handleLoadMore,
@@ -10244,7 +10381,14 @@ const SalesDetail = () => {
                 <AsyncSelect 
                   value={followUpAssignedTo} 
                   onChange={(val) => setFollowUpAssignedTo(val)} 
-                  fetchOptions={(search, offset, limit) => getLookupUsersPage(search, offset, limit, selectedBranch?.id || form.branch || null)} 
+                  fetchOptions={async (search, offset, limit) => {
+                    const res = await getLookupUsersPage(search, offset, limit, selectedBranch?.id || form.branch || null);
+                    const items = Array.isArray(res) ? res : (res?.results || []);
+                    return items.map((u) => ({
+                      ...u,
+                      label: u.label || resolveUserLabel(u),
+                    }));
+                  }} 
                   labelField="label" 
                   valueField="id" 
                   placeholder="Select teammate..." 

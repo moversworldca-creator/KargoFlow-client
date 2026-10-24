@@ -12,21 +12,33 @@ function clearCaches() {
 }
 
 function consumeSupportConsoleHandoff() {
-  if (typeof window === 'undefined' || !window.location.hash) return null;
+  if (typeof window === 'undefined') return null;
 
-  const params = new URLSearchParams(window.location.hash.slice(1));
-  const token = params.get('support_token');
-  if (!token) return null;
+  if (window.location.hash) {
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    const token = params.get('support_token');
+    if (token) {
+      const context = {
+        tenantId: params.get('tenant_id') || '',
+        tenantName: params.get('tenant_name') || '',
+        accessMode: params.get('access_mode') || 'read',
+        expiresAt: params.get('expires_at') || '',
+      };
+      sessionStorage.setItem('tenant_access_token', token);
+      sessionStorage.setItem('support_console_context', JSON.stringify(context));
+      window.history.replaceState(null, document.title, `${window.location.pathname}${window.location.search}`);
+      return context;
+    }
+  }
 
-  const context = {
-    tenantId: params.get('tenant_id') || '',
-    tenantName: params.get('tenant_name') || '',
-    accessMode: params.get('access_mode') || 'read',
-    expiresAt: params.get('expires_at') || '',
-  };
-  sessionStorage.setItem('tenant_access_token', token);
-  window.history.replaceState(null, document.title, `${window.location.pathname}${window.location.search}`);
-  return context;
+  try {
+    const saved = sessionStorage.getItem('support_console_context');
+    if (saved && sessionStorage.getItem('tenant_access_token')) {
+      return JSON.parse(saved);
+    }
+  } catch {}
+
+  return null;
 }
 
 export const AuthProvider = ({ children }) => {
@@ -140,6 +152,10 @@ export const AuthProvider = ({ children }) => {
   const switchCompany = async () => {
     throw new Error('Sign out and sign in with an account belonging to that company.');
   };
+  const isPlatformSupport = user?.identity_type === 'platform_support' || Boolean(supportConsoleContext);
+  const supportAccessMode = supportConsoleContext?.accessMode || user?.access_mode || 'read';
+  const isSupportReadOnly = isPlatformSupport && (supportAccessMode === 'read' || supportAccessMode === 'support_read');
+
   const permissionSet = useMemo(() => new Set(user?.permissions || []), [user]);
   const permissionContext = useMemo(() => ({
     permissions: permissionSet,
@@ -150,7 +166,19 @@ export const AuthProvider = ({ children }) => {
   const value = {
     user, isAuthenticated: Boolean(user), isLoading, login, logout, switchCompany, setUser, supportConsoleContext,
     permissionSet, permissionContext, refreshSession,
-    hasPermission: (permissions) => canAll(permissions, permissionContext),
+    isReadOnly: isSupportReadOnly,
+    isSupportReadOnly,
+    hasPermission: (permissions) => {
+      if (isSupportReadOnly) {
+        const perms = Array.isArray(permissions) ? permissions : [permissions];
+        const hasWritePerm = perms.some((p) => {
+          const str = String(p);
+          return !str.endsWith('.view') && !str.includes('.view') && !str.includes('_view');
+        });
+        if (hasWritePerm) return false;
+      }
+      return canAll(permissions, permissionContext);
+    },
   };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

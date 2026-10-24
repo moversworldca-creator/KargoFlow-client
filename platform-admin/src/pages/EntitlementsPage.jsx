@@ -24,12 +24,17 @@ export default function EntitlementsPage() {
 
   const isLoading = isTenantsLoading || isAddonsLoading || isFeaturesLoading || isLimitsLoading;
 
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
+
   const handleRefresh = async () => {
+    setIsRefreshing(true);
     try {
       await Promise.all([refetchTenants(), refetchAddons(), refetchFeatures(), refetchLimits()]);
       showToast('Entitlements refreshed.', 'success');
     } catch {
       showToast('Error syncing entitlements state.', 'error');
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -53,23 +58,24 @@ export default function EntitlementsPage() {
   }
 
   return (
-    <div className="space-y-3 max-w-7xl mx-auto pb-6">
+    <div className="space-y-4 max-w-7xl mx-auto pb-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+          <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
             Entitlements & Add-ons
           </h1>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="text-xs text-slate-500 mt-1">
             Manage tenant feature flags, usage quotas, and administrative overrides.
           </p>
         </div>
 
         <button
           onClick={handleRefresh}
-          className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5 text-xs font-medium self-start sm:self-auto cursor-pointer shadow-2xs"
+          disabled={isRefreshing}
+          className="px-4 py-2 rounded-full border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-sm font-semibold cursor-pointer shadow-2xs inline-flex items-center gap-2 self-start sm:self-auto"
           title="Reload entitlements data"
         >
-          <RefreshCw size={14} />
+          <RefreshCw size={15} className={`text-slate-500 dark:text-slate-400 ${isRefreshing ? 'animate-spin' : ''}`} />
           <span>Refresh</span>
         </button>
       </div>

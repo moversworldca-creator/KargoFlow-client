@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, Plus, RefreshCw, Calendar } from 'lucide-react';
+import { Loader2, Plus, RefreshCw, Calendar, LayoutGrid } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useDashboardData, usePlans, useTenants, useSubscriptions, useInvalidatePlatformQueries } from '../hooks/usePlatformData';
 import PlatformOverviewTab from '../components/PlatformOverviewTab';
@@ -84,47 +84,55 @@ export default function DashboardPage() {
   return (
     <div className="w-full space-y-1.5 pb-0.5">
       {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight leading-tight">
-            Platform Operations Dashboard
-          </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 font-normal mt-0.5">
-            Monitor platform health, tenant activity, and system operations
-          </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-1">
+        {/* Left: Icon Badge & Dashboard Title */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-blue-50/90 border border-blue-100/60 dark:bg-blue-950/40 dark:border-blue-900/40 text-blue-600 dark:text-blue-400 shrink-0 shadow-2xs">
+            <LayoutGrid size={22} className="stroke-[2.2]" />
+          </div>
+          <div>
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight leading-tight">
+              Platform Operations Dashboard
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-normal mt-0.5">
+              Monitor platform health, tenant activity, and system operations
+            </p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-1.5 self-start sm:self-auto flex-wrap">
-          {/* Date & Time Widget */}
-          <div className="flex items-center gap-2 px-2.5 py-1 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 text-slate-700 dark:text-slate-300 shadow-2xs">
-            <Calendar size={13} className="text-slate-400 dark:text-slate-500 shrink-0" />
+        {/* Right: Date/Time Pill, Refresh Pill, Provision Button */}
+        <div className="flex items-center gap-2.5 self-start sm:self-auto flex-wrap">
+          {/* Date & Time Widget Pill */}
+          <div className="flex items-center gap-2.5 px-3.5 py-1.5 rounded-full border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 shadow-2xs">
+            <Calendar size={16} className="text-slate-400 dark:text-slate-500 shrink-0" />
+            <div className="h-5 w-px bg-slate-200 dark:bg-slate-700/80" />
             <div className="leading-tight">
-              <div className="text-[11px] font-bold text-slate-800 dark:text-slate-200">
+              <div className="text-xs font-bold text-slate-900 dark:text-slate-100">
                 {formattedDate}
               </div>
-              <div className="text-[10px] text-slate-400 dark:text-slate-500">
+              <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400">
                 {formattedDayTime}
               </div>
             </div>
           </div>
 
-          {/* Refresh Button */}
+          {/* Refresh Pill Button */}
           <button
             onClick={handleRefresh}
             disabled={isRefreshing}
-            className="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5 text-xs font-bold shadow-2xs cursor-pointer"
+            className="px-4 py-2 rounded-full border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors flex items-center gap-2 text-xs font-bold shadow-2xs cursor-pointer disabled:opacity-60"
             title="Reload control plane data"
           >
-            <RefreshCw size={12} className={isRefreshing ? 'animate-spin text-blue-600' : 'text-slate-500'} />
+            <RefreshCw size={14} className={isRefreshing ? 'animate-spin text-blue-600' : 'text-slate-500 dark:text-slate-400'} />
             <span>Refresh</span>
           </button>
 
           {/* Provision Tenant Button */}
           <button
             onClick={() => setShowProvisionModal(true)}
-            className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+            className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
           >
-            <Plus size={13} />
+            <Plus size={15} className="stroke-[2.5]" />
             <span>Provision Tenant</span>
           </button>
         </div>

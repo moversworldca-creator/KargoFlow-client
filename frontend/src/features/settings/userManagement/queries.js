@@ -73,6 +73,23 @@ export const useEntitlements = (enabled) => useQuery({
 export const isReadOnlyMode = (snapshot) => ['read_only', 'blocked'].includes(snapshot?.access_mode);
 export const featureMode = (snapshot, key) => snapshot?.features?.[key] ?? null;
 
+export const isUserManagementReadOnly = (snapshot, activeUserCount = 0) => {
+  if (isReadOnlyMode(snapshot)) return true;
+  if (snapshot?.resource_access?.users_read_only) return true;
+  const userLimit = snapshot?.limits?.['users.max_active'] ?? snapshot?.resource_access?.user_limit;
+  if (userLimit != null && activeUserCount >= userLimit) return true;
+  return false;
+};
+
+export const isBranchManagementReadOnly = (snapshot, activeBranchCount = 0) => {
+  if (isReadOnlyMode(snapshot)) return true;
+  if (snapshot?.resource_access?.branches_read_only) return true;
+  if (snapshot?.features?.['crm.multi_branch'] === 'none' && activeBranchCount >= 1) return true;
+  const branchLimit = snapshot?.limits?.['branches.max_active'] ?? snapshot?.resource_access?.branch_limit;
+  if (branchLimit != null && activeBranchCount >= branchLimit) return true;
+  return false;
+};
+
 /**
  * After any change to employees, logins, roles, grants or overrides: refetch
  * the administrative lists and the signed-in user's own permissions, which the

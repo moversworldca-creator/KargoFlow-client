@@ -53,45 +53,51 @@ export default function PlatformOverviewTab({
     maximumFractionDigits: 0,
   });
 
-  // 1. Plan Adoption Data (from real backend plans_summary or real plans catalog)
+  // 1. Plan Adoption Data (sorted by highest adoption, top 5 plans only)
   const planPalette = [
     { dot: 'bg-blue-600', bar: 'bg-blue-600' },
     { dot: 'bg-cyan-400', bar: 'bg-cyan-400' },
     { dot: 'bg-purple-600', bar: 'bg-purple-600' },
     { dot: 'bg-emerald-500', bar: 'bg-emerald-500' },
+    { dot: 'bg-amber-500', bar: 'bg-amber-500' },
   ];
 
-  const planRows = rawPlansSummary.length > 0
+  const rawPlanList = rawPlansSummary.length > 0
     ? rawPlansSummary.map((p, idx) => {
         const count = Number(p.subscriber_count) || 0;
         const pct = totalSubscriptions > 0 ? Math.round((count / totalSubscriptions) * 100) : 0;
-        const palette = planPalette[idx % planPalette.length];
         return {
           id: p.id || idx,
           name: p.name || 'Plan',
           count,
           pct,
-          dotColor: palette.dot,
-          barColor: palette.bar,
         };
       })
     : (Array.isArray(plans) && plans.length > 0
-        ? plans.map((p, idx) => {
-            const palette = planPalette[idx % planPalette.length];
-            return {
-              id: p.id || idx,
-              name: p.name || 'Plan',
-              count: 0,
-              pct: 0,
-              dotColor: palette.dot,
-              barColor: palette.bar,
-            };
-          })
+        ? plans.map((p, idx) => ({
+            id: p.id || idx,
+            name: p.name || 'Plan',
+            count: 0,
+            pct: 0,
+          }))
         : []);
 
-  // 2. Recent Platform Audits (real immutable events from backend audit log)
+  // Sort by subscriber count / percentage descending, top 5 plans
+  const planRows = rawPlanList
+    .sort((a, b) => b.count - a.count || b.pct - a.pct)
+    .slice(0, 5)
+    .map((plan, idx) => {
+      const palette = planPalette[idx % planPalette.length];
+      return {
+        ...plan,
+        dotColor: palette.dot,
+        barColor: palette.bar,
+      };
+    });
+
+  // 2. Recent Platform Audits (real immutable events, top 5 items)
   const auditRows = rawRecentAudits.length > 0
-    ? rawRecentAudits.slice(0, 4).map((audit, idx) => {
+    ? rawRecentAudits.slice(0, 5).map((audit, idx) => {
         const rawDate = audit.occurred_at || audit.created_at || audit.timestamp;
         const d = rawDate ? new Date(rawDate) : new Date();
         const formatted = new Intl.DateTimeFormat('en-US', {
@@ -122,49 +128,57 @@ export default function PlatformOverviewTab({
       })
     : [];
 
-  // 3. Recent Tenants (real tenants from /core/tenants/ API)
-  const tenantRows = (Array.isArray(tenants) && tenants.length > 0)
-    ? tenants.slice(0, 5).map((t, idx) => {
-        const d = t.created_at ? new Date(t.created_at) : new Date();
-        const dateStr = new Intl.DateTimeFormat('en-US', {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-        }).format(d);
-        return {
-          id: t.id || idx,
-          name: t.name || t.legal_name || `Tenant #${t.id || idx}`,
-          plan: t.plan_name || t.plan?.name || 'Trial Plan',
-          status: t.status ? (t.status.charAt(0).toUpperCase() + t.status.slice(1)) : (t.functional_state || 'Active'),
-          created: dateStr,
-          rawItem: t,
-        };
-      })
-    : [];
+  // 3. Recent Tenants (real tenants from API, sorted by created date, top 5 only)
+  const sortedTenants = [...(Array.isArray(tenants) ? tenants : [])].sort((a, b) => {
+    const dateA = new Date(a.created_at || 0).getTime();
+    const dateB = new Date(b.created_at || 0).getTime();
+    return dateB - dateA;
+  });
 
-  // 4. Subscriptions (real subscriptions from /core/subscriptions/ API)
-  const subscriptionRows = (Array.isArray(subscriptions) && subscriptions.length > 0)
-    ? subscriptions.slice(0, 5).map((s, idx) => {
-        const d = s.current_period_end 
-          ? new Date(s.current_period_end) 
-          : (s.trial_ends_at ? new Date(s.trial_ends_at) : null);
-        const dateStr = d ? new Intl.DateTimeFormat('en-US', {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-        }).format(d) : 'N/A';
-        const st = String(s.status || '').toLowerCase();
-        const statusDisplay = st.includes('trial') ? 'Trial' : (st.includes('active') ? 'Active' : (st ? st.charAt(0).toUpperCase() + st.slice(1) : 'Active'));
-        return {
-          id: s.id || idx,
-          tenant: s.tenant_name || s.company_name || `Tenant #${s.tenant_id || s.company_id || idx}`,
-          plan: s.plan_name || s.plan?.name || 'Trial Plan',
-          status: statusDisplay,
-          renews: dateStr,
-          rawItem: s,
-        };
-      })
-    : [];
+  const tenantRows = sortedTenants.slice(0, 5).map((t, idx) => {
+    const d = t.created_at ? new Date(t.created_at) : new Date();
+    const dateStr = new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(d);
+    return {
+      id: t.id || idx,
+      name: t.name || t.legal_name || `Tenant #${t.id || idx}`,
+      plan: t.plan_name || t.plan?.name || 'Trial Plan',
+      status: t.status ? (t.status.charAt(0).toUpperCase() + t.status.slice(1)) : (t.functional_state || 'Active'),
+      created: dateStr,
+      rawItem: t,
+    };
+  });
+
+  // 4. Subscriptions (real subscriptions from API, sorted by recency, top 5 only)
+  const sortedSubs = [...(Array.isArray(subscriptions) ? subscriptions : [])].sort((a, b) => {
+    const dateA = new Date(a.created_at || a.current_period_start || 0).getTime();
+    const dateB = new Date(b.created_at || b.current_period_start || 0).getTime();
+    return dateB - dateA;
+  });
+
+  const subscriptionRows = sortedSubs.slice(0, 5).map((s, idx) => {
+    const d = s.current_period_end 
+      ? new Date(s.current_period_end) 
+      : (s.trial_ends_at ? new Date(s.trial_ends_at) : null);
+    const dateStr = d ? new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(d) : 'N/A';
+    const st = String(s.status || '').toLowerCase();
+    const statusDisplay = st.includes('trial') ? 'Trial' : (st.includes('active') ? 'Active' : (st ? st.charAt(0).toUpperCase() + st.slice(1) : 'Active'));
+    return {
+      id: s.id || idx,
+      tenant: s.tenant_name || s.company_name || `Tenant #${s.tenant_id || s.company_id || idx}`,
+      plan: s.plan_name || s.plan?.name || 'Trial Plan',
+      status: statusDisplay,
+      renews: dateStr,
+      rawItem: s,
+    };
+  });
 
   // 5. System Status (infrastructure health indicators)
   const systemStatusItems = [

@@ -316,29 +316,61 @@ export default function SubscriptionLifecycleModal({
     }
   };
 
+  const formatStatus = (st) => {
+    if (!st) return '';
+    return st
+      .split('_')
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  };
+
+  const getStatusBadgeStyle = (st) => {
+    switch (st?.toLowerCase()) {
+      case 'active':
+        return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/60';
+      case 'trialing':
+        return 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400 border border-blue-200/60';
+      case 'past_due':
+        return 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-200/60';
+      case 'paused':
+        return 'bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-400 border border-purple-200/60';
+      case 'suspended':
+        return 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400 border border-rose-200/60';
+      default:
+        return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200/60';
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-200">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-3xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="px-6 pt-6 pb-4 flex items-start justify-between bg-white dark:bg-slate-900">
+        <div className="px-6 pt-5 pb-3.5 flex items-start justify-between bg-white dark:bg-slate-900 shrink-0">
           <div>
             <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
               Subscription Lifecycle Governance
             </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">
-              {subscription.tenant_name} • Sub #{subscription.id}
-            </p>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="font-semibold text-slate-700 dark:text-slate-300 text-xs">
+                {subscription.tenant_name}
+              </span>
+              <span className="text-slate-300 dark:text-slate-700">•</span>
+              <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-mono text-[11px] font-semibold">
+                Sub #{subscription.id}
+              </span>
+            </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg transition-colors"
+            className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+            title="Close"
           >
             <X size={20} />
           </button>
         </div>
 
         {/* Sub-Tabs Navigation */}
-        <div className="px-6 border-b border-slate-200/80 dark:border-slate-800 flex items-center gap-6 overflow-x-auto text-xs font-semibold no-scrollbar bg-white dark:bg-slate-900">
+        <div className="px-6 border-b border-slate-200/80 dark:border-slate-800 flex items-center gap-4 sm:gap-6 overflow-x-auto text-xs font-semibold no-scrollbar bg-white dark:bg-slate-900 shrink-0">
           {[
             { id: 'transition', label: 'Status Matrix (2.10)' },
             { id: 'plan_change', label: 'Upgrade / Downgrade (2.9)' },
@@ -349,10 +381,10 @@ export default function SubscriptionLifecycleModal({
             <button
               key={tab.id}
               onClick={() => setActiveSubTab(tab.id)}
-              className={`pb-2.5 whitespace-nowrap transition-colors border-b-2 ${
+              className={`pb-3 whitespace-nowrap transition-colors border-b-2 font-medium cursor-pointer ${
                 activeSubTab === tab.id
                   ? 'border-blue-600 text-blue-600 font-bold -mb-px'
-                  : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
               }`}
             >
               {tab.label}
@@ -363,20 +395,24 @@ export default function SubscriptionLifecycleModal({
         {/* Body Content */}
         <div className="p-6 overflow-y-auto flex-1 space-y-4 text-xs">
           {/* Current State Summary Banner */}
-          <div className="p-4 sm:p-4.5 rounded-2xl bg-white dark:bg-slate-900/60 border border-slate-200/90 dark:border-slate-800 grid grid-cols-2 sm:grid-cols-4 gap-4 divide-y sm:divide-y-0 sm:divide-x divide-slate-100 dark:divide-slate-800/80">
-            <div className="sm:pr-4">
-              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mb-1">Current Status</span>
-              <span className="text-base font-bold text-slate-900 dark:text-white capitalize">{subscription.status}</span>
+          <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-800 grid grid-cols-2 sm:grid-cols-4 gap-4 divide-y sm:divide-y-0 sm:divide-x divide-slate-200/70 dark:divide-slate-800">
+            <div className="sm:pr-3">
+              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mb-1.5">Current Status</span>
+              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold capitalize ${getStatusBadgeStyle(subscription.status)}`}>
+                {subscription.status}
+              </span>
             </div>
-            <div className="pt-2 sm:pt-0 sm:px-4">
-              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mb-1">Current Plan</span>
-              <span className="text-base font-bold text-blue-600 dark:text-blue-400">{currentPlan.name}</span>
+            <div className="pt-3 sm:pt-0 sm:px-3">
+              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mb-1.5">Current Plan</span>
+              <span className="text-sm font-bold text-slate-900 dark:text-white truncate block">
+                {currentPlan.name}
+              </span>
             </div>
-            <div className="pt-2 sm:pt-0 sm:px-4">
-              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mb-1">
+            <div className="pt-3 sm:pt-0 sm:px-3">
+              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mb-1.5">
                 {subscription.status === 'trialing' ? 'Trial Period' : 'Billing Period'}
               </span>
-              <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">
                 {subscription.status === 'trialing'
                   ? (subscription.trial_ends_at ? `Trial ends ${new Date(subscription.trial_ends_at).toLocaleDateString()}` : 'Trial Active')
                   : (() => {
@@ -393,9 +429,9 @@ export default function SubscriptionLifecycleModal({
                     })()}
               </span>
             </div>
-            <div className="pt-2 sm:pt-0 sm:pl-4">
-              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mb-1">Derived Access</span>
-              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 leading-snug block">
+            <div className="pt-3 sm:pt-0 sm:pl-3">
+              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mb-1.5">Derived Access</span>
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#EAF8F1] text-[#16A34A] dark:bg-emerald-950/40 dark:text-emerald-400">
                 {STATUS_ACCESS_INFO[subscription.status]?.access || 'Active'}
               </span>
             </div>
@@ -403,33 +439,47 @@ export default function SubscriptionLifecycleModal({
 
           {/* TAB 1: Status Transition Matrix (Section 2.10) */}
           {activeSubTab === 'transition' && (
-            <form onSubmit={handleTransitionSubmit} className="space-y-4 animate-in fade-in">
-              <div className="p-3.5 px-4 rounded-xl bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200/70 dark:border-blue-900/40 border-l-4 border-l-blue-600 dark:border-l-blue-500 text-xs text-blue-900 dark:text-blue-200 leading-relaxed">
-                <strong className="font-bold">Section 2.10 Approved Transition Guard:</strong> Only explicitly permitted transitions are accepted. Current status <strong className="font-bold">{subscription.status}</strong> may transition only to: {allowedNextStatuses.join(', ') || 'No allowed transitions'}.
+            <form id="transition-form" onSubmit={handleTransitionSubmit} className="space-y-4 animate-in fade-in">
+              <div className="p-3.5 px-4 rounded-xl bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200/80 dark:border-blue-900/40 flex items-start gap-3 text-xs text-blue-900 dark:text-blue-200 leading-relaxed">
+                <Info size={16} className="text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="font-bold">Section 2.10 Approved Transition Guard:</strong> Only explicitly permitted transitions are accepted. Current status <strong className="font-bold underline decoration-blue-300">{subscription.status}</strong> may transition only to: <span className="font-semibold text-blue-800 dark:text-blue-300">{allowedNextStatuses.map(s => formatStatus(s)).join(', ') || 'No allowed transitions'}</span>.
+                </div>
               </div>
 
               <div>
-                <label className="block text-slate-800 dark:text-slate-200 font-bold uppercase tracking-wider text-xs mb-2.5">
+                <label className="block text-slate-800 dark:text-slate-200 font-bold uppercase tracking-wider text-[11px] mb-2">
                   Allowed Target Status
                 </label>
                 {allowedNextStatuses.length === 0 ? (
                   <p className="text-slate-400 italic">No transitions available from current state.</p>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
                     {allowedNextStatuses.map((st) => {
                       const isSel = targetStatus === st;
                       return (
                         <div
                           key={st}
                           onClick={() => setTargetStatus(st)}
-                          className={`p-4 rounded-2xl border cursor-pointer transition-all ${
+                          className={`p-3.5 rounded-2xl border cursor-pointer transition-all flex flex-col justify-between ${
                             isSel
-                              ? 'border-2 border-blue-600 bg-blue-50/40 dark:bg-blue-950/30'
+                              ? 'border-2 border-blue-600 bg-blue-50/40 dark:bg-blue-950/30 ring-2 ring-blue-500/10'
                               : 'border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-700'
                           }`}
                         >
-                          <span className="capitalize block text-slate-900 dark:text-white font-bold text-sm">{st}</span>
-                          <span className="text-xs text-slate-400 dark:text-slate-500 block mt-1">{STATUS_ACCESS_INFO[st]?.access}</span>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="capitalize block text-slate-900 dark:text-white font-bold text-sm">
+                              {formatStatus(st)}
+                            </span>
+                            <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                              isSel ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 dark:border-slate-600'
+                            }`}>
+                              {isSel && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                            </div>
+                          </div>
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug block">
+                            {STATUS_ACCESS_INFO[st]?.access}
+                          </span>
                         </div>
                       );
                     })}
@@ -438,58 +488,59 @@ export default function SubscriptionLifecycleModal({
               </div>
 
               {targetStatus === 'past_due' && (
-                <div>
-                  <label className="block text-slate-800 dark:text-slate-200 font-bold uppercase tracking-wider text-xs mb-1.5">
-                    Grace Period Days (Section 2.6)
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={60}
-                    value={graceDays}
-                    onChange={(e) => setGraceDays(Number(e.target.value))}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 font-bold text-xs"
-                  />
-                  <span className="text-[10px] text-slate-400 block mt-1">Operational writes remain enabled until grace period ends.</span>
+                <div className="p-3.5 rounded-xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-900/40 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-slate-800 dark:text-slate-200 font-bold uppercase tracking-wider text-[11px]">
+                      Grace Period Days (Section 2.6)
+                    </label>
+                    <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+                      {graceDays} Days Operational Grace
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="number"
+                      min={1}
+                      max={60}
+                      value={graceDays}
+                      onChange={(e) => setGraceDays(Number(e.target.value))}
+                      className="w-28 px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-bold text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    />
+                    <span className="text-xs text-slate-500 dark:text-slate-400">
+                      Operational writes remain enabled until grace period ends.
+                    </span>
+                  </div>
                 </div>
               )}
 
               <div>
-                <label className="block text-slate-800 dark:text-slate-200 font-bold uppercase tracking-wider text-xs mb-2">
-                  Mandatory Audit Reason (Section 2.11) <span className="text-rose-500">*</span>
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-slate-800 dark:text-slate-200 font-bold uppercase tracking-wider text-[11px]">
+                    Mandatory Audit Reason (Section 2.11)
+                  </label>
+                  <span className="text-[11px] font-semibold text-rose-500">Required *</span>
+                </div>
                 <textarea
                   required
                   rows={3}
                   value={transitionReason}
                   onChange={(e) => setTransitionReason(e.target.value)}
                   placeholder="e.g. Card charge declined 3 times via Stripe webhook, placing subscription into past_due with 7 days grace..."
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 font-normal focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 outline-none transition-all resize-y"
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 font-normal focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 outline-none transition-all resize-y"
                 />
-              </div>
-
-              <div className="pt-2 flex justify-end">
-                <button
-                  type="submit"
-                  disabled={isSubmitting || allowedNextStatuses.length === 0}
-                  className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
-                >
-                  {isSubmitting ? <Loader2 size={14} className="animate-spin" /> : null}
-                  <span>Execute Status Transition</span>
-                </button>
               </div>
             </form>
           )}
 
           {/* TAB 2: Commercial Plan Change (Section 2.9) */}
           {activeSubTab === 'plan_change' && (
-            <form onSubmit={handlePlanChangeSubmit} className="space-y-4 animate-in fade-in">
+            <form id="plan-change-form" onSubmit={handlePlanChangeSubmit} className="space-y-4 animate-in fade-in">
               <div className="p-3.5 px-4 rounded-xl bg-purple-50/70 dark:bg-purple-950/20 border border-purple-200/70 dark:border-purple-900/40 border-l-4 border-l-purple-600 dark:border-l-purple-500 text-xs text-purple-900 dark:text-purple-200 leading-relaxed">
                 <strong className="font-bold">Section 2.9 Specification Rule:</strong> When the base plan changes, the previous subscription record is ended and a new current subscription record is created, preserving plan history.
               </div>
 
               <div>
-                <label className="block text-slate-800 dark:text-slate-200 font-bold uppercase tracking-wider text-xs mb-2.5">
+                <label className="block text-slate-800 dark:text-slate-200 font-bold uppercase tracking-wider text-[11px] mb-2">
                   Select Target Commercial Plan
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -559,7 +610,7 @@ export default function SubscriptionLifecycleModal({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-800 dark:text-slate-200 font-bold uppercase tracking-wider text-xs mb-1.5">
+                  <label className="block text-slate-800 dark:text-slate-200 font-bold uppercase tracking-wider text-[11px] mb-1.5">
                     Billing Interval
                   </label>
                   <select
@@ -572,7 +623,7 @@ export default function SubscriptionLifecycleModal({
                   </select>
                 </div>
                 <div>
-                  <label className="block text-slate-800 dark:text-slate-200 font-bold uppercase tracking-wider text-xs mb-1.5">
+                  <label className="block text-slate-800 dark:text-slate-200 font-bold uppercase tracking-wider text-[11px] mb-1.5">
                     Effective Timing
                   </label>
                   <select
@@ -587,7 +638,7 @@ export default function SubscriptionLifecycleModal({
               </div>
 
               <div>
-                <label className="block text-slate-800 dark:text-slate-200 font-bold uppercase tracking-wider text-xs mb-2">
+                <label className="block text-slate-800 dark:text-slate-200 font-bold uppercase tracking-wider text-[11px] mb-1.5">
                   Commercial Plan Change Reason (Required) <span className="text-rose-500">*</span>
                 </label>
                 <textarea
@@ -596,26 +647,15 @@ export default function SubscriptionLifecycleModal({
                   value={planChangeReason}
                   onChange={(e) => setPlanChangeReason(e.target.value)}
                   placeholder="e.g. Customer upgraded to Enterprise tier for multi-branch and white-label access..."
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 font-normal focus:ring-2 focus:ring-purple-500/20 focus:border-purple-600 outline-none transition-all resize-y"
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 font-normal focus:ring-2 focus:ring-purple-500/20 focus:border-purple-600 outline-none transition-all resize-y"
                 />
-              </div>
-
-              <div className="pt-2 flex justify-end">
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
-                >
-                  {isSubmitting ? <Loader2 size={14} className="animate-spin" /> : null}
-                  <span>Execute Plan Change</span>
-                </button>
               </div>
             </form>
           )}
 
           {/* TAB 3: Trial & Grace Periods (Section 2.4, 2.6) */}
           {activeSubTab === 'dates' && (
-            <form onSubmit={handleDatesSubmit} className="space-y-4 animate-in fade-in">
+            <form id="dates-form" onSubmit={handleDatesSubmit} className="space-y-4 animate-in fade-in">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="p-4 rounded-2xl bg-white dark:bg-slate-900/60 border border-slate-200/90 dark:border-slate-800 space-y-2.5">
                   <div className="flex items-center gap-2 font-bold text-slate-800 dark:text-slate-200 text-sm">
@@ -632,7 +672,7 @@ export default function SubscriptionLifecycleModal({
                         <button
                           type="button"
                           onClick={() => setTrialEndsAt('')}
-                          className="text-[10px] text-slate-400 hover:text-rose-500 font-semibold transition-colors"
+                          className="text-[10px] text-slate-400 hover:text-rose-500 font-semibold transition-colors cursor-pointer"
                         >
                           Clear
                         </button>
@@ -662,7 +702,7 @@ export default function SubscriptionLifecycleModal({
                         <button
                           type="button"
                           onClick={() => setGraceEndsAt('')}
-                          className="text-[10px] text-slate-400 hover:text-rose-500 font-semibold transition-colors"
+                          className="text-[10px] text-slate-400 hover:text-rose-500 font-semibold transition-colors cursor-pointer"
                         >
                           Clear
                         </button>
@@ -679,7 +719,7 @@ export default function SubscriptionLifecycleModal({
               </div>
 
               <div>
-                <label className="block text-slate-800 dark:text-slate-200 font-bold uppercase tracking-wider text-xs mb-1.5">
+                <label className="block text-slate-800 dark:text-slate-200 font-bold uppercase tracking-wider text-[11px] mb-1.5">
                   Adjustment Explanation
                 </label>
                 <input
@@ -690,23 +730,12 @@ export default function SubscriptionLifecycleModal({
                   className="w-full px-4 py-2.5 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-normal text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 outline-none transition-all"
                 />
               </div>
-
-              <div className="pt-2 flex justify-end">
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
-                >
-                  {isSubmitting ? <Loader2 size={14} className="animate-spin" /> : null}
-                  <span>Save Lifecycle Dates</span>
-                </button>
-              </div>
             </form>
           )}
 
           {/* TAB 4: Cancellation & Reactivation (Section 2.8) */}
           {activeSubTab === 'cancel_reactivate' && (
-            <div className="space-y-5 animate-in fade-in">
+            <div className="space-y-4 animate-in fade-in">
               {/* Cancellation Box */}
               <div className="p-4 rounded-2xl bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200/70 dark:border-rose-900/40 border-l-4 border-l-rose-500 space-y-3">
                 <div className="flex items-center gap-2 font-bold text-rose-800 dark:text-rose-300 text-sm">
@@ -722,14 +751,14 @@ export default function SubscriptionLifecycleModal({
                     <button
                       type="button"
                       onClick={() => setCancelMode('period_end')}
-                      className={`py-2 rounded-xl text-xs font-bold transition-colors ${cancelMode === 'period_end' ? 'bg-rose-600 text-white shadow-2xs' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'}`}
+                      className={`py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${cancelMode === 'period_end' ? 'bg-rose-600 text-white shadow-2xs' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'}`}
                     >
                       Cancel at Period End
                     </button>
                     <button
                       type="button"
                       onClick={() => setCancelMode('immediate')}
-                      className={`py-2 rounded-xl text-xs font-bold transition-colors ${cancelMode === 'immediate' ? 'bg-rose-600 text-white shadow-2xs' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'}`}
+                      className={`py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${cancelMode === 'immediate' ? 'bg-rose-600 text-white shadow-2xs' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'}`}
                     >
                       Immediate Cancellation
                     </button>
@@ -748,7 +777,7 @@ export default function SubscriptionLifecycleModal({
                     <button
                       type="submit"
                       disabled={isSubmitting}
-                      className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-xl font-bold text-xs shadow-sm transition-all"
+                      className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-xl font-bold text-xs shadow-sm transition-all cursor-pointer"
                     >
                       Confirm Cancellation
                     </button>
@@ -780,7 +809,7 @@ export default function SubscriptionLifecycleModal({
                     <button
                       type="submit"
                       disabled={isSubmitting}
-                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl font-bold text-xs shadow-sm transition-all"
+                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl font-bold text-xs shadow-sm transition-all cursor-pointer"
                     >
                       Reactivate to Active
                     </button>
@@ -823,15 +852,52 @@ export default function SubscriptionLifecycleModal({
           )}
         </div>
 
-        {/* Footer */}
-        <div className="px-6 py-3.5 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-end bg-slate-50/30 dark:bg-slate-900/30">
+        {/* Unified Sticky Footer */}
+        <div className="px-6 py-3.5 border-t border-slate-200/80 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50 shrink-0">
           <button
             type="button"
             onClick={onClose}
-            className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-colors"
+            className="px-4 py-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
           >
             Close
           </button>
+
+          {/* Primary Action Button Linked To Active Tab Form */}
+          {activeSubTab === 'transition' && (
+            <button
+              form="transition-form"
+              type="submit"
+              disabled={isSubmitting || allowedNextStatuses.length === 0}
+              className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer"
+            >
+              {isSubmitting ? <Loader2 size={14} className="animate-spin" /> : null}
+              <span>Execute Status Transition</span>
+            </button>
+          )}
+
+          {activeSubTab === 'plan_change' && (
+            <button
+              form="plan-change-form"
+              type="submit"
+              disabled={isSubmitting}
+              className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 active:bg-purple-800 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer"
+            >
+              {isSubmitting ? <Loader2 size={14} className="animate-spin" /> : null}
+              <span>Execute Plan Change</span>
+            </button>
+          )}
+
+          {activeSubTab === 'dates' && (
+            <button
+              form="dates-form"
+              type="submit"
+              disabled={isSubmitting}
+              className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer"
+            >
+              {isSubmitting ? <Loader2 size={14} className="animate-spin" /> : null}
+              <span>Save Lifecycle Dates</span>
+            </button>
+          )}
         </div>
       </div>
     </div>

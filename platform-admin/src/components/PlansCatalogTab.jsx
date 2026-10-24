@@ -1325,6 +1325,7 @@ export default function PlansCatalogTab({
               const activeUsers = getPlanLimit(plan, 'active_users');
               const activeBranches = getPlanLimit(plan, 'active_branches');
               const monthlySms = getPlanLimit(plan, 'monthly_sms');
+              const monthlyEmail = getPlanLimit(plan, 'monthly_email');
               const storageBytes = getPlanLimit(plan, 'storage_bytes');
               const storageFormatted = typeof storageBytes === 'number' && !isNaN(storageBytes)
                 ? `${Math.round(storageBytes / 1073741824)} GB`
@@ -1427,6 +1428,13 @@ export default function PlansCatalogTab({
                         <span>Monthly SMS</span>
                         <span className="font-semibold text-slate-900 dark:text-slate-100">
                           {typeof monthlySms === 'number' ? monthlySms.toLocaleString() : (monthlySms ?? '—')}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
+                        <span>Monthly Email</span>
+                        <span className="font-semibold text-slate-900 dark:text-slate-100">
+                          {typeof monthlyEmail === 'number' ? monthlyEmail.toLocaleString() : (monthlyEmail ?? '—')}
                         </span>
                       </div>
 
@@ -1667,6 +1675,7 @@ export default function PlansCatalogTab({
                       const activeUsers = getPlanLimit(vPlan, 'active_users');
                       const activeBranches = getPlanLimit(vPlan, 'active_branches');
                       const monthlySms = getPlanLimit(vPlan, 'monthly_sms');
+                      const monthlyEmail = getPlanLimit(vPlan, 'monthly_email');
                       const storageBytes = getPlanLimit(vPlan, 'storage_bytes');
                       const storageFormatted = typeof storageBytes === 'number' && !isNaN(storageBytes)
                         ? `${Math.round(storageBytes / 1073741824)} GB`
@@ -1761,6 +1770,11 @@ export default function PlansCatalogTab({
                               <span className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-[11px]">
                                 💬 Monthly SMS: <strong className="text-slate-900 dark:text-white">
                                   {typeof monthlySms === 'number' ? monthlySms.toLocaleString() : (monthlySms ?? '—')}
+                                </strong>
+                              </span>
+                              <span className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-[11px]">
+                                ✉️ Monthly Email: <strong className="text-slate-900 dark:text-white">
+                                  {typeof monthlyEmail === 'number' ? monthlyEmail.toLocaleString() : (monthlyEmail ?? '—')}
                                 </strong>
                               </span>
                               <span className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-[11px]">
