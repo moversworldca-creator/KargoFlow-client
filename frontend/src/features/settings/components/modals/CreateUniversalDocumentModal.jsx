@@ -7,6 +7,8 @@ import {
   createEstimatePortalTemplate,
   createCommunicationTemplate,
   getBuilderCatalog,
+  installBuilderCatalogTemplate,
+  duplicateBuilderTemplate,
   getCommunicationCatalogTemplate,
   normalizeEstimateSubtype,
 } from '../../../../services/api';
@@ -413,9 +415,19 @@ export default function CreateUniversalDocumentModal({
             body_text: preview.body_text || '', body_html: preview.body_html || '' });
           saved = response?.data ?? response;
         } else {
-          const response = catalogKind === 'estimate_portal'
-            ? await createEstimatePortalTemplate(payload) : await createDocumentTemplate(payload);
+          const response = await installBuilderCatalogTemplate(key, {
+            kind: catalogKind,
+            name: trimmedTitle,
+            branch_id: branchVal,
+          });
           saved = response?.data ?? response;
+          saved = {
+            ...saved,
+            template_type: saved.subtype || subtype,
+            branch: saved.branch_id,
+            is_active: saved.state === 'active',
+            lock_version: saved.draft_revision?.lock_version || 1,
+          };
         }
         if (!saved?.id) throw new Error('Server returned an unexpected response with no template ID.');
         onCreated(saved, { group: currentCategory.group, mode: currentCategory.builderMode || (catalogKind === 'estimate_portal' ? 'estimate' : currentCategory.channel), payload });
@@ -426,6 +438,24 @@ export default function CreateUniversalDocumentModal({
       // 1. LEGAL & OPERATIONAL DOCUMENTS DISPATCH
       // ==========================================
       if (currentCategory.group === 'legal') {
+        if (startingTemplate.startsWith('template:')) {
+          const sourceId = Number(startingTemplate.slice('template:'.length));
+          const response = await duplicateBuilderTemplate(sourceId, {
+            name: trimmedTitle,
+            branch_id: branchVal,
+          });
+          const source = response?.data ?? response;
+          const saved = {
+            ...source,
+            template_type: source.subtype,
+            branch: source.branch_id,
+            is_active: source.state === 'active',
+            lock_version: source.draft_revision?.lock_version || 1,
+          };
+          if (!saved?.id) throw new Error('Server returned an unexpected response with no template ID.');
+          onCreated(saved, { group: 'legal', mode: currentCategory.builderMode, payload: saved });
+          return;
+        }
         let initialContent = { docSettings: { format: 'Letter', margin: '40px' }, blocks: [] };
         let initialHtml = '';
         let initialSubject = '';

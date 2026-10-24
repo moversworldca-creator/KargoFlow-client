@@ -609,7 +609,9 @@ export const createInventoryItemTemplate = (data) => api.post("/inventory-item-t
 export const updateInventoryItemTemplate = (id, data) => api.patch(`/inventory-item-templates/${id}/`, data);
 export const deleteInventoryItemTemplate = (id) => api.delete(`/inventory-item-templates/${id}/`);
 export const getEstimateCatalogItems = (params) => legacyOperationsApiEnabled ? api.get("/catalog-items/", { params }) : Promise.resolve([]);
-export const getEstimatePortalTemplates = async (params = {}) => legacyOperationsApiEnabled ? {
+export const getEstimatePortalTemplates = async (params = {}) => {
+  if (!legacyOperationsApiEnabled) return [];
+
   try {
     const builderParams = {
       kind: "estimate_portal",
@@ -629,7 +631,7 @@ export const getEstimatePortalTemplates = async (params = {}) => legacyOperation
     return { ...res, data: normalized };
   } catch (err) {
     if (err?.response?.status === 404) {
-      return api.get("/portal-templates/", { params }) : Promise.resolve([]);
+      return api.get("/portal-templates/", { params });
     }
     throw err;
   }
@@ -801,15 +803,166 @@ export const getPublicSquareOrder = (token, orderId) =>
 export const getPublicContractPortal = (token) => api.get("/public/contracts/portal/", { params: { token } });
 export const signPublicContractPortal = (data) => api.post("/public/contracts/portal/sign/", data);
 
-export const getDocumentTemplates = (params) => api.get("/documents/templates/", { params });
-export const createDocumentTemplate = (data) => api.post("/documents/templates/", data);
-export const updateDocumentTemplate = (id, data) => api.patch(`/documents/templates/${id}/`, data);
-export const deleteDocumentTemplate = (id) => api.delete(`/documents/templates/${id}/`);
-export const getDocumentVariableRegistry = () => api.get("/documents/variables/");
-export const previewDocumentTemplate = (id, data) => api.post(`/documents/templates/${id}/preview/`, data);
+const presentBuilderDocumentTemplate = (template) => ({
+  ...template,
+  template_type: template?.subtype || template?.template_type,
+  branch: template?.branch_id ?? null,
+  is_active: template?.state === "active",
+  version: template?.published_revision?.revision_number || template?.draft_revision?.revision_number || "1.0",
+  lock_version: template?.draft_revision?.lock_version || 1,
+});
+
+export const getDocumentTemplates = (params = {}) => {
+  const rawType = String(params.template_type || "").trim().toLowerCase();
+  const documentSubtypeAliases = {
+    credit_card_authorization: "cc_authorization",
+    cc_auth: "cc_authorization",
+    inventory: "inventory_sheet",
+  };
+  const documentSubtypes = new Set([
+    "contract", "bol", "cc_authorization", "credit_card_authorization", "cc_auth",
+    "valuation_waiver", "inventory_sheet", "inventory", "agreement", "custom",
+  ]);
+  const invoiceSubtypes = new Set(["final", "deposit", "storage", "progress"]);
+  const inferredKind = params.kind || (
+    rawType === "invoice" || params.scope_type === "invoice" || invoiceSubtypes.has(rawType)
+      ? "invoice"
+      : documentSubtypes.has(rawType) ? "document" : ""
+  );
+
+  if (inferredKind) {
+    const filters = {};
+    if (params.q) filters.q = params.q;
+    if (params.limit !== undefined) filters.limit = params.limit;
+    if (params.offset !== undefined) filters.offset = params.offset;
+    const normalizedSubtype = params.subtype || (
+      inferredKind === "document" ? documentSubtypeAliases[rawType] || rawType : ""
+    );
+    if (normalizedSubtype && !(inferredKind === "invoice" && rawType === "invoice")) filters.subtype = normalizedSubtype;
+    const resolvedState = params.state || (
+      params.is_active === true || params.is_active === "true" ? "active"
+        : params.is_active === false || params.is_active === "false" ? "inactive" : ""
+    );
+    if (resolvedState) filters.state = resolvedState;
+    return api.get("/tenant/builder/templates/", {
+      params: { ...filters, kind: inferredKind, branch_id: params.branch_id ?? params.branch },
+    }).then((response) => {
+      const data = response?.data ?? {};
+      return {
+        ...response,
+        data: {
+          ...data,
+          results: (data.results || []).map(presentBuilderDocumentTemplate),
+        },
+      };
+    });
+  }
+  return legacyOperationsApiEnabled ? api.get("/documents/templates/", { params }) : Promise.resolve([]);
+};
+export const createDocumentTemplate = async (data) => {
+  const rawSubtype = String(data.subtype || data.template_type || "").trim().toLowerCase();
+  const kind = data.kind || (rawSubtype === "invoice" || data.scope_type === "invoice" ? "invoice" : "document");
+  const documentSubtypeAliases = {
+    credit_card_authorization: "cc_authorization",
+    cc_auth: "cc_authorization",
+    inventory: "inventory_sheet",
+  };
+  const documentSubtypes = ["contract", "bol", "cc_authorization", "valuation_waiver", "inventory_sheet", "agreement", "custom"];
+  const invoiceSubtypes = ["final", "deposit", "storage", "progress"];
+  const normalizedDocumentSubtype = documentSubtypeAliases[rawSubtype] || rawSubtype;
+  const subtype = kind === "invoice"
+    ? (invoiceSubtypes.includes(rawSubtype) ? rawSubtype : "final")
+    : (documentSubtypes.includes(normalizedDocumentSubtype) ? normalizedDocumentSubtype : "custom");
+  const payload = {
+    kind,
+    subtype,
+    name: data.name,
+    description: data.description || "",
+    branch_id: data.branch_id ? Number(data.branch_id) : (data.branch ? Number(data.branch) : null),
+  };
+  const hasDocument = Boolean(data.document || data.content || data.html_content || data.body_html);
+
+  const response = await api.post("/tenant/builder/templates/", payload);
+  const created = response?.data ?? response;
+  if (hasDocument && created?.id) {
+    try {
+      const draft = await api.put(`/tenant/builder/templates/${created.id}/draft/`, {
+        lock_version: created.draft_revision?.lock_version || 1,
+        document: toBackendTemplateDocument(data, kind === "document" ? subtype : kind),
+      });
+      created.saved_draft = draft?.data ?? draft;
+    } catch (error) {
+      try {
+        await api.delete(`/tenant/builder/templates/${created.id}/`);
+      } catch (cleanupError) {
+        error.message = `${error.message} The empty template could not be archived; template ID ${created.id} may need cleanup.`;
+        error.cleanupError = cleanupError;
+      }
+      throw error;
+    }
+  }
+
+  return {
+    ...response,
+    data: presentBuilderDocumentTemplate({
+      ...created,
+      template_type: created.subtype || subtype,
+      html_content: data.html_content || data.body_html,
+    }),
+  };
+};
+export const updateDocumentTemplate = async (id, data) => {
+  const kind = data.kind || (data.template_type === "invoice" ? "invoice" : "document");
+  const rawSubtype = String(data.subtype || data.template_type || "").trim().toLowerCase();
+  const aliases = { credit_card_authorization: "cc_authorization", cc_auth: "cc_authorization", inventory: "inventory_sheet" };
+  const metadata = {};
+  if (Object.prototype.hasOwnProperty.call(data, "name")) metadata.name = data.name;
+  if (Object.prototype.hasOwnProperty.call(data, "description")) metadata.description = data.description;
+  if (rawSubtype) metadata.subtype = aliases[rawSubtype] || rawSubtype;
+  const response = await api.patch(`/tenant/builder/templates/${id}/`, metadata);
+  const saved = response?.data ?? response;
+
+  if (Object.prototype.hasOwnProperty.call(data, "is_active")) {
+    const action = data.is_active ? "activate" : "deactivate";
+    await api.post(`/tenant/builder/templates/${id}/${action}/`);
+    saved.state = data.is_active ? "active" : "inactive";
+  }
+
+  if (data.content || data.document || data.html_content || data.body_html) {
+    let draftResponse;
+    const branchId = data.branch_id ?? data.branch;
+    try {
+      draftResponse = await getBuilderTemplateDraft(id, branchId ? { params: { branch_id: branchId } } : {});
+    } catch (error) {
+      if (error?.response?.status !== 404) throw error;
+      draftResponse = await startBuilderTemplateDraft(id, branchId ? { params: { branch_id: branchId } } : {});
+    }
+    const draft = draftResponse?.data ?? draftResponse;
+    const document = data.document || toBackendTemplateDocument(data, kind === "document" ? metadata.subtype : kind);
+    const draftSave = await saveBuilderTemplateDraft(id, {
+      lock_version: data.lock_version || draft?.revision?.lock_version || draft?.lock_version || 1,
+      document,
+    });
+    saved.draft_revision = (draftSave?.data ?? draftSave)?.revision || saved.draft_revision;
+  }
+
+  return { ...response, data: presentBuilderDocumentTemplate({ ...saved, subtype: saved.subtype || metadata.subtype }) };
+};
+export const deleteDocumentTemplate = (id) => api.delete(`/tenant/builder/templates/${id}/`);
+export const getDocumentVariableRegistry = (kind = "document", branchId = null) =>
+  api.get("/tenant/builder/variables/", { params: { kind, ...(branchId ? { branch_id: branchId } : {}) } });
+export const previewDocumentTemplate = (id, data) => previewBuilderTemplate(id, {
+  document: data.document,
+  source: data.source,
+  audience: data.audience || "customer",
+  format: data.format || "html",
+}, data.branch_id ? { params: { branch_id: data.branch_id } } : {});
 export const regenerateOpportunityDocuments = (opportunityId) => api.post(`/documents/opportunities/${opportunityId}/regenerate/`, {});
 
 export const getTemplateVariables = async (params) => {
+  if (params?.kind) {
+    return getBuilderVariables(params.kind, params.branch_id ? { branch_id: params.branch_id } : {});
+  }
   try {
     return await api.get("/tenant/builder/variables/", { params });
   } catch (err) {
@@ -819,6 +972,56 @@ export const getTemplateVariables = async (params) => {
     throw err;
   }
 };
+export const getBuilderMeta = (kind = '') => api.get("/tenant/builder/meta/", {
+  params: typeof kind === 'string' ? { kind } : kind,
+});
+export const getBuilderVariables = (kind = 'document', params = {}) => api.get("/tenant/builder/variables/", {
+  params: { kind, ...params },
+});
+export const getBuilderBlocks = (params) => api.get("/tenant/builder/blocks/", { params });
+export const getBuilderBlock = (id) => api.get(`/tenant/builder/blocks/${id}/`);
+export const getBuilderCustomVariable = (id) => api.get(`/tenant/builder/variables/${id}/`);
+export const getBuilderSettings = () => api.get("/tenant/builder/settings/");
+export const getBuilderTemplate = (id, config = {}) => api.get(`/tenant/builder/templates/${id}/`, config);
+export const getBuilderTemplateDraft = (id, config = {}) => api.get(`/tenant/builder/templates/${id}/draft/`, config);
+export const startBuilderTemplateDraft = (id, config = {}) => api.post(`/tenant/builder/templates/${id}/draft/`, {}, config);
+export const saveBuilderTemplateDraft = (id, data) =>
+  api.put(`/tenant/builder/templates/${id}/draft/`, data);
+export const validateBuilderTemplateDraft = (id) =>
+  api.post(`/tenant/builder/templates/${id}/draft/validate/`);
+export const publishBuilderTemplateDraft = (id) =>
+  api.post(`/tenant/builder/templates/${id}/draft/publish/`);
+export const discardBuilderTemplateDraft = (id) =>
+  api.delete(`/tenant/builder/templates/${id}/draft/`);
+export const activateDocumentTemplate = (id) =>
+  api.post(`/tenant/builder/templates/${id}/activate/`);
+export const deactivateDocumentTemplate = (id) =>
+  api.post(`/tenant/builder/templates/${id}/deactivate/`);
+export const duplicateBuilderTemplate = (id, data = {}) =>
+  api.post(`/tenant/builder/templates/${id}/duplicate/`, data);
+export const getBuilderCatalog = (params = {}) =>
+  params.kind === "communication"
+    ? api.get("/tenant/communications/catalog/", { params })
+    : api.get("/tenant/builder/catalog/", { params });
+export const getBuilderCatalogTemplate = (key, params = {}) =>
+  api.get(`/tenant/builder/catalog/${encodeURIComponent(key)}/`, { params });
+export const installBuilderCatalogTemplate = (key, data) =>
+  api.post(`/tenant/builder/catalog/${encodeURIComponent(key)}/install/`, data);
+export const getBuilderTemplateRevisions = (id) =>
+  api.get(`/tenant/builder/templates/${id}/revisions/`);
+export const getBuilderTemplateRevision = (id, revisionId) =>
+  api.get(`/tenant/builder/templates/${id}/revisions/${revisionId}/`);
+export const restoreBuilderTemplateRevision = (id, revisionId) =>
+  api.post(`/tenant/builder/templates/${id}/revisions/${revisionId}/restore/`);
+export const compareBuilderTemplateRevisions = (id, from, to) =>
+  api.get(`/tenant/builder/templates/${id}/compare/`, { params: { from, to } });
+export const discardBuilderBlockDraft = (id) => api.delete(`/tenant/builder/blocks/${id}/draft/`);
+export const createBuilderRender = (data, config = {}) => api.post("/tenant/builder/renders/", data, config);
+export const previewBuilderTemplate = (id, data = {}, config = {}) =>
+  api.post(`/tenant/builder/templates/${id}/preview/`, data, {
+    ...config,
+    ...(data.format === "pdf" ? { responseType: "blob" } : {}),
+  });
 export const createTemplateVariable = (data) => api.post("/documents/template-variables/", data);
 export const updateTemplateVariable = (id, data) => api.patch(`/documents/template-variables/${id}/`, data);
 export const deleteTemplateVariable = (id) => api.delete(`/documents/template-variables/${id}/`);
@@ -910,6 +1113,16 @@ export const getCommunicationTemplateVariables = (params) =>
   api.get("/integrations/communication-templates/variables/", { params });
 export const getCommunicationTemplateKeys = (params) =>
   api.get("/integrations/communication-templates/template-keys/", { params });
+const normalizeTenantCommunicationTokens = (text) => {
+  if (typeof text !== "string") return text;
+  return text
+    .replace(/\{\{\s*Customer\.first_name\s*\}\}/gi, "{{customer.first_name}}")
+    .replace(/\{\{\s*Company\.name\s*\}\}/gi, "{{company.name}}")
+    .replace(/\{\{\s*Customer\.(?:full_name|name)\s*\}\}/gi, "{{customer.name}}")
+    .replace(/\{\{\s*Customer\.phone\s*\}\}/gi, "{{customer.phone}}")
+    .replace(/\{\{\s*Customer\.email\s*\}\}/gi, "{{customer.email}}")
+    .replace(/\{\{\s*Company\.phone\s*\}\}/gi, "{{branch.phone}}");
+};
 const toTenantCommunicationTemplatePayload = (data, partial = false) => {
   const payload = {};
   const has = (key) => Object.prototype.hasOwnProperty.call(data, key);
@@ -917,10 +1130,10 @@ const toTenantCommunicationTemplatePayload = (data, partial = false) => {
   if (!partial || has("name")) payload.name = data.name;
   if (!partial || has("description")) payload.description = data.description || "";
   if (!partial || has("channel")) payload.channel = data.channel;
-  if (!partial || has("subject")) payload.subject = data.subject || "";
-  if (!partial || has("body_html")) payload.body_html = data.body_html || "";
+  if (!partial || has("subject")) payload.subject = normalizeTenantCommunicationTokens(data.subject || "");
+  if (!partial || has("body_html")) payload.body_html = normalizeTenantCommunicationTokens(data.body_html || "");
   if (!partial || has("body_text") || has("body") || has("sms_body")) {
-    payload.body_text = data.body_text ?? data.sms_body ?? data.body ?? "";
+    payload.body_text = normalizeTenantCommunicationTokens(data.body_text ?? data.sms_body ?? data.body ?? "");
   }
   if (!partial || has("branch_id") || has("branch")) {
     payload.branch_id = data.branch_id ?? data.branch ?? null;
@@ -976,11 +1189,38 @@ export const updateCommunicationTemplateCategory = (id, data) => api.patch(`/int
 export const deleteCommunicationTemplateCategory = (id) => api.delete(`/integrations/communication-template-categories/${id}/`);
 
 // Additional Tenant Communications APIs
+export const getBranchNotifications = (branchId) =>
+  api.get(`/tenant/communications/branch-settings/${branchId}/notifications/`);
+export const updateBranchNotification = (branchId, key, data) =>
+  api.put(`/tenant/communications/branch-settings/${branchId}/notifications/${key}/`, data);
+
 export const getNotificationTemplates = (params) => api.get("/tenant/communications/notification-templates/", { params });
+export const getNotificationTemplate = (id) => api.get(`/tenant/communications/notification-templates/${id}/`);
 export const createNotificationTemplate = (data) => api.post("/tenant/communications/notification-templates/", data);
 export const updateNotificationTemplate = (id, data) => api.patch(`/tenant/communications/notification-templates/${id}/`, data);
 export const deleteNotificationTemplate = (id) => api.delete(`/tenant/communications/notification-templates/${id}/`);
+export const getCustomAutomations = (params) => api.get("/tenant/communications/automations/", { params });
+export const getCustomAutomation = (id) => api.get(`/tenant/communications/automations/${id}/`);
+export const createCustomAutomation = (data) => api.post("/tenant/communications/automations/", data);
+export const updateCustomAutomation = (id, data) => api.patch(`/tenant/communications/automations/${id}/`, data);
+export const deactivateCustomAutomation = (id) => api.delete(`/tenant/communications/automations/${id}/`);
+export const getCustomAutomationEvents = () => api.get("/tenant/communications/automations/events/");
+export const getCustomAutomationRuns = (id) => api.get(`/tenant/communications/automations/${id}/runs/`);
+export const getGeneralTemplates = (params = {}) => {
+  const { include_inactive, ...queryParams } = params;
+  const path = include_inactive
+    ? "/tenant/communications/templates/managed/"
+    : "/tenant/communications/templates/";
+  return api.get(path, { params: queryParams });
+};
+export const getGeneralTemplate = (id) => api.get(`/tenant/communications/templates/${id}/`);
+export const getGeneralTemplateVariables = () => api.get("/tenant/communications/templates/variables/");
+export const createGeneralTemplate = (data) => api.post("/tenant/communications/templates/", data);
+export const updateGeneralTemplate = (id, data) => api.patch(`/tenant/communications/templates/${id}/`, data);
+export const deleteGeneralTemplate = (id) => api.delete(`/tenant/communications/templates/${id}/`);
 export const getCommunicationCatalog = (params) => api.get("/tenant/communications/catalog/", { params });
+export const getCommunicationCatalogTemplate = (key, params) =>
+  api.get(`/tenant/communications/catalog/${key}/`, { params });
 export const getCommunicationReviews = (params) => api.get("/tenant/communications/review/", { params });
 export const getMySmsNumbers = (params) => api.get("/tenant/communications/my-sms-numbers/", { params });
 

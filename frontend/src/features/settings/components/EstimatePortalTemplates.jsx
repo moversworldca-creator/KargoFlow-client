@@ -570,7 +570,7 @@ export default function EstimatePortalTemplates({ branchId = null, builderRouteV
       return;
     }
     try {
-      const res = await getTemplateVariables({ template: templateId });
+      const res = await getTemplateVariables({ kind: 'estimate_portal', ...(branchFilter ? { branch_id: Number(branchFilter) } : {}) });
       setVariables(normalize(res?.data ?? res));
     } catch {
       setVariables([]);

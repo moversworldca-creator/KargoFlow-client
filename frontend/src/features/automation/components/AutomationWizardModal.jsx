@@ -106,6 +106,7 @@ export default function AutomationWizardModal({
           return (list || []).filter((t) => {
             if (t.state && t.state !== 'active') return false;
             if (t.is_active === false) return false;
+            if (Object.prototype.hasOwnProperty.call(t, 'revision_id') && !t.revision_id) return false;
             return true;
           });
         };

@@ -313,6 +313,10 @@ function App() {
             <Route path="communication" element={withPermission('/communication', <Communication />)} />
             <Route path="marketing" element={withPermission('/marketing', <Marketing />)} />
             <Route path="automation" element={withPermission('/automation', <Automation />)} />
+            <Route path="automation/documents" element={withPermission('/documents', <SettingsHub initialGroup="documents" />)} />
+            <Route path="automation/documents/:subTab" element={withPermission('/documents', <SettingsHub initialGroup="documents" />)} />
+            <Route path="automation/documents/:subTab/:itemId/:subView" element={withPermission('/documents', <SettingsHub initialGroup="documents" />)} />
+            <Route path="automation/documents/:subTab/:subView" element={withPermission('/documents', <SettingsHub initialGroup="documents" />)} />
             <Route path="automation/templates" element={withPermission('/automation/templates', <AutomationTemplateEditor />)} />
             <Route path="automation/templates/:tabId" element={withPermission('/automation/templates/:tabId', <AutomationTemplateEditor />)} />
             <Route path="automation/templates/:itemId/:subView" element={withPermission('/automation/templates/:itemId/:subView', <AutomationTemplateEditor />)} />

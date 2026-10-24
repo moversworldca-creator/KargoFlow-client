@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Bot,
@@ -8,8 +8,6 @@ import {
   Copy,
   Trash2,
   Pencil,
-  ToggleLeft,
-  ToggleRight,
   Clock3,
   AlertCircle,
   CheckCircle2,
@@ -19,6 +17,7 @@ import {
   MessageSquare,
   Building,
   Settings2,
+  FileText,
 } from 'lucide-react';
 import {
   getBranchNotifications,
@@ -59,7 +58,9 @@ const Automation = () => {
   const [selectedAutomationForLogs, setSelectedAutomationForLogs] = useState('');
   const [runs, setRuns] = useState([]);
   const [runsLoading, setRunsLoading] = useState(false);
+  const [runsError, setRunsError] = useState('');
   const [runFilters, setRunFilters] = useState({ status: '', target_type: '' });
+  const runsRequestIdRef = useRef(0);
 
   // Search & Filter
   const [search, setSearch] = useState('');
@@ -70,7 +71,17 @@ const Automation = () => {
   const navigate = useNavigate();
 
   const canManageAutomations = can('communications.automations.manage');
+  const canViewAutomations = can('communications.automations.view') || canManageAutomations;
   const canUpdateBranchNotifications = can('communications.branch_settings.update');
+  const canViewDocumentBuilder = can('builder.templates.view') || can('crm.settings.portal_templates.view') ||
+    can('crm.settings.portal_templates.manage') || can('crm.opportunities.view') || can('crm.workspace.admin');
+
+  const getRequestErrorMessage = (err, fallback) => {
+    const status = err?.response?.status;
+    if (status === 401) return 'Your session has expired. Sign in again to continue.';
+    if (status === 403) return 'You do not have permission to view this information.';
+    return err?.response?.data?.detail || err?.response?.data?.error || fallback;
+  };
 
   const formatTriggerLabel = (event) => {
     const eventName = String(event || '').split('.').slice(1).join('.') || event || 'changes';
@@ -113,12 +124,19 @@ const Automation = () => {
     if (!branchId) return;
     setNotificationsLoading(true);
     setErrorBanner(null);
+    if (!canUpdateBranchNotifications) {
+      setNotifications([]);
+      setErrorBanner('You do not have permission to view or configure branch notifications.');
+      setNotificationsLoading(false);
+      return;
+    }
     try {
       const res = await getBranchNotifications(branchId);
       setNotifications(Array.isArray(res) ? res : res?.results || []);
     } catch (err) {
       console.error('Failed to load branch notifications:', err);
-      setErrorBanner('Failed to load standard notifications for this branch.');
+      setNotifications([]);
+      setErrorBanner(getRequestErrorMessage(err, 'Failed to load standard notifications for this branch.'));
     } finally {
       setNotificationsLoading(false);
     }
@@ -128,6 +146,12 @@ const Automation = () => {
   const loadCustomAutomations = async (branchId = selectedBranchId) => {
     setAutomationsLoading(true);
     setErrorBanner(null);
+    if (!canViewAutomations) {
+      setCustomAutomations([]);
+      setErrorBanner('You do not have permission to view custom automations.');
+      setAutomationsLoading(false);
+      return;
+    }
     try {
       const params = {};
       if (branchId) params.branch_id = branchId;
@@ -140,7 +164,8 @@ const Automation = () => {
       }
     } catch (err) {
       console.error('Failed to load custom automations:', err);
-      setErrorBanner('Failed to load custom automations.');
+      setCustomAutomations([]);
+      setErrorBanner(getRequestErrorMessage(err, 'Failed to load custom automations.'));
     } finally {
       setAutomationsLoading(false);
     }
@@ -148,14 +173,23 @@ const Automation = () => {
 
   // 4. Fetch Runs for selected Custom Automation
   const loadRuns = async (automationId = selectedAutomationForLogs) => {
+    const requestId = ++runsRequestIdRef.current;
+    setRunsError('');
+    if (!canViewAutomations) {
+      setRuns([]);
+      setRunsError('You do not have permission to view automation runs.');
+      return;
+    }
     const automations = automationId
       ? customAutomations.filter((automation) => String(automation.id) === String(automationId))
       : customAutomations;
     if (!automations.length) {
       setRuns([]);
+      setRunsLoading(false);
       return;
     }
     setRunsLoading(true);
+    setRuns([]);
     try {
       const runsByAutomation = await Promise.all(
         automations.map(async (automation) => {
@@ -175,16 +209,21 @@ const Automation = () => {
           });
         })
       );
-      setRuns(
-        runsByAutomation
-          .flat()
-          .sort((left, right) => new Date(right.scheduled_for || 0) - new Date(left.scheduled_for || 0))
-      );
+      if (requestId === runsRequestIdRef.current) {
+        setRuns(
+          runsByAutomation
+            .flat()
+            .sort((left, right) => new Date(right.scheduled_for || 0) - new Date(left.scheduled_for || 0))
+        );
+      }
     } catch (err) {
       console.error('Failed to load runs:', err);
-      setRuns([]);
+      if (requestId === runsRequestIdRef.current) {
+        setRuns([]);
+        setRunsError(getRequestErrorMessage(err, 'Failed to load automation runs. Try refreshing.'));
+      }
     } finally {
-      setRunsLoading(false);
+      if (requestId === runsRequestIdRef.current) setRunsLoading(false);
     }
   };
 
@@ -453,9 +492,9 @@ const Automation = () => {
   const selectedBranchName = branches.find((b) => String(b.id) === String(selectedBranchId))?.name || '';
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-screen-2xl space-y-5 sm:space-y-6">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+      <div className="flex flex-col gap-4 rounded-2xl border border-brand-border bg-white p-4 shadow-xs sm:flex-row sm:items-center sm:justify-between sm:p-5">
         <div className="flex items-center gap-3">
           <div className="p-2 sm:p-2.5 bg-blue-100 text-blue-600 rounded-xl shrink-0">
             <Bot size={24} className="h-5 w-5 sm:h-[26px] sm:w-[26px]" />
@@ -469,14 +508,24 @@ const Automation = () => {
         </div>
 
         {/* Global Controls */}
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
+          {canViewDocumentBuilder && (
+            <button
+              type="button"
+              onClick={() => navigate('/automation/documents/document-templates')}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-brand-border bg-white px-3 py-2 text-xs font-bold text-heading transition hover:bg-subtle sm:text-sm"
+            >
+              <FileText size={16} />
+              Document Builder
+            </button>
+          )}
           {branches.length > 0 && (
-            <div className="flex min-w-0 items-center space-x-1.5 sm:space-x-2 bg-subtle rounded-xl p-1.5 border border-brand-border">
+            <div className="flex min-w-0 items-center justify-between gap-2 rounded-xl border border-brand-border bg-subtle p-1.5 sm:justify-start">
               <span className="text-[10px] sm:text-xs font-bold text-muted pl-1 sm:pl-2 uppercase tracking-wide flex items-center gap-1">
                 <Building size={14} className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" /> Branch:
               </span>
               <select
-                className="max-w-[150px] sm:max-w-none bg-transparent text-xs sm:text-sm font-semibold text-heading border-none focus:ring-0 cursor-pointer pl-1 pr-5 sm:pr-6 py-1"
+                className="min-w-0 flex-1 bg-transparent py-1 pl-1 pr-5 text-xs font-semibold text-heading border-none focus:ring-0 cursor-pointer sm:flex-initial sm:text-sm sm:pr-6"
                 value={selectedBranchId}
                 onChange={(e) => setSelectedBranchId(e.target.value)}
               >
@@ -497,7 +546,7 @@ const Automation = () => {
                 setWizardInitial(null);
                 setWizardOpen(true);
               }}
-              className="px-3 sm:px-4 py-2 bg-gradient-to-r from-orange-300 to-rose-200 text-heading rounded-xl text-xs sm:text-sm font-bold shadow-sm hover:brightness-95 transition-all inline-flex items-center gap-1.5 sm:gap-2"
+              className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-orange-300 to-rose-200 px-3 py-2 text-xs font-bold text-heading shadow-sm transition-all hover:brightness-95 sm:gap-2 sm:px-4 sm:text-sm"
             >
               <Plus size={16} className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" /> Create Automation
             </button>
@@ -506,7 +555,7 @@ const Automation = () => {
       </div>
 
       {/* Tabs */}
-      <div className="flex overflow-x-auto border-b border-brand-border">
+      <div className="flex overflow-x-auto rounded-t-xl border border-brand-border bg-white">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -517,7 +566,7 @@ const Automation = () => {
                 setActiveTab(tab.id);
                 setSearch('');
               }}
-              className={`flex shrink-0 items-center gap-2 px-3 sm:gap-2.5 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold transition-colors relative cursor-pointer ${
+              className={`relative flex min-h-11 shrink-0 cursor-pointer items-center gap-2 px-3 py-3 text-xs font-semibold transition-colors sm:gap-2.5 sm:px-6 sm:py-4 sm:text-sm ${
                 isActive
                   ? 'text-heading bg-gradient-to-r from-orange-300 to-rose-200 rounded-t-xl'
                   : 'text-content-sec hover:text-content-main'
@@ -548,19 +597,23 @@ const Automation = () => {
       )}
 
       {/* Main Content Area */}
-      <div className="bg-white rounded-2xl border border-brand-border p-3 sm:p-5 shadow-xs">
+      <div className="rounded-b-2xl rounded-tr-2xl border border-t-0 border-brand-border bg-white p-3 shadow-xs sm:p-5">
         {/* Search Bar for Notifications / Automations */}
         {activeTab !== 'logs' && (
-          <div className="flex items-center justify-between gap-3 mb-4 sm:mb-6">
-            <div className="relative w-full max-w-md">
-              <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" />
+          <div className="mb-4 flex flex-col gap-2 sm:mb-6 sm:flex-row sm:items-center sm:justify-between">
+            <label className="relative block w-full sm:max-w-md">
+              <span className="sr-only">Search {activeTab === 'notifications' ? 'notifications' : 'automations'}</span>
+              <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-3.5 flex items-center">
+                <Search size={16} className="text-muted" />
+              </span>
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search automations..."
+                aria-label={`Search ${activeTab === 'notifications' ? 'notifications' : 'automations'}`}
+                placeholder={`Search ${activeTab === 'notifications' ? 'notifications' : 'automations'}...`}
                 className="w-full pl-10 pr-4 py-2 bg-subtle rounded-xl text-xs sm:text-sm border border-transparent focus:border-brand-border outline-none transition-all"
               />
-            </div>
+            </label>
           </div>
         )}
 
@@ -638,9 +691,9 @@ const Automation = () => {
                                 disabled={!canUpdateBranchNotifications || !selectedBranchId}
                                 aria-label={`Configure ${notification.name}`}
                                 title="Configure notification channels and templates"
-                                className="inline-flex items-center justify-center rounded-md p-1 text-slate-500 transition-colors hover:bg-slate-100 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
+                                className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
                               >
-                                <Settings2 className="h-5 w-5" />
+                                <Settings2 className="h-4 w-4" />
                               </button>
                               <button
                                 type="button"
@@ -660,13 +713,21 @@ const Automation = () => {
                                       ? 'Turn off this workflow; keep its channel and template settings'
                                       : 'Turn on this workflow'
                                 }
-                                className="inline-flex items-center justify-center rounded-md p-1 transition-all duration-200 hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-50"
+                                className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg transition-all duration-200 hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-50"
                               >
-                                {notification.enabled ? (
-                                  <ToggleRight className="w-8 h-8 text-blue-500 drop-shadow-sm" />
-                                ) : (
-                                  <ToggleLeft className="w-8 h-8 text-slate-400" />
-                                )}
+                                <span
+                                  className={`inline-flex h-3.5 w-6 items-center rounded-full border-2 transition-colors ${
+                                    notification.enabled ? 'border-blue-500 bg-white' : 'border-slate-300 bg-slate-300'
+                                  }`}
+                                >
+                                  <span
+                                    className={`inline-block h-2 w-2 rounded-full transition-[margin,background-color,border-color] ${
+                                      notification.enabled
+                                        ? 'ml-2.5 border-2 border-blue-500 bg-white'
+                                        : 'ml-0.5 border border-white bg-white'
+                                    }`}
+                                  />
+                                </span>
                               </button>
                             </div>
                           </div>
@@ -686,7 +747,7 @@ const Automation = () => {
 
         {/* TAB 2: CUSTOM AUTOMATIONS */}
         {activeTab === 'rules' && (
-          <div className="border border-border rounded-2xl overflow-x-auto">
+          <div className="border border-border rounded-2xl overflow-x-auto" aria-label="Custom automations list">
             <table className="w-full min-w-[1120px] table-fixed border-collapse text-left">
               <colgroup>
                 <col className="w-[22%]" />
@@ -782,17 +843,21 @@ const Automation = () => {
                                 title={wf.is_active ? 'Disable automation' : 'Enable automation'}
                                 aria-busy={togglingAutomationIds.has(wf.id)}
                                 role="switch"
-                                className={`relative inline-flex h-[22px] w-[38px] shrink-0 items-center rounded-full border-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
-                                  wf.is_active ? 'border-blue-500 bg-white' : 'border-slate-300 bg-slate-300'
-                                }`}
+                                className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 <span
-                                  className={`absolute top-1/2 h-[14px] w-[14px] -translate-y-1/2 rounded-full transition-[left,background-color,border-color] ${
+                                  className={`inline-flex h-3.5 w-6 items-center rounded-full border-2 transition-colors ${
+                                    wf.is_active ? 'border-blue-500 bg-white' : 'border-slate-300 bg-slate-300'
+                                  }`}
+                                >
+                                <span
+                                  className={`inline-block h-2 w-2 rounded-full transition-[margin,background-color,border-color] ${
                                     wf.is_active
-                                      ? 'left-[18px] border-2 border-blue-500 bg-white'
-                                      : 'left-[2px] border border-white bg-white'
+                                      ? 'ml-2.5 border-2 border-blue-500 bg-white'
+                                      : 'ml-0.5 border border-white bg-white'
                                   }`}
                                 />
+                                </span>
                               </button>
                               <button
                                 type="button"
@@ -825,7 +890,7 @@ const Automation = () => {
         {/* TAB 3: RUNS & LOGS */}
         {activeTab === 'logs' && (
           <div className="space-y-3">
-            <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2.5">
+            <div className="grid grid-cols-1 gap-2.5 sm:flex sm:flex-row sm:flex-wrap sm:items-center">
               <select
                 value={selectedAutomationForLogs}
                 onChange={(e) => setSelectedAutomationForLogs(e.target.value)}
@@ -868,7 +933,7 @@ const Automation = () => {
                 disabled={runsLoading || customAutomations.length === 0}
                 className="w-full sm:w-auto px-4 py-2 bg-gradient-to-r from-orange-300 to-rose-200 text-heading rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
               >
-                <RefreshCw size={14} className={runsLoading ? 'animate-spin' : ''} /> Refresh Logs
+                <RefreshCw size={14} className={runsLoading ? 'animate-spin' : ''} /> {runsError ? 'Retry' : 'Refresh Logs'}
               </button>
             </div>
 
@@ -898,6 +963,20 @@ const Automation = () => {
                       <td colSpan={6} className="p-8 text-center text-sm text-muted">
                         <RefreshCw size={24} className="animate-spin mx-auto text-primary mb-2" />
                         Loading runs...
+                      </td>
+                    </tr>
+                  ) : runsError ? (
+                    <tr>
+                      <td colSpan={6} role="alert" className="p-8 text-center text-sm text-rose-700">
+                        <div>{runsError}</div>
+                        <button
+                          type="button"
+                          onClick={() => loadRuns(selectedAutomationForLogs)}
+                          disabled={runsLoading}
+                          className="mt-3 inline-flex items-center gap-2 rounded-lg border border-rose-300 px-3 py-1.5 font-semibold hover:bg-rose-50 disabled:opacity-50"
+                        >
+                          <RefreshCw size={14} className={runsLoading ? 'animate-spin' : ''} /> Retry
+                        </button>
                       </td>
                     </tr>
                   ) : filteredRuns.length > 0 ? (

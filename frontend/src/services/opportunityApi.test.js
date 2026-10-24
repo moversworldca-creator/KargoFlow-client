@@ -66,6 +66,7 @@ it('loads opportunity jobs through the tenant opportunity endpoint', async () =>
 });
 
 it('does not request backend modules that are not mounted', async () => {
+  api.get.mockResolvedValue({ data: { count: 0, results: [] } });
   await expect(getEstimates({ opportunity: 31 })).resolves.toEqual([]);
   await expect(getPaymentRequests({ opportunity_id: 31 })).resolves.toEqual([]);
   await expect(getPayments({ opportunity_id: 31 })).resolves.toEqual([]);
@@ -73,7 +74,10 @@ it('does not request backend modules that are not mounted', async () => {
   await expect(getEstimateCatalogItems({ branch: 1 })).resolves.toEqual([]);
   await expect(getEstimatePackages({ branch: 1 })).resolves.toEqual([]);
   await expect(getEstimatePortalTemplates({ is_active: true })).resolves.toEqual([]);
-  await expect(getDocumentTemplates({ template_type: 'contract' })).resolves.toEqual([]);
+  await getDocumentTemplates({ template_type: 'contract', is_active: 'true', branch: 3 });
+  expect(api.get).toHaveBeenCalledWith('/tenant/builder/templates/', {
+    params: { kind: 'document', subtype: 'contract', state: 'active', branch_id: 3 },
+  });
   await expect(getContracts({ opportunity: 31 })).resolves.toEqual([]);
   await expect(getEstimatePortalInventory('draft-1')).resolves.toEqual([]);
   await expect(getJobAccountingSummary(1)).resolves.toBeNull();
@@ -84,6 +88,6 @@ it('does not request backend modules that are not mounted', async () => {
   await expect(requestEstimatePortal('draft-1')).rejects.toMatchObject({
     code: 'MODULE_NOT_AVAILABLE',
   });
-  expect(api.get).not.toHaveBeenCalled();
+  expect(api.get).toHaveBeenCalledTimes(1);
   expect(api.post).not.toHaveBeenCalled();
 });

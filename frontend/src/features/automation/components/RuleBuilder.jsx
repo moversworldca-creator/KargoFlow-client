@@ -646,9 +646,14 @@ const RuleBuilder = () => {
                   type="button"
                   onClick={toggleActive}
                   disabled={isSaving}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${draft.is_active ? 'bg-primary' : 'bg-disabled'}`}
+                  className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                  role="switch"
+                  aria-checked={Boolean(draft.is_active)}
+                  aria-label="Automation enabled"
                 >
-                  <span className={`inline-block h-4 w-4 transform rounded-full bg-card transition-transform ${draft.is_active ? 'translate-x-6' : 'translate-x-1'}`} />
+                  <span className={`inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.is_active ? 'bg-primary' : 'bg-disabled'}`}>
+                    <span className={`inline-block h-2.5 w-2.5 transform rounded-full bg-card transition-transform ${draft.is_active ? 'translate-x-3' : 'translate-x-0.5'}`} />
+                  </span>
                 </button>
                 <div className="text-sm text-muted">Enabled</div>
               </div>
@@ -894,10 +899,10 @@ const RuleBuilder = () => {
                                 <div className="text-sm font-bold text-heading">{label}</div>
                                 <div className="text-xs text-muted">{hint}</div>
                               </div>
-                              <div className={`h-5 w-9 rounded-full transition-colors ${enabled ? 'bg-primary' : 'bg-disabled'}`}>
+                              <div className={`h-3.5 w-6 rounded-full transition-colors ${enabled ? 'bg-primary' : 'bg-disabled'}`}>
                                 <div
-                                  className={`mt-[2px] ml-[2px] h-4 w-4 rounded-full bg-white transition-transform ${
-                                    enabled ? 'translate-x-4' : 'translate-x-0'
+                                  className={`mt-[3px] ml-[3px] h-2 w-2 rounded-full bg-white transition-transform ${
+                                    enabled ? 'translate-x-2.5' : 'translate-x-0'
                                   }`}
                                 />
                               </div>

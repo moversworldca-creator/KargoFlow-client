@@ -70,6 +70,7 @@ export default function NotificationConfigModal({
           (list || []).filter((t) => {
             if (t.state && t.state !== 'active') return false;
             if (t.is_active === false) return false;
+            if (Object.prototype.hasOwnProperty.call(t, 'revision_id') && !t.revision_id) return false;
             return true;
           });
 
@@ -103,12 +104,15 @@ export default function NotificationConfigModal({
 
   const validate = () => {
     const supportedChannels = notification.supported_channels || Object.keys(notification.channels || {});
-    if (supportedChannels.includes('in_app')) {
-      if (enabled && !inAppEnabled) return 'Enable in-app delivery before enabling this notification.';
-      return null;
-    }
     if (loading) return 'Notification templates are still loading.';
     if (templatesError) return 'Notification templates could not be loaded. Close and reopen this dialog to retry.';
+    const hasCustomerChannels = supportedChannels.some((channel) => channel === 'email' || channel === 'sms');
+    if (!hasCustomerChannels) {
+      if (enabled && supportedChannels.includes('in_app') && !inAppEnabled) {
+        return 'Enable in-app delivery before enabling this notification.';
+      }
+      return null;
+    }
     if (emailTemplateId && !emailTemplates.some((t) => String(t.id) === String(emailTemplateId))) {
       return 'The selected Email template is inactive or unavailable. Choose an active template or clear the selection.';
     }
@@ -118,7 +122,11 @@ export default function NotificationConfigModal({
     if (enabled) {
       const emailSupported = supportedChannels.includes('email');
       const smsSupported = supportedChannels.includes('sms');
-      if ((!emailSupported || !emailEnabled) && (!smsSupported || !smsEnabled)) {
+      if (
+        (!emailSupported || !emailEnabled) &&
+        (!smsSupported || !smsEnabled) &&
+        !(supportedChannels.includes('in_app') && inAppEnabled)
+      ) {
         return 'When notification is enabled, at least one supported channel must be enabled.';
       }
       if (emailSupported && emailEnabled) {
@@ -199,13 +207,13 @@ export default function NotificationConfigModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-xl border border-brand-border shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/40 p-3 backdrop-blur-xs sm:p-4">
+      <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-brand-border bg-white shadow-2xl">
         {/* Header */}
-        <div className="p-5 border-b border-brand-border flex items-center justify-between shrink-0 bg-slate-50/70">
-          <div>
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-brand-border bg-slate-50/70 p-4 sm:p-5">
+          <div className="min-w-0">
             <h3 className="text-lg font-bold text-heading">Configure Notification</h3>
-            <p className="text-xs text-muted mt-0.5">
+            <p className="mt-1 break-words text-xs text-muted">
               Branch: <span className="font-semibold text-body">{branchName || `#${branchId}`}</span>
             </p>
           </div>
@@ -219,7 +227,7 @@ export default function NotificationConfigModal({
         </div>
 
         {/* Content */}
-        <form onSubmit={handleSave} className="flex-1 overflow-y-auto p-6 space-y-6">
+        <form onSubmit={handleSave} className="flex-1 space-y-5 overflow-y-auto p-4 sm:space-y-6 sm:p-6">
           {error && (
             <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-700 text-sm">
               <AlertCircle size={18} className="shrink-0 mt-0.5" />
@@ -235,9 +243,9 @@ export default function NotificationConfigModal({
 
           {/* Info Card */}
           <div className="p-4 bg-subtle rounded-xl border border-brand-border">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <span className="text-sm font-bold text-heading">{notification.name}</span>
-              <span className="text-[11px] font-mono uppercase bg-slate-200 text-slate-700 px-2 py-0.5 rounded">
+              <span className="w-fit rounded bg-slate-200 px-2 py-0.5 text-[11px] font-mono uppercase text-slate-700">
                 Target: {notification.target}
               </span>
             </div>
@@ -252,50 +260,50 @@ export default function NotificationConfigModal({
           </div>
 
           {/* Master Switch */}
-          <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-brand-border">
-            <div>
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-brand-border bg-slate-50 p-3.5 sm:p-4">
+            <div className="min-w-0">
               <div className="text-sm font-bold text-heading">Notification Enabled</div>
               <div className="text-xs text-muted mt-0.5">
                 Enable or disable automated sends for this branch
               </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
+            <label className="relative inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center cursor-pointer">
               <input
                 type="checkbox"
                 checked={enabled}
                 onChange={(e) => setEnabled(e.target.checked)}
                 className="sr-only peer"
               />
-              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+              <span className="relative block h-4 w-7 rounded-full bg-slate-200 transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary peer-checked:bg-primary after:content-[''] after:absolute after:left-[2px] after:top-[2px] after:h-2.5 after:w-2.5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-transform peer-checked:after:translate-x-3 peer-checked:after:border-white"></span>
             </label>
           </div>
 
           {/* Channels Configuration */}
-          <div className="space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             <div className="text-xs font-bold uppercase tracking-wider text-muted">
               Delivery Channels
             </div>
 
             {supportedChannels.includes('in_app') && (
-              <div className={`p-4 rounded-xl border transition-all ${inAppEnabled ? 'border-primary/40 bg-primary/5' : 'border-brand-border bg-white'}`}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
+              <div className={`rounded-xl border p-3.5 transition-all sm:p-4 ${inAppEnabled ? 'border-primary/40 bg-primary/5' : 'border-brand-border bg-white'}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-2.5">
                     <div className={`p-2 rounded-lg ${inAppEnabled ? 'bg-primary/10 text-primary' : 'bg-slate-100 text-slate-500'}`}>
                       <CheckCircle size={18} />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <div className="text-sm font-bold text-heading">In-app notification</div>
                       <div className="text-xs text-muted">Delivered to the assigned salesperson’s notification center</div>
                     </div>
                   </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
+                  <label className="relative inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center cursor-pointer">
                     <input
                       type="checkbox"
                       checked={inAppEnabled}
                       onChange={(e) => setInAppEnabled(e.target.checked)}
                       className="sr-only peer"
                     />
-                    <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                    <span className="relative block h-3.5 w-6 rounded-full bg-slate-200 transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary peer-checked:bg-primary after:content-[''] after:absolute after:left-[3px] after:top-[3px] after:h-2 after:w-2 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-transform peer-checked:after:translate-x-2.5 peer-checked:after:border-white"></span>
                   </label>
                 </div>
                 <p className="text-[11px] text-muted mt-2">No notification is created when the record has no active assigned salesperson.</p>
@@ -304,25 +312,25 @@ export default function NotificationConfigModal({
 
             {/* Email Channel */}
             {supportedChannels.includes('email') && (
-            <div className={`p-4 rounded-xl border transition-all ${emailEnabled ? 'border-primary/40 bg-primary/5' : 'border-brand-border bg-white'}`}>
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2.5">
+            <div className={`rounded-xl border p-3.5 transition-all sm:p-4 ${emailEnabled ? 'border-primary/40 bg-primary/5' : 'border-brand-border bg-white'}`}>
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-2.5">
                   <div className={`p-2 rounded-lg ${emailEnabled ? 'bg-primary/10 text-primary' : 'bg-slate-100 text-slate-500'}`}>
                     <Mail size={18} />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <div className="text-sm font-bold text-heading">Email Channel</div>
                     <div className="text-xs text-muted">Send transactional email via transactional provider</div>
                   </div>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer">
+                <label className="relative inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center cursor-pointer">
                   <input
                     type="checkbox"
                     checked={emailEnabled}
                     onChange={(e) => setEmailEnabled(e.target.checked)}
                     className="sr-only peer"
                   />
-                  <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                  <span className="relative block h-3.5 w-6 rounded-full bg-slate-200 transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary peer-checked:bg-primary after:content-[''] after:absolute after:left-[3px] after:top-[3px] after:h-2 after:w-2 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-transform peer-checked:after:translate-x-2.5 peer-checked:after:border-white"></span>
                 </label>
               </div>
 
@@ -359,25 +367,25 @@ export default function NotificationConfigModal({
 
             {/* SMS Channel */}
             {supportedChannels.includes('sms') && (
-            <div className={`p-4 rounded-xl border transition-all ${smsEnabled ? 'border-primary/40 bg-primary/5' : 'border-brand-border bg-white'}`}>
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2.5">
+            <div className={`rounded-xl border p-3.5 transition-all sm:p-4 ${smsEnabled ? 'border-primary/40 bg-primary/5' : 'border-brand-border bg-white'}`}>
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-2.5">
                   <div className={`p-2 rounded-lg ${smsEnabled ? 'bg-primary/10 text-primary' : 'bg-slate-100 text-slate-500'}`}>
                     <MessageSquare size={18} />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <div className="text-sm font-bold text-heading">SMS Channel</div>
                     <div className="text-xs text-muted">Send automated SMS via branch business number</div>
                   </div>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer">
+                <label className="relative inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center cursor-pointer">
                   <input
                     type="checkbox"
                     checked={smsEnabled}
                     onChange={(e) => setSmsEnabled(e.target.checked)}
                     className="sr-only peer"
                   />
-                  <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                  <span className="relative block h-3.5 w-6 rounded-full bg-slate-200 transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary peer-checked:bg-primary after:content-[''] after:absolute after:left-[3px] after:top-[3px] after:h-2 after:w-2 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-transform peer-checked:after:translate-x-2.5 peer-checked:after:border-white"></span>
                 </label>
               </div>
 
@@ -414,19 +422,19 @@ export default function NotificationConfigModal({
           </div>
 
           {/* Action Buttons */}
-          <div className="pt-2 flex items-center justify-end gap-3 border-t border-brand-border">
+          <div className="grid grid-cols-1 gap-2 border-t border-brand-border pt-4 sm:flex sm:items-center sm:justify-end sm:gap-3">
             <button
               type="button"
               onClick={onClose}
               disabled={saving}
-              className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-200 transition-colors"
+              className="min-h-10 rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-200 sm:order-1"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={saving || loading}
-              className="px-5 py-2 bg-primary text-white rounded-xl text-sm font-bold shadow-md hover:bg-[#003d2f] transition-all disabled:opacity-50"
+              className="min-h-10 rounded-xl bg-primary px-5 py-2 text-sm font-bold text-white shadow-md transition-all hover:bg-[#003d2f] disabled:opacity-50"
             >
               {saving ? 'Saving...' : 'Save Configuration'}
             </button>

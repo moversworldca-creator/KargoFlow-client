@@ -1,11 +1,13 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+const navigateMock = vi.hoisted(() => vi.fn());
+const automationRunsMock = vi.hoisted(() => vi.fn());
 import Automation from './Automation';
 
 // Mock dependencies
 vi.mock('react-router-dom', () => ({
-  useNavigate: () => vi.fn(),
+  useNavigate: () => navigateMock,
 }));
 
 vi.mock('../../auth/context/AuthContext', () => ({
@@ -177,7 +179,19 @@ vi.mock('../../../services/api', () => ({
     { event: 'lead.created', target: 'lead', emitted: true },
     { event: 'opportunity.booked', target: 'opportunity', emitted: true },
   ]),
-  getCustomAutomationRuns: vi.fn().mockResolvedValue([
+  getCustomAutomationRuns: automationRunsMock,
+  getNotificationTemplates: vi.fn().mockResolvedValue([
+    { id: 45, name: 'Lead Welcome', is_active: true },
+  ]),
+  getGeneralTemplates: vi.fn().mockResolvedValue([
+    { id: 45, name: 'General Follow-up', is_active: true },
+  ]),
+}));
+
+describe('Automation Page Component', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    automationRunsMock.mockResolvedValue([
     {
       id: 804,
       step_id: 301,
@@ -190,18 +204,7 @@ vi.mock('../../../services/api', () => ({
       message_id: 1204,
       message_state: 'queued',
     },
-  ]),
-  getNotificationTemplates: vi.fn().mockResolvedValue([
-    { id: 45, name: 'Lead Welcome', is_active: true },
-  ]),
-  getGeneralTemplates: vi.fn().mockResolvedValue([
-    { id: 45, name: 'General Follow-up', is_active: true },
-  ]),
-}));
-
-describe('Automation Page Component', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+    ]);
   });
 
   it('renders standard notifications list and badges correctly', async () => {
@@ -222,8 +225,30 @@ describe('Automation Page Component', () => {
       expect(screen.getByText('Workflow')).toBeInTheDocument();
       expect(screen.getByText('Channel')).toBeInTheDocument();
       expect(screen.getByText('Actions')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Disable New Lead Received' })).toHaveAttribute('aria-pressed', 'true');
+      const notificationToggle = screen.getByRole('button', { name: 'Disable New Lead Received' });
+      expect(notificationToggle).toHaveAttribute('aria-pressed', 'true');
+      expect(notificationToggle).toHaveClass('min-h-10', 'min-w-10');
+      expect(notificationToggle.querySelector('span')).toHaveClass('h-3.5', 'w-6');
+      expect(notificationToggle.querySelector('span span')).toHaveClass('h-2', 'w-2');
     });
+  });
+
+  it('opens the integrated Document Builder route from Automations', async () => {
+    render(<Automation />);
+    await screen.findByRole('button', { name: /Document Builder/ });
+    fireEvent.click(screen.getByRole('button', { name: /Document Builder/ }));
+    expect(navigateMock).toHaveBeenCalledWith('/automation/documents/document-templates');
+  });
+
+  it('shows a run-history error with a working retry action', async () => {
+    automationRunsMock.mockRejectedValueOnce({ response: { status: 500, data: { detail: 'Run history unavailable.' } } });
+    render(<Automation />);
+    fireEvent.click(screen.getByRole('button', { name: 'Automation Logs' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Run history unavailable.');
+    const retryButtons = screen.getAllByRole('button', { name: 'Retry' });
+    fireEvent.click(retryButtons[0]);
+    await waitFor(() => expect(screen.queryByText('Run history unavailable.')).not.toBeInTheDocument());
+    expect(automationRunsMock).toHaveBeenCalledTimes(2);
   });
 
   it('enables a customer notification from the toggle after selecting a template', async () => {
@@ -234,6 +259,9 @@ describe('Automation Page Component', () => {
     fireEvent.click(enableButton);
     expect(await screen.findByRole('heading', { name: 'Configure Notification' })).toBeInTheDocument();
     expect(screen.getByText('Notification Enabled')).toBeInTheDocument();
+    const masterToggle = screen.getByText('Notification Enabled').parentElement.parentElement.querySelector('label');
+    expect(masterToggle).toHaveClass('min-h-10', 'min-w-10');
+    expect(masterToggle.querySelector('span')).toHaveClass('h-4', 'w-7');
     await waitFor(() => {
       expect(getNotificationTemplates).toHaveBeenCalledWith({ channel: 'email', branch_id: 12 });
     });
@@ -429,7 +457,7 @@ describe('Automation Page Component', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Enable Job Remainder' }));
     expect(await screen.findByText('Notification Enabled')).toBeInTheDocument();
-    expect(screen.queryByText(/trigger is not emitted yet/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/this event is accepted but is not currently emitted/i)).not.toBeInTheDocument();
     const emailTemplateSelect = screen.getAllByText(/Email Notification Template/)[0].parentElement.querySelector('select');
     fireEvent.change(emailTemplateSelect, { target: { value: '45' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
@@ -613,7 +641,11 @@ describe('Automation Page Component', () => {
       expect(screen.getByText('Active')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Edit Follow up after a new lead' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Duplicate Follow up after a new lead' })).toBeInTheDocument();
-      expect(screen.getByRole('switch', { name: 'Disable Follow up after a new lead' })).toHaveAttribute('aria-pressed', 'true');
+      const automationToggle = screen.getByRole('switch', { name: 'Disable Follow up after a new lead' });
+      expect(automationToggle).toHaveAttribute('aria-pressed', 'true');
+      expect(automationToggle).toHaveClass('min-h-10', 'min-w-10');
+      expect(automationToggle.querySelector('span')).toHaveClass('h-3.5', 'w-6');
+      expect(automationToggle.querySelector('span span')).toHaveClass('h-2', 'w-2');
       expect(screen.getByRole('button', { name: 'Deactivate Follow up after a new lead' })).toBeInTheDocument();
     });
   });
@@ -642,6 +674,17 @@ describe('Automation Page Component', () => {
       expect(screen.getByText('queued', { exact: true })).toBeInTheDocument();
       expect(screen.getByText('Send accepted · Message queued')).toBeInTheDocument();
     });
+  });
+
+  it('shows a run-history error instead of an empty-state message when loading fails', async () => {
+    const { getCustomAutomationRuns } = await import('../../../services/api');
+    getCustomAutomationRuns.mockRejectedValueOnce({ response: { status: 403 } });
+    render(<Automation />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Automation Logs/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('You do not have permission to view this information.');
+    expect(screen.queryByText('No automation runs found.')).not.toBeInTheDocument();
   });
 
   it('shows the four-step automation editor with a live preview', async () => {
@@ -683,6 +726,7 @@ describe('Automation Page Component', () => {
     getGeneralTemplates.mockResolvedValueOnce([
       { id: 101, name: 'Active Email Template', state: 'active', is_active: true },
       { id: 102, name: 'Inactive Email Template', state: 'inactive', is_active: false },
+      { id: 103, name: 'Unpublished Email Template', state: 'active', is_active: true, revision_id: null },
     ]);
 
     render(<Automation />);
@@ -700,6 +744,32 @@ describe('Automation Page Component', () => {
     await waitFor(() => {
       expect(screen.getByText('Active Email Template')).toBeInTheDocument();
       expect(screen.queryByText('Inactive Email Template')).not.toBeInTheDocument();
+      expect(screen.queryByText('Unpublished Email Template')).not.toBeInTheDocument();
     });
+  });
+
+  it('requires a usable email template when an in-app channel is also enabled', async () => {
+    const { getBranchNotifications, updateBranchNotification } = await import('../../../services/api');
+    getBranchNotifications.mockResolvedValueOnce([
+      {
+        key: 'mixed_channel_notification',
+        name: 'Mixed Channel Notification',
+        event: 'lead.created',
+        target: 'lead',
+        enabled: true,
+        supported_channels: ['in_app', 'email'],
+        channels: {
+          in_app: { enabled: true },
+          email: { enabled: true, template_id: null },
+        },
+      },
+    ]);
+    render(<Automation />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Configure Mixed Channel Notification' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Configuration' }));
+
+    expect(await screen.findByText('Please select a template for the Email channel before saving.')).toBeInTheDocument();
+    expect(updateBranchNotification).not.toHaveBeenCalled();
   });
 });

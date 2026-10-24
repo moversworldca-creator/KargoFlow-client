@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getTenantTemplateKind, getTenantTemplateMode, getTenantTemplateRoute } from './templateBoundary';
-import { isTemplateForMode } from '../../../../../shared/template-builder/core/templateBoundary';
+import { isBuilderDocumentMode, isTemplateForMode } from '../../../../../shared/template-builder/core/templateBoundary';
 
 describe('Tenant template boundaries', () => {
   it.each([
@@ -21,6 +21,10 @@ describe('Tenant template boundaries', () => {
     expect(() => getTenantTemplateMode({ kind: 'communication', subtype: 'contract' })).toThrow();
   });
   it('blocks saved templates and imports from a different mode or without type metadata', () => {
+    expect(isBuilderDocumentMode('contract')).toBe(true);
+    expect(isBuilderDocumentMode('invoice')).toBe(true);
+    expect(isBuilderDocumentMode('email')).toBe(false);
+    expect(isBuilderDocumentMode('sms')).toBe(false);
     expect(isTemplateForMode({ mode: 'estimate_portal' }, 'estimate')).toBe(true);
     expect(isTemplateForMode({ mode: 'invoice' }, 'invoice')).toBe(true);
     expect(isTemplateForMode({ mode: 'estimate' }, 'invoice')).toBe(false);

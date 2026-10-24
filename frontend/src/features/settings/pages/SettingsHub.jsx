@@ -197,10 +197,10 @@ const SETTINGS_GROUPS = [
     shortLabel: "Documents",
     icon: FileSignature,
     tabs: [
-      { id: "document-templates", label: "Document Templates", description: "Legal contracts, bills of lading, waivers, and authorizations.", icon: FileSignature, render: (branchId, subView, itemId, onOpenChooser, isDocs) => <DocumentTemplates key="document" branchId={Number(branchId) || null} basePath={isDocs ? "/documents/document-templates" : "/settings/documents/document-templates"} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} onOpenChooser={onOpenChooser} /> },
-      { id: "invoice-templates", label: "Invoice Templates", description: "Final, deposit, storage, and progress invoice layouts.", icon: FileSignature, render: (branchId, subView, itemId, onOpenChooser, isDocs) => <DocumentTemplates key="invoice" templateKind="invoice" branchId={Number(branchId) || null} basePath={isDocs ? "/documents/invoice-templates" : "/settings/documents/invoice-templates"} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} onOpenChooser={onOpenChooser} /> },
-      { id: "estimate-portal-templates", label: "Estimate Templates", description: "Customer estimate portal templates, rate calculations, and charges layouts.", icon: FileText, render: (branchId, subView, itemId, onOpenChooser, isDocs) => <EstimatePortalTemplates branchId={Number(branchId) || null} basePath={isDocs ? "/documents/estimate-portal-templates" : "/settings/documents/estimate-portal-templates"} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} onOpenChooser={onOpenChooser} /> },
-      { id: "communication-templates", label: "Email & SMS Templates", description: "Transactional email designs, SMS notification templates, and merge tags.", icon: Mail, render: (branchId, subView, itemId, onOpenChooser, isDocs) => <CommunicationTemplates branchId={branchId} basePath={isDocs ? "/documents/communication-templates" : "/settings/documents/communication-templates"} closePath={isDocs ? "/documents/communication-templates" : "/settings/documents/communication-templates"} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} onOpenChooser={onOpenChooser} /> },
+      { id: "document-templates", label: "Document Templates", description: "Legal contracts, bills of lading, waivers, and authorizations.", icon: FileSignature, render: (branchId, subView, itemId, onOpenChooser, docsBasePath) => <DocumentTemplates key="document" branchId={Number(branchId) || null} basePath={`${docsBasePath}/document-templates`} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} onOpenChooser={onOpenChooser} /> },
+      { id: "invoice-templates", label: "Invoice Templates", description: "Final, deposit, storage, and progress invoice layouts.", icon: FileSignature, render: (branchId, subView, itemId, onOpenChooser, docsBasePath) => <DocumentTemplates key="invoice" templateKind="invoice" branchId={Number(branchId) || null} basePath={`${docsBasePath}/invoice-templates`} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} onOpenChooser={onOpenChooser} /> },
+      { id: "estimate-portal-templates", label: "Estimate Templates", description: "Customer estimate portal templates, rate calculations, and charges layouts.", icon: FileText, render: (branchId, subView, itemId, onOpenChooser, docsBasePath) => <EstimatePortalTemplates branchId={Number(branchId) || null} basePath={`${docsBasePath}/estimate-portal-templates`} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} onOpenChooser={onOpenChooser} /> },
+      { id: "communication-templates", label: "Email & SMS Templates", description: "Transactional email designs, SMS notification templates, and merge tags.", icon: Mail, render: (branchId, subView, itemId, onOpenChooser, docsBasePath) => <CommunicationTemplates branchId={branchId} basePath={`${docsBasePath}/communication-templates`} closePath={`${docsBasePath}/communication-templates`} builderRouteView={subView || itemId || ''} builderRouteItemId={subView ? itemId : null} onOpenChooser={onOpenChooser} /> },
     ],
   },
 ];
@@ -252,7 +252,10 @@ export default function SettingsHub({ initialGroup }) {
   const subView = params.subView;
   const itemId = params.itemId;
 
-  const isDocumentsRoute = currentPathname.startsWith("/documents") || initialGroup === "documents";
+  const isAutomationDocumentsRoute = currentPathname.startsWith("/automation/documents");
+  const isDocumentsRoute = currentPathname.startsWith("/documents") || isAutomationDocumentsRoute || initialGroup === "documents";
+  const documentsBasePath = isAutomationDocumentsRoute ? "/automation/documents"
+    : currentPathname.startsWith("/documents") ? "/documents" : "/settings/documents";
   const legacyMap = LEGACY_ROUTES[mainGroup || tabId];
   const isDocumentsGroup = isDocumentsRoute || mainGroup === "documents" || legacyMap?.[0] === "documents";
   const isDocumentsSection = isDocumentsGroup;
@@ -333,21 +336,24 @@ export default function SettingsHub({ initialGroup }) {
   // Determine current active group and active subtab
   const effectiveMainGroup = mainGroup || tabId;
   const effectiveSubTab = subTab || subView;
+  const targetGroupId = initialGroup || legacyMap?.[0] || effectiveMainGroup;
+  const targetSubTabId = legacyMap?.[1] || effectiveSubTab;
+  const effectiveSubView = subView;
+  const effectiveItemId = itemId;
 
   const activeGroup = useMemo(() => {
     return visibleGroups.find((group) => group.id === targetGroupId) || visibleGroups[0] || SETTINGS_GROUPS[0];
   }, [targetGroupId, visibleGroups]);
 
-  const activeTab = useMemo(() => {
-    return activeGroup.tabs.find((tab) => tab.id === effectiveSubTab) || activeGroup.tabs[0];
-  }, [activeGroup, effectiveSubTab]);
+  const activeTab =
+    activeGroup.tabs.find((tab) => tab.id === effectiveSubTab) || activeGroup.tabs[0];
 
   // Handle URL normalization and legacy route redirection
   useEffect(() => {
     // If standalone /documents section
     if (isDocumentsRoute) {
-      if (currentPathname === "/documents" || currentPathname === "/documents/") {
-        navigate("/documents/document-templates", { replace: true });
+      if (currentPathname === documentsBasePath || currentPathname === `${documentsBasePath}/`) {
+        navigate(`${documentsBasePath}/document-templates`, { replace: true });
         return;
       }
       return;
@@ -391,7 +397,7 @@ export default function SettingsHub({ initialGroup }) {
     if (!effectiveSubView && (!targetSubTabId || !group.tabs.some((tab) => tab.id === targetSubTabId))) {
       navigate(`/settings/${group.id}/${group.tabs[0].id}`, { replace: true });
     }
-  }, [isDocumentsRoute, currentPathname, mainGroup, tabId, legacyMap, targetGroupId, targetSubTabId, effectiveSubView, effectiveItemId, navigate, visibleGroups, subTab]);
+  }, [isDocumentsRoute, documentsBasePath, currentPathname, mainGroup, tabId, legacyMap, targetGroupId, targetSubTabId, effectiveSubView, effectiveItemId, navigate, visibleGroups, subTab]);
 
   // Load live branches
   useEffect(() => {
@@ -470,7 +476,7 @@ export default function SettingsHub({ initialGroup }) {
                 onClick={() => {
                   if (group.id === "documents") {
                     if (isDocumentsRoute) {
-                      navigate(`/documents/${group.tabs[0].id}`);
+                      navigate(`${documentsBasePath}/${group.tabs[0].id}`);
                     } else {
                       navigate(`/settings/documents/${group.tabs[0].id}`);
                     }
@@ -535,7 +541,7 @@ export default function SettingsHub({ initialGroup }) {
                           onClick={() => {
                             if (group.id === "documents") {
                               if (isDocumentsRoute) {
-                                navigate(`/documents/${tab.id}`);
+                                navigate(`${documentsBasePath}/${tab.id}`);
                               } else {
                                 navigate(`/settings/documents/${tab.id}`);
                               }
@@ -606,7 +612,7 @@ export default function SettingsHub({ initialGroup }) {
                   key={tab.id}
                   onClick={() => {
                     if (isDocumentsRoute) {
-                      navigate(`/documents/${tab.id}`);
+                      navigate(`${documentsBasePath}/${tab.id}`);
                     } else {
                       navigate(`/settings/${activeGroup.id}/${tab.id}`);
                     }
@@ -634,7 +640,7 @@ export default function SettingsHub({ initialGroup }) {
         {/* Main Content Area (Compact viewport, efficient space usage) */}
         <main className="min-h-0 flex-1 overflow-auto p-2 sm:p-2.5">
           <div className="mx-auto h-full max-w-7xl">
-            {activeTab && activeTab.render(branchId, effectiveSubView, effectiveItemId, handleOpenTemplateChooser, isDocumentsRoute)}
+            {activeTab && activeTab.render(branchId, effectiveSubView, effectiveItemId, handleOpenTemplateChooser, documentsBasePath)}
           </div>
         </main>
 
@@ -663,7 +669,7 @@ export default function SettingsHub({ initialGroup }) {
             setIsCreateCommModalOpen(false);
             if (created?.id) {
               const kind = created.kind || (meta.mode === 'invoice' ? 'invoice' : meta.group === 'estimate' ? 'estimate_portal' : meta.group === 'comm' ? 'communication' : getTenantTemplateKind(created));
-              navigate(getTenantTemplateRoute(`${isDocumentsRoute ? '/documents' : '/settings/documents'}/document-templates`, kind, created.id));
+              navigate(getTenantTemplateRoute(`${documentsBasePath}/document-templates`, kind, created.id));
             }
           }}
         />

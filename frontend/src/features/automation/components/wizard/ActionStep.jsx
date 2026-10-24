@@ -495,10 +495,10 @@ export default function ActionStep({ draft, dispatch }) {
                           <div className="text-sm font-bold text-heading">{option.label}</div>
                           <div className="text-xs text-muted">{option.hint}</div>
                         </div>
-                        <div className={`h-5 w-9 rounded-full transition-colors ${enabled ? 'bg-primary' : 'bg-disabled'}`}>
+                        <div className={`h-3.5 w-6 rounded-full transition-colors ${enabled ? 'bg-primary' : 'bg-disabled'}`}>
                           <div
-                            className={`mt-[2px] ml-[2px] h-4 w-4 rounded-full bg-white transition-transform ${
-                              enabled ? 'translate-x-4' : 'translate-x-0'
+                            className={`mt-[3px] ml-[3px] h-2 w-2 rounded-full bg-white transition-transform ${
+                              enabled ? 'translate-x-2.5' : 'translate-x-0'
                             }`}
                           />
                         </div>

@@ -367,24 +367,24 @@ const toNotificationTemplatePayload = (template) => ({
   name: template.name,
   description: template.description || '',
   channel: template.channel,
-  subject: template.channel === 'email' ? template.subject || '' : '',
-  body_html: template.channel === 'email' ? template.body_html || '' : '',
-  body_text: template.channel === 'sms'
+  subject: normalizeCommunicationTokens(template.channel === 'email' ? template.subject || '' : ''),
+  body_html: normalizeCommunicationTokens(template.channel === 'email' ? template.body_html || '' : ''),
+  body_text: normalizeCommunicationTokens(template.channel === 'sms'
     ? template.sms_body || template.body || ''
-    : template.body || '',
+    : template.body || ''),
   branch_id: template.branch ? Number(template.branch) : null,
   is_active: template.is_active !== false,
 });
 
-const toGeneralTemplatePayload = (template) => ({
+export const toGeneralTemplatePayload = (template) => ({
   name: template.name,
   description: template.description || '',
   channel: template.channel,
-  subject: template.channel === 'email' ? template.subject || '' : '',
-  body_html: template.channel === 'email' ? template.body_html || '' : '',
-  body_text: template.channel === 'sms'
+  subject: normalizeCommunicationTokens(template.channel === 'email' ? template.subject || '' : ''),
+  body_html: normalizeCommunicationTokens(template.channel === 'email' ? template.body_html || '' : ''),
+  body_text: normalizeCommunicationTokens(template.channel === 'sms'
     ? template.sms_body || template.body || ''
-    : template.body || '',
+    : template.body || ''),
   branch_id: template.branch ? Number(template.branch) : null,
   is_active: template.is_active !== false,
 });
@@ -2162,13 +2162,17 @@ const CommunicationTemplates = ({
                           )}
                         </td>
                       </tr>
-                    );
-                  })}
+                    ))}
                 </tbody>
               </table>
+                </div>
+              </Card>
             </div>
-          )}
-        </Card>
+          ))}
+          </div>
+        </div>
+      )}
+      </Card>
       </div>
 
       {/* Editor Modal for Automation */}

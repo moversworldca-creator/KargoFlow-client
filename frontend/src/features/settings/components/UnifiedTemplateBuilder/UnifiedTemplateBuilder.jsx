@@ -1,4 +1,7 @@
-import { isTemplateForMode } from '../../../../../../shared/template-builder/core/templateBoundary.js';
+import {
+  isBuilderDocumentMode,
+  isTemplateForMode,
+} from '../../../../../../shared/template-builder/core/templateBoundary.js';
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import TopNavbar from "./components/TopNavbar";
 import LeftSidebar from "./components/LeftSidebar";
@@ -61,6 +64,7 @@ export default function UnifiedTemplateBuilder({
   isSendingTest = false,
 }) {
   const modeConfig = getModeConfig(mode);
+  const usesBuilderDocumentApi = isBuilderDocumentMode(mode);
   const initialSource = draft || template;
   const targetTemplateId = initialSource?.id || template?.id || draft?.id;
 
@@ -124,8 +128,8 @@ export default function UnifiedTemplateBuilder({
   useEffect(() => {
     let isCancelled = false;
     const targetId = template?.id || draft?.id || initialSource?.id;
-    if (targetId && !initialSource?.isHydratedFromServer) {
-      getBuilderTemplateDraft(targetId)
+    if (usesBuilderDocumentApi && targetId && !initialSource?.isHydratedFromServer) {
+      getBuilderTemplateDraft(targetId, draft?.branch || branchId ? { params: { branch_id: draft?.branch || branchId } } : {})
         .then((res) => {
           if (isCancelled) return;
           const draftData = res?.data ?? res;
@@ -858,7 +862,7 @@ export default function UnifiedTemplateBuilder({
       await handleSaveToLibrary(doc);
       await saveDocument(doc);
 
-      if (targetTemplateId) {
+      if (usesBuilderDocumentApi && targetTemplateId && !onSave) {
         try {
           const draftRes = await saveBuilderTemplateDraft(targetTemplateId, {
             lock_version: currentLock,
@@ -872,7 +876,7 @@ export default function UnifiedTemplateBuilder({
             setIsSaving(false);
             return;
           }
-          console.warn("Backend draft save warning:", serverErr?.message);
+          throw serverErr;
         }
       }
 
@@ -919,7 +923,7 @@ export default function UnifiedTemplateBuilder({
       await handleSaveToLibrary({ ...doc, name: `${doc.name} (Draft)` });
       await saveDocument(doc);
 
-      if (targetTemplateId) {
+      if (usesBuilderDocumentApi && targetTemplateId && !onSave) {
         try {
           const draftRes = await saveBuilderTemplateDraft(targetTemplateId, {
             lock_version: currentLock,
@@ -933,7 +937,7 @@ export default function UnifiedTemplateBuilder({
             setIsSaving(false);
             return;
           }
-          console.warn("Backend draft save warning:", serverErr?.message);
+          throw serverErr;
         }
       }
 
@@ -944,7 +948,7 @@ export default function UnifiedTemplateBuilder({
       setToastMessage("Draft saved successfully");
     } catch (err) {
       console.error("Draft error:", err);
-      setToastMessage("Draft saved to local storage");
+      setToastMessage("Failed to save draft. Please retry.");
     } finally {
       setIsSaving(false);
     }
@@ -953,14 +957,17 @@ export default function UnifiedTemplateBuilder({
   // Discard Draft Handler
   const handleDiscardDraft = async () => {
     const targetTemplateId = initialSource?.id || template?.id || draft?.id;
-    if (!targetTemplateId) return;
+    if (!usesBuilderDocumentApi || !targetTemplateId) return;
     const ok = window.confirm("Discard uncommitted draft changes and revert to the published revision?");
     if (!ok) return;
 
     setIsSaving(true);
     try {
       await discardBuilderTemplateDraft(targetTemplateId);
-      const freshDraft = await getBuilderTemplateDraft(targetTemplateId);
+      const freshDraft = await getBuilderTemplateDraft(
+        targetTemplateId,
+        draft?.branch || branchId ? { params: { branch_id: draft?.branch || branchId } } : {},
+      );
       const draftData = freshDraft?.data ?? freshDraft;
       if (draftData?.document?.sections) {
         const loaded = fromBackendDocument(draftData.document, {
@@ -983,7 +990,7 @@ export default function UnifiedTemplateBuilder({
   // Publish Handler
   const handlePublish = async () => {
     const targetTemplateId = initialSource?.id || template?.id || draft?.id;
-    if (!targetTemplateId) {
+    if (!usesBuilderDocumentApi || !targetTemplateId) {
       setToastMessage("Please save the template first before publishing.");
       return;
     }
@@ -1021,9 +1028,9 @@ export default function UnifiedTemplateBuilder({
         isDirty={isDirty}
         isSaving={isSaving}
         onSave={handleSave}
-        onSaveDraft={handleSaveDraft}
-        onDiscardDraft={targetTemplateId ? handleDiscardDraft : null}
-        onPublish={handlePublish}
+        onSaveDraft={usesBuilderDocumentApi ? handleSaveDraft : handleSave}
+        onDiscardDraft={usesBuilderDocumentApi && targetTemplateId ? handleDiscardDraft : null}
+        onPublish={usesBuilderDocumentApi ? handlePublish : null}
         onBack={onBack}
         onOpenCode={() => {
           setActiveHtmlItem(null);
@@ -1276,11 +1283,11 @@ export default function UnifiedTemplateBuilder({
         pageSize={pageSize}
         orientation={orientation}
         smsText={smsText}
-        onRenderRecordPreview={targetTemplateId ? async (source) => {
+        onRenderRecordPreview={usesBuilderDocumentApi && targetTemplateId ? async (source) => {
           const kind = ['estimate', 'estimate_portal'].includes(mode) ? 'estimate_portal' : mode === 'invoice' ? 'invoice' : 'document';
           const response = await previewBuilderTemplate(targetTemplateId, {
             document: toBackendDocument(doc, kind), source, format: 'both', audience: 'customer',
-          });
+          }, draft?.branch || branchId ? { params: { branch_id: draft?.branch || branchId } } : {});
           return response.data?.data || response.data;
         } : null}
         onClose={() => setIsPreviewOpen(false)}

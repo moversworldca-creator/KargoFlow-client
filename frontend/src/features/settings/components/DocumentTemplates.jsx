@@ -687,7 +687,8 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
       }
       const matchesActive =
         activeFilter === 'all' ? true : Boolean(t.is_active) === (activeFilter === 'active');
-      const matchesBranch = !branchFilter || String(t.branch || '') === String(branchFilter);
+      const matchesBranch = !branchFilter || t.branch === null || t.branch === undefined ||
+        String(t.branch) === String(branchFilter);
       return matchesSearch && matchesType && matchesActive && matchesBranch;
     });
   }, [items, searchTerm, typeFilter, activeFilter, branchFilter]);
@@ -697,7 +698,7 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
     setMessage({ type: '', text: '' });
     try {
       const params = {};
-      if (branchFilter) params.branch = branchFilter;
+      if (branchFilter) params.branch_id = Number(branchFilter);
 
       const response = await getDocumentTemplates({ ...params, kind: templateKind });
       const rows = normalize(response?.data ?? response).filter((item) => getTenantTemplateKind(item) === templateKind);
@@ -726,7 +727,7 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
       return;
     }
     try {
-      const res = await getTemplateVariables({ template: templateId });
+      const res = await getTemplateVariables({ kind: templateKind, ...(branchFilter ? { branch_id: Number(branchFilter) } : {}) });
       setVariables(normalize(res?.data ?? res));
     } catch {
       setVariables([]);
@@ -781,7 +782,7 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
         let template = items.find((row) => String(row.id) === String(builderRouteItemId));
         if (!template) {
           try {
-            const res = await getBuilderTemplate(builderRouteItemId);
+            const res = await getBuilderTemplate(builderRouteItemId, branchFilter ? { params: { branch_id: Number(branchFilter) } } : {});
             const raw = res?.data ?? res;
             if (raw?.id && !isCancelled) {
               template = {
@@ -822,14 +823,27 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
         let lockVersion = template.lock_version || 1;
 
         try {
-          const draftRes = await getBuilderTemplateDraft(template.id);
+          let draftRes;
+          try {
+            draftRes = await getBuilderTemplateDraft(
+              template.id,
+              branchFilter ? { params: { branch_id: Number(branchFilter) } } : {},
+            );
+          } catch (error) {
+            if (error?.response?.status !== 404) throw error;
+            draftRes = await startBuilderTemplateDraft(
+              template.id,
+              branchFilter ? { params: { branch_id: Number(branchFilter) } } : {},
+            );
+          }
           const draftData = draftRes?.data ?? draftRes;
           if (draftData?.document?.sections) {
             hydratedContent = fromBackendDocument(draftData.document, { name: template.name, mode });
             lockVersion = draftData.revision?.lock_version || draftData.lock_version || 1;
+            template = { ...template, isHydratedFromServer: true };
           }
-        } catch {
-          // Fall back to template summary content if draft cannot be fetched
+        } catch (error) {
+          throw new Error(error?.response?.data?.detail || 'Unable to load or start this document draft.');
         }
 
         if (isCancelled) return;
@@ -1198,7 +1212,7 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
     try {
       const mode = getBuilderMode ? getBuilderMode() : 'contract';
       const kind = mode === 'estimate' ? 'estimate_portal' : mode === 'invoice' ? 'invoice' : 'document';
-      const res = await getDocumentVariableRegistry(kind);
+      const res = await getDocumentVariableRegistry(kind, branchFilter ? Number(branchFilter) : null);
       const groups = safeList(res?.data?.groups ?? res?.data ?? res);
       setRegistry(groups);
     } catch (err) {
@@ -1542,6 +1556,7 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
           key={draft?.id || selectedId || 'new'}
           mode={getBuilderMode()}
           draft={draft}
+          branchId={draft.branch || (branchFilter ? Number(branchFilter) : null)}
           onChange={(newDraft) => setDraft(newDraft)}
           onSave={async (savedDoc) => {
             const saved = await saveTemplate();
