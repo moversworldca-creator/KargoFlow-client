@@ -1,0 +1,31 @@
+name: Dependency audit
+
+# Fails when a production npm dependency (what ships to browsers or runs on
+# servers) has a high or critical advisory. Dev tooling is reported but does
+# not fail the job. Runs on every change and weekly.
+on:
+  pull_request:
+  push:
+    branches: [main, Dev]
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  npm-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Production dependencies (blocking)
+        run: npm audit --omit=dev --audit-level=high
+      - name: All dependencies (report only)
+        if: always()
+        run: npm audit || true
