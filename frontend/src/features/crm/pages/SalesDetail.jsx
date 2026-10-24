@@ -10166,7 +10166,7 @@ const SalesDetail = () => {
                   onDeleteStop={!isLeadPath && !isCreation && canEditOpportunity() ? deleteSalesRouteStop : undefined}
               />
             
-              <LeadInventory key={`${isLeadPath}:${id}`} leadId={recordInventoryLeadId(isLeadPath, id, opportunity, isCanonicalRecordRoute)} canView={hasPermission(PERMISSIONS.LEAD_VIEW)} canEdit={hasPermission(PERMISSIONS.LEAD_EDIT)} />
+              <LeadInventory key={`${isLeadPath}:${id}`} snapshot={isLeadPath} leadId={recordInventoryLeadId(isLeadPath, id, opportunity, isCanonicalRecordRoute)} canView={hasPermission(PERMISSIONS.LEAD_VIEW)} canEdit={hasPermission(PERMISSIONS.LEAD_EDIT)} />
               <div className="max-h-[360px] overflow-hidden rounded-xl border border-ink-100 bg-white shadow-sm flex flex-col">
                 <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-ink-100 bg-white px-4 py-3">
                   <div>

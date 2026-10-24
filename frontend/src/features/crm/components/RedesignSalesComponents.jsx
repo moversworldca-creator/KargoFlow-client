@@ -2247,7 +2247,7 @@ export function SidebarSpecs({
 }
 
 /* ----- Sidebar Inventory Snapshot ----- */
-export function InventorySnapshot({ roomCount, totalQty, totalVol, items = [], onOpenFullList, isLoading = false }) {
+export function InventorySnapshot({ roomCount, totalQty, totalVol, items = [], onOpenFullList, isLoading = false, measurementLabel = 'cu·ft' }) {
   if (isLoading) {
     return (
       <section className="rounded-xl border border-ink-100 bg-white shadow-sm flex flex-col overflow-hidden">
@@ -2274,7 +2274,7 @@ export function InventorySnapshot({ roomCount, totalQty, totalVol, items = [], o
         <div className="mt-0 grid grid-cols-3 gap-2 text-center">
           {[
             { v: totalQty, l: "Items" },
-            { v: totalVol, l: "cu·ft" },
+            { v: totalVol, l: measurementLabel },
             { v: roomCount, l: "Rooms" },
           ].map((s) => (
             <div key={s.l} className="rounded-xl bg-ink-50/70 p-2.5">

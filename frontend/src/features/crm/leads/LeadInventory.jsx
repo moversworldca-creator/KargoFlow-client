@@ -1,17 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { listLeadInventory, createLeadInventoryItem, updateLeadInventoryItem, deleteLeadInventoryItem, inventorySummary } from './leadInventoryApi';
 import { recordWorkError as getErrorMessage } from './recordWorkError';
+import { InventorySnapshot } from '../components/RedesignSalesComponents';
 const empty = { room_name: '', item_name: '', quantity: 1, weight_lbs_each: '0.00', is_fragile: false, is_special: false, notes: '' };
-export default function LeadInventory({ leadId, canView, canEdit }) {
+export default function LeadInventory({ leadId, canView, canEdit, snapshot = false }) {
   const [state, setState] = useState({ rows: [], loading: true, error: '' });
   const [draft, setDraft] = useState(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [revision, setRevision] = useState(0);
+  const [showDetails, setShowDetails] = useState(false);
   const generation = useRef(0);
   useEffect(() => {
     const token = ++generation.current;
-    setDraft(null); setMessage(''); setBusy(false);
+    setDraft(null); setMessage(''); setBusy(false); setShowDetails(false);
     setState({ rows: [], loading: Boolean(leadId && canView), error: '' });
     if (leadId && canView) listLeadInventory(leadId).then(result => {
       if (token === generation.current) setState({ rows: Array.isArray(result) ? result : result.results, loading: false, error: '' });
@@ -46,7 +48,7 @@ export default function LeadInventory({ leadId, canView, canEdit }) {
   if (!leadId) return <section className="rounded-xl border p-4">Inventory unavailable: this opportunity has no linked lead.</section>;
   if (!canView) return <section className="rounded-xl border p-4">You do not have permission to view lead inventory.</section>;
   const summary = inventorySummary(state.rows);
-  return <section className="rounded-xl border bg-white p-4 space-y-3" aria-label="Lead inventory">
+  const card = <section className="rounded-xl border bg-white p-4 space-y-3" aria-label="Lead inventory">
     <div className="flex justify-between"><h3 className="font-bold">Inventory</h3><div className="flex gap-3">
       <button disabled={busy || state.loading} onClick={() => setRevision(value => value + 1)}>Refresh inventory</button>
       {canEdit && <button disabled={busy || state.loading || Boolean(state.error)} onClick={() => setDraft({ ...empty })}>Add item</button>}
@@ -71,4 +73,17 @@ export default function LeadInventory({ leadId, canView, canEdit }) {
       <button type="submit">{busy ? 'Saving…' : 'Save item'}</button> <button type="button" onClick={() => setDraft(null)}>Cancel</button>
     </fieldset></form>}
   </section>;
+  if (!snapshot) return card;
+  return <div className="space-y-3">
+    <InventorySnapshot
+      roomCount={summary.rooms.size}
+      totalQty={summary.quantity}
+      totalVol={summary.weight.toFixed(2)}
+      measurementLabel="lbs"
+      items={[...summary.rooms].sort().map(name => ({ name, qty: state.rows.filter(item => item.room_name === name).reduce((total, item) => total + Number(item.quantity), 0) }))}
+      isLoading={state.loading}
+      onOpenFullList={() => setShowDetails(value => !value)}
+    />
+    {(showDetails || state.error) && card}
+  </div>;
 }

@@ -65,68 +65,7 @@ const fmtAccountingMoney = (n) => {
 };
 
 /* ---------- Estimate Header ---------- */
-export function EstimateHeader({ 
-  number, 
-  status, 
-  customerName, 
-  jobSummary, 
-  grandTotal, 
-  branchLogo,
-  onAction 
-}) {
-  const statusTone = {
-    draft:  { bg: "bg-slate-100",    text: "text-slate-700", dot: "bg-slate-400" },
-    sent:   { bg: "bg-amber-50",     text: "text-amber-700", dot: "bg-amber-500" },
-    signed: { bg: "bg-emerald-50",   text: "text-emerald-700", dot: "bg-emerald-500" },
-  }[String(status || 'draft').toLowerCase()] || { bg: "bg-slate-100", text: "text-slate-700", dot: "bg-slate-400" };
-
-  return (
-    <header className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-card flex flex-col">
-      <div className="flex flex-col sm:flex-row justify-between gap-3 p-3 md:p-4">
-        <div className="min-w-0 flex items-start sm:items-center gap-4">
-          {branchLogo ? (
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white overflow-hidden p-1 shrink-0">
-              <img src={branchLogo} alt="Branch Logo" className="h-full w-full object-contain" />
-            </div>
-          ) : (
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900 text-white shrink-0">
-              <Icon name="file-text" className="w-5 h-5" />
-            </div>
-          )}
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-lg font-extrabold tracking-tight text-slate-900">
-                Estimate <span className="font-mono text-slate-500">{number}</span>
-              </h2>
-              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${statusTone.bg} ${statusTone.text}`}>
-                <span className={`inline-block h-1.5 w-1.5 rounded-full ${statusTone.dot}`} />
-                {(status || 'Draft').toUpperCase()}
-              </span>
-            </div>
-            <p className="mt-1 text-sm text-slate-500">{customerName} · {jobSummary}</p>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between sm:justify-end gap-4 w-full sm:w-auto">
-          <div className="text-left sm:text-right">
-            <div className="label-eyebrow text-slate-400">Grand total</div>
-            <div className="font-mono text-2xl font-black tracking-tight text-slate-900">
-              {fmtMoney(grandTotal)}
-            </div>
-          </div>
-          <div className="hidden h-10 w-px bg-slate-200 sm:block" />
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <GhostBtn icon="external-link" onClick={() => onAction?.("portal")}>View Estimate</GhostBtn>
-            <PrimaryBtn icon="send" onClick={() => onAction?.("send")}>
-              {status === 'sent' ? 'Resend' : 'Send estimate'}
-            </PrimaryBtn>
-            <IconButton name="more-horizontal" label="More" />
-          </div>
-        </div>
-      </div>
-    </header>
-  );
-}
+export { default as EstimateHeader, getEstimatePricingStatus, formatBindingType } from './EstimateSummaryHeader';
 
 /* ---------- Summary Bento ---------- */
 export function SummaryBento({ totalVol, totalQty, zoneCount, estWeight, distance, duration, stopCount, balance, captured }) {

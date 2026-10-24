@@ -10277,7 +10277,22 @@ export default function EstimateView({
                 </div>
             ) : null}
 
-
+            <EstimateHeader
+                estimate={estimate}
+                opportunity={opportunity}
+                inventorySummary={inventorySummary}
+                isOpportunityLocked={isOpportunityLocked}
+                canEditOpportunity={canEditOpportunity}
+                canSendEmail={canSendEmail}
+                isRecalculating={saving}
+                onRecalculate={handleRecalculate}
+                onPreview={() => {
+                    const selection = resolvePortalTemplateSelection();
+                    setSelectedPortalTemplateId(selection.portalTemplateId);
+                    setIsPortalSelectModalOpen(true);
+                }}
+                onSend={handleSendEstimate}
+            />
 
     <SummaryBento
         totalVol={inventorySummary.totalVol || 0}

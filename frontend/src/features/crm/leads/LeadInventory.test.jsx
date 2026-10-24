@@ -7,6 +7,17 @@ vi.mock('./leadInventoryApi', async original => ({ ...await original(), listLead
 const item = { id: 7, room_name: 'Lounge', item_name: 'Sofa', quantity: 2, weight_lbs_each: '85.00', notes: 'Careful', is_fragile: true, is_special: true };
 beforeEach(() => { vi.clearAllMocks(); api.listLeadInventory.mockResolvedValue([item]); });
 afterEach(cleanup);
+it('shows the original snapshot and opens the inventory controls', async () => {
+  render(<LeadInventory leadId={12} canView canEdit snapshot />);
+  await screen.findByText('Lounge');
+  expect(screen.getByText('Inventory items')).toBeInTheDocument();
+  expect(screen.getByText('170.00')).toBeInTheDocument();
+  expect(screen.getByText('lbs')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Add item' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /View detailed list/ }));
+  expect(screen.getByRole('button', { name: 'Add item' })).toBeInTheDocument();
+  expect(screen.getByText(/Sofa × 2/)).toBeInTheDocument();
+});
 it('renders canonical rows and handling summary', async () => {
   render(<LeadInventory leadId={12} canView canEdit />);
   expect(screen.getByText('Loading inventory…')).toBeInTheDocument();
