@@ -6,9 +6,9 @@ const Dashboard = React.lazy(() => import('./features/crm/pages/Dashboard'));
 const Sales = React.lazy(() => import('./features/crm/pages/Sales'));
 const SalesDetail = React.lazy(() => import('./features/crm/pages/SalesDetail'));
 const NewLeadPage = React.lazy(() => import('./features/crm/pages/NewLeadPage'));
-const CustomerEstimatePortal = React.lazy(() => import('./features/crm/pages/CustomerEstimatePortal'));
+const EstimatePortalPage = React.lazy(() => import('./features/crm/pages/IssuedCustomerPortal').then((module) => ({ default: module.IssuedEstimatePortal })));
 const CustomerInventoryPortal = React.lazy(() => import('./features/crm/pages/CustomerInventoryPortal'));
-const CustomerContractPortal = React.lazy(() => import('./features/crm/pages/CustomerContractPortal'));
+const CustomerContractPortal = React.lazy(() => import('./features/crm/pages/IssuedCustomerPortal').then((module) => ({ default: module.IssuedDocumentPortal })));
 const PublicLeadIntakePage = React.lazy(() => import('./features/crm/pages/PublicLeadIntakePage'));
 const CRMHub = React.lazy(() => import('./features/crm/pages/CRMHub'));
 const Jobs = React.lazy(() => import('./features/operations/pages/Jobs'));
@@ -33,6 +33,9 @@ const PaymentsPage = React.lazy(() => import('./features/payments/pages/Payments
 const Settings = React.lazy(() => import('./features/settings/pages/Settings'));
 const SettingsHub = React.lazy(() => import('./features/settings/pages/SettingsHub'));
 const SuperuserCreateCompanyPage = React.lazy(() => import('./features/settings/pages/SuperuserCreateCompanyPage'));
+import MailboxOAuthCallback from './features/settings/pages/MailboxOAuthCallback';
+import MemberPasswordPage from './features/settings/pages/MemberPasswordPage';
+import AcceptInvitationPage from './features/auth/pages/AcceptInvitationPage';
 import LoginPage from './features/auth/pages/LoginPage';
 import Profile from './features/auth/pages/Profile';
 const EstimateViewPlaywrightHarness = React.lazy(() => import('./features/crm/pages/EstimateViewPlaywrightHarness'));
@@ -41,7 +44,7 @@ import { useAuth } from './features/auth/context/AuthContext';
 import { ToastProvider } from './shared/context/ToastContext';
 import { Toaster } from 'sonner';
 import PermissionRoute from './shared/auth/PermissionRoute';
-import { ROUTE_PERMISSIONS } from './shared/permissions/registry';
+import { PERMISSIONS, ROUTE_PERMISSIONS } from './shared/permissions/registry';
 const isPlaywrightHarnessEnabled =
   import.meta.env.DEV || import.meta.env.MODE === 'test' || import.meta.env.VITE_ENABLE_PLAYWRIGHT_HARNESS === '1';
 
@@ -102,6 +105,7 @@ const PageTitleUpdater = () => {
 
   React.useEffect(() => {
     const getTitleFromPath = (pathname) => {
+      if (pathname === '/accept-invitation') return 'Accept Invitation';
       if (pathname === '/login') return 'Login';
       if (pathname === '/dashboard') return 'Dashboard';
       if (pathname === '/portal/estimate') return 'Estimate Portal';
@@ -179,6 +183,7 @@ const PageTitleUpdater = () => {
       if (pathname === '/profile') return 'Profile';
       if (pathname === '/__playwright__/estimate-view') return 'Playwright Estimate View';
       if (pathname === '/__playwright__/document-templates') return 'Playwright Document Templates';
+      if (pathname === '/__playwright__/estimates') return 'Playwright Estimates';
 
       return '';
     };
@@ -218,7 +223,8 @@ function App() {
                 isAuthenticated ? <Navigate to={homePath} replace /> : <LoginPage onLogin={login} />
             } 
           />
-          <Route path="/portal/estimate" element={<CustomerEstimatePortal />} />
+          <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
+          <Route path="/portal/estimate" element={<EstimatePortalPage />} />
           <Route path="/portal/inventory" element={<CustomerInventoryPortal />} />
           <Route path="/portal/contracts/:token" element={<CustomerContractPortal />} />
           <Route path="/intake" element={<PublicLeadIntakePage />} />
@@ -318,6 +324,12 @@ function App() {
             <Route path="documents/:subTab/:itemId/:subView" element={withPermission('/documents', <SettingsHub initialGroup="documents" />)} />
             <Route path="documents/:subTab/:subView" element={withPermission('/documents', <SettingsHub initialGroup="documents" />)} />
 
+            <Route path="settings/communications/mailbox/callback" element={<MailboxOAuthCallback />} />
+            <Route path="settings/team/members/:employeeId/password" element={
+              <PermissionRoute required={[PERMISSIONS.USER_CREATE]} fallbackPath={homePath}>
+                <MemberPasswordPage />
+              </PermissionRoute>
+            } />
             <Route path="settings" element={withPermission('/settings', <SettingsHub />)} />
             <Route path="settings/:mainGroup" element={withPermission('/settings', <SettingsHub />)} />
             <Route path="settings/:mainGroup/:subTab" element={withPermission('/settings', <SettingsHub />)} />

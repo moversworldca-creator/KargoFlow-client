@@ -86,6 +86,18 @@ vi.mock('../../../services/api', () => ({
   getUsers: vi.fn(),
 }));
 
+vi.mock('../leads/salesOverviewApi', async () => {
+  const api = await import('../../../services/api');
+  return {
+    getTenantStaff: api.getLookupUsers,
+    getTenantSalesOverview: api.getSalesDashboardSummary,
+    getTenantTasks: api.getTasks,
+    getTenantActivities: api.getActivities,
+    getTenantLeadActivities: api.getLeadActivities,
+    updateTenantTask: vi.fn(),
+  };
+});
+
 const today = new Date().toISOString().slice(0, 10);
 
 const makeSalesQueueResponse = (rows) => ({
@@ -213,6 +225,34 @@ describe('Sales DashboardPane', () => {
     </MemoryRouter>
   );
 
+  it('shows canonical lead and opportunity statuses separately from custom labels', async () => {
+    const lead = makeSalesQueueRow({
+      id: 801, name: 'Status Lead', system_state: 'in_progress',
+      workflow_stage: 'new_lead', workflow_stage_label: 'Stale lead stage',
+      custom_status_code: 91, custom_status_label: 'Needs COI',
+    });
+    const opportunity = makeSalesQueueRow({
+      id: 802, row_type: 'opportunity', opportunity_id: 802, lead_id: null,
+      name: 'Status Opportunity', system_state: 'cancelled',
+      workflow_stage: 'confirmed', workflow_stage_label: 'Stale opportunity stage',
+      custom_status_code: 92, custom_status_label: 'Waiting on Customer',
+    });
+    vi.mocked(getMyLeadsQueue).mockResolvedValue(makeSalesQueueResponse([lead, opportunity]));
+    render(<MemoryRouter initialEntries={[{ pathname: '/sales', state: { activeTab: 'all-leads' } }]}>
+      <Routes><Route path="/sales" element={<Sales />} /></Routes>
+    </MemoryRouter>);
+    await screen.findAllByText('Status Lead');
+    const table = screen.getByRole('table');
+    const leadRow = within(table).getByText('Status Lead').closest('tr');
+    const opportunityRow = within(table).getByText('Status Opportunity').closest('tr');
+    expect(within(leadRow).getByText('In Progress')).toBeInTheDocument();
+    expect(within(leadRow).getByText('Needs COI')).toHaveAttribute('title', 'Custom status');
+    expect(within(opportunityRow).getByText('Cancelled')).toBeInTheDocument();
+    expect(within(opportunityRow).getByText('Waiting on Customer')).toHaveAttribute('title', 'Custom status');
+    expect(within(table).queryByText('Stale lead stage')).not.toBeInTheDocument();
+    expect(within(table).queryByText('Stale opportunity stage')).not.toBeInTheDocument();
+  });
+
   it('renders dashboard metrics and scopes refreshes by selected user', async () => {
     renderSalesDashboard();
 
@@ -221,11 +261,11 @@ describe('Sales DashboardPane', () => {
     expect(screen.getByText('Emails Logged')).toBeInTheDocument();
     expect(screen.getByText('SMS Logged')).toBeInTheDocument();
     expect(screen.getByText('Phone Calls Logged')).toBeInTheDocument();
-    expect(screen.getByText('Payments Captured')).toBeInTheDocument();
+    expect(screen.getByText('Payments unavailable')).toBeInTheDocument();
     expect(within(screen.getByText('Emails Logged').closest('div.rounded-xl')).getByText('2')).toBeInTheDocument();
     expect(within(screen.getByText('SMS Logged').closest('div.rounded-xl')).getByText('1')).toBeInTheDocument();
     expect(within(screen.getByText('Phone Calls Logged').closest('div.rounded-xl')).getByText('3')).toBeInTheDocument();
-    expect(screen.getByText('$1.5k')).toBeInTheDocument();
+    expect(within(screen.getByText('Payments unavailable').closest('div.rounded-xl')).getByText('—')).toBeInTheDocument();
     expect(screen.getByText(/2 leads received this period/i)).toBeInTheDocument();
     expect(getActivities).toHaveBeenCalledWith(expect.objectContaining({
       startDate: expect.any(String),
@@ -239,12 +279,6 @@ describe('Sales DashboardPane', () => {
       startDate: expect.any(String),
       endDate: expect.any(String),
       status: 'pending',
-    }));
-    expect(getMyLeadsQueue).toHaveBeenCalledWith(expect.objectContaining({
-      startDate: expect.any(String),
-      endDate: expect.any(String),
-      date_field: 'created_at',
-      include_converted: true,
     }));
 
     const userSelect = screen.getByDisplayValue('All Staff');
@@ -281,10 +315,6 @@ describe('Sales DashboardPane', () => {
     expect(getTasks).toHaveBeenCalledWith(expect.objectContaining({
       assigned_user: '7',
       status: 'pending',
-    }));
-    expect(getMyLeadsQueue).toHaveBeenCalledWith(expect.objectContaining({
-      assigned_user: '7',
-      include_converted: true,
     }));
 
     const insights = screen.getByText('User Insights').closest('div.rounded-xl');
@@ -690,9 +720,6 @@ describe('Sales DashboardPane', () => {
   it('loads the merged calls modal within the current day range', async () => {
     const now = new Date();
     const today = now.toISOString().slice(0, 10);
-    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
-      .toISOString()
-      .slice(0, 10);
     const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1))
       .toISOString()
       .slice(0, 10);
@@ -740,16 +767,16 @@ describe('Sales DashboardPane', () => {
     fireEvent.click(screen.getByText('Phone Calls Logged').closest('div.rounded-xl'));
 
     await waitFor(() => {
-      expect(screen.getByText('Calls This Month')).toBeInTheDocument();
+      expect(screen.getByText('Calls Today')).toBeInTheDocument();
     });
 
     await waitFor(() => {
       expect(getActivities).toHaveBeenCalledWith(expect.objectContaining({
-        startDate: monthStart,
+        startDate: today,
         endDate: tomorrow,
       }));
       expect(getLeadActivities).toHaveBeenCalledWith(expect.objectContaining({
-        startDate: monthStart,
+        startDate: today,
         endDate: tomorrow,
         activity_type: 'call',
       }));
@@ -846,10 +873,10 @@ describe('Sales DashboardPane', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Follow-up')).toBeInTheDocument();
+      expect(screen.getAllByText('Follow-up').length).toBeGreaterThan(0);
     });
 
-    fireEvent.click(screen.getByText('Follow-up').closest('div.rounded-xl'));
+    fireEvent.click(screen.getAllByText('Follow-up').find((element) => element.closest('div.rounded-xl')).closest('div.rounded-xl'));
 
     await waitFor(() => {
       expect(screen.getByText('Follow-up Today')).toBeInTheDocument();
@@ -861,7 +888,16 @@ describe('Sales DashboardPane', () => {
       assigned_user: undefined,
     }));
     expect(await screen.findAllByText('1 - 1 of 1 Total Results')).toHaveLength(1);
-    expect(screen.getByText('Call pending lead')).toBeInTheDocument();
+    expect(screen.getAllByText('Call pending lead').length).toBeGreaterThan(0);
     expect(screen.queryByText('Completed task should not count')).not.toBeInTheDocument();
   });
+  it('accepts fresh dashboard results after a sales-data-changed event', async () => {
+    vi.mocked(getSalesDashboardSummary).mockResolvedValueOnce({ leadsCount: 11 }).mockResolvedValue({ leadsCount: 42 });
+    renderSalesDashboard();
+    await waitFor(() => expect(within(screen.getByText('Leads Created').closest('div.rounded-xl')).getByText('11')).toBeInTheDocument());
+    window.dispatchEvent(new Event('sales-data-changed'));
+    await waitFor(() => expect(within(screen.getByText('Leads Created').closest('div.rounded-xl')).getByText('42')).toBeInTheDocument());
+    expect(screen.queryByText('Refreshing...')).not.toBeInTheDocument();
+  });
+
 });

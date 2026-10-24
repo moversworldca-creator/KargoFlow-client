@@ -8,63 +8,60 @@ const context = vi.hoisted(() => ({ user: { is_superuser: true }, canAll: vi.fn(
 vi.mock('../../auth/context/AuthContext', () => ({ useAuth: () => ({ user: context.user, isLoading: false }) }));
 vi.mock('../../../shared/auth/useCan', () => ({ default: () => ({ canAll: context.canAll }) }));
 vi.mock('../../../shared/context/ToastContext', () => ({ useToast: () => ({ showToast: context.showToast }) }));
-vi.mock('../../../services/api', async (importOriginal) => ({
-  ...await importOriginal(),
-  getBranches: vi.fn(), getSendGridConfig: vi.fn(), getResendConfig: vi.fn(), getSMTPConfig: vi.fn(),
-  getTelnyxSMSConfig: vi.fn(), getPaymentGateways: vi.fn(),
-  testSendGridEmail: vi.fn(), testResendEmail: vi.fn(), testSMTPEmail: vi.fn(),
+vi.mock('../../../services/api', () => ({
+  getAuthorizeNetSettings: vi.fn(), saveAuthorizeNetSettings: vi.fn(), verifyAuthorizeNetSettings: vi.fn(),
 }));
 afterEach(cleanup);
 beforeEach(() => {
   vi.clearAllMocks();
   context.canAll.mockReturnValue(true);
-  api.getBranches.mockResolvedValue([]);
-  api.getSendGridConfig.mockResolvedValue([{ id: 11, sender_email: 'sender@example.com', api_key: '****' }]);
-  api.getResendConfig.mockResolvedValue([{ id: 12, sender_email: 'sender@example.com', api_key: '****' }]);
-  api.getSMTPConfig.mockResolvedValue([{ id: 13, sender_email: 'sender@example.com', host: 'smtp.example.com' }]);
-  api.getTelnyxSMSConfig.mockRejectedValue({ response: { status: 404 } });
-  api.getPaymentGateways.mockRejectedValue({ response: { status: 404 } });
+  api.getAuthorizeNetSettings.mockResolvedValue({});
 });
-async function section(title) {
-  render(<IntegrationSettings view="delivery" />);
-  const heading = await screen.findByRole('heading', { name: title });
-  return within(heading.closest('.relative'));
-}
-it.each([
-  ['SendGrid', 'testSendGridEmail', 11], ['Resend', 'testResendEmail', 12], ['SMTP Mail', 'testSMTPEmail', 13],
-])('sends from saved %s settings to the trimmed recipient', async (title, method, id) => {
-  api[method].mockResolvedValue({ message: 'Test email accepted for sending.' });
-  const panel = await section(title);
-  fireEvent.change(panel.getByRole('textbox', { name: 'Test Recipient' }), { target: { value: ' test@example.com ' } });
-  fireEvent.click(panel.getByRole('button', { name: 'Send Test Email' }));
-  await waitFor(() => expect(api[method]).toHaveBeenCalledWith(id, 'test@example.com'));
-  expect(await panel.findByRole('status')).toHaveTextContent('Test email accepted for sending.');
+
+it('saves Authorize.Net configuration, preserves blank secrets, and exposes no transaction controls', async () => {
+  api.getAuthorizeNetSettings.mockResolvedValue({ api_login_id: 'merchant', environment: 'sandbox', has_transaction_key: true });
+  api.saveAuthorizeNetSettings.mockResolvedValue({ api_login_id: 'merchant', environment: 'production', has_transaction_key: true });
+  render(<IntegrationSettings view="gateways" />);
+  const heading = await screen.findByRole('heading', { name: 'Authorize.net' });
+  const panel = within(heading.closest('.relative'));
+  fireEvent.change(panel.getByRole('combobox'), { target: { value: 'production' } });
+  fireEvent.click(panel.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(api.saveAuthorizeNetSettings).toHaveBeenCalledWith({ api_login_id: 'merchant', environment: 'production', is_active: false, transaction_key: '', signature_key: '' }));
+  expect(screen.queryByText('Payment Activity')).not.toBeInTheDocument();
+  expect(screen.queryByText('Create Payment Request')).not.toBeInTheDocument();
+  expect(screen.queryByText('Create Refund')).not.toBeInTheDocument();
 });
-it('rejects invalid recipients without sending', async () => {
-  const panel = await section('SendGrid');
-  for (const value of ['', 'invalid']) {
-    fireEvent.change(panel.getByRole('textbox', { name: 'Test Recipient' }), { target: { value } });
-    fireEvent.click(panel.getByRole('button', { name: 'Send Test Email' }));
-    expect(await panel.findByRole('status')).toHaveTextContent('Enter a valid test recipient');
+
+it('verifies saved Authorize.Net credentials and enforces management permission', async () => {
+  api.getAuthorizeNetSettings.mockResolvedValue({ api_login_id: 'merchant', has_transaction_key: true });
+  api.verifyAuthorizeNetSettings.mockResolvedValue({ success: true, message: 'Connection verified.' });
+  render(<IntegrationSettings view="gateways" />);
+  const heading = await screen.findByRole('heading', { name: 'Authorize.net' });
+  const panel = within(heading.closest('.relative'));
+  fireEvent.click(panel.getByRole('button', { name: 'Verify' }));
+  expect(await panel.findByRole('status')).toHaveTextContent('Connection verified.');
+  expect(api.verifyAuthorizeNetSettings).toHaveBeenCalledWith();
+  context.canAll.mockReturnValue(false);
+  fireEvent.click(panel.getByRole('button', { name: 'Verify' }));
+  expect(api.verifyAuthorizeNetSettings).toHaveBeenCalledTimes(1);
+});
+
+
+it('shows only the gateway configuration without obsolete categories or providers', async () => {
+  render(<IntegrationSettings />);
+  expect(await screen.findByRole('heading', { name: 'Authorize.net' })).toBeInTheDocument();
+  expect(screen.getAllByRole('combobox')).toHaveLength(1);
+  for (const text of ['Hub Overview', 'SendGrid', 'Resend', 'SMTP Mail', 'SMS Messaging', 'Upcoming', 'Calendar Sync', 'AI Assistant', 'Accounting', 'Advanced Provider Fields']) {
+    expect(screen.queryByText(text)).not.toBeInTheDocument();
   }
-  expect(api.testSendGridEmail).not.toHaveBeenCalled();
+  expect(api.getAuthorizeNetSettings).toHaveBeenCalledTimes(1);
 });
-it('requires saving a new configuration', async () => {
-  api.getSendGridConfig.mockResolvedValue([]);
-  const panel = await section('SendGrid');
-  fireEvent.click(panel.getByRole('button', { name: 'Send Test Email' }));
-  expect(await panel.findByRole('status')).toHaveTextContent('Save this configuration');
-  expect(api.testSendGridEmail).not.toHaveBeenCalled();
-});
-it('prevents duplicate sends and displays provider failure', async () => {
-  let rejectSend;
-  api.testResendEmail.mockImplementation(() => new Promise((resolve, reject) => { rejectSend = reject; }));
-  const panel = await section('Resend');
-  fireEvent.change(panel.getByRole('textbox', { name: 'Test Recipient' }), { target: { value: 'test@example.com' } });
-  fireEvent.click(panel.getByRole('button', { name: 'Send Test Email' }));
-  expect(panel.getByRole('button', { name: 'Sending…' })).toBeDisabled();
-  expect(panel.getByRole('button', { name: 'Save' })).toBeDisabled();
-  rejectSend({ response: { data: { detail: 'The provider rejected the configured credentials.' } } });
-  expect(await panel.findByRole('status')).toHaveTextContent('The provider rejected the configured credentials.');
-  expect(panel.getByRole('button', { name: 'Send Test Email' })).toBeEnabled();
+
+it('prevents saving when configuration could not be loaded', async () => {
+  api.getAuthorizeNetSettings.mockRejectedValue(new Error('Unavailable'));
+  render(<IntegrationSettings />);
+  await screen.findByRole('heading', { name: 'Authorize.net' });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  expect(await screen.findByRole('status')).toHaveTextContent('Refresh to load saved settings');
+  expect(api.saveAuthorizeNetSettings).not.toHaveBeenCalled();
 });

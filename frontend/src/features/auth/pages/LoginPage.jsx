@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import React, { useState } from 'react';
 import { Mail, Lock, Eye, EyeOff, ArrowRight, AlertCircle } from 'lucide-react';
 import logo from '../../../assets/full_logo.png';
@@ -54,6 +55,7 @@ export default function LoginPage({ onLogin }) {
             <p className="mb-4 text-[13px] text-[#475467] font-medium">Sign in to your company workspace.</p>
           </div>
 
+          <Link to="/accept-invitation" className="block mb-3 text-center text-sm text-primary">Have an invitation code? Set up your login</Link>
           <form onSubmit={handleLogin} className="w-full space-y-3">
             {error ? (
               <div className="flex items-center gap-2 rounded-[8px] border border-[#FDE8E8] bg-[#FDE8E8]/50 px-4 py-3 text-[13px] text-[#791F1F]" role="alert">

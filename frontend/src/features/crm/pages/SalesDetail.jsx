@@ -1,3 +1,6 @@
+import InventoryPortalPanel from '../components/InventoryPortalPanel';
+import IssuedDocumentsPanel from '../components/IssuedDocumentsPanel';
+import { hasSendingMailbox, getComposerTemplates, getComposerTemplate } from '../leads/communicationSetupApi';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link, useLocation } from 'react-router-dom';
 import { 
@@ -27,17 +30,19 @@ import RichTextEditor from '../../../shared/ui/RichTextEditor';
 import AddressAutocomplete from '../../../shared/ui/AddressAutocomplete';
 import AsyncSelect from '../../../shared/ui/AsyncSelect';
 import useCan from '../../../shared/auth/useCan';
+import { useAuth } from '../../auth/context/AuthContext';
 import { PERMISSIONS } from '../../../shared/permissions/registry';
-import { getLookupUsersPage, getBranchLookupsPage, getStatusCodeLookupsPage, getOpportunityLossReasonLookupsPage, getMoveTypeLookups, getServices } from '../../../services/api';
+import { getLookupEmployeesPage, getLeadStatusCodeLookups, getLookupUsersPage, getBranchLookupsPage, getStatusCodeLookupsPage, getOpportunityLossReasonLookupsPage, getMoveTypeLookups, getServices } from '../../../services/api';
 import { useMoverSizesLookup } from '../../../shared/queries/sharedQueries';
 
 import EstimateView from '../components/EstimateView';
+import SalesLifecyclePanel from '../components/SalesLifecyclePanel';
 import PaymentsPanel from '../components/PaymentsPanel';
 import StorageView from '../components/StorageView';
 import LeadSpecs from '../components/LeadSpecs';
-import RingCentralEmbeddablePanel from '../components/RingCentralEmbeddablePanel';
+const RingCentralEmbeddablePanel = React.lazy(() => import('../components/RingCentralEmbeddablePanel'));
 import MovablePanel from '../components/MovablePanel';
-import CategorizedFilesPanel from '../../files/components/CategorizedFilesPanel';
+const CategorizedFilesPanel = React.lazy(() => import('../../files/components/CategorizedFilesPanel'));
 
 const resolveSpecLookupLabel = (value, options = []) => {
   const normalizedValue = String(value ?? '').trim();
@@ -109,29 +114,37 @@ import api, {
   createOpportunity,
   getTimelineEvents,
   sendRecordEmail,
+  sendRecordSms,
+  recordRecordSmsConsent,
   markOpportunityEstimateCreated,
   bookOpportunityJob,
+  getOpportunityBookingReadiness,
   unbookOpportunityJob,
-  confirmOpportunityJob,
+  getCancellationReasons,
+  getDisqualificationReasons,
+  disqualifyLead,
+  restoreLead,
+  archiveLead,
   cancelOpportunityJob,
   completeOpportunityJob,
   markOpportunityLost,
   reopenOpportunity,
   createOpportunityStop,
+  createOpportunityJobStop,
   updateOpportunityStop,
+  updateOpportunityJobStop,
   deleteOpportunityStop,
   createSalesActivity,
-  updateSalesActivity,
-  deleteSalesActivity,
+  updateSalesActivity as updateActivityRequest,
   getCallLogs,
   getActivities as getSalesActivities,
   getTasks,
   createTask,
-  updateTask,
-  getCommunicationTemplate,
+  updateTask as updateTaskRequest,
   getStatusCodeLookups,
   getOpportunityLossReasonLookups,
   getBranchLookups,
+  getMoverSizeLookups,
   getEstimates,
   createEstimate,
   getLookupUsers,
@@ -141,18 +154,15 @@ import api, {
   createCustomerContact,
   updateCustomerContact,
   deleteCustomerContact,
-	  getSendGridConfig,
-	  getResendConfig,
-	  getSMTPConfig,
 	  getLead,
 	  getLeadBySalesNumber,
 	  updateLead,
 	  createLead,
   convertLead,
+  startLead,
+  qualifyLead,
   markLeadLost,
   reopenLead,
-  getCommunicationTemplates,
-  getCommunicationTemplateCategories,
   previewCommunicationTemplate,
   getDocumentTemplates,
   createContract,
@@ -174,8 +184,13 @@ import {
   getRecordTabLabelFromSegment,
   isLeadRecordType,
 } from '../utils/recordRoutes';
-import { getWorkflowStageLabel } from '../utils/statusWorkflow';
+import { getWorkflowStageLabel, getRecordSystemState, getRecordWorkflowActions } from '../utils/statusWorkflow';
 import { getPortalBaseUrl } from '../../../shared/utils/portalBaseUrl';
+import {
+  buildDefaultDraftEstimate,
+  getStoredDraftEstimate,
+  setStoredDraftEstimate,
+} from '../utils/estimateDraftUtils';
 
 const CANADIAN_PROVINCES = [
   { code: 'AB', name: 'Alberta' },
@@ -196,6 +211,8 @@ const CANADIAN_PROVINCES = [
 const asList = (res) => {
   if (Array.isArray(res)) return res;
   if (Array.isArray(res?.results)) return res.results;
+  if (Array.isArray(res?.data)) return res.data;
+  if (Array.isArray(res?.data?.results)) return res.data.results;
   return [];
 };
 
@@ -237,15 +254,15 @@ const safeDateTime = (iso) => {
 
 const toneForWorkflowStage = (stage) => {
   const normalized = String(stage || '').toLowerCase();
-  if (['completed', 'job'].includes(normalized)) return 'green';
+  if (['completed', 'closed', 'converted', 'job'].includes(normalized)) return 'green';
   if (['confirmed'].includes(normalized)) return 'teal';
   if (['booked'].includes(normalized)) return 'amber';
   if (['estimate_ready', 'quoted', 'estimate'].includes(normalized)) return 'violet';
   if (['lead_in_progress', 'in_progress'].includes(normalized)) return 'indigo';
-  if (['opportunity'].includes(normalized)) return 'blue';
+  if (['open', 'opportunity'].includes(normalized)) return 'blue';
   if (['new_lead', 'new'].includes(normalized)) return 'sky';
   if (['lost'].includes(normalized)) return 'rose';
-  if (['canceled'].includes(normalized)) return 'red';
+  if (['canceled', 'cancelled', 'disqualified'].includes(normalized)) return 'red';
   if (['draft', 'pending'].includes(normalized)) return 'cyan';
   return 'amber';
 };
@@ -666,14 +683,33 @@ const formatAddressText = (parts, fallback) => {
 
 const createRouteDraftStopId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-const normalizeRouteStopForSales = (stop) => ({
-  id: stop?.id,
-  type: stop?.stop_type || stop?.type || 'stop',
-  address: formatAddressText(stop?.address_details, stop?.address_details?.address_line1 || ''),
-  details: stop?.address_details || {},
-  notes: stop?.notes || '',
-  sort_order: stop?.sort_order ?? 0,
-});
+const normalizeRouteStopForSales = (stop) => {
+  const details = stop?.address_details || {
+    address_line1: stop?.address_line1 || '',
+    unit_number: stop?.unit_number || '',
+    city: stop?.city || '',
+    state: stop?.state || '',
+    postal_code: stop?.postal_code || stop?.zip_code || '',
+    zip_code: stop?.zip_code || stop?.postal_code || '',
+    country: stop?.country || '',
+    county: stop?.county || '',
+    property_type: stop?.property_type || '',
+    parking_type: stop?.parking_type || '',
+    flights_of_stairs: stop?.flights_of_stairs ?? 0,
+    has_elevator: Boolean(stop?.has_elevator),
+    walk_distance_ft: stop?.walk_distance_ft ?? 0,
+    latitude: stop?.latitude ?? null,
+    longitude: stop?.longitude ?? null,
+  };
+  return {
+    id: stop?.id,
+    type: stop?.stop_type || stop?.type || 'intermediate',
+    address: formatAddressText(details, details.address_line1 || ''),
+    details,
+    notes: stop?.notes || '',
+    sort_order: stop?.sort_order ?? 0,
+  };
+};
 
 const buildSalesRouteStops = (record, isLead, view = {}) => {
   if (!record) return [];
@@ -722,13 +758,15 @@ const buildSalesRouteStops = (record, isLead, view = {}) => {
   const originDetails = getDetails('origin');
   const destinationDetails = getDetails('destination');
   const routeStops = Array.isArray(record?.stops) ? record.stops.map(normalizeRouteStopForSales) : [];
+  const originStop = routeStops.find((stop) => stop.type === 'origin');
+  const destinationStop = routeStops.find((stop) => stop.type === 'destination');
   const preStops = sortStops(routeStops.filter((stop) => stop.type === 'pre_stop'));
-  const middleStops = sortStops(routeStops.filter((stop) => stop.type !== 'pre_stop' && stop.type !== 'post_stop'));
+  const middleStops = sortStops(routeStops.filter((stop) => ['stop', 'intermediate'].includes(stop.type)));
   const postStops = sortStops(routeStops.filter((stop) => stop.type === 'post_stop'));
 
   return [
     ...preStops,
-    {
+    originStop || {
       id: 'origin',
       type: 'origin',
       label: 'PICK-UP - ORIGIN',
@@ -737,7 +775,7 @@ const buildSalesRouteStops = (record, isLead, view = {}) => {
       details: originDetails,
     },
     ...middleStops,
-    {
+    destinationStop || {
       id: 'destination',
       type: 'destination',
       label: 'DROP-OFF - DESTINATION',
@@ -1040,7 +1078,7 @@ const createEmptyAdditionalContact = () => ({
 });
 const getAdditionalCustomerContacts = (customer) =>
   getCustomerContacts(customer)
-    .filter((contact) => !contact?.is_primary)
+    .filter((contact) => !contact?.is_primary && contact?.is_active !== false)
     .slice(0, MAX_ADDITIONAL_CONTACTS);
 const getContactLabel = (contact, index = 0) =>
   String(contact?.name || '').trim() || `Additional Contact ${index + 1}`;
@@ -1304,9 +1342,13 @@ const oppView = (opportunity, isLeadRecord = null) => {
   
   // Lead and opportunity share this UI, but the route/API context is the reliable entity signal.
   const isLead = isLeadRecord ?? (opportunity.id === 'new' ? !opportunity.isOpportunity : !opportunity.customer_details);
+  const leadFullName = String(
+    opportunity?.full_name || opportunity?.customer_name || opportunity?.lead_name ||
+    opportunity?.name || opportunity?.contact_name || opportunity?.customer?.full_name || ''
+  ).trim();
   
   const customerName = isLead 
-    ? `${opportunity.first_name || ''} ${opportunity.last_name || ''}`.trim() || (opportunity.id === 'new' ? 'New Lead' : `Lead #${String(opportunity.sales_number || opportunity.id).padStart(5, '0')}`)
+    ? `${opportunity.first_name || ''} ${opportunity.last_name || ''}`.trim() || leadFullName || (opportunity.id === 'new' ? 'New Lead' : `Lead #${String(opportunity.sales_number || opportunity.id).padStart(5, '0')}`)
     : (opportunity?.customer_details?.full_name ||
       (opportunity?.customer_details?.first_name || opportunity?.customer_details?.last_name
         ? `${opportunity.customer_details.first_name || ''} ${opportunity.customer_details.last_name || ''}`.trim()
@@ -1405,60 +1447,6 @@ const oppView = (opportunity, isLeadRecord = null) => {
   };
 };
 
-const buildWorkflowActions = ({
-  isLead,
-  isNewRecord,
-  workflowStage,
-  estimateSummary,
-  canDuplicateOpportunity = false,
-  canBookOpportunity = false,
-  canMarkOpportunityLost = false,
-  canCreateOpportunity = false,
-  canEditOpportunity = false,
-}) => {
-  if (isNewRecord) return [];
-
-  const stage = String(workflowStage || '').toLowerCase();
-
-  if (isLead) {
-    if (stage === 'converted') return [];
-    if (stage === 'lost') return [{ key: 'reopen', label: 'Reopen Lead', tone: 'primary' }];
-    return [
-      ...(canBookOpportunity ? [{ key: 'book', label: 'Book Job', tone: 'primary' }] : []),
-      ...(canMarkOpportunityLost ? [{ key: 'lost', label: 'Mark Lost', tone: 'secondary' }] : []),
-    ];
-  }
-
-  const estimateStatus = String(estimateSummary?.status || '').toLowerCase();
-  const isEstimateSigned = estimateStatus === 'signed';
-  const canSendEstimate = Boolean(estimateSummary) && !isEstimateSigned;
-  const actions = [];
-
-  if (['lost', 'canceled', 'completed'].includes(stage)) {
-    if (canEditOpportunity) actions.push({ key: 'reopen', label: 'Reopen Opportunity', tone: 'primary' });
-    return actions;
-  }
-
-  if (['opportunity', 'estimate_ready'].includes(stage)) {
-    if (canSendEstimate && canCreateOpportunity) {
-      actions.push({ key: 'send_estimate', label: 'Send Estimate', tone: 'primary' });
-    }
-    if (canBookOpportunity) actions.push({ key: 'book', label: 'Book Job', tone: 'primary' });
-    if (canMarkOpportunityLost) actions.push({ key: 'lost', label: 'Mark Lost', tone: 'secondary' });
-  } else if (stage === 'booked') {
-    if (canEditOpportunity) {
-      actions.push({ key: 'confirm', label: 'Confirm Job', tone: 'primary' });
-      actions.push({ key: 'cancel', label: 'Cancel Job', tone: 'secondary' });
-    }
-  } else if (stage === 'confirmed') {
-    if (canEditOpportunity) {
-      actions.push({ key: 'complete', label: 'Complete Job', tone: 'primary' });
-      actions.push({ key: 'cancel', label: 'Cancel Job', tone: 'secondary' });
-    }
-  }
-
-  return actions;
-};
 
 const omitBlankStrings = (payload) => {
   if (!payload || typeof payload !== 'object') return payload;
@@ -1563,9 +1551,10 @@ const getActivityLogBody = (activity) => {
         activity?.description ||
         activity?.content ||
         summary ||
+        activity?.body_text ||
         activity?.email_log_details?.body_text ||
         activity?.email_log_details?.text_body ||
-        stripHtml(activity?.email_log_details?.body_html || activity?.body_html || '')
+        stripHtml(activity?.email_log_details?.body_html || activity?.body_html || activity?.payload?.body_html || '')
       );
     }
     return activity?.email_log_details?.preview_html || activity?.email_log_details?.body_html || activity?.body_html || activity?.description || activity?.content || summary || '';
@@ -1584,7 +1573,13 @@ const getActivityLogBody = (activity) => {
 
 const getActivityLogEmailHtml = (activity, branchContext = '') =>
   activity?.inbound_message_id
-    ? ''
+    ? normalizePreviewHtml(
+        activity?.body_html ||
+        activity?.email_log_details?.body_html ||
+        activity?.payload?.body_html ||
+        '',
+        branchContext
+      )
     : normalizePreviewHtml(
         activity?.email_log_details?.preview_html ||
         activity?.email_log_details?.body_html ||
@@ -2099,22 +2094,13 @@ const INITIAL_FORM_STATE = {
     destination_has_elevator: false,
     destination_walk_distance_ft: 50,
 };
-const DETAIL_BOOTSTRAP_TTL_MS = 2500;
-const detailBootstrapCache = new Map();
+
 const ACTIVITY_PAGE_SIZE = 20;
 const ACTIVITY_FETCH_LIMIT = 20;
 const TIMELINE_FETCH_LIMIT = 20;
 const DETAIL_TAB_IDS = ['Sales', 'Estimate', 'Files & Photos', 'Documents', 'Accounting', 'Payments'];
 const DEFAULT_DETAIL_TAB = 'Sales';
 const DEFAULT_ESTIMATE_TAB = 'charges';
-const SUB_JOB_SERVICE_OPTIONS = [
-  { value: 'move', label: 'Move' },
-  { value: 'packing', label: 'Packing' },
-  { value: 'loading', label: 'Loading' },
-  { value: 'unloading', label: 'Unloading' },
-  { value: 'storage', label: 'Storage' },
-  { value: 'other', label: 'Other' },
-];
 
 const resolveDetailTab = ({ tabSegment, stateTab, search, fallback = DEFAULT_DETAIL_TAB }) => {
   const routeTab = getRecordTabLabelFromSegment(tabSegment);
@@ -2135,6 +2121,7 @@ const SalesDetail = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { canAll, canAny } = useCan();
+  const { user } = useAuth();
   const isCanonicalRecordRoute = Boolean(entityType);
   const isLeadPath = entityType
     ? isLeadRecordType(entityType)
@@ -2143,6 +2130,15 @@ const SalesDetail = () => {
   
   const textareaRef = useRef(null);
   const [opportunity, setOpportunity] = useState(null);
+  const recordRequestRef = useRef(0);
+  const timelineRequestRef = useRef(0);
+  const followUpRequestRef = useRef(0);
+  const [recordError, setRecordError] = useState(null);
+  const [workError, setWorkError] = useState(null);
+  const [conversionReview, setConversionReview] = useState(null);
+  const recordTarget = () => isLeadPath ? { lead: opportunity?.id } : { opportunity: opportunity?.id };
+  const updateSalesActivity = (activityId, data) => updateActivityRequest(activityId, data, recordTarget());
+  const updateTask = (taskId, data) => updateTaskRequest(taskId, data, recordTarget());
   const [estimateOpportunity, setEstimateOpportunity] = useState(null);
   const [estimateSummary, setEstimateSummary] = useState(null);
   const [estimatePortalInventory, setEstimatePortalInventory] = useState([]);
@@ -2182,7 +2178,8 @@ const SalesDetail = () => {
   const canDuplicateOpportunity = useCallback(() => hasPermission(PERMISSIONS.OPPORTUNITY_DUPLICATE), [hasPermission]);
   const canBookOpportunity = useCallback(() => hasPermission(PERMISSIONS.OPPORTUNITY_BOOK), [hasPermission]);
   const canMarkOpportunityLost = useCallback(() => hasPermission(PERMISSIONS.OPPORTUNITY_MARK_LOST), [hasPermission]);
-  const canEditOpportunity = useCallback(() => hasPermission(PERMISSIONS.OPPORTUNITY_EDIT), [hasPermission]);
+  const canEditOpportunity = useCallback(() => isLeadPath ? hasPermission(PERMISSIONS.LEAD_EDIT) : hasPermission(PERMISSIONS.OPPORTUNITY_EDIT) &&
+    (!opportunity?.id || opportunity.id === 'new' || ['open', 'booked'].includes(getRecordSystemState(opportunity))), [hasPermission, opportunity, isLeadPath]);
   const canManageActivityHistory = useCallback(
     () => hasPermission(PERMISSIONS.COMMUNICATIONS_HISTORY_VIEW),
     [hasPermission]
@@ -2206,119 +2203,26 @@ const SalesDetail = () => {
 
   // Book Job Modal State
   const [isBookJobModalOpen, setIsBookJobModalOpen] = useState(false);
-  const [bookJobSendEmail, setBookJobSendEmail] = useState(true);
-  const [bookJobSendSms, setBookJobSendSms] = useState(false);
-  const [bookJobEmail, setBookJobEmail] = useState('');
-  const [bookJobPhone, setBookJobPhone] = useState('');
+  const [bookingReadiness, setBookingReadiness] = useState(null);
+  const [bookingOverrides, setBookingOverrides] = useState([]);
+  const [bookingOverrideReason, setBookingOverrideReason] = useState('');
+  const canSubmitBooking = Boolean(bookingReadiness) &&
+    (bookingReadiness.missing || []).every((name) => bookingOverrides.includes(name) &&
+      bookingReadiness.overridable_missing?.includes(name) && hasPermission(`opportunities.book_without_${name}`)) &&
+    (!bookingOverrides.length || Boolean(bookingOverrideReason.trim()));
   const [isBookingJob, setIsBookingJob] = useState(false);
 
-  const availableEmails = useMemo(() => {
-    const list = [];
-    const seen = new Set();
-    const addEmail = (email, label) => {
-      if (!email) return;
-      const cleaned = email.trim();
-      if (!cleaned || seen.has(cleaned.toLowerCase())) return;
-      seen.add(cleaned.toLowerCase());
-      list.push({ label, value: cleaned });
-    };
-    if (opportunity?.customer_details?.email) {
-      addEmail(opportunity.customer_details.email, `Customer Primary: ${opportunity.customer_details.email}`);
-    }
-    if (opportunity?.email) {
-      addEmail(opportunity.email, `Opportunity Email: ${opportunity.email}`);
-    }
-    if (opportunity?.customer_details?.contacts && Array.isArray(opportunity.customer_details.contacts)) {
-      opportunity.customer_details.contacts.forEach((contact) => {
-        if (contact.email) {
-          addEmail(contact.email, contact.relationship ? `${contact.name} (${contact.relationship}): ${contact.email}` : `${contact.name}: ${contact.email}`);
-        }
-      });
-    }
-    if (opportunity?.additional_contacts && Array.isArray(opportunity.additional_contacts)) {
-      opportunity.additional_contacts.forEach((contact) => {
-        if (contact.email) {
-          addEmail(contact.email, contact.relationship ? `${contact.name} (${contact.relationship}): ${contact.email}` : `${contact.name}: ${contact.email}`);
-        }
-      });
-    }
-    return list;
-  }, [opportunity]);
-
-  const availablePhones = useMemo(() => {
-    const list = [];
-    const seen = new Set();
-    const addPhone = (phone, label) => {
-      if (!phone) return;
-      const cleaned = phone.trim();
-      if (!cleaned || seen.has(cleaned)) return;
-      seen.add(cleaned);
-      list.push({ label, value: cleaned });
-    };
-    if (opportunity?.customer_details?.phone) {
-      addPhone(opportunity.customer_details.phone, `Customer Primary: ${opportunity.customer_details.phone}`);
-    }
-    if (opportunity?.phone) {
-      addPhone(opportunity.phone, `Opportunity Phone: ${opportunity.phone}`);
-    }
-    if (opportunity?.customer_details?.contacts && Array.isArray(opportunity.customer_details.contacts)) {
-      opportunity.customer_details.contacts.forEach((contact) => {
-        if (contact.phone) {
-          addPhone(contact.phone, contact.relationship ? `${contact.name} (${contact.relationship}): ${contact.phone}` : `${contact.name}: ${contact.phone}`);
-        }
-      });
-    }
-    if (opportunity?.additional_contacts && Array.isArray(opportunity.additional_contacts)) {
-      opportunity.additional_contacts.forEach((contact) => {
-        if (contact.phone) {
-          addPhone(contact.phone, contact.relationship ? `${contact.name} (${contact.relationship}): ${contact.phone}` : `${contact.name}: ${contact.phone}`);
-        }
-      });
-    }
-    return list;
-  }, [opportunity]);
-
-  useEffect(() => {
-    if (isBookJobModalOpen) {
-      if (availableEmails.length > 0 && !bookJobEmail) setBookJobEmail(availableEmails[0].value);
-      if (availablePhones.length > 0 && !bookJobPhone) setBookJobPhone(availablePhones[0].value);
-    }
-  }, [isBookJobModalOpen, availableEmails, availablePhones]);
-
-  const confirmBookJob = async (allowWithoutDeposit = false, overrideSendEmail = null, overrideSendSms = null) => {
+  const confirmBookJob = async () => {
+    if (!canSubmitBooking || getRecordSystemState(opportunity) !== 'open' || !hasPermission('opportunities.book')) return;
     setIsBookingJob(true);
     try {
-      const sendEmail = overrideSendEmail !== null ? overrideSendEmail : bookJobSendEmail;
-      const sendSms = overrideSendSms !== null ? overrideSendSms : bookJobSendSms;
-      const payload = {
-        send_email: sendEmail,
-        send_sms: sendSms,
-        to_email: sendEmail ? (bookJobEmail || '') : '',
-        to_phone: sendSms ? (bookJobPhone || '') : '',
-      };
-      if (allowWithoutDeposit) {
-        payload.allow_without_deposit = true;
-      }
-      
-      const updated = await bookOpportunityJob(opportunity.id, payload);
-      setOpportunity((prev) => ({ ...prev, ...(updated?.data || updated || {}) }));
+      await bookOpportunityJob(opportunity.id, { override_requirements: bookingOverrides, override_reason: bookingOverrideReason.trim() });
+      await fetchOpportunity();
       setIsBookJobModalOpen(false);
-      setToast({ type: 'success', text: 'Job successfully booked.' });
-    } catch (err) {
-      const code = err?.response?.data?.code;
-      const canOverride = Boolean(err?.response?.data?.can_override);
-      if (code === 'deposit_required' && canOverride) {
-        const confirmOverride = window.confirm('Deposit payment is not recorded. Book this job anyway?');
-        if (confirmOverride) {
-          return confirmBookJob(true);
-        }
-      } else {
-        const msg = err?.response?.data?.detail || 'Failed to book job.';
-        setToast({ type: 'error', text: String(msg) });
-      }
-    } finally {
-      setIsBookingJob(false);
-    }
+      setToast({ type: 'success', text: 'Opportunity booked.' });
+    } catch (error) {
+      setToast({ type: 'error', text: getErrorMessage(error, 'Could not book this opportunity. Check booking requirements.') });
+    } finally { setIsBookingJob(false); }
   };
 
   // Tracks display labels for async-selected spec fields so the panel shows
@@ -2453,13 +2357,16 @@ const SalesDetail = () => {
   const [gatewayPayments, setGatewayPayments] = useState([]);
 
   const loadOpportunityJobs = useCallback(async () => {
-    if (!opportunity?.id || isCreation) {
+    const targetOpportunityId = isLeadPath
+      ? (estimateOpportunity?.id || opportunity?.opportunity_id)
+      : opportunity?.id;
+    if (!targetOpportunityId || isCreation) {
       setOpportunityJobs([]);
       setSelectedEstimateJobId('');
       return [];
     }
     try {
-      const jobs = await api.sales.getOpportunityPlannedSubJobs(opportunity.id);
+      const jobs = await api.sales.getOpportunityPlannedSubJobs(targetOpportunityId);
       const rows = Array.isArray(jobs?.results) ? jobs.results : Array.isArray(jobs) ? jobs : [];
       setOpportunityJobs(rows);
       setSelectedEstimateJobId((prev) => {
@@ -2476,7 +2383,7 @@ const SalesDetail = () => {
       setSelectedEstimateJobId('');
       return [];
     }
-  }, [isCreation, opportunity?.id]);
+  }, [estimateOpportunity?.id, isCreation, isLeadPath, opportunity?.id, opportunity?.opportunity_id]);
 
 
   const allPayments = useMemo(() => {
@@ -2582,6 +2489,7 @@ const SalesDetail = () => {
   const [activityEmailBccText, setActivityEmailBccText] = useState('');
   const [showCcBcc, setShowCcBcc] = useState(false);
   const [activitySmsRecipients, setActivitySmsRecipients] = useState([]);
+  const [smsConsentConfirmed, setSmsConsentConfirmed] = useState(false);
   const [activityCallRecipient, setActivityCallRecipient] = useState('');
   const [editingActivity, setEditingActivity] = useState(null);
   const [expandedActivityKeys, setExpandedActivityKeys] = useState(() => new Set());
@@ -2608,7 +2516,6 @@ const SalesDetail = () => {
   });
   const [isPosting, setIsPosting] = useState(false);
   const [toast, setToast] = useState({ type: '', text: '' });
-  const [hasActiveEmailProvider, setHasActiveEmailProvider] = useState(false);
   const [isLoadingCommTemplates, setIsLoadingCommTemplates] = useState(false);
   const [followUps, setFollowUps] = useState([]);
   const [isLoadingFollowUps, setIsLoadingFollowUps] = useState(false);
@@ -2657,7 +2564,7 @@ const SalesDetail = () => {
         label: st.name ?? st.label ?? 'Unknown'
       }));
     }
-    return SUB_JOB_SERVICE_OPTIONS;
+    return [];
   }, [serviceTypes]);
 
   const [referralSources, setReferralSources] = useState([]);
@@ -2674,14 +2581,49 @@ const SalesDetail = () => {
     setActivityBodies((prev) => ({ ...prev, [commTab]: value }));
   };
   const buildCurrentOpportunityFormSnapshot = useCallback(
-    () => ({
-      ...form,
-      ...(customerDraft || {}),
-      ...(routeDraft || {}),
-      ...(specsDraft || {}),
-      ...(moveDateDraft || {}),
-    }),
-    [customerDraft, form, moveDateDraft, routeDraft, specsDraft]
+    () => {
+      const customer = getRecordCustomerDetails(opportunity) || {};
+      const nameParts = String(
+        customer.full_name || customer.profile_name || customer.name ||
+        opportunity?.customer_name || opportunity?.full_name || opportunity?.name || ''
+      ).trim().split(/\s+/).filter(Boolean);
+      const route = buildRouteFieldsFromRecord(opportunity, isLeadPath);
+      const hydratedFallback = {
+        ...route,
+        first_name: customer.first_name || opportunity?.first_name || nameParts[0] || '',
+        last_name: customer.last_name || opportunity?.last_name || nameParts.slice(1).join(' '),
+        email: customer.email || opportunity?.email || '',
+        phone: customer.primary_phone || customer.phone || opportunity?.phone || '',
+        move_date: opportunity?.move_date || '',
+        branch: normalizeLookupValue(opportunity?.branch_id || opportunity?.branch_details || opportunity?.branch),
+        service_type: normalizeLookupValue(opportunity?.service_type_id || opportunity?.service_type),
+        move_type: normalizeLookupValue(opportunity?.move_type_id || opportunity?.move_type),
+        move_size: normalizeLookupValue(
+          opportunity?.mover_size_details || opportunity?.move_size_details ||
+          opportunity?.mover_size || opportunity?.move_size
+        ),
+        assigned_to: normalizeLookupValue(
+          opportunity?.assigned_to_id || opportunity?.assigned_user_details ||
+          opportunity?.assigned_to_details || opportunity?.assigned_user || opportunity?.assigned_to
+        ),
+        referral_source: normalizeLookupValue(opportunity?.referral_source_id || opportunity?.referral_source),
+        notes: opportunity?.notes_internal || opportunity?.notes || '',
+      };
+      const snapshot = Object.keys({ ...hydratedFallback, ...form }).reduce((result, key) => ({
+        ...result,
+        [key]: form[key] !== undefined && form[key] !== null && form[key] !== ''
+          ? form[key]
+          : hydratedFallback[key],
+      }), {});
+      return {
+        ...snapshot,
+        ...(customerDraft || {}),
+        ...(routeDraft || {}),
+        ...(specsDraft || {}),
+        ...(moveDateDraft || {}),
+      };
+    },
+    [customerDraft, form, isLeadPath, moveDateDraft, opportunity, routeDraft, specsDraft]
   );
 
   const splitLocalDateTime = (isoString) => {
@@ -2712,9 +2654,7 @@ const SalesDetail = () => {
       }
       setIsLoadingEstimateOpportunity(true);
       try {
-        const linkedOpportunity = await api.get(`/sales/opportunities/${record.opportunity_id}/`, {
-          params: { include_portal_inventory: 1 },
-        });
+        const linkedOpportunity = await getOpportunity(record.opportunity_id);
         const linkedOpportunityData = linkedOpportunity?.data || linkedOpportunity || null;
         setEstimateOpportunity(linkedOpportunityData);
         const linkedEstimates = await getEstimates({ opportunity: linkedOpportunityData.id });
@@ -2740,16 +2680,24 @@ const SalesDetail = () => {
     try {
       const estimates = await getEstimates({ opportunity: record.id });
       const rows = Array.isArray(estimates?.results) ? estimates.results : Array.isArray(estimates) ? estimates : [];
-      const activeEstimate = rows.find((row) => row?.method === 'manual') || rows[0] || null;
-      if (activeEstimate?.id) {
-        const detail = await api.get(`/estimates/${activeEstimate.id}/`);
-        setEstimateSummary(detail || activeEstimate);
+      let activeEstimate = rows.find((row) => row?.method === 'manual') || rows[0] || null;
+      if (!activeEstimate) {
+        activeEstimate = getStoredDraftEstimate(record.id);
+      }
+      if (activeEstimate?.id && !String(activeEstimate.id).startsWith('draft-')) {
+        try {
+          const detail = await api.get(`/estimates/${activeEstimate.id}/`);
+          setEstimateSummary(detail?.data || detail || activeEstimate);
+        } catch {
+          setEstimateSummary(activeEstimate);
+        }
       } else {
         setEstimateSummary(activeEstimate);
       }
     } catch (err) {
       console.warn('Failed to load estimate summary:', err);
-      setEstimateSummary(null);
+      const draft = getStoredDraftEstimate(record.id);
+      setEstimateSummary(draft || null);
     }
   }, [isCreation, isLeadPath]);
 
@@ -2874,13 +2822,18 @@ const SalesDetail = () => {
   }, [toast?.text]);
 
   const fetchTimeline = async (entityType, entityId) => {
+    const recordRequestId = recordRequestRef.current;
+    const requestId = ++timelineRequestRef.current;
     try {
       const res = await getTimelineEvents({ entity_type: entityType, entity_id: entityId, limit: TIMELINE_FETCH_LIMIT });
+      if (recordRequestId !== recordRequestRef.current || requestId !== timelineRequestRef.current) return;
       const rows = asList(res?.data || res);
       setTimelineEvents(rows);
       setTimelineOffset(0);
       setHasMoreTimeline(rows.length >= TIMELINE_FETCH_LIMIT);
     } catch (err) {
+      if (recordRequestId !== recordRequestRef.current || requestId !== timelineRequestRef.current) return;
+      setWorkError('Could not load communication history. Please retry.');
       console.warn('Failed to load timeline events:', err);
       setTimelineEvents([]);
       setHasMoreTimeline(false);
@@ -2888,6 +2841,8 @@ const SalesDetail = () => {
   };
 
   const fetchUnifiedTimeline = async ({ leadId, opportunityId }) => {
+    const recordRequestId = recordRequestRef.current;
+    const requestId = ++timelineRequestRef.current;
     const requests = [];
     if (leadId) requests.push(getTimelineEvents({ entity_type: 'lead', entity_id: leadId, limit: TIMELINE_FETCH_LIMIT }));
     if (opportunityId) requests.push(getTimelineEvents({ entity_type: 'opportunity', entity_id: opportunityId, limit: TIMELINE_FETCH_LIMIT }));
@@ -2897,6 +2852,8 @@ const SalesDetail = () => {
     }
     try {
       const results = await Promise.allSettled(requests);
+      if (recordRequestId !== recordRequestRef.current || requestId !== timelineRequestRef.current) return;
+      if (results.some((result) => result.status === 'rejected')) setWorkError('Some communication history could not be loaded. Please retry.');
       const all = results.flatMap((r) => {
         if (r.status !== 'fulfilled') return [];
         return asList(r.value?.data || r.value);
@@ -2907,6 +2864,8 @@ const SalesDetail = () => {
       setTimelineOffset(0);
       setHasMoreTimeline(all.length > 0);
     } catch (err) {
+      if (recordRequestId !== recordRequestRef.current || requestId !== timelineRequestRef.current) return;
+      setWorkError('Could not load communication history. Please retry.');
       console.warn('Failed to load unified timeline:', err);
       setTimelineEvents([]);
       setHasMoreTimeline(false);
@@ -2969,6 +2928,10 @@ const SalesDetail = () => {
   }, [activeTab, isLeadPath, opportunity?.id, opportunity?.lead, opportunity?.opportunity_id, opportunity?.opportunity]);
 
   const fetchOpportunity = async () => {
+    const requestId = ++recordRequestRef.current;
+    setRecordError(null);
+    setWorkError(null);
+    setConversionReview(null);
     setEstimateOpportunity(null);
     setEstimateSummary(null);
     setIsLoadingEstimateOpportunity(false);
@@ -2981,9 +2944,11 @@ const SalesDetail = () => {
 
     try {
       if (isLeadPath) {
-        const leadData = isCanonicalRecordRoute
+        const leadResponse = isCanonicalRecordRoute
           ? await getLeadBySalesNumber(id)
           : await getLead(id);
+        const leadData = leadResponse?.data || leadResponse;
+        if (requestId !== recordRequestRef.current) return;
         if (leadData?.opportunity_id) {
           navigate(`/crm/opportunity/${leadData.sales_number || leadData.opportunity_id}`, { replace: true });
           return;
@@ -2993,12 +2958,17 @@ const SalesDetail = () => {
         return;
       }
 
-      const oppData = isCanonicalRecordRoute
+      const oppResponse = isCanonicalRecordRoute
         ? await getOpportunityBySalesNumber(id)
         : await getOpportunity(id);
+      const oppData = oppResponse?.data || oppResponse;
+      if (requestId !== recordRequestRef.current) return;
       setOpportunity(oppData);
       setEstimateOpportunity(oppData);
     } catch (err) {
+      if (requestId !== recordRequestRef.current) return;
+      const status = err.response?.status;
+      setRecordError(status === 404 ? 'This record could not be found.' : status === 403 ? 'You do not have permission to open this record.' : 'Could not load this record. Please try again.');
       console.error('Failed to fetch data:', err);
     }
   };
@@ -3048,7 +3018,7 @@ const SalesDetail = () => {
       setGatewayPayments(asList(paymentsRes).filter(p => p.status === 'pending' || p.status === 'succeeded' || p.status === 'partially_refunded' || p.status === 'refunded'));
       if (job?.id) {
         const [summaryRes, crewRes] = await Promise.all([
-          api.jobs.getJobAccountingSummary(job.id),
+          api.jobs.getJobAccountingSummary(job.id).catch(() => null),
           api.crew.getCrewMembers({ is_active: true }),
         ]);
         summary = summaryRes;
@@ -3138,9 +3108,8 @@ const SalesDetail = () => {
 
   useEffect(() => {
     if (!opportunity?.id || isCreation) return;
-    if (!['Estimate', 'Accounting', 'Documents', 'Payments'].includes(activeTab)) return;
     loadOpportunityJobs();
-  }, [activeTab, isCreation, loadOpportunityJobs, opportunity?.id]);
+  }, [isCreation, loadOpportunityJobs, opportunity?.id]);
 
   useEffect(() => {
     if (!selectedEstimateJobId) return;
@@ -3763,83 +3732,37 @@ const SalesDetail = () => {
     }
   };
 
-  const loadDependencies = async () => {
+  const loadDependencies = async (requestId = recordRequestRef.current) => {
     const fetchSafe = async (fn, setter, label) => {
       try {
         const res = await fn();
+        if (requestId !== recordRequestRef.current) return;
         setter(asList(res));
       } catch (err) {
         console.warn(`Failed to load ${label}:`, err);
+        if (requestId !== recordRequestRef.current) return;
         setter([]);
       }
     };
 
     await Promise.allSettled([
-      // Branches and users are now fetched on demand via AsyncSelect pagination
+      fetchSafe(() => isLeadPath ? getLookupEmployeesPage('', 0, 200) : getLookupUsersPage('', 0, 200), setUsers, 'staff'),
+      // Further options are fetched on demand via AsyncSelect pagination
       fetchSafe(getReferralSourceLookups, setReferralSources, 'referral sources'),
+      fetchSafe(getMoverSizeLookups, setMoverSizes, 'move sizes'),
+      fetchSafe(getMoveTypeLookups, setMoverTypes, 'company move types'),
+      fetchSafe(getServices, setServiceTypes, 'company service types'),
+      fetchSafe(getBranchLookups, setBranches, 'branches'),
     ]);
   };
 
   const loadCommunicationTemplates = async (branchId = null, channel = null) => {
     setIsLoadingCommTemplates(true);
     try {
-      const numericBranchId = Number(String(branchId || '').match(/^\s*(\d+)\s*$/)?.[1] || branchId || 0);
-      const safeBranchId = Number.isFinite(numericBranchId) && numericBranchId > 0 ? numericBranchId : null;
-      const params = { compact: 1, limit: 500 };
-      if (channel) params.channel = channel;
-      if (safeBranchId) params.branch = safeBranchId;
-      const normalizeRows = (rows, fallbackChannel) => asList(rows).map((row) => ({
-        ...row,
-        channel: String(row?.channel || fallbackChannel || '').toLowerCase(),
-        is_active: row?.is_active ?? row?.status ?? true,
-      }));
-      const fetchAllTemplatePages = async (requestParams, fallbackChannel) => {
-        const allRows = [];
-        let page = 1;
-        let safety = 0;
-        while (page && safety < 50) {
-          const response = await getCommunicationTemplates({ ...requestParams, page });
-          allRows.push(...normalizeRows(response, fallbackChannel));
-          const nextPage = getNextPageNumber(response);
-          if (!nextPage || nextPage === page) break;
-          page = nextPage;
-          safety += 1;
-        }
-        return allRows;
-      };
-      const [branchResponse, globalResponse, categoriesRes] = await Promise.all([
-        safeBranchId ? fetchAllTemplatePages({ ...params, branch: safeBranchId }, channel) : Promise.resolve([]),
-        fetchAllTemplatePages(params, channel),
-        getCommunicationTemplateCategories(safeBranchId ? { branch: safeBranchId } : params).catch(err => {
-          console.warn('Failed to load categories:', err);
-          return [];
-        })
-      ]);
-      const templates = [
-        ...normalizeRows(branchResponse, channel),
-        ...normalizeRows(globalResponse, channel),
-      ];
-      const seen = new Set();
-      const uniqueTemplates = templates.filter((template) => {
-        const templateKey = String(template?.template_key || '').trim();
-        if (template?.is_default || templateKey.startsWith('automation_notification__')) {
-          return false;
-        }
-        if (channel && String(template?.channel || '').toLowerCase() !== String(channel).toLowerCase()) {
-          return false;
-        }
-        const key = [
-          String(template?.id || ''),
-          templateKey || String(template?.name || ''),
-          String(template?.channel || ''),
-          String(template?.branch || template?.branch_id || ''),
-        ].join('::');
-        if (!key || seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-      setCommCategories(asList(categoriesRes));
-      setCommTemplates(uniqueTemplates);
+      const params = { ...(channel ? { channel } : {}), ...(branchId ? { branch_id: Number(branchId) } : {}) };
+      const response = await getComposerTemplates(params);
+      setCommTemplates(asList(response).map((row) => ({ ...row, body: row.body_text || row.body || '' })));
+      setCommCategories([]);
     } catch (err) {
       console.error('Failed to load communication templates:', err);
       setCommTemplates([]);
@@ -3878,115 +3801,37 @@ const SalesDetail = () => {
 
   useEffect(() => {
     let cancelled = false;
+    const recordId = recordRequestRef.current;
     const loadBranchStatuses = async () => {
-      const cacheKey = `status:${String(statusBranchId || 'global')}`;
-      const now = Date.now();
-      const lastRun = detailBootstrapCache.get(cacheKey) || 0;
-      if (now - lastRun < DETAIL_BOOTSTRAP_TTL_MS) return;
-      detailBootstrapCache.set(cacheKey, now);
       try {
-        const res = await getStatusCodeLookupsPage('', 0, 100);
-        if (cancelled) return;
+        const res = await (isLeadPath ? getLeadStatusCodeLookups({ limit: 100 }) : getStatusCodeLookupsPage('', 0, 100));
+        if (cancelled || recordId !== recordRequestRef.current) return;
         const rows = asList(res);
         setCustomStatusCodes(rows);
       } catch (err) {
         console.warn('Failed to load branch status codes:', err);
-        if (!cancelled) setCustomStatusCodes([]);
+        if (!cancelled && recordId === recordRequestRef.current) setCustomStatusCodes([]);
       }
     };
     loadBranchStatuses();
     return () => {
       cancelled = true;
     };
-  }, [statusBranchId]);
+  }, [statusBranchId, isLeadPath, id]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const loadBranchTypes = async () => {
-      const cacheKey = `types:${String(statusBranchId || 'global')}`;
-      const now = Date.now();
-      const lastRun = detailBootstrapCache.get(cacheKey) || 0;
-      if (now - lastRun < DETAIL_BOOTSTRAP_TTL_MS) return;
-      detailBootstrapCache.set(cacheKey, now);
-      try {
-        const params = statusBranchId ? { branch: statusBranchId } : {};
-        const [moverTypesRes, servicesRes] = await Promise.allSettled([
-          getMoveTypeLookups(params),
-          getServices(params)
-        ]);
-        if (cancelled) return;
-        
-        if (moverTypesRes.status === 'fulfilled') {
-          setMoverTypes(asList(moverTypesRes.value));
-        } else {
-          setMoverTypes([]);
-        }
-        
-        if (servicesRes.status === 'fulfilled') {
-          setServiceTypes(asList(servicesRes.value));
-        } else {
-          setServiceTypes([]);
-        }
-      } catch (err) {
-        console.warn('Failed to load branch types:', err);
-      }
-    };
-    loadBranchTypes();
-    return () => {
-      cancelled = true;
-    };
-  }, [statusBranchId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const loadOpportunityLossReasons = async () => {
-      const cacheKey = 'loss-reasons';
-      const now = Date.now();
-      const lastRun = detailBootstrapCache.get(cacheKey) || 0;
-      if (now - lastRun < DETAIL_BOOTSTRAP_TTL_MS) return;
-      detailBootstrapCache.set(cacheKey, now);
-      try {
-        const response = await getOpportunityLossReasonLookups({ limit: 100 });
-        if (cancelled) return;
-        const rows = asList(response);
-        setLostReasonOptions(rows);
-      } catch (err) {
-        console.warn('Failed to load opportunity loss reasons:', err);
-        try {
-          const fallback = await getOpportunityLossReasonLookupsPage('', 0, 100);
-          if (cancelled) return;
-          setLostReasonOptions(asList(fallback));
-        } catch (fallbackErr) {
-          console.warn('Fallback opportunity loss reason lookup failed:', fallbackErr);
-          if (!cancelled) setLostReasonOptions([]);
-        }
-      }
-    };
-    loadOpportunityLossReasons();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
 
   const loadEmailProviderStatus = async () => {
     try {
-      const [sendgridRows, resendRows, smtpRows] = await Promise.all([
-        getSendGridConfig(),
-        getResendConfig(),
-	        getSMTPConfig(),
-	      ]);
-	      const hasProvider =
-	        asList(sendgridRows).some((row) => Boolean(row?.is_active)) ||
-	        asList(resendRows).some((row) => Boolean(row?.is_active)) ||
-	        asList(smtpRows).some((row) => Boolean(row?.is_active));
-	      setHasActiveEmailProvider(hasProvider);
-	    } catch {
-      setHasActiveEmailProvider(false);
+      return await hasSendingMailbox();
+    } catch {
+      return false;
     }
   };
 
   const loadFollowUps = async (targetEntity) => {
+    const requestId = recordRequestRef.current;
+    const followUpId = ++followUpRequestRef.current;
 	    if (!targetEntity || targetEntity?.id === 'new') {
 	      setFollowUps([]);
 	      return;
@@ -4001,16 +3846,23 @@ const SalesDetail = () => {
 	        params.opportunity = targetEntity.id;
 	      }
 	      const rows = asList(await getTasks(params));
+          if (requestId !== recordRequestRef.current || followUpId !== followUpRequestRef.current) return;
 	      setFollowUps(rows);
 	    } catch {
+          if (requestId !== recordRequestRef.current || followUpId !== followUpRequestRef.current) return;
+          setWorkError('Could not load follow-ups. Please retry.');
 	      setFollowUps([]);
 	    } finally {
-	      setIsLoadingFollowUps(false);
+	      if (requestId === recordRequestRef.current && followUpId === followUpRequestRef.current) setIsLoadingFollowUps(false);
 	    }
 	  };
 
   const loadActivitiesPage = useCallback(async ({ leadId = null, opportunityId = null, offset = 0, replace = false }) => {
-    const rows = await getSalesActivities({ ...(leadId ? { lead: leadId } : { opportunity: opportunityId }), ordering: '-created_at', limit: ACTIVITY_FETCH_LIMIT, offset }).catch(() => []);
+    const requestId = recordRequestRef.current;
+    let rows;
+    try { rows = await getSalesActivities({ ...(leadId ? { lead: leadId } : { opportunity: opportunityId }), ordering: '-created_at', limit: ACTIVITY_FETCH_LIMIT, offset }); }
+    catch { if (requestId === recordRequestRef.current) setWorkError('Could not load activity history. Please retry.'); return; }
+    if (requestId !== recordRequestRef.current) return;
     const activityRows = dedupeActivityRows(asList(rows).map((row) => ({ ...row, timeline_source: leadId ? 'lead' : 'opportunity' })));
 
     if (replace) {
@@ -4050,31 +3902,28 @@ const SalesDetail = () => {
   }, [isEstimateMenuOpen]);
 
   useEffect(() => {
+    let cancelled = false;
     const run = async () => {
-      const cacheKey = [
-        id,
-        isCanonicalRecordRoute ? 'canonical' : 'direct',
-        isLeadPath ? 'lead' : 'opportunity',
-      ].join(':');
-      const now = Date.now();
-      const lastRun = detailBootstrapCache.get(cacheKey) || 0;
-      if (now - lastRun < DETAIL_BOOTSTRAP_TTL_MS) return;
-      detailBootstrapCache.set(cacheKey, now);
       setIsLoading(true);
+      setTimelineEvents([]);
+      setActivities([]);
+      setFollowUps([]);
+      setIsLoadingMoreActivities(false);
+      setIsLoadingMoreTimeline(false);
       try {
-        setTimeout(() => {
-          void loadDependencies();
-        }, 0);
-        await fetchOpportunity();
+        const fetchPromise = fetchOpportunity();
+        void loadDependencies(recordRequestRef.current);
+        await fetchPromise;
       } catch (err) {
         console.error('Failed to load sales detail page:', err);
         setOpportunity(null);
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
     run();
-  }, [id, isCanonicalRecordRoute, isLeadPath]);
+    return () => { cancelled = true; recordRequestRef.current += 1; };
+  }, [id, isCanonicalRecordRoute, isLeadPath, user?.id, user?.company_id]);
 
   useEffect(() => {
     if (activeTab !== "Sales") return;
@@ -4338,7 +4187,7 @@ const SalesDetail = () => {
           source === 'telnyx_inbound_sms' ||
           source.startsWith('inbound_sms') ||
           Boolean(payload?.inbound_sms_id) ||
-          Boolean(payload?.inbound_message_id)
+          (Boolean(payload?.inbound_message_id) && !source.includes('email') && !payload.from_email)
         );
       })
       .map((evt) => ({
@@ -4365,7 +4214,28 @@ const SalesDetail = () => {
         pinned_at: evt.pinned_at,
       }));
 
-    const emailActivities = [...(activities || [])]
+    const inboundEmailActivities = (timelineEvents || []).filter((event) => {
+      const source = String(event.source || '').toLowerCase();
+      const direction = String(event.direction || '').toLowerCase();
+      const channel = String(event.channel || event.activity_type || '').toLowerCase();
+      return source.includes('inbound_email') ||
+        Boolean(event.payload?.from_email && event.payload?.inbound_message_id) ||
+        (direction === 'inbound' && channel === 'email');
+    }).map((event) => ({
+      id: `inbound-email-${event.id}`, activity_type: 'email', direction: 'inbound',
+      timeline_source: 'inbound_email', inbound_message_id: event.payload?.inbound_message_id || event.id,
+      communication_message_id: event.channel === 'email' ? event.id : undefined,
+      conversation_id: event.conversation_id,
+      attachments: event.attachments || [],
+      subject: event.payload?.subject || event.subject || event.title || 'Inbound email',
+      description: event.payload?.body_text || event.body_text || event.summary || '',
+      content: event.payload?.body_text || event.body_text || event.summary || '',
+      body_text: event.payload?.body_text || event.body_text || '',
+      body_html: event.payload?.body_html || event.body_html || '',
+      payload: event.payload || {}, created_at: event.created_at,
+      user_details: { email: event.payload?.from_email || event.sender_address || 'Inbound' },
+    }));
+    const emailActivities = [...(activities || []), ...inboundEmailActivities]
       .filter((item) => String(item?.activity_type || '').toLowerCase() === 'email')
       .map((item) => ({ ...item, email_thread_key: buildEmailThreadKey(item) }));
     const nonEmailActivities = [...(activities || []), ...warningActivities, ...inboundSmsActivities]
@@ -4436,6 +4306,7 @@ const SalesDetail = () => {
     if (!hasMoreActivities && !hasMoreTimeline) return;
     if (isLoadingMoreActivities || isLoadingMoreTimeline) return;
     if (!opportunity) return;
+    const requestId = recordRequestRef.current;
 
     if (hasMoreActivities) {
       setIsLoadingMoreActivities(true);
@@ -4443,7 +4314,8 @@ const SalesDetail = () => {
         const nextOffset = activityOffset + ACTIVITY_FETCH_LIMIT;
         let fetchedAny = false;
         const params = isLeadPath ? { lead: opportunity?.id } : { opportunity: opportunity?.id };
-        const rows = dedupeActivityRows(asList(await getSalesActivities({ ...params, ordering: '-created_at', limit: ACTIVITY_FETCH_LIMIT, offset: nextOffset }).catch(() => [])));
+        const rows = dedupeActivityRows(asList(await getSalesActivities({ ...params, ordering: '-created_at', limit: ACTIVITY_FETCH_LIMIT, offset: nextOffset })));
+        if (requestId !== recordRequestRef.current) return;
         if (rows.length) {
           fetchedAny = true;
           setActivities(prev => mergeTimelineActivities({
@@ -4454,9 +4326,10 @@ const SalesDetail = () => {
         if (!fetchedAny) setHasMoreActivities(false);
         else setActivityOffset(nextOffset);
       } catch(err) {
+        if (requestId === recordRequestRef.current) setWorkError('Could not load more activity history. Please retry.');
         console.warn(err);
       } finally {
-        setIsLoadingMoreActivities(false);
+        if (requestId === recordRequestRef.current) setIsLoadingMoreActivities(false);
       }
       return;
     }
@@ -4480,7 +4353,9 @@ const SalesDetail = () => {
 
         if (requests.length) {
           const results = await Promise.allSettled(requests);
-          const all = results.flatMap((r) => {
+          if (requestId !== recordRequestRef.current) return;
+          if (results.some((result) => result.status === 'rejected')) { setWorkError('Could not load more communication history. Please retry.'); return; }
+      const all = results.flatMap((r) => {
             if (r.status !== 'fulfilled') return [];
             return asList(r.value?.data || r.value);
           });
@@ -4494,9 +4369,10 @@ const SalesDetail = () => {
           setHasMoreTimeline(false);
         }
       } catch (err) {
+        if (requestId === recordRequestRef.current) setWorkError('Could not load more communication history. Please retry.');
         console.warn(err);
       } finally {
-        setIsLoadingMoreTimeline(false);
+        if (requestId === recordRequestRef.current) setIsLoadingMoreTimeline(false);
       }
     }
   }, [
@@ -4634,7 +4510,7 @@ const SalesDetail = () => {
       : structuredSummary;
     setIsPosting(true);
     try {
-      await api.patch(`/sales/call-logs/${callLogId}/`, {
+      if (!isLeadPath) await api.patch(`/sales/call-logs/${callLogId}/`, {
         duration_seconds: durationSeconds,
         disposition: callLogDraft.disposition,
       });
@@ -4653,6 +4529,7 @@ const SalesDetail = () => {
   }, [callLogDraft.disposition, callLogDraft.duration_minutes, callLogDraft.direction, callLogDraft.notes, closeCallLogModal, editingCallLog, fetchOpportunity, setToast]);
 
   const deleteCallLog = useCallback(async (activity) => {
+    if (isLeadPath) return denyAction('Call deletion is not available. You can edit its notes instead.');
     if (!canManageActivityHistory()) {
       return denyAction('You do not have permission to delete call logs.');
     }
@@ -4853,8 +4730,15 @@ const SalesDetail = () => {
   }, [communicationRecipients.phones]);
   
   const routePoints = useMemo(() => {
-    return buildSalesRouteStops(opportunity, isLeadPath, view);
-  }, [opportunity, view, isLeadPath]);
+    const routeRecord = opportunity;
+    const selectedJob = opportunityJobs.find((job) => String(job.id) === String(selectedEstimateJobId))
+      || opportunityJobs.find((job) => job?.is_primary)
+      || opportunityJobs[0];
+    const recordWithJobStops = selectedJob && Array.isArray(selectedJob.stops)
+      ? { ...routeRecord, stops: selectedJob.stops }
+      : routeRecord;
+    return buildSalesRouteStops(recordWithJobStops, isLeadPath, view);
+  }, [estimateOpportunity, isLeadPath, opportunity, opportunityJobs, selectedEstimateJobId, view]);
 
   const isSalesRouteEditable = !isLeadPath && !isCreation && opportunity?.id && opportunity.id !== 'new';
 
@@ -5141,30 +5025,15 @@ const SalesDetail = () => {
     }
   };
 
-  const workflowActions = useMemo(
-    () => {
-      const actions = buildWorkflowActions({
-        isLead: view.isLead,
-        isNewRecord: opportunity?.id === 'new',
-        workflowStage: opportunity?.workflow_stage,
-        estimateSummary,
-        canDuplicateOpportunity: canDuplicateOpportunity(),
-        canBookOpportunity: canBookOpportunity(),
-        canMarkOpportunityLost: canMarkOpportunityLost(),
-        canCreateOpportunity: canCreateOpportunity(),
-        canEditOpportunity: canEditOpportunity(),
-      });
-      return actions;
-    },
-    [canBookOpportunity, canCreateOpportunity, canDuplicateOpportunity, canEditOpportunity, canMarkOpportunityLost, estimateSummary, opportunity?.id, opportunity?.workflow_stage, view.isLead]
-  );
+  const workflowActions = useMemo(() => getRecordWorkflowActions(opportunity, {
+    isLead: view.isLead, hasPermission,
+  }), [opportunity, view.isLead, hasPermission]);
 
   const accountingEnabled = useMemo(() => {
     if (isCreation) return false;
-    const stage = String(opportunity?.workflow_stage || '').toLowerCase();
-    // Accounting is only relevant once the opportunity is booked into a job (and later stages).
-    return ['booked', 'confirmed', 'completed', 'canceled'].includes(stage);
-  }, [isCreation, opportunity?.workflow_stage]);
+    const stage = getRecordSystemState(opportunity);
+    return ['booked', 'completed', 'closed', 'cancelled'].includes(stage);
+  }, [isCreation, opportunity]);
 
   useEffect(() => {
     if (activeTab !== 'Accounting') return;
@@ -5433,17 +5302,20 @@ const SalesDetail = () => {
   };
 
   const removeAdditionalContactForm = async (indexToRemove) => {
+    if (!requiresAnyPermission([PERMISSIONS.LEAD_EDIT, PERMISSIONS.SALES_CHANGE_OPPORTUNITY])) {
+      return denyAction('You do not have permission to edit contacts.');
+    }
     const formToRemove = additionalContactForms[indexToRemove];
     if (!formToRemove) return;
 
     if (formToRemove.id) {
       try {
         setIsAdditionalContactsSaving(true);
-        await deleteCustomerContact(formToRemove.id);
-        
         const customerId = resolveCustomerId(getRecordCustomerDetails(opportunity), opportunity?.customer_id, opportunity?.customer);
+        if (!customerId) throw new Error('Customer record is missing.');
+        await deleteCustomerContact(formToRemove.id, customerId);
         const currentContacts = getRecordCustomerDetails(opportunity)?.contacts || [];
-        const nextContacts = currentContacts.filter(c => c.id !== formToRemove.id);
+        const nextContacts = currentContacts.filter(c => String(c.id) !== String(formToRemove.id));
 
         const updatedCustomer = { ...getRecordCustomerDetails(opportunity), contacts: nextContacts };
         
@@ -5501,9 +5373,6 @@ const SalesDetail = () => {
     if (!requiresAnyPermission([PERMISSIONS.LEAD_EDIT, PERMISSIONS.SALES_CHANGE_OPPORTUNITY])) {
       return denyAction('You do not have permission to edit contacts.');
     }
-    if (!requiresAnyPermission([PERMISSIONS.LEAD_EDIT, PERMISSIONS.SALES_CHANGE_OPPORTUNITY])) {
-      return denyAction('You do not have permission to edit contacts.');
-    }
 
     let customerId = resolveCustomerId(getRecordCustomerDetails(opportunity), opportunity?.customer_id, opportunity?.customer);
     if (!customerId) {
@@ -5557,8 +5426,7 @@ const SalesDetail = () => {
         }
 
         const rowId = String(row.id || '').trim();
-        const existingContact =
-          currentContacts.find((contact) => String(contact?.id || '') === rowId) || currentContacts[index] || null;
+        const existingContact = currentContacts.find((contact) => String(contact?.id || '') === rowId) || null;
         const contactId = Number(rowId || existingContact?.id || 0) || null;
         const contactChanged =
           String(contactPayload.name || '') !== String(existingContact?.name || '') ||
@@ -5569,7 +5437,7 @@ const SalesDetail = () => {
 
         if (contactId) {
           if (contactChanged) {
-            const savedContact = await updateCustomerContact(contactId, contactPayload);
+            const savedContact = await updateCustomerContact(contactId, contactPayload, customerId);
             savedContacts.push(savedContact);
             syncSavedCustomerContact(savedContact, customerId);
           }
@@ -5613,9 +5481,13 @@ const SalesDetail = () => {
     };
 
     if (isLeadPath) {
+      const leadNameParts = String(
+        record.full_name || record.customer_name || record.lead_name || record.name ||
+        record.contact_name || record.customer?.full_name || ''
+      ).trim().split(/\s+/).filter(Boolean);
       setForm({
-        first_name: record.first_name || '',
-        last_name: record.last_name || '',
+        first_name: record.first_name || leadNameParts[0] || '',
+        last_name: record.last_name || leadNameParts.slice(1).join(' '),
         email: record.email || '',
         phone: record.phone || '',
         status: record.status || 'new',
@@ -5742,8 +5614,6 @@ const SalesDetail = () => {
     if (!String(target.branch || '').trim()) gaps.push('Branch');
     if (!String(target.service_type || '').trim()) gaps.push('Service type');
     if (!String(target.move_type || '').trim()) gaps.push('Move type');
-    if (!String(target.origin_street || '').trim()) gaps.push('Origin address');
-    if (!String(target.destination_street || '').trim()) gaps.push('Destination address');
     return gaps;
   }
 
@@ -5754,8 +5624,6 @@ const SalesDetail = () => {
     if (!String(target.branch || '').trim()) return 'Please select a branch.';
     if (!String(target.service_type || '').trim()) return 'Please select a service type.';
     if (!String(target.move_type || '').trim()) return 'Please select a move type.';
-    if (!String(target.origin_street || '').trim()) return 'Origin address is required.';
-    if (!String(target.destination_street || '').trim()) return 'Destination address is required.';
     return null;
   }
 
@@ -5853,7 +5721,11 @@ const SalesDetail = () => {
             customer_details: {
               ...(opportunity?.customer_details || {}),
               ...updatedCustomer,
-              primary_phone: updatedCustomer?.primary_phone || payload.phone,
+              full_name: updatedCustomer?.full_name || `${payload.first_name} ${payload.last_name}`.trim(),
+              first_name: payload.first_name,
+              last_name: payload.last_name,
+              email: updatedCustomer?.email ?? payload.email,
+              primary_phone: updatedCustomer?.primary_phone ?? payload.phone,
             },
           };
           syncSavedOpportunity(nextOpportunity);
@@ -5885,8 +5757,14 @@ const SalesDetail = () => {
 
   const handleCustomerInlineSave = async (field, value) => {
     const previousDraft = customerDraft;
+    const currentCustomer = getRecordCustomerDetails(opportunity);
+    const nameParts = String(currentCustomer?.full_name || currentCustomer?.profile_name || '').trim().split(/\s+/);
     const updatedDraft = {
       ...form,
+      first_name: currentCustomer?.first_name || nameParts[0] || form.first_name,
+      last_name: currentCustomer?.last_name || nameParts.slice(1).join(' ') || form.last_name,
+      email: currentCustomer?.email ?? form.email,
+      phone: currentCustomer?.primary_phone ?? currentCustomer?.phone ?? form.phone,
       ...(customerDraft || {}),
       [field]: value,
     };
@@ -5937,7 +5815,7 @@ const SalesDetail = () => {
 
     const payload = isLeadPath
       ? {
-          origin_address_line1: String(routeDraft?.origin_street || '').trim(),
+          origin_street: String(routeDraft?.origin_street || '').trim(),
           origin_city: originCity,
           origin_state: originState,
           origin_zip: originZip,
@@ -5947,7 +5825,7 @@ const SalesDetail = () => {
           origin_flights_of_stairs: Number(routeDraft?.origin_flights_of_stairs || 0),
           origin_has_elevator: Boolean(routeDraft?.origin_has_elevator),
           origin_walk_distance_ft: Number(routeDraft?.origin_walk_distance_ft || 0),
-          destination_address_line1: String(routeDraft?.destination_street || '').trim(),
+          destination_street: String(routeDraft?.destination_street || '').trim(),
           destination_city: destCity,
           destination_state: destState,
           destination_zip: destZip,
@@ -5984,10 +5862,128 @@ const SalesDetail = () => {
     setIsRouteSaving(true);
     setToast({ type: '', text: '' });
     try {
-      const updated = isLeadPath
-        ? await updateLead(opportunity.id, payload)
-        : await updateOpportunity(opportunity.id, payload);
-      syncSavedOpportunity(updated);
+      let updated;
+      if (isLeadPath) {
+        updated = await updateLead(opportunity.id, payload);
+      } else {
+        const selectedJob = opportunityJobs.find((job) => String(job.id) === String(selectedEstimateJobId))
+          || opportunityJobs.find((job) => job?.is_primary)
+          || opportunityJobs[0];
+        if (!selectedJob?.id) {
+          throw new Error('A planned job is required before route addresses can be saved.');
+        }
+
+        const saveEndpoint = async (type, fields) => {
+          const existingStop = routePoints.find((stop) => stop?.type === type);
+          const stopPayload = {
+            stop_type: type,
+            address_line1: fields.address_line1,
+            city: fields.city,
+            state: fields.state,
+            zip_code: fields.zip_code,
+            unit_number: fields.unit_number,
+            property_type: fields.property_type,
+            parking_type: fields.parking_type,
+            flights_of_stairs: fields.flights_of_stairs,
+            has_elevator: fields.has_elevator,
+            walk_distance_ft: fields.walk_distance_ft,
+            sort_order: type === 'origin' ? 0 : Math.max(routePoints.length - 1, 1),
+          };
+          if (isDatabaseRouteStopId(existingStop?.id)) {
+            return updateOpportunityJobStop(opportunity.id, selectedJob.id, existingStop.id, stopPayload);
+          }
+          return createOpportunityJobStop(opportunity.id, selectedJob.id, stopPayload);
+        };
+
+        const [savedOrigin, savedDestination] = await Promise.all([
+          saveEndpoint('origin', {
+            address_line1: payload.origin_address_line1,
+            city: payload.origin_city,
+            state: payload.origin_state,
+            zip_code: payload.origin_postal_code,
+            unit_number: payload.origin_unit_number || '',
+            property_type: payload.origin_property_type || '',
+            parking_type: payload.origin_parking_type || '',
+            flights_of_stairs: payload.origin_flights_of_stairs,
+            has_elevator: payload.origin_has_elevator,
+            walk_distance_ft: payload.origin_walk_distance_ft,
+          }),
+          saveEndpoint('destination', {
+            address_line1: payload.destination_address_line1,
+            city: payload.destination_city,
+            state: payload.destination_state,
+            zip_code: payload.destination_postal_code,
+            unit_number: payload.destination_unit_number || '',
+            property_type: payload.destination_property_type || '',
+            parking_type: payload.destination_parking_type || '',
+            flights_of_stairs: payload.destination_flights_of_stairs,
+            has_elevator: payload.destination_has_elevator,
+            walk_distance_ft: payload.destination_walk_distance_ft,
+          }),
+        ]);
+        const normalizedSavedStops = [savedOrigin, savedDestination].map((response) => response?.data || response);
+        setOpportunityJobs((prev) => prev.map((job) => String(job.id) === String(selectedJob.id)
+          ? {
+              ...job,
+              stops: [
+                ...(Array.isArray(job.stops) ? job.stops : []).filter((stop) => !['origin', 'destination'].includes(stop?.stop_type || stop?.type)),
+                ...normalizedSavedStops,
+              ],
+            }
+          : job));
+        updated = {};
+      }
+      const savedOriginStreet = payload.origin_street ?? payload.origin_address_line1 ?? '';
+      const savedOriginZip = payload.origin_zip ?? payload.origin_postal_code ?? '';
+      const savedDestinationStreet = payload.destination_street ?? payload.destination_address_line1 ?? '';
+      const savedDestinationZip = payload.destination_zip ?? payload.destination_postal_code ?? '';
+      // Some update responses contain a stale serialized address relation. Keep
+      // the values the user just saved authoritative until the next full fetch.
+      syncSavedOpportunity({
+        ...(updated || {}),
+        ...payload,
+        origin_address_details: {
+          ...(opportunity?.origin_address_details || {}),
+          ...(updated?.origin_address_details || {}),
+          address_line1: savedOriginStreet,
+          city: payload.origin_city || '',
+          state: payload.origin_state || '',
+          zip_code: savedOriginZip,
+          postal_code: savedOriginZip,
+        },
+        destination_address_details: {
+          ...(opportunity?.destination_address_details || {}),
+          ...(updated?.destination_address_details || {}),
+          address_line1: savedDestinationStreet,
+          city: payload.destination_city || '',
+          state: payload.destination_state || '',
+          zip_code: savedDestinationZip,
+          postal_code: savedDestinationZip,
+        },
+      });
+      setForm((prev) => ({
+        ...prev,
+        origin_street: payload.origin_street ?? payload.origin_address_line1 ?? '',
+        origin_city: payload.origin_city || '',
+        origin_state: payload.origin_state || '',
+        origin_zip: payload.origin_zip ?? payload.origin_postal_code ?? '',
+        origin_unit_number: payload.origin_unit_number || '',
+        origin_property_type: payload.origin_property_type || '',
+        origin_parking_type: payload.origin_parking_type || '',
+        origin_flights_of_stairs: payload.origin_flights_of_stairs || 0,
+        origin_has_elevator: Boolean(payload.origin_has_elevator),
+        origin_walk_distance_ft: payload.origin_walk_distance_ft || 0,
+        destination_street: payload.destination_street ?? payload.destination_address_line1 ?? '',
+        destination_city: payload.destination_city || '',
+        destination_state: payload.destination_state || '',
+        destination_zip: payload.destination_zip ?? payload.destination_postal_code ?? '',
+        destination_unit_number: payload.destination_unit_number || '',
+        destination_property_type: payload.destination_property_type || '',
+        destination_parking_type: payload.destination_parking_type || '',
+        destination_flights_of_stairs: payload.destination_flights_of_stairs || 0,
+        destination_has_elevator: Boolean(payload.destination_has_elevator),
+        destination_walk_distance_ft: payload.destination_walk_distance_ft || 0,
+      }));
       setIsRouteEditing(false);
       setRouteDraft(null);
       setToast({ type: 'success', text: 'Route details saved successfully.' });
@@ -6018,7 +6014,7 @@ const SalesDetail = () => {
 
     setSpecsDraft(updatedDraft);
     setSpecsDraftLabels(updatedLabels);
-    await saveSpecsSection(updatedDraft);
+    return saveSpecsSection(updatedDraft);
   };
 
   const saveSpecsSection = async (inlinePayload = null) => {
@@ -6032,7 +6028,7 @@ const SalesDetail = () => {
     const validationError = validateSpecsSection(draftToSave);
     if (validationError) {
       setToast({ type: 'error', text: validationError });
-      return;
+      return false;
     }
 
     const changed = (key) => String(draftToSave?.[key] ?? '') !== String(form?.[key] ?? '');
@@ -6051,13 +6047,13 @@ const SalesDetail = () => {
       payload.move_type = resolvedMoveTypeId || null;
     }
     if (changed('move_size')) {
-      if (isLeadPath) payload.move_size = resolveMoveSizeName(draftToSave?.move_size, moverSizes);
+      if (isLeadPath) payload.move_size_id = draftToSave?.move_size ? Number(draftToSave.move_size) : null;
       else payload.mover_size = draftToSave?.move_size ? Number(draftToSave.move_size) : null;
     }
     if (changed('branch')) payload.branch = branchId ? Number(branchId) : null;
     if (changed('assigned_to')) {
       const assignedUserId = selectedAssignedUserId ? Number(selectedAssignedUserId) : null;
-      if (isLeadPath) payload.assigned_to = assignedUserId;
+      if (isLeadPath) payload.assigned_employee_id = assignedUserId;
       else payload.assigned_user = assignedUserId;
     }
     if (changed('referral_source')) payload.referral_source = draftToSave?.referral_source ? Number(draftToSave.referral_source) : null;
@@ -6082,8 +6078,10 @@ const SalesDetail = () => {
       setSpecsDraft(null);
       setToast({ type: 'success', text: 'Details saved successfully.' });
       setTimeout(() => setToast({ type: '', text: '' }), 2500);
+      return true;
     } catch (err) {
       setToast({ type: 'error', text: getErrorMessage(err, 'Failed to save lead/opportunity details.') });
+      return false;
     } finally {
       setIsSpecsSaving(false);
     }
@@ -6105,7 +6103,25 @@ const SalesDetail = () => {
   };
 
   const startRouteEdit = () => {
-    setRouteDraft(buildRouteFieldsFromRecord(opportunity, isLeadPath));
+    const draft = buildRouteFieldsFromRecord(opportunity, isLeadPath);
+    const applyStop = (type, prefix) => {
+      const stop = routePoints.find((item) => item?.type === type);
+      if (!stop) return;
+      const details = stop.details || {};
+      draft[`${prefix}_street`] = details.address_line1 || stop.address || draft[`${prefix}_street`] || '';
+      draft[`${prefix}_city`] = details.city || draft[`${prefix}_city`] || '';
+      draft[`${prefix}_state`] = details.state || draft[`${prefix}_state`] || '';
+      draft[`${prefix}_zip`] = details.zip_code || details.postal_code || draft[`${prefix}_zip`] || '';
+      draft[`${prefix}_unit_number`] = details.unit_number || draft[`${prefix}_unit_number`] || '';
+      draft[`${prefix}_property_type`] = details.property_type || draft[`${prefix}_property_type`] || '';
+      draft[`${prefix}_parking_type`] = details.parking_type || draft[`${prefix}_parking_type`] || '';
+      draft[`${prefix}_flights_of_stairs`] = details.flights_of_stairs ?? draft[`${prefix}_flights_of_stairs`] ?? 0;
+      draft[`${prefix}_has_elevator`] = details.has_elevator ?? draft[`${prefix}_has_elevator`] ?? false;
+      draft[`${prefix}_walk_distance_ft`] = details.walk_distance_ft ?? draft[`${prefix}_walk_distance_ft`] ?? 0;
+    };
+    applyStop('origin', 'origin');
+    applyStop('destination', 'destination');
+    setRouteDraft(draft);
     setIsRouteEditing(true);
   };
 
@@ -6345,7 +6361,7 @@ const SalesDetail = () => {
     isLeadPath,
     draftArrivalWindowStart: moveDateDraft?.arrival_window_start || opportunity?.arrival_window_start || '',
     draftArrivalWindowEnd: moveDateDraft?.arrival_window_end || opportunity?.arrival_window_end || '',
-    onArrivalWindowChange: (start, end) => setMoveDateDraft((p) => ({ ...(p || {}), arrival_window_start: start, arrival_window_end: end })),
+    onArrivalWindowChange: isLeadPath ? undefined : (start, end) => setMoveDateDraft((p) => ({ ...(p || {}), arrival_window_start: start, arrival_window_end: end })),
     availabilityData,
     isAvailabilityLoading,
     branchName: opportunity?.branch_details?.name,
@@ -6399,16 +6415,32 @@ const SalesDetail = () => {
     if (!opportunity?.id || opportunity.id === 'new') return;
 
     if (actionKey === 'send_estimate') {
-      navigateToEstimateSubTab('charges');
-      setSendEstimateNonce((v) => v + 1);
+      setActiveTab('Documents');
+      navigateToDetailTab('Documents');
       return;
     }
 
-    if ((actionKey === 'lost' || actionKey === 'cancel') && !String(reasonOverride || '').trim()) {
+    const permitted = getRecordWorkflowActions(opportunity, { isLead: view.isLead, hasPermission });
+    if (!permitted.some((action) => action.key === actionKey)) {
+      setToast({ type: 'error', text: 'This action is not available for the current status or permissions.' });
+      return;
+    }
+    if (['lost', 'cancel', 'disqualify', 'restore'].includes(actionKey) && !String(reasonOverride || '').trim()) {
       setSelectedLostReason('');
       setReasonText('');
       setReasonAction(actionKey);
-      setIsReasonModalOpen(true);
+      setLostReasonOptions([]);
+      if (actionKey === 'restore') { setIsReasonModalOpen(true); return; }
+      try {
+        const response = await (actionKey === 'cancel' ? getCancellationReasons()
+          : actionKey === 'disqualify' ? getDisqualificationReasons()
+          : getOpportunityLossReasonLookups({ active: true }));
+        setLostReasonOptions(asList(response).filter((row) => row.is_active !== false &&
+          (actionKey !== 'lost' || !row.applies_to || row.applies_to === 'both' || row.applies_to === (view.isLead ? 'lead' : 'opportunity'))));
+        setIsReasonModalOpen(true);
+      } catch (error) {
+        setToast({ type: 'error', text: getErrorMessage(error, 'Could not load reasons. Please retry.') });
+      }
       return;
     }
 
@@ -6424,31 +6456,27 @@ const SalesDetail = () => {
           lost_reason_id: Number(selectedLostReason),
           note: String(reasonText || '').trim(),
         });
+      } else if (view.isLead && actionKey === 'disqualify') {
+        updated = await disqualifyLead(opportunity.id, { disqualification_reason_id: Number(selectedLostReason), note: String(reasonText || '').trim() });
+      } else if (view.isLead && actionKey === 'restore') {
+        updated = await restoreLead(opportunity.id, { reason: workflowReason });
+      } else if (view.isLead && actionKey === 'archive') {
+        updated = await archiveLead(opportunity.id, 'Archived from CRM detail page');
+      } else if (view.isLead && ['start', 'qualify'].includes(actionKey)) {
+        updated = await (actionKey === 'start' ? startLead(opportunity.id) : qualifyLead(opportunity.id));
       } else if (view.isLead && actionKey === 'reopen') {
         setLostReasonOverride('');
         updated = await reopenLead(opportunity.id, { reason: 'Reopened from CRM detail page' });
       } else if (actionKey === 'book') {
+        setBookingOverrides([]);
+        setBookingOverrideReason('');
+        setBookingReadiness(await getOpportunityBookingReadiness(opportunity.id));
         setIsBookJobModalOpen(true);
         setIsSaving(false);
         return;
-      } else if (actionKey === 'confirm') {
-        updated = await confirmOpportunityJob(opportunity.id);
-        try {
-          const jobs = await api.jobs.getJobs({ opportunity: opportunity.id });
-          const rows = Array.isArray(jobs?.results) ? jobs.results : Array.isArray(jobs) ? jobs : [];
-          const job = rows[0] || null;
-          if (job?.id) {
-            navigate(`/jobs/${job.id}`);
-            return;
-          }
-          navigate('/jobs');
-          return;
-        } catch {
-          // If dispatch lookup fails, fall back to current page and normal refresh.
-        }
       } else if (actionKey === 'cancel') {
         updated = await cancelOpportunityJob(opportunity.id, {
-          reason: workflowReason || 'Canceled from CRM detail page',
+          cancellation_reason_id: Number(selectedLostReason), note: String(reasonText || '').trim(),
         });
       } else if (actionKey === 'unbook') {
         setUnbookReason(workflowReason || '');
@@ -6461,7 +6489,7 @@ const SalesDetail = () => {
       } else if (actionKey === 'lost') {
         setLostReasonOverride(workflowReason || 'Marked lost from CRM detail page');
         updated = await markOpportunityLost(opportunity.id, {
-          reason: workflowReason || 'Marked lost from CRM detail page',
+          lost_reason_id: Number(selectedLostReason), note: String(reasonText || '').trim(),
         });
       } else if (actionKey === 'reopen') {
         setLostReasonOverride('');
@@ -6470,15 +6498,21 @@ const SalesDetail = () => {
         return;
       }
 
-      if (actionKey === 'lost' || actionKey === 'cancel') {
+      if (['lost', 'cancel', 'disqualify', 'restore'].includes(actionKey)) {
         setIsReasonModalOpen(false);
         setReasonAction('');
         setSelectedLostReason('');
         setReasonText('');
       }
 
-      setOpportunity(updated);
-      await fetchOpportunity();
+      if (view.isLead) {
+        // The command returns the persisted lifecycle state. Preserve detail
+        // fields and avoid replacing it with an older follow-up GET response.
+        setOpportunity((previous) => ({ ...previous, ...updated }));
+      } else {
+        setOpportunity(updated);
+        await fetchOpportunity();
+      }
       setToast({ type: 'success', text: 'Workflow updated successfully.' });
       setTimeout(() => setToast({ type: '', text: '' }), 2500);
     } catch (err) {
@@ -6488,23 +6522,45 @@ const SalesDetail = () => {
     }
   };
 
-  const handleCreateEstimate = useCallback(async () => {
+  const handleAdvanceLead = useCallback(async () => {
+    setIsSaving(true);
+    try {
+      const state = getRecordSystemState(opportunity, true);
+      const allowed = getRecordWorkflowActions(opportunity, { isLead: true, hasPermission }).some((action) => action.key === (state === 'new' ? 'start' : 'qualify'));
+      if (!allowed) throw new Error('This lead transition is not available.');
+      const updated = await (state === 'new' ? startLead(opportunity.id) : qualifyLead(opportunity.id));
+      setOpportunity((previous) => ({ ...previous, ...updated }));
+      setToast({ type: 'success', text: state === 'new' ? 'Lead started.' : 'Lead qualified. You can now convert it to an opportunity.' });
+    } catch (error) { setToast({ type: 'error', text: getErrorMessage(error, 'Could not update the lead workflow.') }); }
+    finally { setIsSaving(false); }
+  }, [opportunity, hasPermission]);
+
+  const handleCreateEstimate = useCallback(async (options = {}) => {
     if (!opportunity?.id || opportunity.id === 'new') return;
+    if (!hasPermission('leads.convert')) { setToast({ type: 'error', text: 'You do not have permission to convert this lead.' }); return; }
+    if (getRecordSystemState(opportunity, true) !== 'qualified') { setToast({ type: 'error', text: 'Qualify this lead before converting it to an opportunity.' }); return; }
     setIsSaving(true);
     setToast({ type: '', text: '' });
     try {
-      const res = await convertLead(opportunity.id);
+      const reviewOptions = options.customer_id ? { customer_id: options.customer_id } : options.create_new_customer ? { create_new_customer: true } : {};
+      const res = await convertLead(opportunity.id, reviewOptions);
+      setConversionReview(null);
       const convertedOpportunity = res?.opportunity || res?.data?.opportunity || null;
       const oppId = convertedOpportunity?.id;
-      setToast({ type: 'success', text: 'Lead converted! Opening estimate...' });
+      setToast({ type: 'success', text: 'Lead converted. Opening the opportunity...' });
       if (convertedOpportunity) {
-        navigate(getRecordEstimateTabPath('opportunity', convertedOpportunity, 'charges'));
+        navigate(getLegacyRecordEstimateTabPath('opportunity', convertedOpportunity.id, 'charges'));
       } else if (oppId) {
         navigate(getLegacyRecordEstimateTabPath('opportunity', oppId, 'charges'));
       } else {
         navigate(getRecordListPath('opportunity'));
       }
     } catch (err) {
+      if (err.response?.data?.error === 'customer_review_required') {
+        setConversionReview(err.response.data.candidates || []);
+        setIsSaving(false);
+        return;
+      }
       console.error('Lead conversion failed:', {
         leadId: opportunity?.id,
         responseStatus: err?.response?.status,
@@ -6513,7 +6569,7 @@ const SalesDetail = () => {
       setToast({ type: 'error', text: getErrorMessage(err, 'Failed to convert lead.') });
       setIsSaving(false);
     }
-  }, [navigate, opportunity?.id]);
+  }, [navigate, opportunity, hasPermission]);
 
   const saveEstimateRequirementsToOpportunity = useCallback(async (target) => {
     if (isLeadPath || !opportunity?.id || opportunity.id === 'new') {
@@ -6547,62 +6603,21 @@ const SalesDetail = () => {
       }
     }
 
-    let originCity = String(target.origin_city || '').trim();
-    let originState = String(target.origin_state || '').trim();
-    let originZip = String(target.origin_zip || '').trim();
-    if (!originCity || !originState || !originZip) {
-      const parsed = parseAddressString(target.origin_street);
-      if (!originCity) originCity = parsed.city;
-      if (!originState) originState = parsed.state;
-      if (!originZip) originZip = parsed.postal_code;
-    }
-
-    let destCity = String(target.destination_city || '').trim();
-    let destState = String(target.destination_state || '').trim();
-    let destZip = String(target.destination_zip || '').trim();
-    if (!destCity || !destState || !destZip) {
-      const parsed = parseAddressString(target.destination_street);
-      if (!destCity) destCity = parsed.city;
-      if (!destState) destState = parsed.state;
-      if (!destZip) destZip = parsed.postal_code;
-    }
-
     const resolvedServiceTypeId = normalizeLookupValue(target.service_type);
     const resolvedMoveTypeId = normalizeLookupValue(target.move_type);
 
     await updateOpportunity(opportunity.id, omitBlankStrings({
-      customer: finalCustomerId ? Number(finalCustomerId) : null,
       service_type: resolvedServiceTypeId || null,
       move_date: target.move_date || null,
       arrival_window_start: target.arrival_window_start || null,
       arrival_window_end: target.arrival_window_end || null,
       mover_size: target.move_size ? Number(target.move_size) : null,
       move_type: resolvedMoveTypeId || null,
-      branch: target.branch ? Number(target.branch) : null,
-      assigned_user: target.assigned_to ? Number(target.assigned_to) : null,
+      ...(String(target.branch || '') !== String(form.branch || '') ? { branch: target.branch ? Number(target.branch) : null } : {}),
+      ...(String(target.assigned_to || '') !== String(form.assigned_to || '') ? { assigned_user: target.assigned_to ? Number(target.assigned_to) : null } : {}),
       referral_source: target.referral_source ? Number(target.referral_source) : null,
       utm_source: target.utm_source,
       notes_internal: target.notes,
-      origin_address_line1: String(target.origin_street || '').trim(),
-      origin_city: originCity,
-      origin_state: originState,
-      origin_postal_code: originZip,
-      destination_address_line1: String(target.destination_street || '').trim(),
-      destination_city: destCity,
-      destination_state: destState,
-      destination_postal_code: destZip,
-      origin_unit_number: target.origin_unit_number,
-      origin_property_type: target.origin_property_type,
-      origin_parking_type: target.origin_parking_type,
-      origin_flights_of_stairs: target.origin_flights_of_stairs,
-      origin_has_elevator: target.origin_has_elevator,
-      origin_walk_distance_ft: target.origin_walk_distance_ft,
-      destination_unit_number: target.destination_unit_number,
-      destination_property_type: target.destination_property_type,
-      destination_parking_type: target.destination_parking_type,
-      destination_flights_of_stairs: target.destination_flights_of_stairs,
-      destination_has_elevator: target.destination_has_elevator,
-      destination_walk_distance_ft: target.destination_walk_distance_ft,
     }));
 
     setForm((prev) => ({ ...prev, ...target }));
@@ -6610,10 +6625,20 @@ const SalesDetail = () => {
   }, [fetchOpportunity, isLeadPath, opportunity]);
 
   const createOpportunityEstimateRecord = useCallback(async () => {
-    const res = await createEstimate({
-      opportunity: opportunity.id,
-      method: 'manual',
-    });
+    let res;
+    try {
+      res = await createEstimate({
+        opportunity: opportunity.id,
+        method: 'manual',
+      });
+    } catch (err) {
+      if (err?.code === 'MODULE_NOT_AVAILABLE' || err?.response?.status === 404 || err?.response?.status === 501) {
+        res = buildDefaultDraftEstimate(opportunity.id);
+        setStoredDraftEstimate(opportunity.id, res);
+      } else {
+        throw err;
+      }
+    }
     setEstimateSummary(res);
     setToast({ type: 'success', text: 'Estimate created successfully!' });
     navigateToEstimateSubTab('charges');
@@ -6775,7 +6800,7 @@ const SalesDetail = () => {
       value: activeSpecs.move_size, 
       displayValue: resolveMoveSizeName(activeSpecs.move_size, [...(Array.isArray(moverSizes) ? moverSizes : []), opportunity?.mover_size_details, opportunity?.move_size_details].filter(Boolean)) || opportunity?.mover_size_details?.name || opportunity?.move_size_details?.name || activeSpecs.move_size, 
       icon: "home", 
-      options: moverSizes 
+      options: moverSizes.filter((size) => size.is_active !== false || String(size.id) === String(activeSpecs.move_size)) 
     },
     { 
       id: "move_type", 
@@ -6783,7 +6808,7 @@ const SalesDetail = () => {
       value: activeSpecs.move_type, 
       displayValue: opportunity?.move_type_name || resolveSpecLookupLabel(activeSpecs.move_type, moverTypes) || resolveSpecLookupLabel(activeSpecs.move_type, MOVE_TYPE_OPTIONS), 
       icon: "map", 
-      options: moverTypes.length ? moverTypes : MOVE_TYPE_OPTIONS 
+      options: moverTypes
     },
     { 
       id: "service_type", 
@@ -6791,7 +6816,7 @@ const SalesDetail = () => {
       value: activeSpecs.service_type, 
       displayValue: opportunity?.service_type_name || resolveSpecLookupLabel(activeSpecs.service_type, serviceTypes) || resolveSpecLookupLabel(activeSpecs.service_type, SERVICE_TYPE_OPTIONS), 
       icon: "package", 
-      options: serviceTypes.length ? serviceTypes : SERVICE_TYPE_OPTIONS 
+      options: serviceTypes
     },
     { 
       id: "branch", 
@@ -6834,7 +6859,7 @@ const SalesDetail = () => {
         resolveUserLabel(opportunity?.assigned_user) ||
         resolveUserLabel(opportunity?.assigned_to) ||
         specsDraftLabels.assigned_to ||
-        'Unassigned',
+        (activeSpecs.assigned_to ? `Employee #${activeSpecs.assigned_to}` : 'Unassigned'),
       displayValue:
         resolveUserLabel(selectedAssignedUser) ||
         resolveUserLabel(opportunity?.assigned_user_details) ||
@@ -6842,9 +6867,9 @@ const SalesDetail = () => {
         resolveUserLabel(opportunity?.assigned_user) ||
         resolveUserLabel(opportunity?.assigned_to) ||
         committedSpecsLabels.assigned_to ||
-        'Unassigned',
+        (activeSpecs.assigned_to ? `Employee #${activeSpecs.assigned_to}` : 'Unassigned'),
       icon: "user",
-      fetchOptions: (search, offset, limit) => getLookupUsersPage(search, offset, limit, activeSpecs.branch || selectedBranch?.id || null),
+      fetchOptions: (search, offset, limit) => (isLeadPath ? getLookupEmployeesPage : getLookupUsersPage)(search, offset, limit, activeSpecs.branch || selectedBranch?.id || null),
       cacheKey: activeSpecs.branch || selectedBranch?.id || 'no-branch',
       labelField: "label",
       options: assignedUserOptions,
@@ -6857,34 +6882,37 @@ const SalesDetail = () => {
       initialLabel: selectedCustomStatusCode?.label || opportunity?.custom_status_code_details?.label || '',
       displayValue: selectedCustomStatusCode?.label || opportunity?.custom_status_code_details?.label || '',
       icon: "activity",
-      fetchOptions: (search, offset, limit) => getStatusCodeLookupsPage(search, offset, limit),
+      fetchOptions: (search, offset, limit) => isLeadPath ? getLeadStatusCodeLookups({ search, offset, limit }) : getStatusCodeLookupsPage(search, offset, limit),
       // cacheKey keeps AsyncSelect stable on the company-wide list
-      cacheKey: 'company-wide-status-codes',
+      cacheKey: isLeadPath ? 'lead-status-codes' : 'opportunity-status-codes',
       labelField: "label",
       options: customStatusCodes,
     },
-  ], [activeSpecs, opportunity, moverSizes, branches, selectedBranch, selectedBranchName, selectedReferralSource, selectedAssignedUser, referralSources, branchScopedUsers, customStatusCodes, selectedCustomStatusCode, titleCase, specsDraftLabels, committedSpecsLabels, statusBranchId]);
+  ], [activeSpecs, opportunity, moverSizes, moverTypes, serviceTypes, isLeadPath, branches, selectedBranch, selectedBranchName, selectedReferralSource, selectedAssignedUser, referralSources, branchScopedUsers, customStatusCodes, selectedCustomStatusCode, titleCase, specsDraftLabels, committedSpecsLabels, statusBranchId]);
 
 	  const headerActions = useMemo(() => {
 	    if (opportunity?.id === 'new') return [];
-	    if (!canViewOpportunity()) return [];
+	    if (!(view.isLead ? hasPermission(PERMISSIONS.LEAD_VIEW) : canViewOpportunity())) return [];
 
 	    if (view.isLead) {
 	      if (String(opportunity?.workflow_stage || '').toLowerCase() === 'opportunity' || opportunity?.opportunity_id || opportunity?.opportunity) {
 	        return [];
 	      } else {
-	        if (!canCreateOpportunity()) return [];
+          const leadState = opportunity.system_state || opportunity.status;
+          if (['new', 'in_progress'].includes(leadState)) return hasPermission(leadState === 'new' ? 'leads.update' : 'leads.qualify') ? [{ type: 'primary', label: leadState === 'new' ? 'Start lead' : 'Qualify lead', icon: 'check', onClick: handleAdvanceLead }] : [];
+          if (leadState !== 'qualified' || !hasPermission('leads.convert')) return [];
+
 	        return [
 	          {
 	            type: 'primary',
-	            label: 'Create Estimate',
+	            label: 'Convert to Opportunity',
 	            icon: 'plus',
 	            onClick: handleCreateEstimate,
 	          },
 	        ];
 	      }
 	    } else {
-	      if (!estimateSummary) {
+	      if (!estimateSummary && ['open', 'booked'].includes(getRecordSystemState(opportunity))) {
 	        return [
 	          {
 	            type: 'primary',
@@ -6898,9 +6926,13 @@ const SalesDetail = () => {
 	    return [];
 	  }, [
 	    handleCreateEstimate,
+    handleAdvanceLead,
 	    handleCreateOpportunityEstimate,
 	    opportunity?.id,
 	    opportunity?.workflow_stage,
+      opportunity?.system_state,
+      opportunity?.status,
+      hasPermission,
 	    opportunity?.opportunity_id,
 	    opportunity?.opportunity,
 	    view.isLead,
@@ -6936,9 +6968,9 @@ const SalesDetail = () => {
     if (canCreateTask()) {
       items.push({ label: 'Add Follow-up', icon: 'calendar-plus', onClick: openCreateFollowUpModal });
     }
-    if (!estimateSummary && canCreateOpportunity()) {
+    if (!estimateSummary && (view.isLead ? getRecordSystemState(opportunity, true) === 'qualified' && hasPermission('leads.convert') : ['open', 'booked'].includes(getRecordSystemState(opportunity)) && canCreateOpportunity())) {
       items.push({ 
-        label: "Create Estimate", 
+        label: view.isLead ? "Convert to Opportunity" : "Create Estimate",
         icon: "plus", 
         onClick: () => {
           if (view.isLead) {
@@ -6974,20 +7006,6 @@ const SalesDetail = () => {
       },
     });
 
-    if (canEditOpportunity() && String(opportunity?.workflow_stage || '').toLowerCase() === 'booked') {
-      items.push({ type: 'separator' });
-      items.push({ type: 'label', label: 'Booking' });
-      items.push({
-        label: 'Unbook Job',
-        icon: 'calendar-x',
-        onClick: () => {
-          setUnbookReason('');
-          setUnbookNote('');
-          setIsUnbookModalOpen(true);
-        },
-      });
-    }
-
     if (opportunity?.id && opportunity.id !== 'new' && canDuplicateOpportunity()) {
       items.push({ type: 'separator' });
       items.push({ type: 'label', label: 'Record' });
@@ -7001,10 +7019,12 @@ const SalesDetail = () => {
       });
     }
 
-    if (workflowActions?.length) {
+    const menuWorkflowActions = workflowActions.filter((action) =>
+      !headerActions.some((primary) => primary.label === action.label));
+    if (menuWorkflowActions.length) {
       items.push({ type: 'separator' });
       items.push({ type: 'label', label: 'Workflow' });
-      workflowActions.forEach((action) => {
+      menuWorkflowActions.forEach((action) => {
         const icon =
           action.key === 'lost'
             ? 'x-circle'
@@ -7057,7 +7077,7 @@ const SalesDetail = () => {
         return canBookOpportunity();
       }
       if (item.label === 'Mark Lost') {
-        return canMarkOpportunityLost();
+        return view.isLead ? hasPermission('leads.close') : canMarkOpportunityLost();
       }
       if (item.label === 'Activities') {
         return canManageActivityHistory();
@@ -7080,6 +7100,7 @@ const SalesDetail = () => {
     estimateSummary,
     handleCreateEstimate,
     handleCreateOpportunityEstimate,
+    headerActions,
     handleOpenOpportunityInvoicePreview,
     handleRefinalizeInvoice,
     handleWorkflowAction,
@@ -7126,12 +7147,7 @@ const SalesDetail = () => {
       totalQty += safeQty;
       totalVol += safeQty * Number(item?.volume_cuft_each || 0);
     });
-    console.log('inventorySnapshotData', {
-      sourceItems,
-      grouped,
-      totalQty,
-      totalVol,
-    });
+
     return {
       roomCount: grouped.size,
       totalQty,
@@ -7149,10 +7165,11 @@ const SalesDetail = () => {
   ]);
 
   if (isLoading) return <div className="flex items-center justify-center h-[80vh]"><Loader2 className="w-12 h-12 text-primary animate-spin" /></div>;
-  if (!opportunity) return (
+  if (!opportunity || recordError) return (
     <div className="max-w-[1400px] mx-auto">
       <Card className="p-6 rounded-2xl border border-subtle">
-        <p className="text-sm font-bold text-[#791F1F]">{isLeadPath ? 'Lead' : 'Opportunity'} not found.</p>
+        <p className="text-sm font-bold text-[#791F1F]">{recordError || `${isLeadPath ? 'Lead' : 'Opportunity'} not found.`}</p>
+        <button type="button" className="mt-3 text-sm underline" onClick={async () => { setIsLoading(true); try { await fetchOpportunity(); } finally { setIsLoading(false); } }}>Retry</button>
       </Card>
     </div>
   );
@@ -7334,8 +7351,10 @@ const SalesDetail = () => {
             } else {
               setAdditionalContactError('');
               let savedContact = null;
-              const existingContact = customerAdditionalContacts[selectedAdditionalContactIndex] || null;
-              const contactId = Number(selectedAdditionalContactForm.id || existingContact?.id || 0) || null;
+              const existingContact = customerAdditionalContacts.find(
+                (contact) => String(contact?.id || '') === String(selectedAdditionalContactForm.id || '')
+              ) || null;
+              const contactId = Number(selectedAdditionalContactForm.id || 0) || null;
               if (contactId) {
                 const contactChanged =
                   String(contactPayload.name || '') !== String(existingContact?.name || '') ||
@@ -7344,7 +7363,7 @@ const SalesDetail = () => {
                   String(contactPayload.phone_type || '') !== String(existingContact?.phone_type || '') ||
                   String(contactPayload.relationship || '') !== String(existingContact?.relationship || '');
                 if (contactChanged) {
-                  savedContact = await updateCustomerContact(contactId, contactPayload);
+                  savedContact = await updateCustomerContact(contactId, contactPayload, finalCustomerId);
                 } else {
                   savedContact = existingContact?.id ? existingContact : null;
                 }
@@ -7494,33 +7513,23 @@ const SalesDetail = () => {
   };
 
   const submitWorkflowReason = async () => {
-    const trimmedReason = String(reasonText || '').trim();
-    if (view.isLead && reasonAction === 'lost' && !selectedLostReason) {
-      setToast({ type: 'error', text: 'Select a lost reason.' });
+    if (reasonAction === 'restore') {
+      const reason = String(reasonText || '').trim();
+      if (!reason) { setToast({ type: 'error', text: 'Enter a reason to restore this lead.' }); return; }
+      await handleWorkflowAction('restore', reason);
       return;
     }
-    const selectedReasonLabel = view.isLead
-      ? String(lostReasonOptions.find((option) => String(option.id) === String(selectedLostReason))?.name || '').trim()
-      : String(selectedLostReason || '').trim();
-    const finalReason = reasonAction === 'cancel'
-      ? trimmedReason
-      : [selectedReasonLabel, trimmedReason].filter(Boolean).join(': ');
-
-    if (!finalReason) {
-      setToast({
-        type: 'error',
-        text: reasonAction === 'cancel'
-          ? 'Please enter a reason before canceling this job.'
-          : 'Please select or enter a reason before marking this as lost.',
-      });
-      return;
+    const selected = lostReasonOptions.find((row) => String(row.id) === String(selectedLostReason));
+    if (!selected) { setToast({ type: 'error', text: 'Select a reason.' }); return; }
+    if (selected.requires_note && !String(reasonText || '').trim()) {
+      setToast({ type: 'error', text: 'Notes are required for this reason.' }); return;
     }
-
-    await handleWorkflowAction(reasonAction || 'lost', finalReason);
+    await handleWorkflowAction(reasonAction, selected.name || selected.label || 'Selected reason');
   };
 
   const submitUnbook = async () => {
     if (!opportunity?.id || opportunity.id === 'new') return;
+    if (getRecordSystemState(opportunity) !== 'booked' || !hasPermission('opportunities.reopen')) return;
 
     const reason = String(unbookReason || '').trim();
     const note = String(unbookNote || '').trim();
@@ -7575,12 +7584,9 @@ const SalesDetail = () => {
         const activityId = getFollowUpActivityId(taskRecord);
         if (!activityId) throw new Error('Missing activity for follow-up.');
 
-        await updateSalesActivity(activityId, {
-          subject: followUpSubject.trim(),
-          description,
-          status: taskRecord?.activity_details?.status || taskRecord?.activity?.status || 'pending',
-        });
         await updateTask(editingFollowUpId, {
+          title: followUpSubject.trim(),
+          status: taskRecord?.activity_details?.status || 'pending',
           ...targetPayload,
           task_type: followUpType,
           assigned_to: Number(followUpAssignedTo),
@@ -7589,15 +7595,9 @@ const SalesDetail = () => {
         });
         setToast({ type: 'success', text: 'Follow-up updated.' });
       } else {
-        const createdActivity = await createSalesActivity({
-          ...targetPayload,
-          activity_type: 'task',
-          subject: followUpSubject.trim(),
-          description,
-          status: 'pending',
-        });
         await createTask({
-          activity: createdActivity.id,
+          title: followUpSubject.trim(),
+          status: 'pending',
           ...targetPayload,
           task_type: followUpType,
           assigned_to: Number(followUpAssignedTo),
@@ -7608,6 +7608,8 @@ const SalesDetail = () => {
       }
 
       closeFollowUpModal();
+      await loadFollowUps(opportunity);
+      await refreshActivityTimeline();
     } catch (err) {
       setToast({ type: 'error', text: getErrorMessage(err, 'Failed to save follow-up.') });
     } finally {
@@ -7628,7 +7630,7 @@ const SalesDetail = () => {
     try {
       const currentStatus = String(task?.activity_details?.status || task?.activity?.status || 'pending').toLowerCase();
       const nextStatus = currentStatus === 'completed' ? 'pending' : 'completed';
-      await updateSalesActivity(activityId, {
+      await updateTask(task.id, {
         status: nextStatus,
         completed_at: nextStatus === 'completed' ? new Date().toISOString() : null,
       });
@@ -7660,31 +7662,6 @@ const SalesDetail = () => {
     }
   };
 
-  const handleDeleteFollowUp = async (task) => {
-    const activityId = getFollowUpActivityId(task);
-    if (!activityId) return;
-    if (!requiresAnyPermission([PERMISSIONS.SALES_CHANGE_TASK, PERMISSIONS.SALES_CHANGE_OPPORTUNITY])) {
-      return denyAction('You do not have permission to delete follow-ups.');
-    }
-    if (!requiresAnyPermission([PERMISSIONS.SALES_CHANGE_TASK, PERMISSIONS.SALES_CHANGE_OPPORTUNITY])) {
-      return denyAction('You do not have permission to delete follow-ups.');
-    }
-    const subject = String(task?.activity_details?.subject || task?.activity?.subject || 'this follow-up').trim();
-    if (!window.confirm(`Delete "${subject}"? This will remove the follow-up.`)) return;
-    setIsSavingFollowUp(true);
-    try {
-      await deleteSalesActivity(activityId);
-      if (editingFollowUpId && String(editingFollowUpId) === String(task.id)) {
-        closeFollowUpModal();
-      }
-      setFollowUps((prev) => prev.filter((row) => String(row.id) !== String(task.id)));
-      setToast({ type: 'success', text: 'Follow-up deleted.' });
-    } catch (err) {
-      setToast({ type: 'error', text: getErrorMessage(err, 'Failed to delete follow-up.') });
-    } finally {
-      setIsSavingFollowUp(false);
-    }
-  };
 
   const renderFollowUpItem = (task) => {
     const activity = task?.activity_details || task?.activity || {};
@@ -7726,8 +7703,9 @@ const SalesDetail = () => {
           />
           <IconButton
             name="trash-2"
-            label="Delete follow-up"
-            onClick={() => handleDeleteFollowUp(task)}
+            label="Task deletion unavailable; mark complete instead"
+            disabled
+            onClick={() => {}}
             className="text-rose-500"
           />
         </div>
@@ -7752,7 +7730,7 @@ const SalesDetail = () => {
       !String(template?.body || '').trim();
     if (missingContent) {
       try {
-        const detail = await getCommunicationTemplate(template.id);
+        const detail = await getComposerTemplate(template.id);
         resolvedTemplate = detail?.data || detail || template;
       } catch {
         resolvedTemplate = template;
@@ -7898,8 +7876,8 @@ const SalesDetail = () => {
       setToast({ type: 'error', text: 'Customer email is required before sending email.' });
       return;
     }
-    if (commTab === 'email' && !hasActiveEmailProvider) {
-      setToast({ type: 'error', text: 'No active email provider is configured for this company.' });
+    if (commTab === 'email' && !(await loadEmailProviderStatus())) {
+      setToast({ type: 'error', text: 'Connect your personal mailbox in Settings → Communications → Email & SMS Setup → Mailboxes before sending email.' });
       return;
     }
     if (commTab === 'text' && activitySmsRecipients.length === 0) {
@@ -7967,10 +7945,8 @@ const SalesDetail = () => {
           const emailsTo = activityEmailToText.split(',').map(e => e.trim()).filter(Boolean);
           const emailsCc = activityEmailCcText.split(',').map(e => e.trim()).filter(Boolean);
           const emailsBcc = activityEmailBccText.split(',').map(e => e.trim()).filter(Boolean);
-          if (emailAttachments.length) {
-            return denyAction('Email attachments are not supported by the tenant communications API yet.');
-          }
           await sendRecordEmail('lead', opportunity.id, {
+            attachments: emailAttachments,
             to: emailsTo,
             cc: emailsCc,
             bcc: emailsBcc,
@@ -7988,36 +7964,8 @@ const SalesDetail = () => {
           if (!canSendSms()) {
             return denyAction('You do not have permission to send SMS messages.');
           }
-          await Promise.all(activitySmsRecipients.map(async (targetPhone) => {
-            if (!targetPhone) return;
-            const created = await createSalesActivity({
-              lead: opportunity.id,
-              opportunity: null,
-              activity_type: 'sms',
-              subject: '',
-              description,
-              direction: 'outbound',
-              status: 'completed',
-            });
-
-            if (created?.id) {
-              try {
-                await api.post('/sales/sms-logs/', {
-                  activity: created.id,
-                  to_phone: targetPhone,
-                  message: activeBody.trim(),
-                  status: 'sent',
-                });
-              } catch (err) {
-                try {
-                  await api.delete(`/sales/sales-activities/${created.id}/`);
-                } catch {
-                  // Preserve the SMS dispatch error as the primary failure.
-                }
-                throw err;
-              }
-            }
-          }));
+          if (!smsConsentConfirmed) throw new Error('Record SMS consent using the checkbox before sending.');
+          await Promise.all(activitySmsRecipients.filter(Boolean).map(async (to) => { await recordRecordSmsConsent('lead', opportunity.id, to); return sendRecordSms('lead', opportunity.id, { to, body: activeBody.trim() }); }));
         } else {
           if (commTab === 'call' && (!canManageActivityHistory() || !canLogCall())) {
             return denyAction('You do not have permission to log calls.');
@@ -8026,41 +7974,7 @@ const SalesDetail = () => {
             return denyAction('You do not have permission to post activities.');
           }
           if (commTab === 'call') {
-            const created = await createSalesActivity({
-              lead: opportunity.id,
-              opportunity: null,
-              activity_type: 'call',
-              subject: activitySubject || '',
-              description,
-              direction: 'outbound',
-              status: 'completed',
-            });
-
-            if (created?.id) {
-              const parsedMinutes = callDuration ? Number(callDuration) : 0;
-              try {
-                const callLogResponse = await api.post('/sales/call-logs/', {
-                  activity: created.id,
-                  duration_seconds: Math.max(0, Math.round(parsedMinutes * 60)),
-                  disposition: callDisposition,
-                });
-                const callLogId = Number(callLogResponse?.data?.id || callLogResponse?.id || 0);
-                if (!callLogId) {
-                  throw new Error('Call log was not created.');
-                }
-                await updateSalesActivity(created.id, {
-                  status: 'completed',
-                  completed_at: new Date().toISOString(),
-                });
-              } catch (err) {
-                try {
-                  await api.delete(`/sales/sales-activities/${created.id}/`);
-                } catch {
-                  // Keep the call-log error as the primary failure.
-                }
-                throw err;
-              }
-            }
+            await createSalesActivity({ lead: opportunity.id, activity_type: 'call', subject: activitySubject || '', description, direction: callDirection || 'outbound', status: 'completed' });
           } else {
             await createSalesActivity({
               lead: opportunity.id,
@@ -8079,79 +7993,27 @@ const SalesDetail = () => {
           const emailsTo = activityEmailToText.split(',').map(e => e.trim()).filter(Boolean);
           const emailsCc = activityEmailCcText.split(',').map(e => e.trim()).filter(Boolean);
           const emailsBcc = activityEmailBccText.split(',').map(e => e.trim()).filter(Boolean);
-          const providerPayload = JSON.stringify({
-            cc_email: emailsCc.join(', '),
-            bcc_email: emailsBcc.join(', '),
-            plain_reply: emailComposeMode === 'inbound_reply',
+          await sendRecordEmail('opportunity', opportunity.id, {
+            attachments: emailAttachments,
+            to: emailsTo,
+            cc: emailsCc,
+            bcc: emailsBcc,
+            subject: activitySubject.trim(),
+            body_text: description,
+            body_html: emailComposeMode === 'inbound_reply'
+              ? activeBody.trim()
+              : replaceBranchPlaceholders(activeBody.trim(), {
+                  branchLogoUrl: selectedBranchLogoUrl,
+                  branchName: selectedBranchName,
+                }),
+            include_signature: true,
           });
-
-          await Promise.all(emailsTo.map(async (targetEmail) => {
-            const created = await createSalesActivity({
-              opportunity: opportunity.id,
-              activity_type: activityTypeForTab(commTab),
-              subject: activitySubject || '',
-              description,
-              direction: 'outbound',
-              status: 'completed',
-            });
-            if (created?.id) {
-              try {
-                const formData = new FormData();
-                formData.append('activity', created.id);
-                formData.append('to_email', targetEmail);
-                formData.append('subject', activitySubject.trim());
-                formData.append(
-                  'body_html',
-                  emailComposeMode === 'inbound_reply'
-                    ? activeBody.trim()
-                    : replaceBranchPlaceholders(activeBody.trim(), {
-                        branchLogoUrl: selectedBranchLogoUrl,
-                        branchName: selectedBranchName,
-                      })
-                );
-                formData.append('provider_payload', providerPayload);
-                emailAttachments.forEach((file) => formData.append('attachments', file));
-                const emailLog = await api.post('/sales/email-logs/', formData);
-                if (emailLog?.status === 'failed') {
-                  channelWarning = emailLog?.error_message || 'Email delivery failed.';
-                }
-              } catch (err) {
-                try {
-                  await api.delete(`/sales/sales-activities/${created.id}/`);
-                } catch {
-                  // Keep the original email validation failure as the primary error.
-                }
-                throw err;
-              }
-            }
-          }));
         } else if (commTab === 'text') {
           if (!canSendSms()) {
             return denyAction('You do not have permission to send SMS messages.');
           }
-          await Promise.all(activitySmsRecipients.map(async (targetPhone) => {
-            if (!targetPhone) return;
-            const created = await createSalesActivity({
-              opportunity: opportunity.id,
-              activity_type: activityTypeForTab(commTab),
-              subject: '',
-              description,
-              direction: 'outbound',
-              status: 'completed',
-            });
-            if (created?.id) {
-              try {
-                await api.post('/sales/sms-logs/', {
-                  activity: created.id,
-                  to_phone: targetPhone,
-                  message: activeBody.trim(),
-                  status: 'sent',
-                });
-              } catch (err) {
-                channelWarning = `Activity saved, but SMS log failed: ${getErrorMessage(err, 'sms log error')}`;
-              }
-            }
-          }));
+          if (!smsConsentConfirmed) throw new Error('Record SMS consent using the checkbox before sending.');
+          await Promise.all(activitySmsRecipients.filter(Boolean).map(async (to) => { await recordRecordSmsConsent('opportunity', opportunity.id, to); return sendRecordSms('opportunity', opportunity.id, { to, body: activeBody.trim() }); }));
         } else {
           if (commTab === 'call' && (!canManageActivityHistory() || !canLogCall())) {
             return denyAction('You do not have permission to log calls.');
@@ -8206,11 +8068,18 @@ const SalesDetail = () => {
       setToast(
         postWarning
           ? { type: 'error', text: postWarning }
-          : { type: 'success', text: 'Activity posted successfully.' }
+          : { type: 'success', text: commTab === 'email' ? 'Email queued.' : commTab === 'text' ? 'Text queued.' : 'Activity posted successfully.' }
       );
       setTimeout(() => setToast({ type: '', text: '' }), 2500);
     } catch (err) {
-      setToast({ type: 'error', text: getErrorMessage(err, 'Failed to post activity.') });
+      const message = getErrorMessage(err, 'Failed to post activity.');
+      const consentRequired = /no text-message consent is on record/i.test(message);
+      setToast({
+        type: 'error',
+        text: consentRequired
+          ? 'SMS was not sent. Record the recipient’s text-message consent on the lead or customer first, then try again.'
+          : message,
+      });
     } finally {
       setIsPosting(false);
     }
@@ -8220,7 +8089,7 @@ const SalesDetail = () => {
   const mainColumnClass = showSidebarCards
     ? 'col-span-12 lg:col-span-8 space-y-2'
     : 'col-span-12 space-y-2';
-  const isOpportunityLost = String(opportunity?.workflow_stage || opportunity?.status || '').toLowerCase() === 'lost';
+  const isOpportunityLost = getRecordSystemState(opportunity, isLeadPath) === 'lost';
   const lockedOpportunityReason = 'This opportunity is lost, so estimate and related tabs are locked.';
   const filesTargetSpec = resolveFilesTargetSpec({
     isLeadPath,
@@ -8231,6 +8100,15 @@ const SalesDetail = () => {
 
   return (
     <div className="min-h-screen bg-slate-50/50">
+      {workError && <div role="alert" className="m-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{workError} <button type="button" className="underline" onClick={() => { setWorkError(null); void loadFollowUps(opportunity); void refreshActivityTimeline(); }}>Retry</button></div>}
+      {conversionReview && <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-labelledby="customer-review-title">
+        <div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl">
+          <h2 id="customer-review-title" className="text-lg font-bold">Review matching customers</h2>
+          <p className="mt-2 text-sm text-slate-600">Choose an existing customer or confirm that this lead needs a new customer profile.</p>
+          <div className="my-4 space-y-2">{conversionReview.map((candidate) => <button type="button" key={candidate.id} disabled={isSaving || candidate.service_blocked} className="block w-full rounded-lg border p-3 text-left disabled:opacity-50" onClick={() => handleCreateEstimate({ customer_id: candidate.id })}>{candidate.profile_name || `Customer #${candidate.id}`}{candidate.service_blocked ? ' — service blocked' : ''}</button>)}</div>
+          <div className="flex gap-3"><button type="button" disabled={isSaving} className="rounded-lg border p-2" onClick={() => handleCreateEstimate({ create_new_customer: true })}>Create a new customer</button><button type="button" disabled={isSaving} className="p-2" onClick={() => setConversionReview(null)}>Cancel</button></div>
+        </div>
+      </div>}
       {toast.text ? (
         <div className="pointer-events-none fixed bottom-5 right-5 z-[200] max-w-[92vw] sm:max-w-md">
           <div
@@ -8268,8 +8146,8 @@ const SalesDetail = () => {
           }
 	        subtitle=""
 	        branchLogoUrl={selectedBranchLogoUrl}
-	        status={getWorkflowStageLabel(opportunity?.workflow_stage || (isLeadPath ? 'new_lead' : 'opportunity'))}
-	        statusTone={toneForWorkflowStage(opportunity?.workflow_stage)}
+	        status={getWorkflowStageLabel(getRecordSystemState(opportunity, isLeadPath))}
+	        statusTone={toneForWorkflowStage(getRecordSystemState(opportunity, isLeadPath))}
 	        statusColor={undefined}
 	        id=""
 	        onBack={handleBack}
@@ -8312,11 +8190,11 @@ const SalesDetail = () => {
               )}
               {['Estimate', 'Files & Photos', 'Accounting', 'Documents', 'Payments'].includes(activeTab) && (
               <RouteLogisticsCard
-                stops={(isLeadPath ? estimateOpportunity : opportunity)?.stops || []}
-                origin={(isLeadPath ? estimateOpportunity?.origin_address_details : opportunity?.origin_address_details) || {
+                stops={opportunity?.stops || []}
+                origin={opportunity?.origin_address_details || {
                   address_line1: form.origin_street,
                 }}
-                destination={(isLeadPath ? estimateOpportunity?.destination_address_details : opportunity?.destination_address_details) || {
+                destination={opportunity?.destination_address_details || {
                   address_line1: form.destination_street,
                 }}
                   routeStops={routePoints}
@@ -8467,6 +8345,12 @@ const SalesDetail = () => {
                     setActivityCallRecipient={setActivityCallRecipient}
                     activitySmsRecipients={activitySmsRecipients}
                     setActivitySmsRecipients={setActivitySmsRecipients}
+                  isLeadPath={isLeadPath}
+                  onRecordSmsConsent={async (destination) => {
+                    await recordRecordSmsConsent(isLeadPath ? 'lead' : 'opportunity', opportunity.id, destination);
+                    setSmsConsentConfirmed(true);
+                    return true;
+                  }}
 	                />
                 {(() => {
                   const timelineProps = {
@@ -8491,7 +8375,7 @@ const SalesDetail = () => {
                     },
                 onEditNote: startEditingNoteActivity,
                 onEditCall: openEditCallLog,
-                onDeleteCall: deleteCallLog,
+                onDeleteCall: isLeadPath ? undefined : deleteCallLog,
                 canManageActivityHistory: canManageActivityHistory(),
                     onPreview: (act) => setSelectedActivityForPreview(act),
                     onLoadMore: handleLoadMore,
@@ -8505,8 +8389,16 @@ const SalesDetail = () => {
               </div>
             )}
 
+            {activeTab === "Estimate" && !isLeadPath && Number(opportunity?.id) > 0 && (
+              <SalesLifecyclePanel opportunityId={Number(opportunity.id)} locked={isOpportunityLost} />
+            )}
+
             {activeTab === "Estimate" && (
                 <EstimateView
+                  onSendPortal={() => {
+                    setActiveTab('Documents');
+                    navigateToDetailTab('Documents');
+                  }}
                   onRefresh={fetchOpportunity}
                   opportunity={isLeadPath ? estimateOpportunity : opportunity}
                   sourceType={isLeadPath ? 'lead' : 'opportunity'}
@@ -8541,39 +8433,19 @@ const SalesDetail = () => {
             )}
 
             {activeTab === "Documents" && (
-                <EstimateView
-                  onRefresh={fetchOpportunity}
-                  opportunity={isLeadPath ? estimateOpportunity : opportunity}
-                  sourceType={isLeadPath ? 'lead' : 'opportunity'}
-                  isLoadingLinkedOpportunity={isLeadPath && isLoadingEstimateOpportunity}
-                  opportunityJobs={opportunityJobs}
-                  subJobServiceOptions={computedSubJobServiceOptions}
-                  selectedSubJobId={selectedEstimateJobId}
-                  onSelectedSubJobChange={setSelectedEstimateJobId}
-                  onCreateSubJob={createSubJobFromServiceType}
-                  onRefreshSubJobs={loadOpportunityJobs}
-                  onDeleteSelectedSubJob={deleteSelectedEstimateJob}
-                  onUpdateSelectedSubJob={updateSelectedEstimateJobPlanning}
-                  triggerSendEstimate={sendEstimateNonce}
-                  triggerViewEstimate={triggerViewEstimateNonce}
-                  view={view}
-                  initialSubTab="documents"
-                  onSubTabChange={(subTab) => {
-                    if (subTab === 'documents') {
-                      setActiveTab('Documents');
-                      navigateToDetailTab('Documents');
-                    } else if (subTab === 'payments') {
-                      setActiveTab('Payments');
-                      navigateToDetailTab('Payments');
-                    } else {
-                      setActiveTab('Estimate');
-                      navigateToEstimateSubTab(subTab);
-                    }
-                  }}
-                  isOpportunityLocked={isOpportunityLost}
-                  canCreateOpportunity={canCreateOpportunity()}
-                  canEditOpportunity={canEditOpportunity()}
-                />
+              <div className="space-y-5">
+              <InventoryPortalPanel
+                key={`inventory-${isLeadPath ? 'lead' : 'opportunity'}-${opportunity?.id}`}
+                leadId={isLeadPath ? opportunity?.id : null}
+                opportunityId={!isLeadPath ? opportunity?.id : null}
+                canEdit={isLeadPath ? hasPermission(PERMISSIONS.LEAD_EDIT) : !isOpportunityLost && canEditOpportunity()}
+              />
+              <IssuedDocumentsPanel
+                key={(isLeadPath ? estimateOpportunity : opportunity)?.id || 'none'}
+                opportunityId={(isLeadPath ? estimateOpportunity : opportunity)?.id}
+                canEdit={!isOpportunityLost && canEditOpportunity()}
+              />
+              </div>
             )}
 
             {activeTab === "Files & Photos" && (
@@ -8583,10 +8455,10 @@ const SalesDetail = () => {
                       <span className="label-eyebrow text-ink-400">Files & Photos</span>
                       <h3 className="text-lg font-extrabold text-ink-900 mt-0.5">Project Documents</h3>
                     </div>
-                    {canEditOpportunity() ? <PrimaryBtn icon="upload">Upload File</PrimaryBtn> : null}
+                    {!isLeadPath && canEditOpportunity() ? <PrimaryBtn icon="upload">Upload File</PrimaryBtn> : null}
                  </div>
                  <div className="p-3">
-                    <CategorizedFilesPanel
+                    {isLeadPath ? <p role="status" className="text-sm text-slate-600">Files and photos are not available for leads yet.</p> : <CategorizedFilesPanel
                       targetType={filesTargetSpec.targetType}
                       targetId={filesTargetSpec.targetId}
                       extraTargets={[
@@ -8603,7 +8475,7 @@ const SalesDetail = () => {
                           ? [{ targetType: 'estimates.estimate', targetId: String(estimateSummary.id) }]
                           : []),
                       ]}
-                    />
+                    />}
                   </div>
               </div>
             )}
@@ -9741,6 +9613,10 @@ const SalesDetail = () => {
 
             {activeTab === "Payments" && (
                 <EstimateView
+                  onSendPortal={() => {
+                    setActiveTab('Documents');
+                    navigateToDetailTab('Documents');
+                  }}
                   onRefresh={fetchOpportunity}
                   opportunity={isLeadPath ? estimateOpportunity : opportunity}
                   sourceType={isLeadPath ? 'lead' : 'opportunity'}
@@ -9809,14 +9685,14 @@ const SalesDetail = () => {
                 onInlineSave={canEditOpportunity() ? handleSpecsInlineSave : undefined}
               />
               <RouteLogisticsCard
-                stops={(isLeadPath ? estimateOpportunity : opportunity)?.stops || []}
-                origin={(isLeadPath ? estimateOpportunity?.origin_address_details : opportunity?.origin_address_details) || {
+                stops={opportunity?.stops || []}
+                origin={opportunity?.origin_address_details || {
                   address_line1: form.origin_street,
                   // city: form.origin_city,
                   // state: form.origin_state,
                   // postal_code: form.origin_zip,
                 }}
-                destination={(isLeadPath ? estimateOpportunity?.destination_address_details : opportunity?.destination_address_details) || {
+                destination={opportunity?.destination_address_details || {
                   address_line1: form.destination_street,
                   // city: form.destination_city,
                   // state: form.destination_state,
@@ -9943,7 +9819,7 @@ const SalesDetail = () => {
                 <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
                   <div className="text-xs font-black uppercase tracking-[0.18em] text-amber-700">Before Estimate Creation</div>
                   <div className="mt-2 text-sm font-semibold text-amber-900">
-                    Estimates require complete customer, move, and route data. Fill the missing fields below and the estimate will be created immediately after save.
+                    Estimates require complete customer and move data. Fill the missing fields below and the estimate will be created immediately after save.
                   </div>
                   {getEstimateRequirementGaps(estimateRequirementsDraft).length ? (
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -10052,7 +9928,7 @@ const SalesDetail = () => {
                           className={`${workspaceInputCls} cursor-pointer`}
                         >
                           <option value="">Select service type...</option>
-                          {(serviceTypes.length ? serviceTypes : SERVICE_TYPE_OPTIONS).map((option) => (
+                          {serviceTypes.map((option) => (
                             <option key={String(option.id ?? option.value ?? option.code ?? option.label ?? option.name)} value={String(option.id ?? option.value ?? option.code ?? option.label ?? option.name)}>
                               {String(option.name || option.label || option.value || option.id)}
                             </option>
@@ -10069,65 +9945,13 @@ const SalesDetail = () => {
                           className={`${workspaceInputCls} cursor-pointer`}
                         >
                           <option value="">Select move type...</option>
-                          {(moverTypes.length ? moverTypes : MOVE_TYPE_OPTIONS).map((option) => (
+                          {moverTypes.map((option) => (
                             <option key={String(option.id ?? option.value ?? option.code ?? option.label ?? option.name)} value={String(option.id ?? option.value ?? option.code ?? option.label ?? option.name)}>
                               {String(option.name || option.label || option.value || option.id)}
                             </option>
                           ))}
                         </select>
                       </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="text-sm font-black uppercase tracking-widest text-slate-400">Route</div>
-                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                    <div>
-                      <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-slate-500">
-                        Origin Address
-                      </label>
-                      <AddressAutocomplete
-                        country="ca,us"
-                        value={estimateRequirementsDraft.origin_street || ''}
-                        onChange={(e) =>
-                          setEstimateRequirementsDraft((prev) => ({ ...prev, origin_street: e.target.value }))
-                        }
-                        onPick={(parts) =>
-                          setEstimateRequirementsDraft((prev) => ({
-                            ...prev,
-                            origin_street: parts.formattedAddress || parts.street || prev.origin_street,
-                            origin_city: parts.city || prev.origin_city,
-                            origin_state: parts.province || prev.origin_state,
-                            origin_zip: parts.postalCode || prev.origin_zip,
-                          }))
-                        }
-                        className={workspaceInputCls}
-                        placeholder="123 Main St, City, State ZIP"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1.5 block text-xs font-bold uppercase tracking-widest text-slate-500">
-                        Destination Address
-                      </label>
-                      <AddressAutocomplete
-                        country="ca,us"
-                        value={estimateRequirementsDraft.destination_street || ''}
-                        onChange={(e) =>
-                          setEstimateRequirementsDraft((prev) => ({ ...prev, destination_street: e.target.value }))
-                        }
-                        onPick={(parts) =>
-                          setEstimateRequirementsDraft((prev) => ({
-                            ...prev,
-                            destination_street: parts.formattedAddress || parts.street || prev.destination_street,
-                            destination_city: parts.city || prev.destination_city,
-                            destination_state: parts.province || prev.destination_state,
-                            destination_zip: parts.postalCode || prev.destination_zip,
-                          }))
-                        }
-                        className={workspaceInputCls}
-                        placeholder="456 Destination Ave, City, State ZIP"
-                      />
                     </div>
                   </div>
                 </div>
@@ -10235,6 +10059,8 @@ const SalesDetail = () => {
                 <label className="space-y-1">
                   <span className="label-eyebrow text-ink-400">Direction</span>
                   <select
+                    disabled={isLeadPath}
+                    title={isLeadPath ? "Call direction cannot be changed after logging" : undefined}
                     value={callLogDraft.direction}
                     onChange={(e) => setCallLogDraft((prev) => ({ ...prev, direction: e.target.value }))}
                     className={inputCls}
@@ -10292,18 +10118,20 @@ const SalesDetail = () => {
           <Card className="w-full max-w-lg p-0 overflow-hidden rounded-3xl border-0 shadow-2xl">
              <div className={reasonAction === 'cancel' ? 'bg-amber-600 text-white px-6 py-4' : 'bg-rose-600 text-white px-6 py-4'}>
                 <h3 className="font-black uppercase tracking-tight">
-                  {reasonAction === 'cancel' ? 'Cancel Job' : 'Mark as Lost'}
+                  {reasonAction === 'cancel' ? 'Cancel Job' : reasonAction === 'disqualify' ? 'Disqualify Lead' : reasonAction === 'restore' ? 'Restore Lead' : 'Mark as Lost'}
                 </h3>
              </div>
              <div className="p-6 space-y-4">
                 <p className="text-sm text-ink-500">
                   {reasonAction === 'cancel'
                     ? 'Please provide a reason why this job is being canceled. This helps us keep records accurate.'
-                    : 'Please provide a reason why this deal was lost. This helps us improve our sales process.'}
+                    : reasonAction === 'restore' ? 'Explain why this lead should be restored to In Progress.'
+                    : reasonAction === 'disqualify' ? 'Select why this inquiry is not a valid sales lead.'
+                    : 'Select why this lead or opportunity was lost.'}
                 </p>
-                {reasonAction !== 'cancel' && (
+                {reasonAction !== 'restore' && (
                   <label className="block space-y-1">
-                    <span className="label-eyebrow text-ink-400">Why was the opportunity lost?</span>
+                    <span className="label-eyebrow text-ink-400">Reason</span>
                     <select
                       value={selectedLostReason}
                       onChange={(e) => setSelectedLostReason(e.target.value)}
@@ -10311,9 +10139,9 @@ const SalesDetail = () => {
                     >
                       <option value="">Please select one...</option>
                       {lostReasonOptions
-                        .filter((option) => !view.isLead || option.applies_to === 'lead' || option.applies_to === 'both')
+                        .filter((option) => option.is_active !== false)
                         .map((option) => (
-                          <option key={String(option?.id || option?.label || '')} value={String(view.isLead ? option.id : option.label || option.name || '')}>
+                          <option key={String(option?.id || option?.label || '')} value={String(option.id)}>
                             {String(option?.label || option?.name || '')}
                           </option>
                         ))}
@@ -10324,7 +10152,7 @@ const SalesDetail = () => {
                   value={reasonText} 
                   onChange={e => setReasonText(e.target.value)} 
                   className={inputCls + " h-32"} 
-                  placeholder={reasonAction === 'cancel' ? 'Enter cancellation reason...' : 'Add optional notes...'}
+                  placeholder={reasonAction === 'restore' ? 'Enter restoration reason...' : 'Add notes (required for some reasons)...'}
                 />
                 <div className="flex justify-end gap-2">
                   <GhostBtn onClick={() => {
@@ -10338,7 +10166,7 @@ const SalesDetail = () => {
                     onClick={submitWorkflowReason}
                     loading={isSaving}
                   >
-                    {reasonAction === 'cancel' ? 'Confirm Cancel' : 'Confirm Loss'}
+                    {reasonAction === 'cancel' ? 'Confirm Cancel' : reasonAction === 'disqualify' ? 'Confirm Disqualification' : reasonAction === 'restore' ? 'Confirm Restore' : 'Confirm Loss'}
                   </PrimaryBtn>
                 </div>
              </div>
@@ -11037,6 +10865,21 @@ const SalesDetail = () => {
               onSave={saveRouteSection}
               saving={isRouteSaving}
               onChange={(field, value) => setRouteDraft((prev) => ({ ...(prev || {}), [field]: value }))}
+              onClearAddress={(type) => setRouteDraft((prev) => {
+                const next = { ...(prev || buildRouteFieldsFromRecord(opportunity, isLeadPath)) };
+                const prefix = type === 'origin' ? 'origin' : 'destination';
+                next[`${prefix}_street`] = '';
+                next[`${prefix}_city`] = '';
+                next[`${prefix}_state`] = '';
+                next[`${prefix}_zip`] = '';
+                next[`${prefix}_unit_number`] = '';
+                next[`${prefix}_property_type`] = '';
+                next[`${prefix}_parking_type`] = '';
+                next[`${prefix}_flights_of_stairs`] = 0;
+                next[`${prefix}_has_elevator`] = false;
+                next[`${prefix}_walk_distance_ft`] = 0;
+                return next;
+              })}
               onAddressPick={(type, parts) =>
                 setRouteDraft((prev) => {
                   const next = { ...(prev || buildRouteFieldsFromRecord(opportunity, isLeadPath)) };
@@ -11060,144 +10903,30 @@ const SalesDetail = () => {
       ) : null}
 
       {isBookJobModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/20 p-4">
-            <div className="w-full max-w-lg bg-white rounded-3xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
-                <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-white">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2.5 bg-blue-50 text-blue-600 rounded-2xl">
-                            <Send size={24} strokeWidth={2} />
-                        </div>
-                        <div>
-                            <h2 className="text-xl font-black text-slate-900 tracking-tight">Book Move</h2>
-                            <p className="text-xs text-slate-500 font-semibold mt-0.5">Send booking confirmation instantly</p>
-                        </div>
-                    </div>
-                    <button 
-                        onClick={() => setIsBookJobModalOpen(false)}
-                        className="p-2.5 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-2xl transition-colors"
-                    >
-                        <X size={20} strokeWidth={2.5} />
-                    </button>
-                </div>
-                
-                <div className="p-6 space-y-6 overflow-y-auto">
-                    <div className="space-y-3">
-                        <label className="text-xs font-bold uppercase tracking-wider text-black">Delivery Channels</label>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <label className={`flex items-center gap-3 rounded-2xl border p-4 text-sm font-bold cursor-pointer transition-all ${
-                                bookJobSendEmail 
-                                    ? 'border-blue-200 bg-blue-50/50 text-blue-800' 
-                                    : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
-                            }`}>
-                                <input
-                                    type="checkbox"
-                                    checked={bookJobSendEmail}
-                                    onChange={(e) => setBookJobSendEmail(e.target.checked)}
-                                    className="h-5 w-5 rounded border-slate-300 text-blue-600 focus:ring-blue-600"
-                                />
-                                <span>Email</span>
-                            </label>
-                            <label className={`flex items-center gap-3 rounded-2xl border p-4 text-sm font-bold cursor-pointer transition-all ${
-                                bookJobSendSms 
-                                    ? 'border-blue-200 bg-blue-50/50 text-blue-800' 
-                                    : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
-                            }`}>
-                                <input
-                                    type="checkbox"
-                                    checked={bookJobSendSms}
-                                    onChange={(e) => setBookJobSendSms(e.target.checked)}
-                                    className="h-5 w-5 rounded border-slate-300 text-blue-600 focus:ring-blue-600"
-                                />
-                                <span>SMS</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    {bookJobSendEmail && (
-                        <div className="space-y-3">
-                            <div className="space-y-2">
-                                <label className="text-xs font-bold uppercase tracking-wider text-black">Recipient Email</label>
-                                {availableEmails.length > 0 && (
-                                    <select
-                                        value={bookJobEmail}
-                                        onChange={(e) => setBookJobEmail(e.target.value)}
-                                        className="w-full rounded-2xl border-2 border-slate-200 px-4 py-3 text-sm font-bold text-black focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 transition-all mb-2 bg-white"
-                                    >
-                                        {availableEmails.map((item) => (
-                                            <option key={item.value} value={item.value}>
-                                                {item.label}
-                                            </option>
-                                        ))}
-                                        <option value="">Custom Email...</option>
-                                    </select>
-                                )}
-                                {(!availableEmails.length || !availableEmails.some(e => e.value === bookJobEmail)) && (
-                                    <input
-                                        type="email"
-                                        value={bookJobEmail}
-                                        onChange={(e) => setBookJobEmail(e.target.value)}
-                                        placeholder="Enter recipient email"
-                                        className="w-full rounded-2xl border-2 border-slate-200 px-4 py-3 text-sm font-bold text-black placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 transition-all"
-                                    />
-                                )}
-                            </div>
-                        </div>
-                    )}
-
-                    {bookJobSendSms && (
-                        <div className="space-y-3">
-                            <div className="space-y-2">
-                                <label className="text-xs font-bold uppercase tracking-wider text-black">Recipient Phone</label>
-                                {availablePhones.length > 0 && (
-                                    <select
-                                        value={bookJobPhone}
-                                        onChange={(e) => setBookJobPhone(e.target.value)}
-                                        className="w-full rounded-2xl border-2 border-slate-200 px-4 py-3 text-sm font-bold text-black focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 transition-all mb-2 bg-white"
-                                    >
-                                        {availablePhones.map((item) => (
-                                            <option key={item.value} value={item.value}>
-                                                {item.label}
-                                            </option>
-                                        ))}
-                                        <option value="">Custom Phone...</option>
-                                    </select>
-                                )}
-                                {(!availablePhones.length || !availablePhones.some(p => p.value === bookJobPhone)) && (
-                                    <input
-                                        type="tel"
-                                        value={bookJobPhone}
-                                        onChange={(e) => setBookJobPhone(e.target.value)}
-                                        placeholder="Enter recipient phone"
-                                        className="w-full rounded-2xl border-2 border-slate-200 px-4 py-3 text-sm font-bold text-black placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 transition-all"
-                                    />
-                                )}
-                            </div>
-                        </div>
-                    )}
-
-                    {(bookJobSendEmail || bookJobSendSms) && (
-                        <p className="text-xs text-slate-500 font-semibold mt-1 px-1">
-                            The booking confirmation template will be used.
-                        </p>
-                    )}
-                </div>
-                <div className="flex items-center justify-end gap-3 p-6 bg-slate-50 border-t border-slate-100">
-                    <GhostBtn onClick={() => setIsBookJobModalOpen(false)}>Cancel</GhostBtn>
-                    <GhostBtn 
-                        onClick={() => confirmBookJob(false, false, false)}
-                        disabled={isBookingJob}
-                    >
-                        Skip & Book
-                    </GhostBtn>
-                    <PrimaryBtn
-                        onClick={() => confirmBookJob(false)}
-                        disabled={isBookingJob || (!bookJobSendEmail && !bookJobSendSms)}
-                        loading={isBookingJob}
-                    >
-                        Send & Book Job
-                    </PrimaryBtn>
-                </div>
-          </div>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-heading/25 p-4">
+          <Card className="w-full max-w-lg space-y-4 p-6">
+            <h2 className="text-xl font-bold">Book Opportunity</h2>
+            <p>Booking creates operational jobs from the planned jobs.</p>
+            {bookingReadiness?.ready ? <p>All booking requirements are satisfied.</p> : (
+              <div role="alert">
+                <p>Complete these requirements before booking:</p>
+                <ul>{(bookingReadiness?.missing || []).map((requirement) => <li key={requirement}>{getWorkflowStageLabel(requirement)}</li>)}</ul>
+              </div>
+            )}
+            {(bookingReadiness?.overridable_missing || []).filter((name) => hasPermission(`opportunities.book_without_${name}`)).map((name) => (
+              <label key={name} className="flex gap-2">
+                <input type="checkbox" checked={bookingOverrides.includes(name)} onChange={(event) => setBookingOverrides((previous) => event.target.checked ? [...previous, name] : previous.filter((item) => item !== name))} />
+                Override {getWorkflowStageLabel(name)} requirement
+              </label>
+            ))}
+            {bookingOverrides.length > 0 && <label className="block">Override reason
+              <textarea aria-label="Booking override reason" value={bookingOverrideReason} onChange={(event) => setBookingOverrideReason(event.target.value)} className={inputCls} />
+            </label>}
+            <div className="flex justify-end gap-2">
+              <GhostBtn onClick={() => setIsBookJobModalOpen(false)} disabled={isBookingJob}>Cancel</GhostBtn>
+              <PrimaryBtn onClick={confirmBookJob} disabled={!canSubmitBooking} loading={isBookingJob}>Book Opportunity</PrimaryBtn>
+            </div>
+          </Card>
         </div>
       )}
 
@@ -11263,9 +10992,15 @@ const SalesDetail = () => {
         isOpen={showRingCentral}
         onClose={() => setShowRingCentral(false)}
       >
-        <RingCentralEmbeddablePanel />
+        {showRingCentral && <RingCentralEmbeddablePanel />}
       </MovablePanel>
     </div>
   );
 }
-export default SalesDetail;
+export default function SalesDetailWithSuspense() {
+  return (
+    <React.Suspense fallback={<div role="status" className="p-6 text-slate-500">Loading details...</div>}>
+      <SalesDetail />
+    </React.Suspense>
+  );
+}

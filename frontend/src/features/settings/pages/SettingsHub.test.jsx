@@ -66,10 +66,23 @@ vi.mock('../components/CommunicationTemplates', () => ({
   default: () => <div data-testid="communication-templates-module">Communication Templates Content</div>,
 }));
 
+vi.mock('../components/MoverSizeSettings', () => ({
+  default: ({ branchId }) => <div data-testid="mover-size-settings-module">Move Sizes Settings: branch {branchId}</div>,
+}));
+
+vi.mock('../components/IntegrationSettings', () => ({
+  default: ({ view }) => <div data-testid="integration-settings-module">Integration Settings: {view}</div>,
+}));
+
+vi.mock('../components/InventoryWorkflowSettings', () => ({
+  default: ({ branchId }) => <div data-testid="inventory-workflow-settings-module">Inventory Settings: branch {branchId}</div>,
+}));
+
 describe('SettingsHub', () => {
   beforeEach(() => {
     navigate.mockClear();
     routeState.pathname = '/settings/company/profile';
+    permissions.canAny = () => true;
     routeState.params = { mainGroup: 'company', subTab: 'profile' };
   });
 
@@ -85,6 +98,8 @@ describe('SettingsHub', () => {
     expect(screen.getByTitle('Operations & Fleet')).toBeInTheDocument();
     expect(screen.getByTitle('Team & Security')).toBeInTheDocument();
     expect(screen.getByTitle('Sales & CRM')).toBeInTheDocument();
+    expect(screen.getByTitle('Move Classifications')).toBeInTheDocument();
+    expect(screen.queryByTitle('Inventory Settings')).not.toBeInTheDocument();
 
     // Check active sub-tab pill in sticky tier-2 header
     expect(screen.getByRole('tab', { name: /Profile & Legal/i })).toBeInTheDocument();
@@ -213,5 +228,56 @@ describe('SettingsHub', () => {
     fireEvent.click(estimateTab);
 
     expect(navigate).toHaveBeenCalledWith('/documents/estimate-portal-templates');
+  });
+
+  it('renders Moves section with Move Sizes tab and mounts the module', () => {
+    routeState.params = { mainGroup: 'moves', subTab: 'move-sizes' };
+    render(<SettingsHub />);
+
+    expect(screen.getByRole('tab', { name: /Move Sizes/i })).toBeInTheDocument();
+    expect(screen.getByTestId('mover-size-settings-module')).toHaveTextContent('Move Sizes Settings: branch 1');
+  });
+
+it('exposes the payment gateway from the active settings navigation', () => {
+  render(<SettingsHub />);
+  fireEvent.click(screen.getByTitle('Integrations'));
+  expect(navigate).toHaveBeenCalledWith('/settings/integrations/payment-gateway');
+});
+
+it('opens Authorize.Net configuration on the payment gateway route', () => {
+  routeState.params = { mainGroup: 'integrations', subTab: 'payment-gateway' };
+  render(<SettingsHub />);
+  expect(screen.getByRole('tab', { name: /Payment Gateway/i })).toBeInTheDocument();
+  expect(screen.getByTestId('integration-settings-module')).toHaveTextContent('Integration Settings: gateways');
+});
+
+it('normalizes the existing integrations link to the gateway configuration', () => {
+  routeState.params = { mainGroup: 'integrations' };
+  render(<SettingsHub />);
+  expect(navigate).toHaveBeenCalledWith('/settings/integrations/payment-gateway', { replace: true });
+});
+
+it('hides the integration entry when settings view permission is missing', () => {
+  permissions.canAny = (required) => !required.includes('settings.view');
+  routeState.params = { mainGroup: 'company', subTab: 'profile' };
+  render(<SettingsHub />);
+  expect(screen.queryByTitle('Integrations')).not.toBeInTheDocument();
+  permissions.canAny = () => true;
+});
+
+
+  it('redirects legacy inventory route to moves inventory tab', () => {
+    routeState.params = { mainGroup: 'inventory', subTab: 'inventory' };
+    render(<SettingsHub />);
+
+    expect(navigate).toHaveBeenCalledWith('/settings/moves/inventory', { replace: true });
+  });
+
+  it('renders Inventory Helpers under Moves section', () => {
+    routeState.params = { mainGroup: 'moves', subTab: 'inventory' };
+    render(<SettingsHub />);
+
+    expect(screen.getByRole('tab', { name: /Inventory Helpers/i })).toBeInTheDocument();
+    expect(screen.getByTestId('inventory-workflow-settings-module')).toHaveTextContent('Inventory Settings: branch 1');
   });
 });

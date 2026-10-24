@@ -51,7 +51,7 @@ import api, {
     addEstimateCharge,
     applyEstimatePackage,
     createContract,
-    createSalesActivity,
+    sendRecordEmail,
     createPaymentRequest,
     createEstimate,
     createRefund,
@@ -108,6 +108,11 @@ import {
   normalizeNumber,
   parseDurationToHours,
 } from '../utils/chargeMath';
+import {
+  buildDefaultDraftEstimate,
+  getStoredDraftEstimate,
+  setStoredDraftEstimate,
+} from '../utils/estimateDraftUtils';
 import { getPortalBaseUrl } from '../../../shared/utils/portalBaseUrl';
 
 const Card = ({ children, className = '', noPadding = false }) => (
@@ -2419,7 +2424,6 @@ const DEFAULT_CATEGORY_FORM_SCHEMAS = {
         ],
     },
     additional_lbs: { version: 1, fields: [{ key: 'qty' }, { key: 'rate' }] },
-    additional_lbs: { version: 1, fields: [{ key: 'qty' }, { key: 'rate' }] },
     storage_in_transit: { version: 1, fields: [{ key: 'qty' }, { key: 'rate' }] },
     packing: {
         version: 1,
@@ -3636,6 +3640,7 @@ export default function EstimateView({
     sourceType = 'opportunity',
     isLoadingLinkedOpportunity = false,
     onRefresh,
+    onSendPortal,
     opportunityJobs = [],
     subJobServiceOptions = [],
     selectedSubJobId = '',
@@ -4012,11 +4017,12 @@ export default function EstimateView({
 
     const buildEstimateRequirementsDraft = () => {
         const customer = opportunity?.customer_details || opportunity?.customer || null;
+        const customerNameParts = String(customer?.full_name || customer?.profile_name || customer?.name || '').trim().split(/\s+/).filter(Boolean);
         const originAddress = opportunity?.origin_address_details || opportunity?.origin_address || null;
         const destinationAddress = opportunity?.destination_address_details || opportunity?.destination_address || null;
         return {
-            first_name: customer?.first_name || '',
-            last_name: customer?.last_name || '',
+            first_name: customer?.first_name || customerNameParts[0] || '',
+            last_name: customer?.last_name || customerNameParts.slice(1).join(' '),
             email: customer?.email || '',
             phone: customer?.primary_phone || customer?.phone || '',
             move_date: opportunity?.move_date || '',
@@ -4054,9 +4060,6 @@ export default function EstimateView({
         if (!String(target?.branch || '').trim()) missing.push('branch');
         if (!String(target?.service_type || '').trim()) missing.push('service type');
         if (!String(target?.move_type || '').trim()) missing.push('move type');
-        if (!String(target?.origin_street || '').trim()) missing.push('origin address');
-        if (!String(target?.destination_street || '').trim()) missing.push('destination address');
-
         return missing;
     };
 
@@ -4576,34 +4579,17 @@ export default function EstimateView({
             const subject = multiSendEmailData.subject.trim();
             const toEmail = multiSendEmailData.to.trim();
             
-            const createdRes = await createSalesActivity({
-                opportunity: opportunityId,
-                activity_type: 'email',
-                subject: subject,
-                description: stripHtml(activeBody),
-                direction: 'outbound',
-                status: 'completed',
+            await sendRecordEmail('opportunity', opportunityId, {
+                to: [toEmail],
+                subject,
+                body_text: stripHtml(activeBody),
+                body_html: activeBody,
+                include_signature: true,
             });
-            const created = createdRes?.data || createdRes;
-            
-            if (!created?.id) {
-                throw new Error('Failed to log email activity.');
-            }
-
-            const formData = new FormData();
-            formData.append('activity', created.id);
-            formData.append('to_email', toEmail);
-            formData.append('subject', subject);
-            formData.append('body_html', activeBody);
-            
-            const emailLog = await api.post('/sales/email-logs/', formData);
-            if (emailLog?.status === 'failed') {
-                throw new Error(emailLog?.error_message || 'Email integration delivery failed.');
-            }
 
             setToast({
                 type: 'success',
-                text: 'Email with selected documents sent successfully.',
+                text: 'Email with selected documents queued.',
             });
             setIsMultiSendModalOpen(false);
             setSelectedDocKeys([]);
@@ -5264,16 +5250,16 @@ export default function EstimateView({
     };
 
     const estimateIsLocked = useMemo(() => {
-        const status = String(estimate?.status || '').toLowerCase();
+        const status = String(estimate?.lifecycle_state || estimate?.status || '').toLowerCase();
         const requiresReapproval = Boolean(estimate?.requires_reapproval);
         if (requiresReapproval) return false;
-        return status === 'voided';
-    }, [estimate?.requires_reapproval, estimate?.status]);
+        return ['cancelled', 'expired', 'superseded', 'voided'].includes(status);
+    }, [estimate?.requires_reapproval, estimate?.lifecycle_state, estimate?.status]);
 
     const estimateIsSigned = useMemo(() => {
-        const status = String(estimate?.status || '').toLowerCase();
-        return status === 'signed' || Boolean(estimate?.esigned);
-    }, [estimate?.esigned, estimate?.status]);
+        const status = String(estimate?.lifecycle_state || estimate?.status || '').toLowerCase();
+        return !estimate?.lifecycle_state && (status === 'signed' || Boolean(estimate?.esigned));
+    }, [estimate?.esigned, estimate?.lifecycle_state, estimate?.status]);
 
     const canModifyEstimate = canEditOpportunity && !estimateIsLocked;
 
@@ -5437,20 +5423,34 @@ export default function EstimateView({
         try {
             const response = await getEstimates({ opportunity: opportunity.id });
             const rows = Array.isArray(response?.results) ? response.results : Array.isArray(response) ? response : [];
-            const active = rows.find((row) => row.method === 'manual') || null;
-            if (active?.id) {
-                const detailResponse = await api.get(`/estimates/${active.id}/`);
-                const detail = detailResponse?.data || active;
-                setEstimate(detail);
-                // Don't overwrite manual fields if the user is actively editing them
-                if (!isEditingDetails) syncManual(detail);
-                return detail;
+            let active = rows.find((row) => row.method === 'manual') || rows[0] || null;
+            if (!active) {
+                active = getStoredDraftEstimate(opportunity.id);
+            }
+            if (active?.id && !String(active.id).startsWith('draft-')) {
+                try {
+                    const detailResponse = await api.get(`/estimates/${active.id}/`);
+                    const detail = detailResponse?.data || detailResponse || active;
+                    setEstimate(detail);
+                    if (!isEditingDetails) syncManual(detail);
+                    return detail;
+                } catch {
+                    setEstimate(active);
+                    if (!isEditingDetails) syncManual(active);
+                    return active;
+                }
             } else {
                 setEstimate(active);
                 if (!isEditingDetails) syncManual(active);
                 return active;
             }
         } catch {
+            const draft = getStoredDraftEstimate(opportunity.id);
+            if (draft) {
+                setEstimate(draft);
+                if (!isEditingDetails) syncManual(draft);
+                return draft;
+            }
             if (!silent) setToast({ type: 'error', text: 'Failed to load manual estimate.' });
             return null;
         } finally {
@@ -7422,11 +7422,21 @@ export default function EstimateView({
         }
         setSaving(true);
         try {
-            const row = await createEstimate({
-                opportunity: opportunity.id,
-                method: 'manual',
-                ...blankManualFields,
-            });
+            let row;
+            try {
+                row = await createEstimate({
+                    opportunity: opportunity.id,
+                    method: 'manual',
+                    ...blankManualFields,
+                });
+            } catch (createErr) {
+                if (createErr?.code === 'MODULE_NOT_AVAILABLE' || createErr?.response?.status === 404 || createErr?.response?.status === 501) {
+                    row = buildDefaultDraftEstimate(opportunity.id, blankManualFields);
+                    setStoredDraftEstimate(opportunity.id, row);
+                } else {
+                    throw createErr;
+                }
+            }
             setEstimate(row);
             syncManual(row);
             setToast({ type: 'success', text: 'Manual estimate created.' });
@@ -7472,28 +7482,31 @@ export default function EstimateView({
             }
 
             await updateOpportunity(opportunity.id, {
-                customer: finalCustomerId,
                 service_type: estimateRequirementsDraft.service_type,
                 move_date: estimateRequirementsDraft.move_date || null,
                 move_type: estimateRequirementsDraft.move_type || null,
-                branch: estimateRequirementsDraft.branch ? Number(estimateRequirementsDraft.branch) : null,
-                origin_address_line1: String(estimateRequirementsDraft.origin_street || '').trim(),
-                origin_city: String(estimateRequirementsDraft.origin_city || '').trim(),
-                origin_state: String(estimateRequirementsDraft.origin_state || '').trim(),
-                origin_postal_code: String(estimateRequirementsDraft.origin_zip || '').trim(),
-                destination_address_line1: String(estimateRequirementsDraft.destination_street || '').trim(),
-                destination_city: String(estimateRequirementsDraft.destination_city || '').trim(),
-                destination_state: String(estimateRequirementsDraft.destination_state || '').trim(),
-                destination_postal_code: String(estimateRequirementsDraft.destination_zip || '').trim(),
+                ...(String(estimateRequirementsDraft.branch || '') !== String(
+                    opportunity?.branch?.id || opportunity?.branch_id || opportunity?.branch_details?.id || ''
+                ) ? { branch: estimateRequirementsDraft.branch ? Number(estimateRequirementsDraft.branch) : null } : {}),
             });
 
             await Promise.resolve(onRefresh?.());
 
-            const row = await createEstimate({
-                opportunity: opportunity.id,
-                method: 'manual',
-                ...blankManualFields,
-            });
+            let row;
+            try {
+                row = await createEstimate({
+                    opportunity: opportunity.id,
+                    method: 'manual',
+                    ...blankManualFields,
+                });
+            } catch (createErr) {
+                if (createErr?.code === 'MODULE_NOT_AVAILABLE' || createErr?.response?.status === 404 || createErr?.response?.status === 501) {
+                    row = buildDefaultDraftEstimate(opportunity.id, blankManualFields);
+                    setStoredDraftEstimate(opportunity.id, row);
+                } else {
+                    throw createErr;
+                }
+            }
             setEstimate(row);
             syncManual(row);
             setIsEstimateRequirementsModalOpen(false);
@@ -8182,6 +8195,10 @@ export default function EstimateView({
     };
 
     const handleSendEstimate = () => {
+        if (onSendPortal) {
+            onSendPortal();
+            return;
+        }
         if (!estimate?.id) return;
 
         // Pre-fill deposit info if available
@@ -9989,50 +10006,6 @@ export default function EstimateView({
                                                 <option value="long_distance">Long Distance</option>
                                                 <option value="interstate">Interstate</option>
                                             </FormInput>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="space-y-4">
-                                    <div className="text-sm font-black uppercase tracking-widest text-slate-400">Route</div>
-                                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                                        <div className="space-y-1.5">
-                                            <label className="text-[0.6875rem] font-bold text-black uppercase tracking-wider">Origin Address</label>
-                                            <AddressAutocomplete
-                                                country="ca,us"
-                                                value={estimateRequirementsDraft.origin_street || ''}
-                                                onChange={(e) => setEstimateRequirementsDraft((prev) => ({ ...prev, origin_street: e.target.value }))}
-                                                onPick={(parts) =>
-                                                    setEstimateRequirementsDraft((prev) => ({
-                                                        ...prev,
-                                                        origin_street: parts.formattedAddress ?? parts.street ?? prev.origin_street,
-                                                        origin_city: parts.city || prev.origin_city,
-                                                        origin_state: parts.province || prev.origin_state,
-                                                        origin_zip: parts.postalCode || prev.origin_zip,
-                                                    }))
-                                                }
-                                                className="w-full px-4 py-2.5 bg-subtle/50 border border-border/80 rounded-xl text-sm font-bold text-black focus:bg-card focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-black/50"
-                                                placeholder="123 Main St, City, State ZIP"
-                                            />
-                                        </div>
-                                        <div className="space-y-1.5">
-                                            <label className="text-[0.6875rem] font-bold text-black uppercase tracking-wider">Destination Address</label>
-                                            <AddressAutocomplete
-                                                country="ca,us"
-                                                value={estimateRequirementsDraft.destination_street || ''}
-                                                onChange={(e) => setEstimateRequirementsDraft((prev) => ({ ...prev, destination_street: e.target.value }))}
-                                                onPick={(parts) =>
-                                                    setEstimateRequirementsDraft((prev) => ({
-                                                        ...prev,
-                                                        destination_street: parts.formattedAddress ?? parts.street ?? prev.destination_street,
-                                                        destination_city: parts.city || prev.destination_city,
-                                                        destination_state: parts.province || prev.destination_state,
-                                                        destination_zip: parts.postalCode || prev.destination_zip,
-                                                    }))
-                                                }
-                                                className="w-full px-4 py-2.5 bg-subtle/50 border border-border/80 rounded-xl text-sm font-bold text-black focus:bg-card focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-black/50"
-                                                placeholder="456 Destination Ave, City, State ZIP"
-                                            />
                                         </div>
                                     </div>
                                 </div>

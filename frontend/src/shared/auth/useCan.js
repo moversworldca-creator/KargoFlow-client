@@ -9,7 +9,6 @@ export const useCan = () => {
     permissions: permissionSet,
     isSuperuser: Boolean(user?.is_superuser),
     isSystemAdmin: Boolean(user?.is_system_admin),
-    isCompanyAdmin: Boolean(permissionSet?.has?.('crm.admin')),
   }), [permissionSet, user?.is_superuser, user?.is_system_admin]);
 
   return useMemo(() => ({
