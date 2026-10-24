@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, Plus, Trash2, ArrowUp, ArrowDown, AlertCircle, ChevronRight } from 'lucide-react';
+import { X, Plus, Trash2, ArrowUp, ArrowDown, AlertCircle, ChevronRight, ToggleLeft, ToggleRight } from 'lucide-react';
 import {
   createCustomAutomation,
   updateCustomAutomation,
@@ -1568,18 +1568,11 @@ function AutomationWizardModalContent({
                         <span className="block text-xs font-bold text-heading">{label}</span>
                         <span className="block text-[11px] text-muted">{enabled ? 'Enabled' : 'Disabled'}</span>
                       </span>
-                      <span
-                        aria-hidden="true"
-                        className={`relative h-4 w-7 rounded-full transition-colors ${
-                          enabled ? 'bg-gradient-to-r from-orange-300 to-rose-200' : 'bg-slate-300'
-                        }`}
-                      >
-                        <span
-                          className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
-                            enabled ? 'translate-x-3.5' : 'translate-x-0.5'
-                          }`}
-                        />
-                      </span>
+                      {enabled ? (
+                        <ToggleRight size={22} className="text-[#1F7AE0] shrink-0" />
+                      ) : (
+                        <ToggleLeft size={22} className="text-[#587195] shrink-0" />
+                      )}
                     </button>
                   );
                 })}

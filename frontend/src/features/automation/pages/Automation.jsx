@@ -11,6 +11,8 @@ import {
   AlertCircle,
   RefreshCw,
   Building,
+  ToggleLeft,
+  ToggleRight,
 } from 'lucide-react';
 import {
   getBranchNotifications,
@@ -887,15 +889,14 @@ const Automation = () => {
                                   aria-checked={isEnabled}
                                   aria-label={`Toggle ${notification.name}`}
                                   onClick={() => toggleNotification(notification.key)}
-                                  className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1877F2] focus-visible:ring-offset-1 ${
-                                    isEnabled ? 'bg-[#1877F2]' : 'bg-slate-300 hover:bg-slate-400/80'
-                                  }`}
+                                  title={isEnabled ? 'Disable notification' : 'Enable notification'}
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-[#EEF3F9] cursor-pointer"
                                 >
-                                  <span
-                                    className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow-sm transition duration-200 ease-in-out ${
-                                      isEnabled ? 'translate-x-3.5' : 'translate-x-0.5'
-                                    }`}
-                                  />
+                                  {isEnabled ? (
+                                    <ToggleRight size={22} className="text-[#1877F2]" />
+                                  ) : (
+                                    <ToggleLeft size={22} className="text-[#587195]" />
+                                  )}
                                 </button>
                               </div>
                             </div>
@@ -1015,15 +1016,13 @@ const Automation = () => {
                                   title={wf.is_active ? 'Disable automation' : 'Enable automation'}
                                   aria-busy={togglingAutomationIds.has(wf.id)}
                                   role="switch"
-                                  className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1F7AE0] focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 ${
-                                    wf.is_active ? 'bg-[#1F7AE0]' : 'bg-slate-300 hover:bg-slate-400/80'
-                                  }`}
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-[#EDF4FA] disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
                                 >
-                                  <span
-                                    className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow-sm transition duration-200 ease-in-out ${
-                                      wf.is_active ? 'translate-x-3.5' : 'translate-x-0.5'
-                                    }`}
-                                  />
+                                  {wf.is_active ? (
+                                    <ToggleRight size={22} className="text-[#1F7AE0]" />
+                                  ) : (
+                                    <ToggleLeft size={22} className="text-[#587195]" />
+                                  )}
                                 </button>
                                 <button
                                   type="button"
