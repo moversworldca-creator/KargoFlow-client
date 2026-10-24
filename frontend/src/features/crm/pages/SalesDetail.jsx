@@ -1,10 +1,12 @@
+import InventoryPortalPanel from '../components/InventoryPortalPanel';
+import IssuedDocumentsPanel from '../components/IssuedDocumentsPanel';
 import { hasSendingMailbox, getComposerTemplates, getComposerTemplate } from '../leads/communicationSetupApi';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link, useLocation } from 'react-router-dom';
-import { 
-  ArrowLeft, Edit2, Phone, Mail, MessageSquare, 
-  Plus, Send, FileText, Info, MapPin, 
-  Calendar, User, Building2, Clock, 
+import {
+  ArrowLeft, Edit2, Phone, Mail, MessageSquare,
+  Plus, Send, FileText, Info, MapPin,
+  Calendar, User, Building2, Clock,
   MoreHorizontal, ChevronDown, CheckCircle2,
   Loader2, Zap, TrendingUp, DollarSign,
   AlertCircle, ChevronRight, Share2, Printer,
@@ -34,6 +36,7 @@ import { getLookupEmployeesPage, getLeadStatusCodeLookups, getLookupUsersPage, g
 import { getOverQuotaBranchIds, isBranchOverQuota } from '../../../shared/utils/branchScope';
 
 import EstimateView from '../components/EstimateView';
+import SalesLifecyclePanel from '../components/SalesLifecyclePanel';
 import PaymentsPanel from '../components/PaymentsPanel';
 import StorageView from '../components/StorageView';
 import LeadSpecs from '../components/LeadSpecs';
@@ -103,11 +106,11 @@ const UNBOOK_REASON_OPTIONS = [
 ];
 
 import { normalizePreviewHtml, replaceBranchPlaceholders } from '../utils/emailPreview';
-import api, { 
-  getOpportunity, 
+import api, {
+  getOpportunity,
   getOpportunityBySalesNumber,
   getOpportunityAvailability,
-  updateOpportunity, 
+  updateOpportunity,
   createOpportunity,
   getTimelineEvents,
   sendRecordEmail,
@@ -115,8 +118,13 @@ import api, {
   recordRecordSmsConsent,
   markOpportunityEstimateCreated,
   bookOpportunityJob,
+  getOpportunityBookingReadiness,
   unbookOpportunityJob,
-  confirmOpportunityJob,
+  getCancellationReasons,
+  getDisqualificationReasons,
+  disqualifyLead,
+  restoreLead,
+  archiveLead,
   cancelOpportunityJob,
   completeOpportunityJob,
   markOpportunityLost,
@@ -146,10 +154,10 @@ import api, {
   createCustomerContact,
   updateCustomerContact,
   deleteCustomerContact,
-	  getLead,
-	  getLeadBySalesNumber,
-	  updateLead,
-	  createLead,
+  getLead,
+  getLeadBySalesNumber,
+  updateLead,
+  createLead,
   convertLead,
   startLead,
   qualifyLead,
@@ -176,7 +184,7 @@ import {
   getRecordTabLabelFromSegment,
   isLeadRecordType,
 } from '../utils/recordRoutes';
-import { getWorkflowStageLabel } from '../utils/statusWorkflow';
+import { getWorkflowStageLabel, getRecordSystemState, getRecordWorkflowActions } from '../utils/statusWorkflow';
 import { getPortalBaseUrl } from '../../../shared/utils/portalBaseUrl';
 import {
   buildDefaultDraftEstimate,
@@ -246,15 +254,15 @@ const safeDateTime = (iso) => {
 
 const toneForWorkflowStage = (stage) => {
   const normalized = String(stage || '').toLowerCase();
-  if (['completed', 'job'].includes(normalized)) return 'green';
+  if (['completed', 'closed', 'converted', 'job'].includes(normalized)) return 'green';
   if (['confirmed'].includes(normalized)) return 'teal';
   if (['booked'].includes(normalized)) return 'amber';
   if (['estimate_ready', 'quoted', 'estimate'].includes(normalized)) return 'violet';
   if (['lead_in_progress', 'in_progress'].includes(normalized)) return 'indigo';
-  if (['opportunity'].includes(normalized)) return 'blue';
+  if (['open', 'opportunity'].includes(normalized)) return 'blue';
   if (['new_lead', 'new'].includes(normalized)) return 'sky';
   if (['lost'].includes(normalized)) return 'rose';
-  if (['canceled'].includes(normalized)) return 'red';
+  if (['canceled', 'cancelled', 'disqualified'].includes(normalized)) return 'red';
   if (['draft', 'pending'].includes(normalized)) return 'cyan';
   return 'amber';
 };
@@ -438,7 +446,7 @@ const formatTimelineDateTime = (iso) => {
   if (!iso) return { date: '-', time: '' };
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return { date: String(iso), time: '' };
-  
+
   const dateStr = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
   const timeStr = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   return { date: dateStr, time: timeStr };
@@ -453,7 +461,7 @@ const formatPaymentDate = (iso) => {
 
 const getEventTheme = (eventType) => {
   const type = String(eventType || '').toLowerCase();
-  
+
   if (type.startsWith('workflow.')) {
     return {
       bg: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
@@ -971,12 +979,12 @@ const mergeTimelineActivities = ({ opportunityActivities = [], leadActivities = 
     const key = isInbound
       ? buildInboundThreadKey(act)
       : [
-          source,
-          kind,
-          id,
-          String(act?.created_at || '').slice(0, 16),
-          normalizeActivityText(act?.subject || act?.description || act?.content || ''),
-        ].join('|');
+        source,
+        kind,
+        id,
+        String(act?.created_at || '').slice(0, 16),
+        normalizeActivityText(act?.subject || act?.description || act?.content || ''),
+      ].join('|');
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -1177,10 +1185,10 @@ const mergeCustomerContactIntoRecord = (record, savedContact, fallbackCustomerId
     customer_details: nextCustomerDetails,
     customer: record?.customer && typeof record.customer === 'object'
       ? {
-          ...record.customer,
-          id: customerId || record.customer.id || null,
-          contacts: currentContacts,
-        }
+        ...record.customer,
+        id: customerId || record.customer.id || null,
+        contacts: currentContacts,
+      }
       : record?.customer,
   };
 };
@@ -1331,15 +1339,15 @@ const getUserBranchIds = (user) => {
 
 const oppView = (opportunity, isLeadRecord = null) => {
   if (!opportunity) return {};
-  
+
   // Lead and opportunity share this UI, but the route/API context is the reliable entity signal.
   const isLead = isLeadRecord ?? (opportunity.id === 'new' ? !opportunity.isOpportunity : !opportunity.customer_details);
   const leadFullName = String(
     opportunity?.full_name || opportunity?.customer_name || opportunity?.lead_name ||
     opportunity?.name || opportunity?.contact_name || opportunity?.customer?.full_name || ''
   ).trim();
-  
-  const customerName = isLead 
+
+  const customerName = isLead
     ? `${opportunity.first_name || ''} ${opportunity.last_name || ''}`.trim() || leadFullName || (opportunity.id === 'new' ? 'New Lead' : `Lead #${String(opportunity.sales_number || opportunity.id).padStart(5, '0')}`)
     : (opportunity?.customer_details?.full_name ||
       (opportunity?.customer_details?.first_name || opportunity?.customer_details?.last_name
@@ -1351,148 +1359,94 @@ const oppView = (opportunity, isLeadRecord = null) => {
 
   const assignedName = isLead
     ? (
-        [
-          opportunity?.assigned_to_details?.first_name,
-          opportunity?.assigned_to_details?.last_name,
-        ].filter(Boolean).join(' ').trim()
-        || opportunity?.assigned_to_details?.email
-        || 'Unassigned'
-      )
+      [
+        opportunity?.assigned_to_details?.first_name,
+        opportunity?.assigned_to_details?.last_name,
+      ].filter(Boolean).join(' ').trim()
+      || opportunity?.assigned_to_details?.email
+      || 'Unassigned'
+    )
     : (
-        [
-          opportunity?.assigned_user_details?.first_name,
-          opportunity?.assigned_user_details?.last_name,
-        ].filter(Boolean).join(' ').trim()
-        || opportunity?.assigned_user_details?.email
-        || 'Unassigned'
-      );
+      [
+        opportunity?.assigned_user_details?.first_name,
+        opportunity?.assigned_user_details?.last_name,
+      ].filter(Boolean).join(' ').trim()
+      || opportunity?.assigned_user_details?.email
+      || 'Unassigned'
+    );
 
   const branchName = opportunity?.branch_details?.name || '-';
 
   const originText = isLead
     ? formatAddressText(
-        {
-          street: opportunity?.origin_street,
-          city: opportunity?.origin_city,
-          state: opportunity?.origin_state,
-          zip: opportunity?.origin_zip,
-        },
-        ''
-      )
+      {
+        street: opportunity?.origin_street,
+        city: opportunity?.origin_city,
+        state: opportunity?.origin_state,
+        zip: opportunity?.origin_zip,
+      },
+      ''
+    )
     : formatAddressText(
-        opportunity?.origin_address_details,
-        ''
-      );
+      opportunity?.origin_address_details,
+      ''
+    );
 
   const destText = isLead
     ? formatAddressText(
-        {
-          street: opportunity?.destination_street,
-          city: opportunity?.destination_city,
-          state: opportunity?.destination_state,
-          zip: opportunity?.destination_zip,
-        },
-        ''
-      )
+      {
+        street: opportunity?.destination_street,
+        city: opportunity?.destination_city,
+        state: opportunity?.destination_state,
+        zip: opportunity?.destination_zip,
+      },
+      ''
+    )
     : formatAddressText(
-        opportunity?.destination_address_details,
-        ''
-      );
+      opportunity?.destination_address_details,
+      ''
+    );
 
   const moveSize = isLead
     ? (resolveMoveSizeName(opportunity.move_size, opportunity?.mover_size_details ? [opportunity.mover_size_details] : []) || opportunity.move_size || '-')
     : (
-        resolveMoveSizeName(
-          opportunity.mover_size_details?.id || opportunity.mover_size_details?.value || opportunity.mover_size_details?.name || opportunity.mover_size_details?.label || opportunity.move_size_details?.id || opportunity.move_size_details?.value || opportunity.move_size_details?.name || opportunity.move_size_details?.label || opportunity.legacy_move_size,
-          [
-            ...(opportunity.mover_size_details ? [opportunity.mover_size_details] : []),
-            ...(opportunity.move_size_details ? [opportunity.move_size_details] : []),
-          ]
-        ) ||
-        (typeof opportunity.mover_size === 'object' ? opportunity.mover_size?.name : '') ||
-        opportunity.legacy_move_size ||
-        '-'
-      );
+      resolveMoveSizeName(
+        opportunity.mover_size_details?.id || opportunity.mover_size_details?.value || opportunity.mover_size_details?.name || opportunity.mover_size_details?.label || opportunity.move_size_details?.id || opportunity.move_size_details?.value || opportunity.move_size_details?.name || opportunity.move_size_details?.label || opportunity.legacy_move_size,
+        [
+          ...(opportunity.mover_size_details ? [opportunity.mover_size_details] : []),
+          ...(opportunity.move_size_details ? [opportunity.move_size_details] : []),
+        ]
+      ) ||
+      (typeof opportunity.mover_size === 'object' ? opportunity.mover_size?.name : '') ||
+      opportunity.legacy_move_size ||
+      '-'
+    );
   const moveType = opportunity?.move_type_name || getMoveTypeLabel(opportunity.move_type || '-') || '-';
   const serviceType = opportunity?.service_type_name || getMoveTypeLabel(opportunity.service_type || '-') || '-';
   const leadSource = opportunity?.referral_source_details?.name || opportunity?.utm_source || '-';
   const originRoute = isLead
     ? formatRouteSummary(opportunity.origin_street, opportunity.origin_city, opportunity.origin_state, opportunity.origin_zip)
     : formatRouteSummary(
-        opportunity?.origin_address_details?.address_line1,
-        opportunity?.origin_address_details?.city,
-        opportunity?.origin_address_details?.state,
-        opportunity?.origin_address_details?.zip_code
-      );
+      opportunity?.origin_address_details?.address_line1,
+      opportunity?.origin_address_details?.city,
+      opportunity?.origin_address_details?.state,
+      opportunity?.origin_address_details?.zip_code
+    );
   const destinationRoute = isLead
     ? formatRouteSummary(opportunity.destination_street, opportunity.destination_city, opportunity.destination_state, opportunity.destination_zip)
     : formatRouteSummary(
-        opportunity?.destination_address_details?.address_line1,
-        opportunity?.destination_address_details?.city,
-        opportunity?.destination_address_details?.state,
-        opportunity?.destination_address_details?.zip_code
-      );
+      opportunity?.destination_address_details?.address_line1,
+      opportunity?.destination_address_details?.city,
+      opportunity?.destination_address_details?.state,
+      opportunity?.destination_address_details?.zip_code
+    );
 
-  return { 
-    customerName, email, phone, assignedName, branchName, 
+  return {
+    customerName, email, phone, assignedName, branchName,
     originText, destText, originRoute, destinationRoute, isLead, moveSize, moveType, serviceType, leadSource
   };
 };
 
-const buildWorkflowActions = ({
-  isLead,
-  isNewRecord,
-  workflowStage,
-  estimateSummary,
-  canDuplicateOpportunity = false,
-  canBookOpportunity = false,
-  canMarkOpportunityLost = false,
-  canCreateOpportunity = false,
-  canEditOpportunity = false,
-}) => {
-  if (isNewRecord) return [];
-
-  const stage = String(workflowStage || '').toLowerCase();
-
-  if (isLead) {
-    if (stage === 'converted') return [];
-    if (stage === 'lost') return [{ key: 'reopen', label: 'Reopen Lead', tone: 'primary' }];
-    return [
-      ...(canBookOpportunity ? [{ key: 'book', label: 'Book Job', tone: 'primary' }] : []),
-      ...(canMarkOpportunityLost ? [{ key: 'lost', label: 'Mark Lost', tone: 'secondary' }] : []),
-    ];
-  }
-
-  const estimateStatus = String(estimateSummary?.status || '').toLowerCase();
-  const isEstimateSigned = estimateStatus === 'signed';
-  const canSendEstimate = Boolean(estimateSummary) && !isEstimateSigned;
-  const actions = [];
-
-  if (['lost', 'canceled', 'completed'].includes(stage)) {
-    if (canEditOpportunity) actions.push({ key: 'reopen', label: 'Reopen Opportunity', tone: 'primary' });
-    return actions;
-  }
-
-  if (['opportunity', 'estimate_ready'].includes(stage)) {
-    if (canSendEstimate && canCreateOpportunity) {
-      actions.push({ key: 'send_estimate', label: 'Send Estimate', tone: 'primary' });
-    }
-    if (canBookOpportunity) actions.push({ key: 'book', label: 'Book Job', tone: 'primary' });
-    if (canMarkOpportunityLost) actions.push({ key: 'lost', label: 'Mark Lost', tone: 'secondary' });
-  } else if (stage === 'booked') {
-    if (canEditOpportunity) {
-      actions.push({ key: 'confirm', label: 'Confirm Job', tone: 'primary' });
-      actions.push({ key: 'cancel', label: 'Cancel Job', tone: 'secondary' });
-    }
-  } else if (stage === 'confirmed') {
-    if (canEditOpportunity) {
-      actions.push({ key: 'complete', label: 'Complete Job', tone: 'primary' });
-      actions.push({ key: 'cancel', label: 'Cancel Job', tone: 'secondary' });
-    }
-  }
-
-  return actions;
-};
 
 const omitBlankStrings = (payload) => {
   if (!payload || typeof payload !== 'object') return payload;
@@ -1620,19 +1574,19 @@ const getActivityLogBody = (activity) => {
 const getActivityLogEmailHtml = (activity, branchContext = '') =>
   activity?.inbound_message_id
     ? normalizePreviewHtml(
-        activity?.body_html ||
-        activity?.email_log_details?.body_html ||
-        activity?.payload?.body_html ||
-        '',
-        branchContext
-      )
+      activity?.body_html ||
+      activity?.email_log_details?.body_html ||
+      activity?.payload?.body_html ||
+      '',
+      branchContext
+    )
     : normalizePreviewHtml(
-        activity?.email_log_details?.preview_html ||
-        activity?.email_log_details?.body_html ||
-        activity?.body_html ||
-        '',
-        branchContext
-      );
+      activity?.email_log_details?.preview_html ||
+      activity?.email_log_details?.body_html ||
+      activity?.body_html ||
+      '',
+      branchContext
+    );
 
 const getInboundActivityAttachments = (activity) => {
   const payloadAttachments = Array.isArray(activity?.payload?.attachments) ? activity.payload.attachments : [];
@@ -1910,25 +1864,25 @@ const ActivityPreviewModal = ({ activity, onClose, onReply, branchLogoUrl = '', 
           </div>
           <div className="flex items-center gap-2">
             {kind === 'email' && onReply && (
-              <button 
-                type="button" 
-                onClick={() => onReply(activity)} 
+              <button
+                type="button"
+                onClick={() => onReply(activity)}
                 className="inline-flex items-center justify-center gap-2 rounded-2xl bg-brand px-4 py-2 text-sm font-black text-white transition hover:bg-brand-dark"
               >
                 <Reply size={16} />
                 Reply
               </button>
             )}
-            <button 
-              type="button" 
-              onClick={onClose} 
+            <button
+              type="button"
+              onClick={onClose}
               className="p-2.5 rounded-2xl hover:bg-page text-body transition-all border border-subtle"
             >
               <X size={20} />
             </button>
           </div>
         </div>
-        
+
         <div className="p-6 bg-page/30 border-b border-subtle shrink-0">
           <div className="space-y-3">
             <div className="flex items-start gap-3">
@@ -2044,9 +1998,9 @@ const ActivityPreviewModal = ({ activity, onClose, onReply, branchLogoUrl = '', 
           <div className="absolute inset-0 z-50 flex flex-col bg-white rounded-[2rem] overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-subtle bg-page shrink-0">
               <h4 className="text-sm font-black text-heading truncate">{previewAttachment.filename}</h4>
-              <button 
-                type="button" 
-                onClick={() => setPreviewAttachment(null)} 
+              <button
+                type="button"
+                onClick={() => setPreviewAttachment(null)}
                 className="p-1.5 rounded-xl hover:bg-white text-body transition-all border border-subtle"
               >
                 <X size={16} />
@@ -2102,43 +2056,43 @@ const SERVICE_TYPE_OPTIONS = [
 ];
 
 const INITIAL_FORM_STATE = {
-    first_name: '',
-    last_name: '',
-    email: '',
-    phone: '',
-    status: 'new',
-    custom_status_code: '',
-    service_type: '',
-    move_date: '',
-    arrival_window_start: '',
-    arrival_window_end: '',
-    move_size: '',
-    move_type: '',
-    branch: '',
-    assigned_to: '',
-    referral_source: '',
-    utm_source: '',
-    notes: '',
-    origin_street: '',
-    origin_city: '',
-    origin_state: '',
-    origin_zip: '',
-    destination_street: '',
-    destination_city: '',
-    destination_state: '',
-    destination_zip: '',
-    origin_unit_number: '',
-    origin_property_type: '',
-    origin_parking_type: '',
-    origin_flights_of_stairs: 0,
-    origin_has_elevator: false,
-    origin_walk_distance_ft: 50,
-    destination_unit_number: '',
-    destination_property_type: '',
-    destination_parking_type: '',
-    destination_flights_of_stairs: 0,
-    destination_has_elevator: false,
-    destination_walk_distance_ft: 50,
+  first_name: '',
+  last_name: '',
+  email: '',
+  phone: '',
+  status: 'new',
+  custom_status_code: '',
+  service_type: '',
+  move_date: '',
+  arrival_window_start: '',
+  arrival_window_end: '',
+  move_size: '',
+  move_type: '',
+  branch: '',
+  assigned_to: '',
+  referral_source: '',
+  utm_source: '',
+  notes: '',
+  origin_street: '',
+  origin_city: '',
+  origin_state: '',
+  origin_zip: '',
+  destination_street: '',
+  destination_city: '',
+  destination_state: '',
+  destination_zip: '',
+  origin_unit_number: '',
+  origin_property_type: '',
+  origin_parking_type: '',
+  origin_flights_of_stairs: 0,
+  origin_has_elevator: false,
+  origin_walk_distance_ft: 50,
+  destination_unit_number: '',
+  destination_property_type: '',
+  destination_parking_type: '',
+  destination_flights_of_stairs: 0,
+  destination_has_elevator: false,
+  destination_walk_distance_ft: 50,
 };
 
 const ACTIVITY_PAGE_SIZE = 20;
@@ -2147,14 +2101,6 @@ const TIMELINE_FETCH_LIMIT = 20;
 const DETAIL_TAB_IDS = ['Sales', 'Estimate', 'Files & Photos', 'Documents', 'Accounting', 'Payments'];
 const DEFAULT_DETAIL_TAB = 'Sales';
 const DEFAULT_ESTIMATE_TAB = 'charges';
-const SUB_JOB_SERVICE_OPTIONS = [
-  { value: 'move', label: 'Move' },
-  { value: 'packing', label: 'Packing' },
-  { value: 'loading', label: 'Loading' },
-  { value: 'unloading', label: 'Unloading' },
-  { value: 'storage', label: 'Storage' },
-  { value: 'other', label: 'Other' },
-];
 
 const resolveDetailTab = ({ tabSegment, stateTab, search, fallback = DEFAULT_DETAIL_TAB }) => {
   const routeTab = getRecordTabLabelFromSegment(tabSegment);
@@ -2181,7 +2127,7 @@ const SalesDetail = () => {
     ? isLeadRecordType(entityType)
     : location.pathname.includes('/leads/');
   const isCreation = id === 'new';
-  
+
   const textareaRef = useRef(null);
   const [opportunity, setOpportunity] = useState(null);
   const [branches, setBranches] = useState([]);
@@ -2317,119 +2263,26 @@ const SalesDetail = () => {
 
   // Book Job Modal State
   const [isBookJobModalOpen, setIsBookJobModalOpen] = useState(false);
-  const [bookJobSendEmail, setBookJobSendEmail] = useState(true);
-  const [bookJobSendSms, setBookJobSendSms] = useState(false);
-  const [bookJobEmail, setBookJobEmail] = useState('');
-  const [bookJobPhone, setBookJobPhone] = useState('');
+  const [bookingReadiness, setBookingReadiness] = useState(null);
+  const [bookingOverrides, setBookingOverrides] = useState([]);
+  const [bookingOverrideReason, setBookingOverrideReason] = useState('');
+  const canSubmitBooking = Boolean(bookingReadiness) &&
+    (bookingReadiness.missing || []).every((name) => bookingOverrides.includes(name) &&
+      bookingReadiness.overridable_missing?.includes(name) && hasPermission(`opportunities.book_without_${name}`)) &&
+    (!bookingOverrides.length || Boolean(bookingOverrideReason.trim()));
   const [isBookingJob, setIsBookingJob] = useState(false);
 
-  const availableEmails = useMemo(() => {
-    const list = [];
-    const seen = new Set();
-    const addEmail = (email, label) => {
-      if (!email) return;
-      const cleaned = email.trim();
-      if (!cleaned || seen.has(cleaned.toLowerCase())) return;
-      seen.add(cleaned.toLowerCase());
-      list.push({ label, value: cleaned });
-    };
-    if (opportunity?.customer_details?.email) {
-      addEmail(opportunity.customer_details.email, `Customer Primary: ${opportunity.customer_details.email}`);
-    }
-    if (opportunity?.email) {
-      addEmail(opportunity.email, `Opportunity Email: ${opportunity.email}`);
-    }
-    if (opportunity?.customer_details?.contacts && Array.isArray(opportunity.customer_details.contacts)) {
-      opportunity.customer_details.contacts.forEach((contact) => {
-        if (contact.email) {
-          addEmail(contact.email, contact.relationship ? `${contact.name} (${contact.relationship}): ${contact.email}` : `${contact.name}: ${contact.email}`);
-        }
-      });
-    }
-    if (opportunity?.additional_contacts && Array.isArray(opportunity.additional_contacts)) {
-      opportunity.additional_contacts.forEach((contact) => {
-        if (contact.email) {
-          addEmail(contact.email, contact.relationship ? `${contact.name} (${contact.relationship}): ${contact.email}` : `${contact.name}: ${contact.email}`);
-        }
-      });
-    }
-    return list;
-  }, [opportunity]);
-
-  const availablePhones = useMemo(() => {
-    const list = [];
-    const seen = new Set();
-    const addPhone = (phone, label) => {
-      if (!phone) return;
-      const cleaned = phone.trim();
-      if (!cleaned || seen.has(cleaned)) return;
-      seen.add(cleaned);
-      list.push({ label, value: cleaned });
-    };
-    if (opportunity?.customer_details?.phone) {
-      addPhone(opportunity.customer_details.phone, `Customer Primary: ${opportunity.customer_details.phone}`);
-    }
-    if (opportunity?.phone) {
-      addPhone(opportunity.phone, `Opportunity Phone: ${opportunity.phone}`);
-    }
-    if (opportunity?.customer_details?.contacts && Array.isArray(opportunity.customer_details.contacts)) {
-      opportunity.customer_details.contacts.forEach((contact) => {
-        if (contact.phone) {
-          addPhone(contact.phone, contact.relationship ? `${contact.name} (${contact.relationship}): ${contact.phone}` : `${contact.name}: ${contact.phone}`);
-        }
-      });
-    }
-    if (opportunity?.additional_contacts && Array.isArray(opportunity.additional_contacts)) {
-      opportunity.additional_contacts.forEach((contact) => {
-        if (contact.phone) {
-          addPhone(contact.phone, contact.relationship ? `${contact.name} (${contact.relationship}): ${contact.phone}` : `${contact.name}: ${contact.phone}`);
-        }
-      });
-    }
-    return list;
-  }, [opportunity]);
-
-  useEffect(() => {
-    if (isBookJobModalOpen) {
-      if (availableEmails.length > 0 && !bookJobEmail) setBookJobEmail(availableEmails[0].value);
-      if (availablePhones.length > 0 && !bookJobPhone) setBookJobPhone(availablePhones[0].value);
-    }
-  }, [isBookJobModalOpen, availableEmails, availablePhones]);
-
-  const confirmBookJob = async (allowWithoutDeposit = false, overrideSendEmail = null, overrideSendSms = null) => {
+  const confirmBookJob = async () => {
+    if (!canSubmitBooking || getRecordSystemState(opportunity) !== 'open' || !hasPermission('opportunities.book')) return;
     setIsBookingJob(true);
     try {
-      const sendEmail = overrideSendEmail !== null ? overrideSendEmail : bookJobSendEmail;
-      const sendSms = overrideSendSms !== null ? overrideSendSms : bookJobSendSms;
-      const payload = {
-        send_email: sendEmail,
-        send_sms: sendSms,
-        to_email: sendEmail ? (bookJobEmail || '') : '',
-        to_phone: sendSms ? (bookJobPhone || '') : '',
-      };
-      if (allowWithoutDeposit) {
-        payload.allow_without_deposit = true;
-      }
-      
-      const updated = await bookOpportunityJob(opportunity.id, payload);
-      setOpportunity((prev) => ({ ...prev, ...(updated?.data || updated || {}) }));
+      await bookOpportunityJob(opportunity.id, { override_requirements: bookingOverrides, override_reason: bookingOverrideReason.trim() });
+      await fetchOpportunity();
       setIsBookJobModalOpen(false);
-      setToast({ type: 'success', text: 'Job successfully booked.' });
-    } catch (err) {
-      const code = err?.response?.data?.code;
-      const canOverride = Boolean(err?.response?.data?.can_override);
-      if (code === 'deposit_required' && canOverride) {
-        const confirmOverride = window.confirm('Deposit payment is not recorded. Book this job anyway?');
-        if (confirmOverride) {
-          return confirmBookJob(true);
-        }
-      } else {
-        const msg = err?.response?.data?.detail || 'Failed to book job.';
-        setToast({ type: 'error', text: String(msg) });
-      }
-    } finally {
-      setIsBookingJob(false);
-    }
+      setToast({ type: 'success', text: 'Opportunity booked.' });
+    } catch (error) {
+      setToast({ type: 'error', text: getErrorMessage(error, 'Could not book this opportunity. Check booking requirements.') });
+    } finally { setIsBookingJob(false); }
   };
 
   // Tracks display labels for async-selected spec fields so the panel shows
@@ -2595,7 +2448,7 @@ const SalesDetail = () => {
 
   const allPayments = useMemo(() => {
     const list = [];
-    
+
     // 1. Add manual payments from the estimate summary when available
     const rawEstimateManual = Array.isArray(estimateSummary?.payment_summary?.manual_payments)
       ? estimateSummary.payment_summary.manual_payments
@@ -2662,9 +2515,9 @@ const SalesDetail = () => {
 
   const opportunityEstimateTotal = Number(
     opportunityAccountingSummary?.estimate?.grand_total
-      ?? accountingSummary?.estimate?.grand_total
-      ?? estimateSummary?.grand_total
-      ?? 0
+    ?? accountingSummary?.estimate?.grand_total
+    ?? estimateSummary?.grand_total
+    ?? 0
   );
   const paymentBalanceDue = Number(accountingSummary?.payments?.balance_due ?? invoiceDetail?.balance_due ?? 0);
   const selectedInvoice = useMemo(() => {
@@ -2761,7 +2614,7 @@ const SalesDetail = () => {
   const [moverSizes, setMoverSizes] = useState([]);
   const [moverTypes, setMoverTypes] = useState([]);
   const [serviceTypes, setServiceTypes] = useState([]);
-  
+
   const computedSubJobServiceOptions = useMemo(() => {
     if (serviceTypes && serviceTypes.length > 0) {
       return serviceTypes.map(st => ({
@@ -2769,7 +2622,7 @@ const SalesDetail = () => {
         label: st.name ?? st.label ?? 'Unknown'
       }));
     }
-    return SUB_JOB_SERVICE_OPTIONS;
+    return [];
   }, [serviceTypes]);
 
   const [referralSources, setReferralSources] = useState([]);
@@ -3475,11 +3328,11 @@ const SalesDetail = () => {
     const taxableBase = Math.max(0, taxableSubtotal - taxableDiscount);
     const taxAmount = taxableBase * taxRate;
     const total = Math.max(0, subtotal - discount) + taxAmount;
-    
+
     const estimateRows = Array.isArray(opportunityAccountingSummary?.estimates) ? opportunityAccountingSummary.estimates : [];
     const targetEstimateId = Number(selectedAccountingEstimateId || estimateRows[0]?.id || 0) || null;
     const selectedEstimate = estimateRows.find((row) => Number(row.id) === Number(targetEstimateId)) || estimateRows[0] || null;
-    
+
     const paid = Number(ledgerPaidAmount || opportunityAccountingSummary?.payments?.total_paid || accountingSummary?.payments?.total_paid || 0);
     const balanceDue = total - paid;
     setSelectedAccountingEstimateId(targetEstimateId);
@@ -3530,11 +3383,11 @@ const SalesDetail = () => {
   const handleOpenFinalizedPreview = (jobId) => {
     const invoiceDetail = invoiceDetailsMap[jobId];
     if (!invoiceDetail) return;
-    
+
     const estimateRows = Array.isArray(opportunityAccountingSummary?.estimates) ? opportunityAccountingSummary.estimates : [];
     const targetEstimateId = Number(invoiceDetail?.estimate_id || selectedAccountingEstimateId || estimateRows[0]?.id || 0) || null;
     const selectedEstimate = estimateRows.find((row) => Number(row.id) === Number(targetEstimateId)) || estimateRows[0] || null;
-    
+
     const liveBalanceDue = Math.max(
       Number(invoiceDetail?.total ?? invoiceDetail?.subtotal ?? 0) - Number(ledgerPaidAmount || opportunityAccountingSummary?.payments?.total_paid || accountingSummary?.payments?.total_paid || 0),
       0
@@ -3955,6 +3808,8 @@ const SalesDetail = () => {
       // Further options are fetched on demand via AsyncSelect pagination
       fetchSafe(getReferralSourceLookups, setReferralSources, 'referral sources'),
       fetchSafe(getMoverSizeLookups, setMoverSizes, 'move sizes'),
+      fetchSafe(getMoveTypeLookups, setMoverTypes, 'company move types'),
+      fetchSafe(getServices, setServiceTypes, 'company service types'),
       fetchSafe(getBranchLookups, setBranches, 'branches'),
       (async () => {
         try {
@@ -4034,65 +3889,6 @@ const SalesDetail = () => {
     };
   }, [statusBranchId, isLeadPath, id]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const recordId = recordRequestRef.current;
-    const loadBranchTypes = async () => {
-      try {
-        const params = statusBranchId ? { branch: statusBranchId } : {};
-        const [moverTypesRes, servicesRes] = await Promise.allSettled([
-          getMoveTypeLookups(params),
-          getServices(params)
-        ]);
-        if (cancelled || recordId !== recordRequestRef.current) return;
-        
-        if (moverTypesRes.status === 'fulfilled') {
-          setMoverTypes(asList(moverTypesRes.value));
-        } else {
-          setMoverTypes([]);
-        }
-        
-        if (servicesRes.status === 'fulfilled') {
-          setServiceTypes(asList(servicesRes.value));
-        } else {
-          setServiceTypes([]);
-        }
-      } catch (err) {
-        console.warn('Failed to load branch types:', err);
-      }
-    };
-    loadBranchTypes();
-    return () => {
-      cancelled = true;
-    };
-  }, [statusBranchId, isLeadPath, id]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const recordId = recordRequestRef.current;
-    const loadOpportunityLossReasons = async () => {
-      try {
-        const response = await getOpportunityLossReasonLookups({ limit: 100 });
-        if (cancelled || recordId !== recordRequestRef.current) return;
-        const rows = asList(response);
-        setLostReasonOptions(rows);
-      } catch (err) {
-        console.warn('Failed to load opportunity loss reasons:', err);
-        try {
-          const fallback = await getOpportunityLossReasonLookupsPage('', 0, 100);
-          if (cancelled || recordId !== recordRequestRef.current) return;
-          setLostReasonOptions(asList(fallback));
-        } catch (fallbackErr) {
-          console.warn('Fallback opportunity loss reason lookup failed:', fallbackErr);
-          if (!cancelled && recordId === recordRequestRef.current) setLostReasonOptions([]);
-        }
-      }
-    };
-    loadOpportunityLossReasons();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
 
   const loadEmailProviderStatus = async () => {
@@ -4106,30 +3902,30 @@ const SalesDetail = () => {
   const loadFollowUps = async (targetEntity) => {
     const requestId = recordRequestRef.current;
     const followUpId = ++followUpRequestRef.current;
-	    if (!targetEntity || targetEntity?.id === 'new') {
-	      setFollowUps([]);
-	      return;
-	    }
-	    setIsLoadingFollowUps(true);
-	    try {
-	      const params = { ordering: '-due_date' };
-	      if (isLeadPath) {
-	        if (targetEntity?.opportunity_id) params.opportunity = targetEntity.opportunity_id;
-	        else params.lead = targetEntity.id;
-	      } else {
-	        params.opportunity = targetEntity.id;
-	      }
-	      const rows = asList(await getTasks(params));
-          if (requestId !== recordRequestRef.current || followUpId !== followUpRequestRef.current) return;
-	      setFollowUps(rows);
-	    } catch {
-          if (requestId !== recordRequestRef.current || followUpId !== followUpRequestRef.current) return;
-          setWorkError('Could not load follow-ups. Please retry.');
-	      setFollowUps([]);
-	    } finally {
-	      if (requestId === recordRequestRef.current && followUpId === followUpRequestRef.current) setIsLoadingFollowUps(false);
-	    }
-	  };
+    if (!targetEntity || targetEntity?.id === 'new') {
+      setFollowUps([]);
+      return;
+    }
+    setIsLoadingFollowUps(true);
+    try {
+      const params = { ordering: '-due_date' };
+      if (isLeadPath) {
+        if (targetEntity?.opportunity_id) params.opportunity = targetEntity.opportunity_id;
+        else params.lead = targetEntity.id;
+      } else {
+        params.opportunity = targetEntity.id;
+      }
+      const rows = asList(await getTasks(params));
+      if (requestId !== recordRequestRef.current || followUpId !== followUpRequestRef.current) return;
+      setFollowUps(rows);
+    } catch {
+      if (requestId !== recordRequestRef.current || followUpId !== followUpRequestRef.current) return;
+      setWorkError('Could not load follow-ups. Please retry.');
+      setFollowUps([]);
+    } finally {
+      if (requestId === recordRequestRef.current && followUpId === followUpRequestRef.current) setIsLoadingFollowUps(false);
+    }
+  };
 
   const loadActivitiesPage = useCallback(async ({ leadId = null, opportunityId = null, offset = 0, replace = false }) => {
     const requestId = recordRequestRef.current;
@@ -4238,10 +4034,10 @@ const SalesDetail = () => {
     const originalServiceType = String(serviceType || '').trim();
     const serviceOption = computedSubJobServiceOptions.find((option) => option.value === originalServiceType || option.value === originalServiceType.toLowerCase());
     const normalizedTitle = serviceOption?.label || (originalServiceType ? (originalServiceType.charAt(0).toUpperCase() + originalServiceType.slice(1)) : 'Other');
-    
+
     // service_type must be a PK (integer) or null. If it's a string like 'other', send null.
     const numericServiceTypeId = /^\d+$/.test(originalServiceType) ? Number(originalServiceType) : null;
-    
+
     setIsSavingSubJob(true);
     try {
       const created = await api.sales.createOpportunityPlannedSubJob(opportunity.id, {
@@ -4599,7 +4395,7 @@ const SalesDetail = () => {
         }
         if (!fetchedAny) setHasMoreActivities(false);
         else setActivityOffset(nextOffset);
-      } catch(err) {
+      } catch (err) {
         if (requestId === recordRequestRef.current) setWorkError('Could not load more activity history. Please retry.');
         console.warn(err);
       } finally {
@@ -4629,7 +4425,7 @@ const SalesDetail = () => {
           const results = await Promise.allSettled(requests);
           if (requestId !== recordRequestRef.current) return;
           if (results.some((result) => result.status === 'rejected')) { setWorkError('Could not load more communication history. Please retry.'); return; }
-      const all = results.flatMap((r) => {
+          const all = results.flatMap((r) => {
             if (r.status !== 'fulfilled') return [];
             return asList(r.value?.data || r.value);
           });
@@ -4951,8 +4747,8 @@ const SalesDetail = () => {
     if (view?.customerName) {
       document.title = `${view.customerName} - ${tabName} - KargoFlow CRM`;
     } else {
-      document.title = isLeadPath 
-        ? `Lead Details - ${tabName} - KargoFlow CRM` 
+      document.title = isLeadPath
+        ? `Lead Details - ${tabName} - KargoFlow CRM`
         : `Sales Details - ${tabName} - KargoFlow CRM`;
     }
   }, [view?.customerName, activeTab, isLeadPath]);
@@ -4968,7 +4764,7 @@ const SalesDetail = () => {
     const values = communicationRecipients.emails.map((item) => item.value);
     const primaryEmail = values.length > 0 ? values[0] : '';
     const oldPrimaryEmail = prevCustomerEmailsRef.current.length > 0 ? prevCustomerEmailsRef.current[0] : '';
-    
+
     if (primaryEmail && primaryEmail !== oldPrimaryEmail) {
       setActivityEmailToText(prev => (!prev || prev === oldPrimaryEmail) ? primaryEmail : prev);
       setInvoiceEmailRecipient(prev => (!prev || prev === oldPrimaryEmail) ? primaryEmail : prev);
@@ -4989,7 +4785,7 @@ const SalesDetail = () => {
     const values = communicationRecipients.phones.map((item) => item.value);
     const primaryPhone = values.length > 0 ? values[0] : '';
     const oldPrimaryPhone = prevCustomerPhonesRef.current.length > 0 ? prevCustomerPhonesRef.current[0] : '';
-    
+
     if (primaryPhone && primaryPhone !== oldPrimaryPhone) {
       setActivityCallRecipient(prev => (!prev || prev === oldPrimaryPhone) ? primaryPhone : prev);
       setActivitySmsRecipients(prev => {
@@ -5002,7 +4798,7 @@ const SalesDetail = () => {
     }
     prevCustomerPhonesRef.current = values;
   }, [communicationRecipients.phones]);
-  
+
   const routePoints = useMemo(() => {
     const routeRecord = opportunity;
     const selectedJob = opportunityJobs.find((job) => String(job.id) === String(selectedEstimateJobId))
@@ -5299,30 +5095,15 @@ const SalesDetail = () => {
     }
   };
 
-  const workflowActions = useMemo(
-    () => {
-      const actions = buildWorkflowActions({
-        isLead: view.isLead,
-        isNewRecord: opportunity?.id === 'new',
-        workflowStage: opportunity?.workflow_stage,
-        estimateSummary,
-        canDuplicateOpportunity: canDuplicateOpportunity(),
-        canBookOpportunity: canBookOpportunity(),
-        canMarkOpportunityLost: canMarkOpportunityLost(),
-        canCreateOpportunity: canCreateOpportunity(),
-        canEditOpportunity: canEditOpportunity(),
-      });
-      return actions;
-    },
-    [canBookOpportunity, canCreateOpportunity, canDuplicateOpportunity, canEditOpportunity, canMarkOpportunityLost, estimateSummary, opportunity?.id, opportunity?.workflow_stage, view.isLead]
-  );
+  const workflowActions = useMemo(() => getRecordWorkflowActions(opportunity, {
+    isLead: view.isLead, hasPermission,
+  }), [opportunity, view.isLead, hasPermission]);
 
   const accountingEnabled = useMemo(() => {
     if (isCreation) return false;
-    const stage = String(opportunity?.workflow_stage || '').toLowerCase();
-    // Accounting is only relevant once the opportunity is booked into a job (and later stages).
-    return ['booked', 'confirmed', 'completed', 'canceled'].includes(stage);
-  }, [isCreation, opportunity?.workflow_stage]);
+    const stage = getRecordSystemState(opportunity);
+    return ['booked', 'completed', 'closed', 'cancelled'].includes(stage);
+  }, [isCreation, opportunity]);
 
   useEffect(() => {
     if (activeTab !== 'Accounting') return;
@@ -5572,9 +5353,9 @@ const SalesDetail = () => {
       prev.map((row, rowIndex) =>
         rowIndex === index
           ? {
-              ...row,
-              ...(typeof nextValue === 'function' ? nextValue(row) : nextValue),
-            }
+            ...row,
+            ...(typeof nextValue === 'function' ? nextValue(row) : nextValue),
+          }
           : row
       )
     );
@@ -5607,7 +5388,7 @@ const SalesDetail = () => {
         const nextContacts = currentContacts.filter(c => String(c.id) !== String(formToRemove.id));
 
         const updatedCustomer = { ...getRecordCustomerDetails(opportunity), contacts: nextContacts };
-        
+
         setOpportunity(prev => prev ? { ...prev, customer_details: updatedCustomer } : prev);
         setEstimateOpportunity(prev => prev ? { ...prev, customer_details: updatedCustomer } : prev);
 
@@ -5634,8 +5415,8 @@ const SalesDetail = () => {
 
   const openAdditionalContactsModal = () => {
     if (!isLeadPath && (!opportunity?.customer_details?.id && !opportunity?.customer)) {
-      setToast({ 
-        type: 'error', 
+      setToast({
+        type: 'error',
         text: 'Please save the customer details first to create a customer profile.'
       });
       return;
@@ -6112,49 +5893,49 @@ const SalesDetail = () => {
 
     const payload = isLeadPath
       ? {
-          origin_street: String(routeDraft?.origin_street || '').trim(),
-          origin_city: originCity,
-          origin_state: originState,
-          origin_zip: originZip,
-          origin_unit_number: String(routeDraft?.origin_unit_number || '').trim(),
-          origin_property_type: String(routeDraft?.origin_property_type || '').trim(),
-          origin_parking_type: String(routeDraft?.origin_parking_type || '').trim(),
-          origin_flights_of_stairs: Number(routeDraft?.origin_flights_of_stairs || 0),
-          origin_has_elevator: Boolean(routeDraft?.origin_has_elevator),
-          origin_walk_distance_ft: Number(routeDraft?.origin_walk_distance_ft || 0),
-          destination_street: String(routeDraft?.destination_street || '').trim(),
-          destination_city: destCity,
-          destination_state: destState,
-          destination_zip: destZip,
-          destination_unit_number: String(routeDraft?.destination_unit_number || '').trim(),
-          destination_property_type: String(routeDraft?.destination_property_type || '').trim(),
-          destination_parking_type: String(routeDraft?.destination_parking_type || '').trim(),
-          destination_flights_of_stairs: Number(routeDraft?.destination_flights_of_stairs || 0),
-          destination_has_elevator: Boolean(routeDraft?.destination_has_elevator),
-          destination_walk_distance_ft: Number(routeDraft?.destination_walk_distance_ft || 0),
-        }
+        origin_street: String(routeDraft?.origin_street || '').trim(),
+        origin_city: originCity,
+        origin_state: originState,
+        origin_zip: originZip,
+        origin_unit_number: String(routeDraft?.origin_unit_number || '').trim(),
+        origin_property_type: String(routeDraft?.origin_property_type || '').trim(),
+        origin_parking_type: String(routeDraft?.origin_parking_type || '').trim(),
+        origin_flights_of_stairs: Number(routeDraft?.origin_flights_of_stairs || 0),
+        origin_has_elevator: Boolean(routeDraft?.origin_has_elevator),
+        origin_walk_distance_ft: Number(routeDraft?.origin_walk_distance_ft || 0),
+        destination_street: String(routeDraft?.destination_street || '').trim(),
+        destination_city: destCity,
+        destination_state: destState,
+        destination_zip: destZip,
+        destination_unit_number: String(routeDraft?.destination_unit_number || '').trim(),
+        destination_property_type: String(routeDraft?.destination_property_type || '').trim(),
+        destination_parking_type: String(routeDraft?.destination_parking_type || '').trim(),
+        destination_flights_of_stairs: Number(routeDraft?.destination_flights_of_stairs || 0),
+        destination_has_elevator: Boolean(routeDraft?.destination_has_elevator),
+        destination_walk_distance_ft: Number(routeDraft?.destination_walk_distance_ft || 0),
+      }
       : {
-          origin_address_line1: String(routeDraft?.origin_street || '').trim(),
-          origin_city: originCity,
-          origin_state: originState,
-          origin_postal_code: originZip,
-          origin_unit_number: optionalText(routeDraft?.origin_unit_number),
-          origin_property_type: optionalText(routeDraft?.origin_property_type),
-          origin_parking_type: optionalText(routeDraft?.origin_parking_type),
-          origin_flights_of_stairs: Number(routeDraft?.origin_flights_of_stairs || 0),
-          origin_has_elevator: Boolean(routeDraft?.origin_has_elevator),
-          origin_walk_distance_ft: Number(routeDraft?.origin_walk_distance_ft || 0),
-          destination_address_line1: String(routeDraft?.destination_street || '').trim(),
-          destination_city: destCity,
-          destination_state: destState,
-          destination_postal_code: destZip,
-          destination_unit_number: optionalText(routeDraft?.destination_unit_number),
-          destination_property_type: optionalText(routeDraft?.destination_property_type),
-          destination_parking_type: optionalText(routeDraft?.destination_parking_type),
-          destination_flights_of_stairs: Number(routeDraft?.destination_flights_of_stairs || 0),
-          destination_has_elevator: Boolean(routeDraft?.destination_has_elevator),
-          destination_walk_distance_ft: Number(routeDraft?.destination_walk_distance_ft || 0),
-        };
+        origin_address_line1: String(routeDraft?.origin_street || '').trim(),
+        origin_city: originCity,
+        origin_state: originState,
+        origin_postal_code: originZip,
+        origin_unit_number: optionalText(routeDraft?.origin_unit_number),
+        origin_property_type: optionalText(routeDraft?.origin_property_type),
+        origin_parking_type: optionalText(routeDraft?.origin_parking_type),
+        origin_flights_of_stairs: Number(routeDraft?.origin_flights_of_stairs || 0),
+        origin_has_elevator: Boolean(routeDraft?.origin_has_elevator),
+        origin_walk_distance_ft: Number(routeDraft?.origin_walk_distance_ft || 0),
+        destination_address_line1: String(routeDraft?.destination_street || '').trim(),
+        destination_city: destCity,
+        destination_state: destState,
+        destination_postal_code: destZip,
+        destination_unit_number: optionalText(routeDraft?.destination_unit_number),
+        destination_property_type: optionalText(routeDraft?.destination_property_type),
+        destination_parking_type: optionalText(routeDraft?.destination_parking_type),
+        destination_flights_of_stairs: Number(routeDraft?.destination_flights_of_stairs || 0),
+        destination_has_elevator: Boolean(routeDraft?.destination_has_elevator),
+        destination_walk_distance_ft: Number(routeDraft?.destination_walk_distance_ft || 0),
+      };
 
     setIsRouteSaving(true);
     setToast({ type: '', text: '' });
@@ -6221,12 +6002,12 @@ const SalesDetail = () => {
         const normalizedSavedStops = [savedOrigin, savedDestination].map((response) => response?.data || response);
         setOpportunityJobs((prev) => prev.map((job) => String(job.id) === String(selectedJob.id)
           ? {
-              ...job,
-              stops: [
-                ...(Array.isArray(job.stops) ? job.stops : []).filter((stop) => !['origin', 'destination'].includes(stop?.stop_type || stop?.type)),
-                ...normalizedSavedStops,
-              ],
-            }
+            ...job,
+            stops: [
+              ...(Array.isArray(job.stops) ? job.stops : []).filter((stop) => !['origin', 'destination'].includes(stop?.stop_type || stop?.type)),
+              ...normalizedSavedStops,
+            ],
+          }
           : job));
         updated = {};
       }
@@ -6543,10 +6324,10 @@ const SalesDetail = () => {
       const payload = isLeadPath
         ? { move_date: moveDateDraft?.move_date || null }
         : {
-            move_date: moveDateDraft?.move_date || null,
-            arrival_window_start: moveDateDraft?.arrival_window_start || null,
-            arrival_window_end: moveDateDraft?.arrival_window_end || null,
-          };
+          move_date: moveDateDraft?.move_date || null,
+          arrival_window_start: moveDateDraft?.arrival_window_start || null,
+          arrival_window_end: moveDateDraft?.arrival_window_end || null,
+        };
       const updated = isLeadPath
         ? await updateLead(opportunity.id, payload)
         : await updateOpportunity(opportunity.id, payload);
@@ -6723,16 +6504,32 @@ const SalesDetail = () => {
     }
 
     if (actionKey === 'send_estimate') {
-      navigateToEstimateSubTab('charges');
-      setSendEstimateNonce((v) => v + 1);
+      setActiveTab('Documents');
+      navigateToDetailTab('Documents');
       return;
     }
 
-    if ((actionKey === 'lost' || actionKey === 'cancel') && !String(reasonOverride || '').trim()) {
+    const permitted = getRecordWorkflowActions(opportunity, { isLead: view.isLead, hasPermission });
+    if (!permitted.some((action) => action.key === actionKey)) {
+      setToast({ type: 'error', text: 'This action is not available for the current status or permissions.' });
+      return;
+    }
+    if (['lost', 'cancel', 'disqualify', 'restore'].includes(actionKey) && !String(reasonOverride || '').trim()) {
       setSelectedLostReason('');
       setReasonText('');
       setReasonAction(actionKey);
-      setIsReasonModalOpen(true);
+      setLostReasonOptions([]);
+      if (actionKey === 'restore') { setIsReasonModalOpen(true); return; }
+      try {
+        const response = await (actionKey === 'cancel' ? getCancellationReasons()
+          : actionKey === 'disqualify' ? getDisqualificationReasons()
+            : getOpportunityLossReasonLookups({ active: true }));
+        setLostReasonOptions(asList(response).filter((row) => row.is_active !== false &&
+          (actionKey !== 'lost' || !row.applies_to || row.applies_to === 'both' || row.applies_to === (view.isLead ? 'lead' : 'opportunity'))));
+        setIsReasonModalOpen(true);
+      } catch (error) {
+        setToast({ type: 'error', text: getErrorMessage(error, 'Could not load reasons. Please retry.') });
+      }
       return;
     }
 
@@ -6748,31 +6545,27 @@ const SalesDetail = () => {
           lost_reason_id: Number(selectedLostReason),
           note: String(reasonText || '').trim(),
         });
+      } else if (view.isLead && actionKey === 'disqualify') {
+        updated = await disqualifyLead(opportunity.id, { disqualification_reason_id: Number(selectedLostReason), note: String(reasonText || '').trim() });
+      } else if (view.isLead && actionKey === 'restore') {
+        updated = await restoreLead(opportunity.id, { reason: workflowReason });
+      } else if (view.isLead && actionKey === 'archive') {
+        updated = await archiveLead(opportunity.id, 'Archived from CRM detail page');
+      } else if (view.isLead && ['start', 'qualify'].includes(actionKey)) {
+        updated = await (actionKey === 'start' ? startLead(opportunity.id) : qualifyLead(opportunity.id));
       } else if (view.isLead && actionKey === 'reopen') {
         setLostReasonOverride('');
         updated = await reopenLead(opportunity.id, { reason: 'Reopened from CRM detail page' });
       } else if (actionKey === 'book') {
+        setBookingOverrides([]);
+        setBookingOverrideReason('');
+        setBookingReadiness(await getOpportunityBookingReadiness(opportunity.id));
         setIsBookJobModalOpen(true);
         setIsSaving(false);
         return;
-      } else if (actionKey === 'confirm') {
-        updated = await confirmOpportunityJob(opportunity.id);
-        try {
-          const jobs = await api.jobs.getJobs({ opportunity: opportunity.id });
-          const rows = Array.isArray(jobs?.results) ? jobs.results : Array.isArray(jobs) ? jobs : [];
-          const job = rows[0] || null;
-          if (job?.id) {
-            navigate(`/jobs/${job.id}`);
-            return;
-          }
-          navigate('/jobs');
-          return;
-        } catch {
-          // If dispatch lookup fails, fall back to current page and normal refresh.
-        }
       } else if (actionKey === 'cancel') {
         updated = await cancelOpportunityJob(opportunity.id, {
-          reason: workflowReason || 'Canceled from CRM detail page',
+          cancellation_reason_id: Number(selectedLostReason), note: String(reasonText || '').trim(),
         });
       } else if (actionKey === 'unbook') {
         setUnbookReason(workflowReason || '');
@@ -6785,7 +6578,7 @@ const SalesDetail = () => {
       } else if (actionKey === 'lost') {
         setLostReasonOverride(workflowReason || 'Marked lost from CRM detail page');
         updated = await markOpportunityLost(opportunity.id, {
-          reason: workflowReason || 'Marked lost from CRM detail page',
+          lost_reason_id: Number(selectedLostReason), note: String(reasonText || '').trim(),
         });
       } else if (actionKey === 'reopen') {
         setLostReasonOverride('');
@@ -6794,15 +6587,21 @@ const SalesDetail = () => {
         return;
       }
 
-      if (actionKey === 'lost' || actionKey === 'cancel') {
+      if (['lost', 'cancel', 'disqualify', 'restore'].includes(actionKey)) {
         setIsReasonModalOpen(false);
         setReasonAction('');
         setSelectedLostReason('');
         setReasonText('');
       }
 
-      setOpportunity(updated);
-      await fetchOpportunity();
+      if (view.isLead) {
+        // The command returns the persisted lifecycle state. Preserve detail
+        // fields and avoid replacing it with an older follow-up GET response.
+        setOpportunity((previous) => ({ ...previous, ...updated }));
+      } else {
+        setOpportunity(updated);
+        await fetchOpportunity();
+      }
       setToast({ type: 'success', text: 'Workflow updated successfully.' });
       setTimeout(() => setToast({ type: '', text: '' }), 2500);
     } catch (err) {
@@ -6818,10 +6617,12 @@ const SalesDetail = () => {
     }
     setIsSaving(true);
     try {
-      const state = opportunity?.system_state || opportunity?.status;
+      const state = getRecordSystemState(opportunity, true);
+      const allowed = getRecordWorkflowActions(opportunity, { isLead: true, hasPermission }).some((action) => action.key === (state === 'new' ? 'start' : 'qualify'));
+      if (!allowed) throw new Error('This lead transition is not available.');
       const updated = await (state === 'new' ? startLead(opportunity.id) : qualifyLead(opportunity.id));
-      setOpportunity(updated);
-      setToast({ type: 'success', text: state === 'new' ? 'Lead started.' : 'Lead qualified. You can now create an estimate.' });
+      setOpportunity((previous) => ({ ...previous, ...updated }));
+      setToast({ type: 'success', text: state === 'new' ? 'Lead started.' : 'Lead qualified. You can now convert it to an opportunity.' });
     } catch (error) { setToast({ type: 'error', text: getErrorMessage(error, 'Could not update the lead workflow.') }); }
     finally { setIsSaving(false); }
   }, [denyAction, isRecordOverQuota, opportunity?.id, opportunity?.status, opportunity?.system_state]);
@@ -6840,7 +6641,7 @@ const SalesDetail = () => {
       setConversionReview(null);
       const convertedOpportunity = res?.opportunity || res?.data?.opportunity || null;
       const oppId = convertedOpportunity?.id;
-      setToast({ type: 'success', text: 'Lead converted! Opening estimate...' });
+      setToast({ type: 'success', text: 'Lead converted. Opening the opportunity...' });
       if (convertedOpportunity) {
         navigate(getLegacyRecordEstimateTabPath('opportunity', convertedOpportunity.id, 'charges'));
       } else if (oppId) {
@@ -6862,7 +6663,7 @@ const SalesDetail = () => {
       setToast({ type: 'error', text: getErrorMessage(err, 'Failed to convert lead.') });
       setIsSaving(false);
     }
-  }, [navigate, opportunity?.id, opportunity?.system_state, opportunity?.status]);
+  }, [navigate, opportunity, hasPermission]);
 
   const saveEstimateRequirementsToOpportunity = useCallback(async (target) => {
     if (isLeadPath || !opportunity?.id || opportunity.id === 'new') {
@@ -7088,41 +6889,41 @@ const SalesDetail = () => {
   }, [lostReasonOverride, opportunity?.workflow_stage, timelineEvents]);
 
   const specsData = useMemo(() => [
-    { 
-      id: "move_size", 
-      label: "Move size", 
-      value: activeSpecs.move_size, 
-      displayValue: resolveMoveSizeName(activeSpecs.move_size, [...(Array.isArray(moverSizes) ? moverSizes : []), opportunity?.mover_size_details, opportunity?.move_size_details].filter(Boolean)) || opportunity?.mover_size_details?.name || opportunity?.move_size_details?.name || activeSpecs.move_size, 
-      icon: "home", 
-      options: moverSizes.filter((size) => size.is_active !== false || String(size.id) === String(activeSpecs.move_size)) 
+    {
+      id: "move_size",
+      label: "Move size",
+      value: activeSpecs.move_size,
+      displayValue: resolveMoveSizeName(activeSpecs.move_size, [...(Array.isArray(moverSizes) ? moverSizes : []), opportunity?.mover_size_details, opportunity?.move_size_details].filter(Boolean)) || opportunity?.mover_size_details?.name || opportunity?.move_size_details?.name || activeSpecs.move_size,
+      icon: "home",
+      options: moverSizes.filter((size) => size.is_active !== false || String(size.id) === String(activeSpecs.move_size))
     },
-    { 
-      id: "move_type", 
-      label: "Move type", 
-      value: activeSpecs.move_type, 
-      displayValue: opportunity?.move_type_name || resolveSpecLookupLabel(activeSpecs.move_type, moverTypes) || resolveSpecLookupLabel(activeSpecs.move_type, MOVE_TYPE_OPTIONS), 
-      icon: "map", 
-      options: moverTypes.length ? moverTypes : isLeadPath ? [] : MOVE_TYPE_OPTIONS 
+    {
+      id: "move_type",
+      label: "Move type",
+      value: activeSpecs.move_type,
+      displayValue: opportunity?.move_type_name || resolveSpecLookupLabel(activeSpecs.move_type, moverTypes) || resolveSpecLookupLabel(activeSpecs.move_type, MOVE_TYPE_OPTIONS),
+      icon: "map",
+      options: moverTypes
     },
-    { 
-      id: "service_type", 
-      label: "Service tier", 
-      value: activeSpecs.service_type, 
-      displayValue: opportunity?.service_type_name || resolveSpecLookupLabel(activeSpecs.service_type, serviceTypes) || resolveSpecLookupLabel(activeSpecs.service_type, SERVICE_TYPE_OPTIONS), 
-      icon: "package", 
-      options: serviceTypes.length ? serviceTypes : isLeadPath ? [] : SERVICE_TYPE_OPTIONS 
+    {
+      id: "service_type",
+      label: "Service tier",
+      value: activeSpecs.service_type,
+      displayValue: opportunity?.service_type_name || resolveSpecLookupLabel(activeSpecs.service_type, serviceTypes) || resolveSpecLookupLabel(activeSpecs.service_type, SERVICE_TYPE_OPTIONS),
+      icon: "package",
+      options: serviceTypes
     },
-    { 
-      id: "branch", 
-      label: "Branch", 
-      value: activeSpecs.branch, 
+    {
+      id: "branch",
+      label: "Branch",
+      value: activeSpecs.branch,
       // Use branch_details from the API response as primary source — always available on load
       displayValue: selectedBranchName || opportunity?.branch_details?.name || '',
       initialLabel: selectedBranchName || opportunity?.branch_details?.name || '',
-      icon: "users", 
+      icon: "users",
       fetchOptions: getBranchLookupsPage,
       labelField: "name",
-      options: branches 
+      options: branches
     },
     {
       id: "referral_source",
@@ -7184,60 +6985,62 @@ const SalesDetail = () => {
     },
   ], [activeSpecs, opportunity, moverSizes, moverTypes, serviceTypes, isLeadPath, branches, selectedBranch, selectedBranchName, selectedReferralSource, selectedAssignedUser, referralSources, branchScopedUsers, customStatusCodes, selectedCustomStatusCode, titleCase, specsDraftLabels, committedSpecsLabels, statusBranchId]);
 
-	  const headerActions = useMemo(() => {
-	    if (opportunity?.id === 'new' || isRecordOverQuota) return [];
-	    if (!canViewOpportunity()) return [];
+  const headerActions = useMemo(() => {
+    if (opportunity?.id === 'new' || isRecordOverQuota) return [];
+    if (!canViewOpportunity()) return [];
 
-	    if (view.isLead) {
-	      if (String(opportunity?.workflow_stage || '').toLowerCase() === 'opportunity' || opportunity?.opportunity_id || opportunity?.opportunity) {
-	        return [];
-	      } else {
-	        if (!canCreateOpportunity()) return [];
-          const leadState = opportunity.system_state || opportunity.status;
-          if (['new', 'in_progress'].includes(leadState)) return [{ type: 'primary', label: leadState === 'new' ? 'Start lead' : 'Qualify lead', icon: 'check', onClick: handleAdvanceLead }];
-          if (leadState !== 'qualified') return [];
+    if (view.isLead) {
+      if (String(opportunity?.workflow_stage || '').toLowerCase() === 'opportunity' || opportunity?.opportunity_id || opportunity?.opportunity) {
+        return [];
+      } else {
+        const leadState = opportunity.system_state || opportunity.status;
+        if (['new', 'in_progress'].includes(leadState)) return hasPermission(leadState === 'new' ? 'leads.update' : 'leads.qualify') ? [{ type: 'primary', label: leadState === 'new' ? 'Start lead' : 'Qualify lead', icon: 'check', onClick: handleAdvanceLead }] : [];
+        if (leadState !== 'qualified' || !hasPermission('leads.convert')) return [];
 
-	        return [
-	          {
-	            type: 'primary',
-	            label: 'Create Estimate',
-	            icon: 'plus',
-	            onClick: handleCreateEstimate,
-	          },
-	        ];
-	      }
-	    } else {
-	      if (!estimateSummary) {
-	        return [
-	          {
-	            type: 'primary',
-	            label: 'Create Estimate',
-	            icon: 'plus',
-	            onClick: handleCreateOpportunityEstimate,
-	          },
-	        ];
-	      }
-	    }
-	    return [];
-	  }, [
-	    handleCreateEstimate,
+        return [
+          {
+            type: 'primary',
+            label: 'Convert to Opportunity',
+            icon: 'plus',
+            onClick: handleCreateEstimate,
+          },
+        ];
+      }
+    } else {
+      if (!estimateSummary && ['open', 'booked'].includes(getRecordSystemState(opportunity))) {
+        return [
+          {
+            type: 'primary',
+            label: 'Create Estimate',
+            icon: 'plus',
+            onClick: handleCreateOpportunityEstimate,
+          },
+        ];
+      }
+    }
+    return [];
+  }, [
+    handleCreateEstimate,
     handleAdvanceLead,
-	    handleCreateOpportunityEstimate,
-	    opportunity?.id,
-	    opportunity?.workflow_stage,
-	    opportunity?.opportunity_id,
-	    opportunity?.opportunity,
-	    view.isLead,
-	    estimateSummary,
-	    activeTab,
-	    navigate,
-	    navigateToDetailTab,
-	    navigateToEstimateSubTab,
-	    canViewOpportunity,
-	    canCreateOpportunity,
-	    isRecordBranchOverQuota,
-	    isRecordOverQuota,
-	  ]);
+    handleCreateOpportunityEstimate,
+    opportunity?.id,
+    opportunity?.workflow_stage,
+    opportunity?.system_state,
+    opportunity?.status,
+    hasPermission,
+    opportunity?.opportunity_id,
+    opportunity?.opportunity,
+    view.isLead,
+    estimateSummary,
+    activeTab,
+    navigate,
+    navigateToDetailTab,
+    navigateToEstimateSubTab,
+    canViewOpportunity,
+    canCreateOpportunity,
+    isRecordBranchOverQuota,
+    isRecordOverQuota,
+  ]);
 
   useEffect(() => {
     if (activeTab !== 'Estimate' || !pendingEstimateHeaderAction) return;
@@ -7262,10 +7065,10 @@ const SalesDetail = () => {
     if (canCreateTask()) {
       items.push({ label: 'Add Follow-up', icon: 'calendar-plus', onClick: openCreateFollowUpModal });
     }
-    if (!estimateSummary && canCreateOpportunity()) {
-      items.push({ 
-        label: "Create Estimate", 
-        icon: "plus", 
+    if (!estimateSummary && (view.isLead ? getRecordSystemState(opportunity, true) === 'qualified' && hasPermission('leads.convert') : ['open', 'booked'].includes(getRecordSystemState(opportunity)) && canCreateOpportunity())) {
+      items.push({
+        label: view.isLead ? "Convert to Opportunity" : "Create Estimate",
+        icon: "plus",
         onClick: () => {
           if (view.isLead) {
             handleCreateEstimate();
@@ -7300,20 +7103,6 @@ const SalesDetail = () => {
       },
     });
 
-    if (canEditOpportunity() && String(opportunity?.workflow_stage || '').toLowerCase() === 'booked') {
-      items.push({ type: 'separator' });
-      items.push({ type: 'label', label: 'Booking' });
-      items.push({
-        label: 'Unbook Job',
-        icon: 'calendar-x',
-        onClick: () => {
-          setUnbookReason('');
-          setUnbookNote('');
-          setIsUnbookModalOpen(true);
-        },
-      });
-    }
-
     if (opportunity?.id && opportunity.id !== 'new' && canDuplicateOpportunity()) {
       items.push({ type: 'separator' });
       items.push({ type: 'label', label: 'Record' });
@@ -7327,10 +7116,12 @@ const SalesDetail = () => {
       });
     }
 
-    if (workflowActions?.length) {
+    const menuWorkflowActions = workflowActions.filter((action) =>
+      !headerActions.some((primary) => primary.label === action.label));
+    if (menuWorkflowActions.length) {
       items.push({ type: 'separator' });
       items.push({ type: 'label', label: 'Workflow' });
-      workflowActions.forEach((action) => {
+      menuWorkflowActions.forEach((action) => {
         const icon =
           action.key === 'lost'
             ? 'x-circle'
@@ -7383,7 +7174,7 @@ const SalesDetail = () => {
         return canBookOpportunity();
       }
       if (item.label === 'Mark Lost') {
-        return canMarkOpportunityLost();
+        return view.isLead ? hasPermission('leads.close') : canMarkOpportunityLost();
       }
       if (item.label === 'Activities') {
         return canManageActivityHistory();
@@ -7406,6 +7197,7 @@ const SalesDetail = () => {
     estimateSummary,
     handleCreateEstimate,
     handleCreateOpportunityEstimate,
+    headerActions,
     handleOpenOpportunityInvoicePreview,
     handleRefinalizeInvoice,
     handleWorkflowAction,
@@ -7422,9 +7214,9 @@ const SalesDetail = () => {
     view.isLead,
     workflowActions,
   ]);
-   
+
   const inventorySnapshotData = useMemo(() => {
-   
+
     const estimateItems = Array.isArray(estimatePortalInventory)
       ? estimatePortalInventory
       : Array.isArray(estimateSummary?.portal_inventory_items)
@@ -7589,7 +7381,7 @@ const SalesDetail = () => {
             setOpportunity(updated);
             closeAllEditSections();
             setToast({ type: 'success', text: 'Lead updated. Opening the linked opportunity...' });
-	            navigate(getRecordEstimateTabPath('opportunity', syncedOpportunity || { id: existingOpportunityId }, 'charges'));
+            navigate(getRecordEstimateTabPath('opportunity', syncedOpportunity || { id: existingOpportunityId }, 'charges'));
             return;
           }
 
@@ -7602,13 +7394,13 @@ const SalesDetail = () => {
           }
           setToast({ type: 'success', text: 'Lead converted to opportunity.' });
           closeAllEditSections();
-	          if (syncedOpportunity || convertedOpportunity) {
-	            navigate(getRecordEstimateTabPath('opportunity', syncedOpportunity || convertedOpportunity, 'charges'));
-	          } else if (oppId) {
-	            navigate(getLegacyRecordEstimateTabPath('opportunity', oppId, 'charges'));
-	          } else {
-	            navigate(getRecordListPath('opportunity'));
-	          }
+          if (syncedOpportunity || convertedOpportunity) {
+            navigate(getRecordEstimateTabPath('opportunity', syncedOpportunity || convertedOpportunity, 'charges'));
+          } else if (oppId) {
+            navigate(getLegacyRecordEstimateTabPath('opportunity', oppId, 'charges'));
+          } else {
+            navigate(getRecordListPath('opportunity'));
+          }
           return;
         }
 
@@ -7692,9 +7484,9 @@ const SalesDetail = () => {
                   prev.map((row, rowIndex) =>
                     rowIndex === selectedAdditionalContactIndex
                       ? {
-                          ...row,
-                          id: savedId,
-                        }
+                        ...row,
+                        id: savedId,
+                      }
                       : row
                   )
                 );
@@ -7824,33 +7616,23 @@ const SalesDetail = () => {
   };
 
   const submitWorkflowReason = async () => {
-    const trimmedReason = String(reasonText || '').trim();
-    if (view.isLead && reasonAction === 'lost' && !selectedLostReason) {
-      setToast({ type: 'error', text: 'Select a lost reason.' });
+    if (reasonAction === 'restore') {
+      const reason = String(reasonText || '').trim();
+      if (!reason) { setToast({ type: 'error', text: 'Enter a reason to restore this lead.' }); return; }
+      await handleWorkflowAction('restore', reason);
       return;
     }
-    const selectedReasonLabel = view.isLead
-      ? String(lostReasonOptions.find((option) => String(option.id) === String(selectedLostReason))?.name || '').trim()
-      : String(selectedLostReason || '').trim();
-    const finalReason = reasonAction === 'cancel'
-      ? trimmedReason
-      : [selectedReasonLabel, trimmedReason].filter(Boolean).join(': ');
-
-    if (!finalReason) {
-      setToast({
-        type: 'error',
-        text: reasonAction === 'cancel'
-          ? 'Please enter a reason before canceling this job.'
-          : 'Please select or enter a reason before marking this as lost.',
-      });
-      return;
+    const selected = lostReasonOptions.find((row) => String(row.id) === String(selectedLostReason));
+    if (!selected) { setToast({ type: 'error', text: 'Select a reason.' }); return; }
+    if (selected.requires_note && !String(reasonText || '').trim()) {
+      setToast({ type: 'error', text: 'Notes are required for this reason.' }); return;
     }
-
-    await handleWorkflowAction(reasonAction || 'lost', finalReason);
+    await handleWorkflowAction(reasonAction, selected.name || selected.label || 'Selected reason');
   };
 
   const submitUnbook = async () => {
     if (!opportunity?.id || opportunity.id === 'new') return;
+    if (getRecordSystemState(opportunity) !== 'booked' || !hasPermission('opportunities.reopen')) return;
 
     const reason = String(unbookReason || '').trim();
     const note = String(unbookNote || '').trim();
@@ -7902,8 +7684,8 @@ const SalesDetail = () => {
       const targetPayload = followUpMode === 'edit' && taskRecord
         ? getFollowUpTargetPayload(taskRecord)
         : (isLeadPath
-            ? (opportunity?.opportunity_id ? { opportunity: opportunity.opportunity_id } : { lead: opportunity.id })
-            : { opportunity: opportunity.id });
+          ? (opportunity?.opportunity_id ? { opportunity: opportunity.opportunity_id } : { lead: opportunity.id })
+          : { opportunity: opportunity.id });
       if (followUpMode === 'edit' && editingFollowUpId) {
         const activityId = getFollowUpActivityId(taskRecord);
         if (!activityId) throw new Error('Missing activity for follow-up.');
@@ -7964,18 +7746,18 @@ const SalesDetail = () => {
       setFollowUps((prev) => prev.map((row) => (
         String(row.id) === String(task.id)
           ? {
-              ...row,
-              activity_details: {
-                ...(row.activity_details || {}),
-                status: nextStatus,
-                completed_at: nextStatus === 'completed' ? new Date().toISOString() : null,
-              },
-              activity: {
-                ...(row.activity || {}),
-                status: nextStatus,
-                completed_at: nextStatus === 'completed' ? new Date().toISOString() : null,
-              },
-            }
+            ...row,
+            activity_details: {
+              ...(row.activity_details || {}),
+              status: nextStatus,
+              completed_at: nextStatus === 'completed' ? new Date().toISOString() : null,
+            },
+            activity: {
+              ...(row.activity || {}),
+              status: nextStatus,
+              completed_at: nextStatus === 'completed' ? new Date().toISOString() : null,
+            },
+          }
           : row
       )));
       setToast({
@@ -8032,7 +7814,7 @@ const SalesDetail = () => {
             name="trash-2"
             label="Task deletion unavailable; mark complete instead"
             disabled
-            onClick={() => {}}
+            onClick={() => { }}
             className="text-rose-500"
           />
         </div>
@@ -8251,7 +8033,7 @@ const SalesDetail = () => {
           setActivities((prev) =>
             (prev || []).map((row) =>
               String(row?.id || '') !== String(editingActivity.id || '') ||
-              String(row.timeline_source || '') !== String(editingActivity.timeline_source || '')
+                String(row.timeline_source || '') !== String(editingActivity.timeline_source || '')
                 ? row
                 : { ...row, ...updated, timeline_source: editingActivity.timeline_source }
             )
@@ -8285,9 +8067,9 @@ const SalesDetail = () => {
             body_html: emailComposeMode === 'inbound_reply'
               ? activeBody.trim()
               : replaceBranchPlaceholders(activeBody.trim(), {
-                  branchLogoUrl: selectedBranchLogoUrl,
-                  branchName: selectedBranchName,
-                }),
+                branchLogoUrl: selectedBranchLogoUrl,
+                branchName: selectedBranchName,
+              }),
             include_signature: true,
           });
         } else if (commTab === 'text') {
@@ -8333,9 +8115,9 @@ const SalesDetail = () => {
             body_html: emailComposeMode === 'inbound_reply'
               ? activeBody.trim()
               : replaceBranchPlaceholders(activeBody.trim(), {
-                  branchLogoUrl: selectedBranchLogoUrl,
-                  branchName: selectedBranchName,
-                }),
+                branchLogoUrl: selectedBranchLogoUrl,
+                branchName: selectedBranchName,
+              }),
             include_signature: true,
           });
         } else if (commTab === 'text') {
@@ -8360,22 +8142,22 @@ const SalesDetail = () => {
             status: 'completed',
           });
 
-            if (created?.id && commTab === 'call') {
-              const parsedMinutes = callDuration ? Number(callDuration) : 0;
-              try {
-                await api.post('/sales/call-logs/', {
-		                activity: created.id,
-		                duration_seconds: Math.max(0, Math.round(parsedMinutes * 60)),
-		                disposition: callDisposition,
-		              });
-                await updateSalesActivity(created.id, {
-                  status: 'completed',
-                  completed_at: new Date().toISOString(),
-                });
-              } catch (err) {
-                channelWarning = `Activity saved, but call log failed: ${getErrorMessage(err, 'call log error')}`;
-              }
+          if (created?.id && commTab === 'call') {
+            const parsedMinutes = callDuration ? Number(callDuration) : 0;
+            try {
+              await api.post('/sales/call-logs/', {
+                activity: created.id,
+                duration_seconds: Math.max(0, Math.round(parsedMinutes * 60)),
+                disposition: callDisposition,
+              });
+              await updateSalesActivity(created.id, {
+                status: 'completed',
+                completed_at: new Date().toISOString(),
+              });
+            } catch (err) {
+              channelWarning = `Activity saved, but call log failed: ${getErrorMessage(err, 'call log error')}`;
             }
+          }
         }
         if (channelWarning) postWarning = channelWarning;
       }
@@ -8419,7 +8201,7 @@ const SalesDetail = () => {
   const mainColumnClass = showSidebarCards
     ? 'col-span-12 lg:col-span-8 space-y-2'
     : 'col-span-12 space-y-2';
-  const isOpportunityLost = String(opportunity?.workflow_stage || opportunity?.status || '').toLowerCase() === 'lost';
+  const isOpportunityLost = getRecordSystemState(opportunity, isLeadPath) === 'lost';
   const lockedOpportunityReason = 'This opportunity is lost, so estimate and related tabs are locked.';
   const filesTargetSpec = resolveFilesTargetSpec({
     isLeadPath,
@@ -8442,11 +8224,10 @@ const SalesDetail = () => {
       {toast.text ? (
         <div className="pointer-events-none fixed bottom-5 right-5 z-[200] max-w-[92vw] sm:max-w-md">
           <div
-            className={`pointer-events-auto flex items-start gap-3 rounded-2xl border bg-white px-4 py-3 text-sm font-semibold shadow-lg ${
-              toast.type === 'error'
+            className={`pointer-events-auto flex items-start gap-3 rounded-2xl border bg-white px-4 py-3 text-sm font-semibold shadow-lg ${toast.type === 'error'
                 ? 'border-rose-200 text-rose-700'
                 : 'border-emerald-200 text-emerald-700'
-            }`}
+              }`}
             role="alert"
             aria-live="polite"
           >
@@ -8480,77 +8261,77 @@ const SalesDetail = () => {
           </div>
         </div>
       )}
-	      <StickyHeader 
-	        title={
-            <div className="flex items-center gap-2">
-              <span className="text-slate-400 font-medium">Estimate:</span>
-              <span className={estimateSummary?.status ? "text-slate-800" : "text-slate-400 italic font-normal"}>
-                {estimateSummary?.status 
-                  ? String(estimateSummary.status).charAt(0).toUpperCase() + String(estimateSummary.status).slice(1).replace(/_/g, ' ') 
-                  : 'Not Created'}
-              </span>
-            </div>
-          }
-	        subtitle=""
-	        branchLogoUrl={selectedBranchLogoUrl}
-	        status={getWorkflowStageLabel(opportunity?.workflow_stage || (isLeadPath ? 'new_lead' : 'opportunity'))}
-	        statusTone={toneForWorkflowStage(opportunity?.workflow_stage)}
-	        statusColor={undefined}
-	        id=""
-	        onBack={handleBack}
-	        actions={headerActions}
-	        moreActions={[
-	          ...headerMenuActions,
-	        ]}
-	        moreLabel="Actions"
-	        sticky={false}
-	        transparent={true}
-	      />
+      <StickyHeader
+        title={
+          <div className="flex items-center gap-2">
+            <span className="text-slate-400 font-medium">Estimate:</span>
+            <span className={estimateSummary?.status ? "text-slate-800" : "text-slate-400 italic font-normal"}>
+              {estimateSummary?.status
+                ? String(estimateSummary.status).charAt(0).toUpperCase() + String(estimateSummary.status).slice(1).replace(/_/g, ' ')
+                : 'Not Created'}
+            </span>
+          </div>
+        }
+        subtitle=""
+        branchLogoUrl={selectedBranchLogoUrl}
+        status={getWorkflowStageLabel(getRecordSystemState(opportunity, isLeadPath))}
+        statusTone={toneForWorkflowStage(getRecordSystemState(opportunity, isLeadPath))}
+        statusColor={undefined}
+        id=""
+        onBack={handleBack}
+        actions={headerActions}
+        moreActions={[
+          ...headerMenuActions,
+        ]}
+        moreLabel="Actions"
+        sticky={false}
+        transparent={true}
+      />
 
       <main className="w-full px-1 py-2 sm:px-2 lg:px-2">
         <div className="grid grid-cols-12 gap-2 lg:gap-3">
           <div className={mainColumnClass}>
 
             <div className={`grid grid-cols-1 gap-2 lg:gap-3 mb-3 ${['Estimate', 'Files & Photos', 'Accounting', 'Documents', 'Payments'].includes(activeTab) ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
-                {['Sales', 'Tasks', 'Estimate', 'Files & Photos', 'Accounting', 'Documents', 'Payments'].includes(activeTab) && (
-                  <>
+              {['Sales', 'Tasks', 'Estimate', 'Files & Photos', 'Accounting', 'Documents', 'Payments'].includes(activeTab) && (
+                <>
 
-                <CustomerCard
-                  customerName={view.customerName}
-                  firstName={customerDraft?.first_name ?? form.first_name}
-                  lastName={customerDraft?.last_name ?? form.last_name}
-                  salesNumber={opportunity?.sales_number || opportunity?.display_number || opportunity?.id}
-                  title={view.moveType}
-                  email={customerDraft?.email ?? form.email}
-                  phone={customerDraft?.phone ?? form.phone}
-                  location={opportunity?.origin_address_details?.city || opportunity?.origin_city}
-                  onAddFollowup={!isRecordOverQuota && canCreateTask() ? openCreateFollowUpModal : undefined}
-                  onInlineSave={isRecordOverQuota ? undefined : handleCustomerInlineSave}
-                  onCustomerChange={(id, val) => setCustomerDraft(p => ({ ...p, [id]: val }))}
-                  onManageContacts={isRecordOverQuota ? undefined : openAdditionalContactsModal}
-                  additionalContacts={customerAdditionalContacts}
-                />
-                <PlannedMoveCard
-                  plannedMove={plannedMove}
-                />
+                  <CustomerCard
+                    customerName={view.customerName}
+                    firstName={customerDraft?.first_name ?? form.first_name}
+                    lastName={customerDraft?.last_name ?? form.last_name}
+                    salesNumber={opportunity?.sales_number || opportunity?.display_number || opportunity?.id}
+                    title={view.moveType}
+                    email={customerDraft?.email ?? form.email}
+                    phone={customerDraft?.phone ?? form.phone}
+                    location={opportunity?.origin_address_details?.city || opportunity?.origin_city}
+                    onAddFollowup={!isRecordOverQuota && canCreateTask() ? openCreateFollowUpModal : undefined}
+                    onInlineSave={isRecordOverQuota ? undefined : handleCustomerInlineSave}
+                    onCustomerChange={(id, val) => setCustomerDraft(p => ({ ...p, [id]: val }))}
+                    onManageContacts={isRecordOverQuota ? undefined : openAdditionalContactsModal}
+                    additionalContacts={customerAdditionalContacts}
+                  />
+                  <PlannedMoveCard
+                    plannedMove={plannedMove}
+                  />
                 </>
               )}
               {['Estimate', 'Files & Photos', 'Accounting', 'Documents', 'Payments'].includes(activeTab) && (
-              <RouteLogisticsCard
-                stops={opportunity?.stops || []}
-                origin={opportunity?.origin_address_details || {
-                  address_line1: form.origin_street,
-                }}
-                destination={opportunity?.destination_address_details || {
-                  address_line1: form.destination_street,
-                }}
+                <RouteLogisticsCard
+                  stops={opportunity?.stops || []}
+                  origin={opportunity?.origin_address_details || {
+                    address_line1: form.origin_street,
+                  }}
+                  destination={opportunity?.destination_address_details || {
+                    address_line1: form.destination_street,
+                  }}
                   routeStops={routePoints}
                   onEdit={!isCreation && canEditOpportunity() ? startRouteEdit : undefined}
                   onOpenMap={() => navigateToEstimateSubTab('route')}
                   onAddStop={() => navigateToEstimateSubTab('route')}
                   onEditStop={!isLeadPath && !isCreation && canEditOpportunity() ? openSalesRouteStopEditor : undefined}
                   onDeleteStop={!isLeadPath && !isCreation && canEditOpportunity() ? deleteSalesRouteStop : undefined}
-              />
+                />
               )}
             </div>
 
@@ -8573,45 +8354,44 @@ const SalesDetail = () => {
               <div className="glass rounded-xl ring-1 ring-ink-100 shadow-sm">
                 <nav className="flex items-center justify-between gap-1 p-1 overflow-x-auto no-scrollbar">
                   <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
-	                  {[
-	                    { id: "Sales", icon: "messages-square", label: "Sales" },
-	                    { id: "Estimate", icon: "file-text", label: "Estimate", disabled: isLeadPath || isOpportunityLost, reason: isOpportunityLost ? lockedOpportunityReason : undefined },
-	                    { id: "Files & Photos", icon: "image", label: "Files & Photos", disabled: isCreation || isOpportunityLost, reason: isOpportunityLost ? lockedOpportunityReason : undefined },
-	                    { id: "Documents", icon: "file-text", label: "Documents", disabled: isCreation || isOpportunityLost, reason: isOpportunityLost ? lockedOpportunityReason : undefined },
-	                    { id: "Accounting", icon: "wallet", label: "Accounting", disabled: !accountingEnabled || isOpportunityLost, reason: isOpportunityLost ? lockedOpportunityReason : undefined },
-	                    { id: "Payments", icon: "wallet", label: "Payments", disabled: isLeadPath || isOpportunityLost, reason: isOpportunityLost ? lockedOpportunityReason : undefined },
-	                  ].map((t) => {
+                    {[
+                      { id: "Sales", icon: "messages-square", label: "Sales" },
+                      { id: "Estimate", icon: "file-text", label: "Estimate", disabled: isLeadPath || isOpportunityLost, reason: isOpportunityLost ? lockedOpportunityReason : undefined },
+                      { id: "Files & Photos", icon: "image", label: "Files & Photos", disabled: isCreation || isOpportunityLost, reason: isOpportunityLost ? lockedOpportunityReason : undefined },
+                      { id: "Documents", icon: "file-text", label: "Documents", disabled: isCreation || isOpportunityLost, reason: isOpportunityLost ? lockedOpportunityReason : undefined },
+                      { id: "Accounting", icon: "wallet", label: "Accounting", disabled: !accountingEnabled || isOpportunityLost, reason: isOpportunityLost ? lockedOpportunityReason : undefined },
+                      { id: "Payments", icon: "wallet", label: "Payments", disabled: isLeadPath || isOpportunityLost, reason: isOpportunityLost ? lockedOpportunityReason : undefined },
+                    ].map((t) => {
                       const isActive = activeTab === t.id;
                       return (
                         <button
                           key={t.id}
-	                          disabled={t.disabled}
-	                          title={t.disabled ? (t.reason || 'This tab is locked.') : undefined}
-	                          onClick={() => {
-	                            if (t.disabled) return;
-	                            if (t.id === 'Estimate') {
-	                              setActiveTab('Estimate');
-	                              navigateToEstimateSubTab('charges');
-	                              return;
-	                            }
-	                            if (t.id === 'Documents') {
-	                              setActiveTab('Documents');
-	                              navigateToDetailTab('Documents');
-	                              return;
-	                            }
-	                            if (t.id === 'Payments') {
-	                              setActiveTab('Payments');
-	                              navigateToDetailTab('Payments');
-	                              return;
-	                            }
-	                            setActiveTab(t.id);
-	                            navigateToDetailTab(t.id);
-	                          }}
-                          className={`relative inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-xs font-bold transition whitespace-nowrap cursor-pointer ${
-                            isActive
+                          disabled={t.disabled}
+                          title={t.disabled ? (t.reason || 'This tab is locked.') : undefined}
+                          onClick={() => {
+                            if (t.disabled) return;
+                            if (t.id === 'Estimate') {
+                              setActiveTab('Estimate');
+                              navigateToEstimateSubTab('charges');
+                              return;
+                            }
+                            if (t.id === 'Documents') {
+                              setActiveTab('Documents');
+                              navigateToDetailTab('Documents');
+                              return;
+                            }
+                            if (t.id === 'Payments') {
+                              setActiveTab('Payments');
+                              navigateToDetailTab('Payments');
+                              return;
+                            }
+                            setActiveTab(t.id);
+                            navigateToDetailTab(t.id);
+                          }}
+                          className={`relative inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-xs font-bold transition whitespace-nowrap cursor-pointer ${isActive
                               ? "bg-slate-900 text-white shadow-sm ring-1 ring-slate-900/10"
                               : t.disabled ? "text-slate-300 cursor-not-allowed" : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
-                          }`}
+                            }`}
                         >
                           <Icon name={t.icon} className={`w-3.5 h-3.5 ${isActive ? "text-white" : "text-slate-400"}`} />
                           <span>{t.label}</span>
@@ -8637,74 +8417,74 @@ const SalesDetail = () => {
 
             {activeTab === "Sales" && (
               <div className="space-y-2">
-                  {editingActivity && commTab === 'note' ? (
-                    <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5">
-                      <div className="text-sm font-semibold text-amber-900">Editing note activity</div>
-                      <button
-                        type="button"
-                        onClick={cancelEditingNoteActivity}
-                        className="text-xs font-bold text-amber-800 hover:text-amber-900 cursor-pointer"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : null}
-                  {isRecordOverQuota && (
-                    <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800 flex items-center gap-2">
-                      <AlertCircle size={16} className="shrink-0 text-amber-600" />
-                      <span>This branch is over quota (read-only). Communication tools and activity logging are disabled.</span>
-                    </div>
-                  )}
-	                <CommsHub 
-	                  customerName={view.customerName}
-	                  customerPhone={activityCallRecipient || form.phone}
-	                  currentChannel={commTab}
-	                  onChannelChange={setCommTab}
-	                  body={currentActivityBody}
-	                  onBodyChange={setCurrentActivityBody}
-	                  subject={activitySubject}
-	                  onSubjectChange={setActivitySubject}
-	                  isPosting={isPosting}
-	                  onPost={handlePostActivity}
-                    activityEmailToText={activityEmailToText}
-                    setActivityEmailToText={setActivityEmailToText}
-                    activityEmailCcText={activityEmailCcText}
-                    setActivityEmailCcText={setActivityEmailCcText}
-                    activityEmailBccText={activityEmailBccText}
-                    setActivityEmailBccText={setActivityEmailBccText}
-                    showCcBcc={showCcBcc}
-                    setShowCcBcc={setShowCcBcc}
-	                  onDial={handleRingCentralCall}
-                    canCreateTask={canCreateTask()}
-                    canSendEmail={canSendEmail()}
-                    canSendSms={canSendSms()}
-                    canLogCall={canLogCall()}
-	                  callDuration={callDuration}
-	                  onCallDurationChange={setCallDuration}
-	                  callDirection={callDirection}
-	                  onCallDirectionChange={setCallDirection}
-	                  callDisposition={callDisposition}
-	                  onCallDispositionChange={setCallDisposition}
-	                  emailTemplates={emailTemplates}
-	                  smsTemplates={smsTemplates}
-	                  onApplyTemplate={handleApplyTemplate}
-	                  emailAttachments={emailAttachments}
-	                  onEmailAttachmentsChange={setEmailAttachments}
-	                  categories={commCategories}
-	                  isLoadingTemplates={isLoadingCommTemplates}
-                    postLabel={editingActivity && commTab === 'note' ? 'Save Note' : undefined}
-                    communicationRecipients={communicationRecipients}
-                    activityCallRecipient={activityCallRecipient}
-                    setActivityCallRecipient={setActivityCallRecipient}
-                    activitySmsRecipients={activitySmsRecipients}
-                    setActivitySmsRecipients={setActivitySmsRecipients}
+                {editingActivity && commTab === 'note' ? (
+                  <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5">
+                    <div className="text-sm font-semibold text-amber-900">Editing note activity</div>
+                    <button
+                      type="button"
+                      onClick={cancelEditingNoteActivity}
+                      className="text-xs font-bold text-amber-800 hover:text-amber-900 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : null}
+                {isRecordOverQuota && (
+                  <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800 flex items-center gap-2">
+                    <AlertCircle size={16} className="shrink-0 text-amber-600" />
+                    <span>This branch is over quota (read-only). Communication tools and activity logging are disabled.</span>
+                  </div>
+                )}
+                <CommsHub
+                  customerName={view.customerName}
+                  customerPhone={activityCallRecipient || form.phone}
+                  currentChannel={commTab}
+                  onChannelChange={setCommTab}
+                  body={currentActivityBody}
+                  onBodyChange={setCurrentActivityBody}
+                  subject={activitySubject}
+                  onSubjectChange={setActivitySubject}
+                  isPosting={isPosting}
+                  onPost={handlePostActivity}
+                  activityEmailToText={activityEmailToText}
+                  setActivityEmailToText={setActivityEmailToText}
+                  activityEmailCcText={activityEmailCcText}
+                  setActivityEmailCcText={setActivityEmailCcText}
+                  activityEmailBccText={activityEmailBccText}
+                  setActivityEmailBccText={setActivityEmailBccText}
+                  showCcBcc={showCcBcc}
+                  setShowCcBcc={setShowCcBcc}
+                  onDial={handleRingCentralCall}
+                  canCreateTask={canCreateTask()}
+                  canSendEmail={canSendEmail()}
+                  canSendSms={canSendSms()}
+                  canLogCall={canLogCall()}
+                  callDuration={callDuration}
+                  onCallDurationChange={setCallDuration}
+                  callDirection={callDirection}
+                  onCallDirectionChange={setCallDirection}
+                  callDisposition={callDisposition}
+                  onCallDispositionChange={setCallDisposition}
+                  emailTemplates={emailTemplates}
+                  smsTemplates={smsTemplates}
+                  onApplyTemplate={handleApplyTemplate}
+                  emailAttachments={emailAttachments}
+                  onEmailAttachmentsChange={setEmailAttachments}
+                  categories={commCategories}
+                  isLoadingTemplates={isLoadingCommTemplates}
+                  postLabel={editingActivity && commTab === 'note' ? 'Save Note' : undefined}
+                  communicationRecipients={communicationRecipients}
+                  activityCallRecipient={activityCallRecipient}
+                  setActivityCallRecipient={setActivityCallRecipient}
+                  activitySmsRecipients={activitySmsRecipients}
+                  setActivitySmsRecipients={setActivitySmsRecipients}
                   isLeadPath={isLeadPath}
                   onRecordSmsConsent={async (destination) => {
                     await recordRecordSmsConsent(isLeadPath ? 'lead' : 'opportunity', opportunity.id, destination);
                     setSmsConsentConfirmed(true);
                     return true;
                   }}
-	                />
+                />
                 {(() => {
                   const timelineProps = {
                     activities: orderedActivities,
@@ -8726,10 +8506,10 @@ const SalesDetail = () => {
                         setCurrentActivityBody('');
                       }, 100);
                     },
-                onEditNote: isRecordOverQuota ? undefined : startEditingNoteActivity,
-                onEditCall: isRecordOverQuota ? undefined : openEditCallLog,
-                onDeleteCall: isLeadPath || isRecordOverQuota ? undefined : deleteCallLog,
-                canManageActivityHistory: canManageActivityHistory(),
+                    onEditNote: isRecordOverQuota ? undefined : startEditingNoteActivity,
+                    onEditCall: isRecordOverQuota ? undefined : openEditCallLog,
+                    onDeleteCall: isLeadPath || isRecordOverQuota ? undefined : deleteCallLog,
+                    canManageActivityHistory: canManageActivityHistory(),
                     onPreview: (act) => setSelectedActivityForPreview(act),
                     onLoadMore: handleLoadMore,
                     hasMore: hasMoreActivities || hasMoreTimeline,
@@ -8742,113 +8522,101 @@ const SalesDetail = () => {
               </div>
             )}
 
+            {activeTab === "Estimate" && !isLeadPath && Number(opportunity?.id) > 0 && (
+              <SalesLifecyclePanel opportunityId={Number(opportunity.id)} locked={isOpportunityLost} />
+            )}
+
             {activeTab === "Estimate" && (
-                <EstimateView
-                  onRefresh={fetchOpportunity}
-                  opportunity={isLeadPath ? estimateOpportunity : opportunity}
-                  sourceType={isLeadPath ? 'lead' : 'opportunity'}
-                  isLoadingLinkedOpportunity={isLeadPath && isLoadingEstimateOpportunity}
-                  opportunityJobs={opportunityJobs}
-                  subJobServiceOptions={computedSubJobServiceOptions}
-                  selectedSubJobId={selectedEstimateJobId}
-                  onSelectedSubJobChange={setSelectedEstimateJobId}
-                  onCreateSubJob={createSubJobFromServiceType}
-                  onRefreshSubJobs={loadOpportunityJobs}
-                  onDeleteSelectedSubJob={deleteSelectedEstimateJob}
-                  onUpdateSelectedSubJob={updateSelectedEstimateJobPlanning}
-                  triggerSendEstimate={sendEstimateNonce}
-                  triggerViewEstimate={triggerViewEstimateNonce}
-                  view={view}
-                  initialSubTab={estimateInitialSubTab}
-                  onSubTabChange={(subTab) => {
-                    if (subTab === 'documents') {
-                      setActiveTab('Documents');
-                      navigateToDetailTab('Documents');
-                    } else if (subTab === 'payments') {
-                      setActiveTab('Payments');
-                      navigateToDetailTab('Payments');
-                    } else {
-                      navigateToEstimateSubTab(subTab);
-                    }
-                  }}
-                  isOpportunityLocked={isOpportunityLost}
-                  canCreateOpportunity={canCreateOpportunity()}
-                  canEditOpportunity={canEditOpportunity()}
-                />
+              <EstimateView
+                onSendPortal={() => {
+                  setActiveTab('Documents');
+                  navigateToDetailTab('Documents');
+                }}
+                onRefresh={fetchOpportunity}
+                opportunity={isLeadPath ? estimateOpportunity : opportunity}
+                sourceType={isLeadPath ? 'lead' : 'opportunity'}
+                isLoadingLinkedOpportunity={isLeadPath && isLoadingEstimateOpportunity}
+                opportunityJobs={opportunityJobs}
+                subJobServiceOptions={computedSubJobServiceOptions}
+                selectedSubJobId={selectedEstimateJobId}
+                onSelectedSubJobChange={setSelectedEstimateJobId}
+                onCreateSubJob={createSubJobFromServiceType}
+                onRefreshSubJobs={loadOpportunityJobs}
+                onDeleteSelectedSubJob={deleteSelectedEstimateJob}
+                onUpdateSelectedSubJob={updateSelectedEstimateJobPlanning}
+                triggerSendEstimate={sendEstimateNonce}
+                triggerViewEstimate={triggerViewEstimateNonce}
+                view={view}
+                initialSubTab={estimateInitialSubTab}
+                onSubTabChange={(subTab) => {
+                  if (subTab === 'documents') {
+                    setActiveTab('Documents');
+                    navigateToDetailTab('Documents');
+                  } else if (subTab === 'payments') {
+                    setActiveTab('Payments');
+                    navigateToDetailTab('Payments');
+                  } else {
+                    navigateToEstimateSubTab(subTab);
+                  }
+                }}
+                isOpportunityLocked={isOpportunityLost}
+                canCreateOpportunity={canCreateOpportunity()}
+                canEditOpportunity={canEditOpportunity()}
+              />
             )}
 
             {activeTab === "Documents" && (
-                <EstimateView
-                  onRefresh={fetchOpportunity}
-                  opportunity={isLeadPath ? estimateOpportunity : opportunity}
-                  sourceType={isLeadPath ? 'lead' : 'opportunity'}
-                  isLoadingLinkedOpportunity={isLeadPath && isLoadingEstimateOpportunity}
-                  opportunityJobs={opportunityJobs}
-                  subJobServiceOptions={computedSubJobServiceOptions}
-                  selectedSubJobId={selectedEstimateJobId}
-                  onSelectedSubJobChange={setSelectedEstimateJobId}
-                  onCreateSubJob={createSubJobFromServiceType}
-                  onRefreshSubJobs={loadOpportunityJobs}
-                  onDeleteSelectedSubJob={deleteSelectedEstimateJob}
-                  onUpdateSelectedSubJob={updateSelectedEstimateJobPlanning}
-                  triggerSendEstimate={sendEstimateNonce}
-                  triggerViewEstimate={triggerViewEstimateNonce}
-                  view={view}
-                  initialSubTab="documents"
-                  onSubTabChange={(subTab) => {
-                    if (subTab === 'documents') {
-                      setActiveTab('Documents');
-                      navigateToDetailTab('Documents');
-                    } else if (subTab === 'payments') {
-                      setActiveTab('Payments');
-                      navigateToDetailTab('Payments');
-                    } else {
-                      setActiveTab('Estimate');
-                      navigateToEstimateSubTab(subTab);
-                    }
-                  }}
-                  isOpportunityLocked={isOpportunityLost}
-                  canCreateOpportunity={canCreateOpportunity()}
-                  canEditOpportunity={canEditOpportunity()}
+              <div className="space-y-5">
+                <InventoryPortalPanel
+                  key={`inventory-${isLeadPath ? 'lead' : 'opportunity'}-${opportunity?.id}`}
+                  leadId={isLeadPath ? opportunity?.id : null}
+                  opportunityId={!isLeadPath ? opportunity?.id : null}
+                  canEdit={isLeadPath ? hasPermission(PERMISSIONS.LEAD_EDIT) : !isOpportunityLost && canEditOpportunity()}
                 />
+                <IssuedDocumentsPanel
+                  key={(isLeadPath ? estimateOpportunity : opportunity)?.id || 'none'}
+                  opportunityId={(isLeadPath ? estimateOpportunity : opportunity)?.id}
+                  canEdit={!isOpportunityLost && canEditOpportunity()}
+                />
+              </div>
             )}
 
             {activeTab === "Files & Photos" && (
               <div className="rounded-xl border border-ink-100 bg-white shadow-sm overflow-hidden">
-                 <div className="px-4 py-3 border-b border-ink-100 flex items-center justify-between">
-                    <div>
-                      <span className="label-eyebrow text-ink-400">Files & Photos</span>
-                      <h3 className="text-lg font-extrabold text-ink-900 mt-0.5">Project Documents</h3>
-                    </div>
-                    {!isLeadPath && canEditOpportunity() ? <PrimaryBtn icon="upload">Upload File</PrimaryBtn> : null}
-                 </div>
-                 <div className="p-3">
-                    {isLeadPath ? <p role="status" className="text-sm text-slate-600">Files and photos are not available for leads yet.</p> : <CategorizedFilesPanel
-                      targetType={filesTargetSpec.targetType}
-                      targetId={filesTargetSpec.targetId}
-                      extraTargets={[
-                        ...(!isLeadPath && estimateSummary?.id
-                          ? [{ targetType: 'estimates.estimate', targetId: String(estimateSummary.id) }]
-                          : []),
-                        ...(!isLeadPath && (opportunity?.lead_id || opportunity?.lead_details?.id || estimateOpportunity?.lead_details?.id)
-                          ? [{
-                              targetType: 'leads.lead',
-                              targetId: String(opportunity?.lead_id || opportunity?.lead_details?.id || estimateOpportunity?.lead_details?.id),
-                            }]
-                          : []),
-                        ...(isLeadPath && opportunity?.opportunity_id && estimateSummary?.id
-                          ? [{ targetType: 'estimates.estimate', targetId: String(estimateSummary.id) }]
-                          : []),
-                      ]}
-                    />}
+                <div className="px-4 py-3 border-b border-ink-100 flex items-center justify-between">
+                  <div>
+                    <span className="label-eyebrow text-ink-400">Files & Photos</span>
+                    <h3 className="text-lg font-extrabold text-ink-900 mt-0.5">Project Documents</h3>
                   </div>
+                  {!isLeadPath && canEditOpportunity() ? <PrimaryBtn icon="upload">Upload File</PrimaryBtn> : null}
+                </div>
+                <div className="p-3">
+                  {isLeadPath ? <p role="status" className="text-sm text-slate-600">Files and photos are not available for leads yet.</p> : <CategorizedFilesPanel
+                    targetType={filesTargetSpec.targetType}
+                    targetId={filesTargetSpec.targetId}
+                    extraTargets={[
+                      ...(!isLeadPath && estimateSummary?.id
+                        ? [{ targetType: 'estimates.estimate', targetId: String(estimateSummary.id) }]
+                        : []),
+                      ...(!isLeadPath && (opportunity?.lead_id || opportunity?.lead_details?.id || estimateOpportunity?.lead_details?.id)
+                        ? [{
+                          targetType: 'leads.lead',
+                          targetId: String(opportunity?.lead_id || opportunity?.lead_details?.id || estimateOpportunity?.lead_details?.id),
+                        }]
+                        : []),
+                      ...(isLeadPath && opportunity?.opportunity_id && estimateSummary?.id
+                        ? [{ targetType: 'estimates.estimate', targetId: String(estimateSummary.id) }]
+                        : []),
+                    ]}
+                  />}
+                </div>
               </div>
             )}
-            
+
             {activeTab === "Accounting" && (
               <div className="space-y-3 animate-in fade-in duration-300">
                 <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-4 space-y-4">
-                 
+
 
                   {(opportunityAccountingSummary?.estimate?.requires_reapproval || estimateSummary?.requires_reapproval) ? (
                     <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
@@ -8985,9 +8753,9 @@ const SalesDetail = () => {
                             <div className="mt-1">
                               <Pill tone={
                                 (opportunityAccountingSummary?.invoice_rollup?.latest_invoice_status || invoiceDetail?.status) === 'paid' ? 'green' :
-                                (opportunityAccountingSummary?.invoice_rollup?.latest_invoice_status || invoiceDetail?.status) === 'sent' ? 'blue' :
-                                (opportunityAccountingSummary?.invoice_rollup?.latest_invoice_status || invoiceDetail?.status) === 'pending' ? 'amber' :
-                                (opportunityAccountingSummary?.invoice_rollup?.latest_invoice_status || invoiceDetail?.status) === 'voided' ? 'rose' : 'slate'
+                                  (opportunityAccountingSummary?.invoice_rollup?.latest_invoice_status || invoiceDetail?.status) === 'sent' ? 'blue' :
+                                    (opportunityAccountingSummary?.invoice_rollup?.latest_invoice_status || invoiceDetail?.status) === 'pending' ? 'amber' :
+                                      (opportunityAccountingSummary?.invoice_rollup?.latest_invoice_status || invoiceDetail?.status) === 'voided' ? 'rose' : 'slate'
                               }>
                                 {String(opportunityAccountingSummary?.invoice_rollup?.latest_invoice_status || invoiceDetail?.status || 'draft').toUpperCase()}
                               </Pill>
@@ -9089,9 +8857,9 @@ const SalesDetail = () => {
                                     <td className="py-3 px-1 text-right font-bold text-amber-700">
                                       {invoice.total != null
                                         ? `$${Math.max(
-                                            Number(invoice.total || 0) - Number(ledgerPaidAmount || opportunityAccountingSummary?.payments?.total_paid || accountingSummary?.payments?.total_paid || 0),
-                                            0
-                                          ).toFixed(2)}`
+                                          Number(invoice.total || 0) - Number(ledgerPaidAmount || opportunityAccountingSummary?.payments?.total_paid || accountingSummary?.payments?.total_paid || 0),
+                                          0
+                                        ).toFixed(2)}`
                                         : '—'}
                                     </td>
                                   </tr>
@@ -9129,9 +8897,9 @@ const SalesDetail = () => {
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-2 shrink-0">
-                                  <GhostBtn 
-                                    icon="save" 
-                                    onClick={saveAllInvoiceDrafts} 
+                                  <GhostBtn
+                                    icon="save"
+                                    onClick={saveAllInvoiceDrafts}
                                     disabled={isSavingInvoiceDraft}
                                     className="h-9 py-0 px-3.5 text-xs font-bold"
                                   >
@@ -9139,7 +8907,7 @@ const SalesDetail = () => {
                                   </GhostBtn>
                                 </div>
                               </div>
-                              
+
                               {/* Job Tabs for Invoicing */}
                               <div className="flex overflow-x-auto border-b border-slate-200 no-scrollbar">
                                 {(opportunityAccountingSummary?.jobs || []).map((job) => {
@@ -9147,16 +8915,15 @@ const SalesDetail = () => {
                                   const svcType = String(job.service_type || opportunity?.service_type || 'Local Move').replace(/_/g, ' ');
                                   const inv = invoiceDetailsMap[job.id];
                                   const number = `${opportunity.sales_number || opportunity.id}-${job.sequence}`;
-                                  
+
                                   return (
                                     <button
                                       key={job.id}
                                       onClick={() => selectAccountingJob(job.id)}
-                                      className={`flex flex-col items-start px-6 py-4 border-b-2 whitespace-nowrap transition-colors ${
-                                        isActive 
-                                          ? 'border-brand text-brand bg-brand/5' 
+                                      className={`flex flex-col items-start px-6 py-4 border-b-2 whitespace-nowrap transition-colors ${isActive
+                                          ? 'border-brand text-brand bg-brand/5'
                                           : 'border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-900'
-                                      }`}
+                                        }`}
                                     >
                                       <div className="font-bold text-base flex items-center justify-between w-full">
                                         {svcType}
@@ -9175,7 +8942,7 @@ const SalesDetail = () => {
                                 {(() => {
                                   const job = (opportunityAccountingSummary?.jobs || []).find(j => j.id === (selectedAccountingJobId || opportunityAccountingSummary?.jobs?.[0]?.id)) || opportunityAccountingSummary?.jobs?.[0];
                                   if (!job) return null;
-                                  
+
                                   const invoiceDetail = Number(refinalizingInvoiceJobId) === Number(job.id)
                                     ? null
                                     : invoiceDetailsMap[job.id];
@@ -9244,11 +9011,11 @@ const SalesDetail = () => {
                                                         <td className="py-3 px-3 max-w-[240px]">
                                                           {isEditing ? (
                                                             <div className="space-y-1">
-                                                              <input 
-                                                                type="text" 
-                                                                value={invoiceLineDraft?.name || ''} 
+                                                              <input
+                                                                type="text"
+                                                                value={invoiceLineDraft?.name || ''}
                                                                 onChange={(e) => setInvoiceLineDraft(p => ({ ...p, name: e.target.value }))}
-                                                                className={workspaceInputCls} 
+                                                                className={workspaceInputCls}
                                                                 placeholder="Name"
                                                               />
                                                               <div className="flex gap-1">
@@ -9266,11 +9033,11 @@ const SalesDetail = () => {
                                                                   <option value="discount">Discount</option>
                                                                   <option value="other">Other</option>
                                                                 </select>
-                                                                <input 
-                                                                  type="text" 
-                                                                  value={invoiceLineDraft?.description || ''} 
+                                                                <input
+                                                                  type="text"
+                                                                  value={invoiceLineDraft?.description || ''}
                                                                   onChange={(e) => setInvoiceLineDraft(p => ({ ...p, description: e.target.value }))}
-                                                                  className={workspaceInputCls} 
+                                                                  className={workspaceInputCls}
                                                                   placeholder="Description"
                                                                 />
                                                               </div>
@@ -9291,9 +9058,9 @@ const SalesDetail = () => {
                                                         </td>
                                                         <td className="py-3 px-2 font-semibold text-center text-sm">
                                                           {isEditing ? (
-                                                            <input 
-                                                              type="number" 
-                                                              value={invoiceLineDraft?.quantity || ''} 
+                                                            <input
+                                                              type="number"
+                                                              value={invoiceLineDraft?.quantity || ''}
                                                               onChange={(e) => setInvoiceLineDraft(p => ({ ...p, quantity: e.target.value }))}
                                                               className={`${workspaceInputCls} no-spinner`}
                                                             />
@@ -9305,9 +9072,9 @@ const SalesDetail = () => {
                                                           {isEditing ? (
                                                             <div className="relative">
                                                               <span className="absolute left-1.5 top-1.5 text-[10px] text-slate-400 font-bold">$</span>
-                                                              <input 
-                                                                type="number" 
-                                                                value={invoiceLineDraft?.unit_price || ''} 
+                                                              <input
+                                                                type="number"
+                                                                value={invoiceLineDraft?.unit_price || ''}
                                                                 onChange={(e) => setInvoiceLineDraft(p => ({ ...p, unit_price: e.target.value }))}
                                                                 className={`${workspaceInputCls} no-spinner pl-4`}
                                                               />
@@ -9398,7 +9165,7 @@ const SalesDetail = () => {
                                                 Re-finalize to Edit
                                               </PrimaryBtn>
                                             </div>
-                                            
+
                                             <div className="flex justify-end">
                                               <div className="text-right text-sm bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2 w-64 shadow-sm">
                                                 <div className="flex justify-between text-slate-500 font-medium"><span>Subtotal:</span> <span className="font-mono">${Number(invoiceDetail.subtotal || 0).toFixed(2)}</span></div>
@@ -9451,9 +9218,9 @@ const SalesDetail = () => {
                                                       {Array.isArray(invoiceDraft?.line_items) && invoiceDraft.line_items.map((item, idx) => (
                                                         <tr key={idx} className="border-b border-slate-100 align-top hover:bg-slate-50/50 transition-colors last:border-b-0">
                                                           <td className="py-3 px-3 space-y-1.5">
-                                                            <input 
-                                                              type="text" 
-                                                              value={item.name || ''} 
+                                                            <input
+                                                              type="text"
+                                                              value={item.name || ''}
                                                               onChange={(e) => updateDraftLineItem(job.id, idx, 'name', e.target.value)}
                                                               className={`${workspaceInputCls} text-sm font-bold py-1.5`}
                                                               placeholder="Item Name"
@@ -9473,19 +9240,19 @@ const SalesDetail = () => {
                                                                 <option value="discount">Discount</option>
                                                                 <option value="other">Other</option>
                                                               </select>
-                                                              <input 
-                                                                type="text" 
-                                                                value={item.description || ''} 
+                                                              <input
+                                                                type="text"
+                                                                value={item.description || ''}
                                                                 onChange={(e) => updateDraftLineItem(job.id, idx, 'description', e.target.value)}
-                                                                className={`${workspaceInputCls} flex-1 text-xs py-1.5`} 
+                                                                className={`${workspaceInputCls} flex-1 text-xs py-1.5`}
                                                                 placeholder="Optional description"
                                                               />
                                                             </div>
                                                           </td>
                                                           <td className="py-3 px-2">
-                                                            <input 
-                                                              type="number" 
-                                                              value={item.quantity || ''} 
+                                                            <input
+                                                              type="number"
+                                                              value={item.quantity || ''}
                                                               onChange={(e) => updateDraftLineItem(job.id, idx, 'quantity', e.target.value)}
                                                               className={`${workspaceInputCls} no-spinner text-sm text-center py-1.5`}
                                                             />
@@ -9493,9 +9260,9 @@ const SalesDetail = () => {
                                                           <td className="py-3 px-2">
                                                             <div className="relative">
                                                               <span className="absolute left-2.5 top-2 text-xs text-slate-400 font-bold">$</span>
-                                                              <input 
-                                                                type="number" 
-                                                                value={item.unit_price || ''} 
+                                                              <input
+                                                                type="number"
+                                                                value={item.unit_price || ''}
                                                                 onChange={(e) => updateDraftLineItem(job.id, idx, 'unit_price', e.target.value)}
                                                                 className={`${workspaceInputCls} no-spinner pl-5 text-sm text-right py-1.5 font-mono`}
                                                               />
@@ -9560,33 +9327,33 @@ const SalesDetail = () => {
 
                                                 <div className="flex items-center justify-between pt-1">
                                                   <div className="flex items-center gap-2">
-                                                  {Number(refinalizingInvoiceJobId) === Number(job.id) && (
+                                                    {Number(refinalizingInvoiceJobId) === Number(job.id) && (
+                                                      <GhostBtn
+                                                        onClick={() => {
+                                                          setRefinalizingInvoiceJobId(null);
+                                                          loadAccountingJobArtifacts(job.id);
+                                                        }}
+                                                        className="h-9 py-0 px-4 text-xs font-bold"
+                                                      >
+                                                        Cancel Re-finalize
+                                                      </GhostBtn>
+                                                    )}
                                                     <GhostBtn
-                                                      onClick={() => {
-                                                        setRefinalizingInvoiceJobId(null);
-                                                        loadAccountingJobArtifacts(job.id);
-                                                      }}
+                                                      icon="plus"
+                                                      onClick={() => addDraftLineItem(job.id)}
+                                                      tone="primary"
                                                       className="h-9 py-0 px-4 text-xs font-bold"
                                                     >
-                                                      Cancel Re-finalize
+                                                      Add Charge Row
                                                     </GhostBtn>
-                                                  )}
-                                                  <GhostBtn 
-                                                    icon="plus" 
-                                                    onClick={() => addDraftLineItem(job.id)}
-                                                    tone="primary"
-                                                    className="h-9 py-0 px-4 text-xs font-bold"
-                                                  >
-                                                    Add Charge Row
-                                                  </GhostBtn>
-                                                  <PrimaryBtn 
-                                                    icon="check" 
-                                                    onClick={() => handleOpenDraftPreview(job.id)}
-                                                    disabled={isFinalizingInvoice}
-                                                    className="h-9 py-0 px-4 text-xs font-bold"
-                                                  >
-                                                    Finalize Segment
-                                                  </PrimaryBtn>
+                                                    <PrimaryBtn
+                                                      icon="check"
+                                                      onClick={() => handleOpenDraftPreview(job.id)}
+                                                      disabled={isFinalizingInvoice}
+                                                      className="h-9 py-0 px-4 text-xs font-bold"
+                                                    >
+                                                      Finalize Segment
+                                                    </PrimaryBtn>
                                                   </div>
                                                 </div>
 
@@ -9596,18 +9363,18 @@ const SalesDetail = () => {
                                                   <div className="flex gap-4">
                                                     <div className="w-28">
                                                       <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1.5">Discount ($)</label>
-                                                      <input 
-                                                        type="number" 
-                                                        value={invoiceDraft?.discount_amount || ''} 
+                                                      <input
+                                                        type="number"
+                                                        value={invoiceDraft?.discount_amount || ''}
                                                         onChange={(e) => setInvoiceDraftsMap(p => ({ ...p, [job.id]: { ...(p[job.id] || {}), discount_amount: e.target.value } }))}
                                                         className={`${workspaceInputCls} no-spinner text-sm py-1.5 text-right font-mono`}
                                                       />
                                                     </div>
                                                     <div className="w-24">
                                                       <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1.5">Tax (%)</label>
-                                                      <input 
-                                                        type="number" 
-                                                        value={invoiceDraft?.tax_rate ? (Number(invoiceDraft.tax_rate) * 100).toFixed(2) : ''} 
+                                                      <input
+                                                        type="number"
+                                                        value={invoiceDraft?.tax_rate ? (Number(invoiceDraft.tax_rate) * 100).toFixed(2) : ''}
                                                         onChange={(e) => {
                                                           const val = Number(e.target.value);
                                                           setInvoiceDraftsMap(p => ({ ...p, [job.id]: { ...(p[job.id] || {}), tax_rate: String(val / 100) } }));
@@ -9646,7 +9413,7 @@ const SalesDetail = () => {
                                                         <span className="font-mono text-base">${Math.abs(draftBalance).toFixed(2)}</span>
                                                       </div>
                                                     </div>
-                                                    
+
                                                     <div>
                                                       <h5 className="font-extrabold text-slate-900 text-sm mb-1.5">Paid Details</h5>
                                                       {allPayments.length > 0 ? (
@@ -9680,7 +9447,7 @@ const SalesDetail = () => {
                             </div>
                           )}
                         </div>
-{/* Right Column: Crew Payroll & Costing */}
+                        {/* Right Column: Crew Payroll & Costing */}
                         <div className="col-span-12 lg:col-span-5 space-y-3">
                           <PaymentsPanel
                             opportunityId={opportunity?.id}
@@ -9708,16 +9475,16 @@ const SalesDetail = () => {
                                   </p>
                                 </div>
                               </div>
-                                {canEditOpportunity() ? (
-                                  <GhostBtn 
-                                    icon="save" 
-                                    onClick={savePayrollDraft} 
-                                    disabled={isSavingPayroll}
-                                    className="shrink-0 h-9 py-0 px-3.5 text-xs font-bold"
-                                  >
-                                    {isSavingPayroll ? 'Saving...' : 'Save Payroll'}
-                                  </GhostBtn>
-                                ) : null}
+                              {canEditOpportunity() ? (
+                                <GhostBtn
+                                  icon="save"
+                                  onClick={savePayrollDraft}
+                                  disabled={isSavingPayroll}
+                                  className="shrink-0 h-9 py-0 px-3.5 text-xs font-bold"
+                                >
+                                  {isSavingPayroll ? 'Saving...' : 'Save Payroll'}
+                                </GhostBtn>
+                              ) : null}
                             </div>
 
                             <div className="space-y-3">
@@ -9740,9 +9507,9 @@ const SalesDetail = () => {
                                   </div>
                                   <div className="w-full sm:w-24 space-y-1.5">
                                     <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Role</label>
-                                    <input 
-                                      type="text" 
-                                      value={row.role || ''} 
+                                    <input
+                                      type="text"
+                                      value={row.role || ''}
                                       onChange={(e) => updatePayrollRow(idx, 'role', e.target.value)}
                                       className={workspaceInputCls}
                                       placeholder="e.g. Helper"
@@ -9750,9 +9517,9 @@ const SalesDetail = () => {
                                   </div>
                                   <div className="w-full sm:w-16 space-y-1.5">
                                     <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Hours</label>
-                                    <input 
-                                      type="number" 
-                                      value={row.hours || ''} 
+                                    <input
+                                      type="number"
+                                      value={row.hours || ''}
                                       onChange={(e) => updatePayrollRow(idx, 'hours', e.target.value)}
                                       className={`${workspaceInputCls} no-spinner text-center`}
                                       placeholder="0"
@@ -9760,15 +9527,15 @@ const SalesDetail = () => {
                                   </div>
                                   <div className="w-full sm:w-20 space-y-1.5">
                                     <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Rate ($)</label>
-                                    <input 
-                                      type="number" 
-                                      value={row.rate || ''} 
+                                    <input
+                                      type="number"
+                                      value={row.rate || ''}
                                       onChange={(e) => updatePayrollRow(idx, 'rate', e.target.value)}
                                       className={`${workspaceInputCls} no-spinner text-center`}
                                       placeholder="0.00"
                                     />
                                   </div>
-                                  <button 
+                                  <button
                                     onClick={() => removePayrollRow(idx)}
                                     className="p-2 text-rose-500 hover:bg-rose-50 rounded-xl mb-0.5 self-end sm:self-auto transition-all"
                                     title="Remove crew row"
@@ -9784,16 +9551,16 @@ const SalesDetail = () => {
                               )}
 
                               <div className="flex items-center justify-between border-t border-slate-100 pt-3">
-                              {canEditOpportunity() ? (
-                                <GhostBtn 
-                                  icon="plus" 
-                                  onClick={addPayrollRow}
-                                  tone="primary"
-                                  className="h-8 py-0 px-3 text-xs"
-                                >
-                                  Add Crew Member
-                                </GhostBtn>
-                              ) : null}
+                                {canEditOpportunity() ? (
+                                  <GhostBtn
+                                    icon="plus"
+                                    onClick={addPayrollRow}
+                                    tone="primary"
+                                    className="h-8 py-0 px-3 text-xs"
+                                  >
+                                    Add Crew Member
+                                  </GhostBtn>
+                                ) : null}
                                 <div className="text-right text-xs font-bold text-slate-500">
                                   Total Payroll: <span className="text-sm font-black text-slate-900 font-mono">${(() => {
                                     return payrollDraft.reduce((acc, row) => acc + (Number(row.hours) * Number(row.rate) || 0), 0).toFixed(2);
@@ -9831,9 +9598,9 @@ const SalesDetail = () => {
                               </div>
                               <div className="w-full sm:w-24 space-y-1.5">
                                 <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Amount ($)</label>
-                                <input 
-                                  type="number" 
-                                  value={costDraft.amount} 
+                                <input
+                                  type="number"
+                                  value={costDraft.amount}
                                   onChange={(e) => setCostDraft(p => ({ ...p, amount: e.target.value }))}
                                   className={`${workspaceInputCls} no-spinner`}
                                   placeholder="0.00"
@@ -9841,16 +9608,16 @@ const SalesDetail = () => {
                               </div>
                               <div className="flex-[2] w-full space-y-1.5">
                                 <label className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Notes</label>
-                                <input 
-                                  type="text" 
-                                  value={costDraft.description} 
+                                <input
+                                  type="text"
+                                  value={costDraft.description}
                                   onChange={(e) => setCostDraft(p => ({ ...p, description: e.target.value }))}
                                   className={workspaceInputCls}
                                   placeholder="Description"
                                 />
                               </div>
                               {canEditOpportunity() ? (
-                                <PrimaryBtn 
+                                <PrimaryBtn
                                   onClick={addCost}
                                   disabled={isSavingCost || !costDraft.amount}
                                   loading={isSavingCost}
@@ -9919,11 +9686,10 @@ const SalesDetail = () => {
                                   const profitMargin = revenue > 0 ? (netProfit / revenue) * 100 : 0;
                                   const isProfitable = netProfit >= 0;
                                   return (
-                                    <div className={`p-4 rounded-xl border transition-all ${
-                                      isProfitable 
-                                        ? 'bg-emerald-50/20 border-emerald-100/80 shadow-[0_12px_40px_-20px_rgba(16,185,129,0.15)]' 
+                                    <div className={`p-4 rounded-xl border transition-all ${isProfitable
+                                        ? 'bg-emerald-50/20 border-emerald-100/80 shadow-[0_12px_40px_-20px_rgba(16,185,129,0.15)]'
                                         : 'bg-rose-50/20 border-rose-100/80 shadow-[0_12px_40px_-20px_rgba(244,63,94,0.15)]'
-                                    } space-y-4`}>
+                                      } space-y-4`}>
                                       <div className="flex justify-between text-xs font-semibold text-slate-500">
                                         <span>Gross Revenue</span>
                                         <span className="font-bold text-slate-800 font-mono">${revenue.toFixed(2)}</span>
@@ -9977,44 +9743,48 @@ const SalesDetail = () => {
             )}
 
             {activeTab === "Payments" && (
-                <EstimateView
-                  onRefresh={fetchOpportunity}
-                  opportunity={isLeadPath ? estimateOpportunity : opportunity}
-                  sourceType={isLeadPath ? 'lead' : 'opportunity'}
-                  isLoadingLinkedOpportunity={isLeadPath && isLoadingEstimateOpportunity}
-                  opportunityJobs={opportunityJobs}
-                  subJobServiceOptions={computedSubJobServiceOptions}
-                  selectedSubJobId={selectedEstimateJobId}
-                  onSelectedSubJobChange={setSelectedEstimateJobId}
-                  onCreateSubJob={createSubJobFromServiceType}
-                  onRefreshSubJobs={loadOpportunityJobs}
-                  onDeleteSelectedSubJob={deleteSelectedEstimateJob}
-                  onUpdateSelectedSubJob={updateSelectedEstimateJobPlanning}
-                  triggerSendEstimate={sendEstimateNonce}
-                  triggerViewEstimate={triggerViewEstimateNonce}
-                  view={view}
-                  initialSubTab="payments"
-                  onSubTabChange={(subTab) => {
-                    if (subTab === 'documents') {
-                      setActiveTab('Documents');
-                      navigateToDetailTab('Documents');
-                    } else if (subTab === 'payments') {
-                      setActiveTab('Payments');
-                      navigateToDetailTab('Payments');
-                    } else {
-                      setActiveTab('Estimate');
-                      navigateToEstimateSubTab(subTab);
-                    }
-                  }}
-                  isOpportunityLocked={isOpportunityLost}
-                  canCreateOpportunity={canCreateOpportunity()}
-                  canEditOpportunity={canEditOpportunity()}
-                />
+              <EstimateView
+                onSendPortal={() => {
+                  setActiveTab('Documents');
+                  navigateToDetailTab('Documents');
+                }}
+                onRefresh={fetchOpportunity}
+                opportunity={isLeadPath ? estimateOpportunity : opportunity}
+                sourceType={isLeadPath ? 'lead' : 'opportunity'}
+                isLoadingLinkedOpportunity={isLeadPath && isLoadingEstimateOpportunity}
+                opportunityJobs={opportunityJobs}
+                subJobServiceOptions={computedSubJobServiceOptions}
+                selectedSubJobId={selectedEstimateJobId}
+                onSelectedSubJobChange={setSelectedEstimateJobId}
+                onCreateSubJob={createSubJobFromServiceType}
+                onRefreshSubJobs={loadOpportunityJobs}
+                onDeleteSelectedSubJob={deleteSelectedEstimateJob}
+                onUpdateSelectedSubJob={updateSelectedEstimateJobPlanning}
+                triggerSendEstimate={sendEstimateNonce}
+                triggerViewEstimate={triggerViewEstimateNonce}
+                view={view}
+                initialSubTab="payments"
+                onSubTabChange={(subTab) => {
+                  if (subTab === 'documents') {
+                    setActiveTab('Documents');
+                    navigateToDetailTab('Documents');
+                  } else if (subTab === 'payments') {
+                    setActiveTab('Payments');
+                    navigateToDetailTab('Payments');
+                  } else {
+                    setActiveTab('Estimate');
+                    navigateToEstimateSubTab(subTab);
+                  }
+                }}
+                isOpportunityLocked={isOpportunityLost}
+                canCreateOpportunity={canCreateOpportunity()}
+                canEditOpportunity={canEditOpportunity()}
+              />
             )}
-        </div>
+          </div>
 
           {showSidebarCards && isMobileSidebarOpen && (
-            <div 
+            <div
               className="fixed inset-0 z-[115] bg-heading/20 lg:hidden transition-opacity duration-300 animate-in fade-in"
               onClick={() => setIsMobileSidebarOpen(false)}
             />
@@ -10031,7 +9801,7 @@ const SalesDetail = () => {
               {/* Close X icon visible on mobile view only */}
               <div className="flex items-center justify-between lg:hidden mb-4 pb-2 border-b border-ink-100">
                 <span className="text-sm font-black uppercase tracking-wider text-ink-900">Details Workspace</span>
-                <button 
+                <button
                   type="button"
                   onClick={() => setIsMobileSidebarOpen(false)}
                   className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-white ring-1 ring-ink-100 text-ink-600 shadow-sm hover:bg-ink-50 hover:text-ink-900 active:scale-95 transition cursor-pointer"
@@ -10041,7 +9811,7 @@ const SalesDetail = () => {
                 </button>
               </div>
 
-              <SidebarSpecs 
+              <SidebarSpecs
                 specs={specsData}
                 onInlineSave={canEditOpportunity() ? handleSpecsInlineSave : undefined}
               />
@@ -10058,22 +9828,22 @@ const SalesDetail = () => {
                   // city: form.destination_city,
                   // state: form.destination_state,
                   // postal_code: form.destination_zip,
-                  }}
-                  routeStops={routePoints}
-                  onEdit={!isCreation && canEditOpportunity() ? startRouteEdit : undefined}
-                  onOpenMap={() => navigateToEstimateSubTab('route')}
-                  onAddStop={() => navigateToEstimateSubTab('route')}
-                  onEditStop={!isLeadPath && !isCreation && canEditOpportunity() ? openSalesRouteStopEditor : undefined}
-                  onDeleteStop={!isLeadPath && !isCreation && canEditOpportunity() ? deleteSalesRouteStop : undefined}
+                }}
+                routeStops={routePoints}
+                onEdit={!isCreation && canEditOpportunity() ? startRouteEdit : undefined}
+                onOpenMap={() => navigateToEstimateSubTab('route')}
+                onAddStop={() => navigateToEstimateSubTab('route')}
+                onEditStop={!isLeadPath && !isCreation && canEditOpportunity() ? openSalesRouteStopEditor : undefined}
+                onDeleteStop={!isLeadPath && !isCreation && canEditOpportunity() ? deleteSalesRouteStop : undefined}
               />
-            
-              <InventorySnapshot 
+
+              <InventorySnapshot
                 roomCount={inventorySnapshotData.roomCount}
                 totalQty={inventorySnapshotData.totalQty}
-	                totalVol={inventorySnapshotData.totalVol}
-	                items={inventorySnapshotData.items}
-                  isLoading={isLoadingPortalInventory}
-	                onOpenFullList={() => navigateToEstimateSubTab('inventory')}
+                totalVol={inventorySnapshotData.totalVol}
+                items={inventorySnapshotData.items}
+                isLoading={isLoadingPortalInventory}
+                onOpenFullList={() => navigateToEstimateSubTab('inventory')}
               />
               <div className="max-h-[360px] overflow-hidden rounded-xl border border-ink-100 bg-white shadow-sm flex flex-col">
                 <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-ink-100 bg-white px-4 py-3">
@@ -10132,20 +9902,20 @@ const SalesDetail = () => {
       </main>
 
       {selectedActivityForPreview && (
-        <ActivityPreviewModal 
-          activity={selectedActivityForPreview} 
+        <ActivityPreviewModal
+          activity={selectedActivityForPreview}
           branchLogoUrl={selectedBranchLogoUrl}
           branchName={selectedBranchName}
-          onClose={() => setSelectedActivityForPreview(null)} 
+          onClose={() => setSelectedActivityForPreview(null)}
           onReply={(activity) => {
             setSelectedActivityForPreview(null);
             setCommTab('email');
             window.scrollTo({ top: 0, behavior: 'smooth' });
-            
+
             setTimeout(() => {
               const subject = activity.subject || activity.email_log_details?.subject || '';
               const fromEmail = activity?.payload?.from_email || activity?.email_log_details?.from_email || activity?.from_email || '';
-              
+
               setActivitySubject(subject.toLowerCase().startsWith('re:') ? subject : `Re: ${subject}`);
               if (fromEmail) {
                 setActivityEmailToText(fromEmail);
@@ -10289,7 +10059,7 @@ const SalesDetail = () => {
                           className={`${workspaceInputCls} cursor-pointer`}
                         >
                           <option value="">Select service type...</option>
-                          {(serviceTypes.length ? serviceTypes : SERVICE_TYPE_OPTIONS).map((option) => (
+                          {serviceTypes.map((option) => (
                             <option key={String(option.id ?? option.value ?? option.code ?? option.label ?? option.name)} value={String(option.id ?? option.value ?? option.code ?? option.label ?? option.name)}>
                               {String(option.name || option.label || option.value || option.id)}
                             </option>
@@ -10306,7 +10076,7 @@ const SalesDetail = () => {
                           className={`${workspaceInputCls} cursor-pointer`}
                         >
                           <option value="">Select move type...</option>
-                          {(moverTypes.length ? moverTypes : MOVE_TYPE_OPTIONS).map((option) => (
+                          {moverTypes.map((option) => (
                             <option key={String(option.id ?? option.value ?? option.code ?? option.label ?? option.name)} value={String(option.id ?? option.value ?? option.code ?? option.label ?? option.name)}>
                               {String(option.name || option.label || option.value || option.id)}
                             </option>
@@ -10345,42 +10115,42 @@ const SalesDetail = () => {
       {isFollowUpModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-heading/25">
           <Card className="w-full max-w-lg p-0 overflow-hidden rounded-3xl border-0 shadow-2xl animate-in zoom-in-95 duration-200">
-             <div className="bg-brand text-white px-6 py-4 flex items-center justify-between">
-                <h3 className="font-black uppercase tracking-tight">
-                  {followUpMode === 'edit' ? 'Edit Follow-up' : 'Add Follow-up'}
-                </h3>
-                <button onClick={closeFollowUpModal}><Icon name="x" className="w-5 h-5" /></button>
-             </div>
-             <div className="p-6 space-y-4">
+            <div className="bg-brand text-white px-6 py-4 flex items-center justify-between">
+              <h3 className="font-black uppercase tracking-tight">
+                {followUpMode === 'edit' ? 'Edit Follow-up' : 'Add Follow-up'}
+              </h3>
+              <button onClick={closeFollowUpModal}><Icon name="x" className="w-5 h-5" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="space-y-1">
+                <label className="label-eyebrow text-ink-400">Task Type</label>
+                <select value={followUpType} onChange={e => setFollowUpType(e.target.value)} className={inputCls}>
+                  <option value="call">Call</option>
+                  <option value="email">Email</option>
+                  <option value="sms">Text/SMS</option>
+                  <option value="meeting">Meeting</option>
+                  <option value="general">General Task</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="label-eyebrow text-ink-400">Subject</label>
+                <input value={followUpSubject} onChange={e => setFollowUpSubject(e.target.value)} className={inputCls} placeholder="e.g. Check on inventory" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="label-eyebrow text-ink-400">Task Type</label>
-                  <select value={followUpType} onChange={e => setFollowUpType(e.target.value)} className={inputCls}>
-                    <option value="call">Call</option>
-                    <option value="email">Email</option>
-                    <option value="sms">Text/SMS</option>
-                    <option value="meeting">Meeting</option>
-                    <option value="general">General Task</option>
-                  </select>
+                  <label className="label-eyebrow text-ink-400">Due Date</label>
+                  <input type="date" value={followUpDueDate} onChange={e => setFollowUpDueDate(e.target.value)} className={inputCls} />
                 </div>
                 <div className="space-y-1">
-                  <label className="label-eyebrow text-ink-400">Subject</label>
-                  <input value={followUpSubject} onChange={e => setFollowUpSubject(e.target.value)} className={inputCls} placeholder="e.g. Check on inventory" />
+                  <label className="label-eyebrow text-ink-400">Due Time</label>
+                  <input type="time" value={followUpDueTime} onChange={e => setFollowUpDueTime(e.target.value)} className={inputCls} />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="label-eyebrow text-ink-400">Due Date</label>
-                    <input type="date" value={followUpDueDate} onChange={e => setFollowUpDueDate(e.target.value)} className={inputCls} />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="label-eyebrow text-ink-400">Due Time</label>
-                    <input type="time" value={followUpDueTime} onChange={e => setFollowUpDueTime(e.target.value)} className={inputCls} />
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <label className="label-eyebrow text-ink-400">Assign To</label>
-                <AsyncSelect 
-                  value={followUpAssignedTo} 
-                  onChange={(val) => setFollowUpAssignedTo(val)} 
+              </div>
+              <div className="space-y-1">
+                <label className="label-eyebrow text-ink-400">Assign To</label>
+                <AsyncSelect
+                  value={followUpAssignedTo}
+                  onChange={(val) => setFollowUpAssignedTo(val)}
                   fetchOptions={async (search, offset, limit) => {
                     const res = await getLookupUsersPage(search, offset, limit, selectedBranch?.id || form.branch || null);
                     const items = Array.isArray(res) ? res : (res?.results || []);
@@ -10388,29 +10158,29 @@ const SalesDetail = () => {
                       ...u,
                       label: u.label || resolveUserLabel(u),
                     }));
-                  }} 
-                  labelField="label" 
-                  valueField="id" 
-                  placeholder="Select teammate..." 
+                  }}
+                  labelField="label"
+                  valueField="id"
+                  placeholder="Select teammate..."
                   className="w-full"
                 />
-                </div>
-                <div className="space-y-1">
-                  <label className="label-eyebrow text-ink-400">Notes</label>
-                  <textarea
-                    value={followUpNotes}
-                    onChange={e => setFollowUpNotes(e.target.value)}
-                    className={inputCls + ' h-28'}
-                    placeholder="Optional notes for this follow-up"
-                  />
-                </div>
-                <div className="pt-4 flex justify-end gap-2">
-                  <GhostBtn onClick={closeFollowUpModal}>Cancel</GhostBtn>
-                  <PrimaryBtn onClick={handleSaveFollowUp} loading={isSavingFollowUp}>
-                    {followUpMode === 'edit' ? 'Save Changes' : 'Create Follow-up'}
-                  </PrimaryBtn>
-                </div>
-             </div>
+              </div>
+              <div className="space-y-1">
+                <label className="label-eyebrow text-ink-400">Notes</label>
+                <textarea
+                  value={followUpNotes}
+                  onChange={e => setFollowUpNotes(e.target.value)}
+                  className={inputCls + ' h-28'}
+                  placeholder="Optional notes for this follow-up"
+                />
+              </div>
+              <div className="pt-4 flex justify-end gap-2">
+                <GhostBtn onClick={closeFollowUpModal}>Cancel</GhostBtn>
+                <PrimaryBtn onClick={handleSaveFollowUp} loading={isSavingFollowUp}>
+                  {followUpMode === 'edit' ? 'Save Changes' : 'Create Follow-up'}
+                </PrimaryBtn>
+              </div>
+            </div>
           </Card>
         </div>
       )}
@@ -10484,58 +10254,60 @@ const SalesDetail = () => {
       {isReasonModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-heading/25">
           <Card className="w-full max-w-lg p-0 overflow-hidden rounded-3xl border-0 shadow-2xl">
-             <div className={reasonAction === 'cancel' ? 'bg-amber-600 text-white px-6 py-4' : 'bg-rose-600 text-white px-6 py-4'}>
-                <h3 className="font-black uppercase tracking-tight">
-                  {reasonAction === 'cancel' ? 'Cancel Job' : 'Mark as Lost'}
-                </h3>
-             </div>
-             <div className="p-6 space-y-4">
-                <p className="text-sm text-ink-500">
-                  {reasonAction === 'cancel'
-                    ? 'Please provide a reason why this job is being canceled. This helps us keep records accurate.'
-                    : 'Please provide a reason why this deal was lost. This helps us improve our sales process.'}
-                </p>
-                {reasonAction !== 'cancel' && (
-                  <label className="block space-y-1">
-                    <span className="label-eyebrow text-ink-400">Why was the opportunity lost?</span>
-                    <select
-                      value={selectedLostReason}
-                      onChange={(e) => setSelectedLostReason(e.target.value)}
-                      className={inputCls}
-                    >
-                      <option value="">Please select one...</option>
-                      {lostReasonOptions
-                        .filter((option) => !view.isLead || option.applies_to === 'lead' || option.applies_to === 'both')
-                        .map((option) => (
-                          <option key={String(option?.id || option?.label || '')} value={String(view.isLead ? option.id : option.label || option.name || '')}>
-                            {String(option?.label || option?.name || '')}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                )}
-                <textarea 
-                  value={reasonText} 
-                  onChange={e => setReasonText(e.target.value)} 
-                  className={inputCls + " h-32"} 
-                  placeholder={reasonAction === 'cancel' ? 'Enter cancellation reason...' : 'Add optional notes...'}
-                />
-                <div className="flex justify-end gap-2">
-                  <GhostBtn onClick={() => {
-                    setIsReasonModalOpen(false);
-                    setReasonAction('');
-                    setSelectedLostReason('');
-                    setReasonText('');
-                  }}>Cancel</GhostBtn>
-                  <PrimaryBtn
-                    className={reasonAction === 'cancel' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-rose-600 hover:bg-rose-700'}
-                    onClick={submitWorkflowReason}
-                    loading={isSaving}
+            <div className={reasonAction === 'cancel' ? 'bg-amber-600 text-white px-6 py-4' : 'bg-rose-600 text-white px-6 py-4'}>
+              <h3 className="font-black uppercase tracking-tight">
+                {reasonAction === 'cancel' ? 'Cancel Job' : reasonAction === 'disqualify' ? 'Disqualify Lead' : reasonAction === 'restore' ? 'Restore Lead' : 'Mark as Lost'}
+              </h3>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-ink-500">
+                {reasonAction === 'cancel'
+                  ? 'Please provide a reason why this job is being canceled. This helps us keep records accurate.'
+                  : reasonAction === 'restore' ? 'Explain why this lead should be restored to In Progress.'
+                    : reasonAction === 'disqualify' ? 'Select why this inquiry is not a valid sales lead.'
+                      : 'Select why this lead or opportunity was lost.'}
+              </p>
+              {reasonAction !== 'restore' && (
+                <label className="block space-y-1">
+                  <span className="label-eyebrow text-ink-400">Reason</span>
+                  <select
+                    value={selectedLostReason}
+                    onChange={(e) => setSelectedLostReason(e.target.value)}
+                    className={inputCls}
                   >
-                    {reasonAction === 'cancel' ? 'Confirm Cancel' : 'Confirm Loss'}
-                  </PrimaryBtn>
-                </div>
-             </div>
+                    <option value="">Please select one...</option>
+                    {lostReasonOptions
+                      .filter((option) => option.is_active !== false)
+                      .map((option) => (
+                        <option key={String(option?.id || option?.label || '')} value={String(option.id)}>
+                          {String(option?.label || option?.name || '')}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              )}
+              <textarea
+                value={reasonText}
+                onChange={e => setReasonText(e.target.value)}
+                className={inputCls + " h-32"}
+                placeholder={reasonAction === 'restore' ? 'Enter restoration reason...' : 'Add notes (required for some reasons)...'}
+              />
+              <div className="flex justify-end gap-2">
+                <GhostBtn onClick={() => {
+                  setIsReasonModalOpen(false);
+                  setReasonAction('');
+                  setSelectedLostReason('');
+                  setReasonText('');
+                }}>Cancel</GhostBtn>
+                <PrimaryBtn
+                  className={reasonAction === 'cancel' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-rose-600 hover:bg-rose-700'}
+                  onClick={submitWorkflowReason}
+                  loading={isSaving}
+                >
+                  {reasonAction === 'cancel' ? 'Confirm Cancel' : reasonAction === 'disqualify' ? 'Confirm Disqualification' : reasonAction === 'restore' ? 'Confirm Restore' : 'Confirm Loss'}
+                </PrimaryBtn>
+              </div>
+            </div>
           </Card>
         </div>
       )}
@@ -10553,7 +10325,7 @@ const SalesDetail = () => {
                   Review and edit the segment invoice before finalizing it.
                 </p>
               </div>
-              <button 
+              <button
                 onClick={() => setIsInvoicePreviewOpen(false)}
                 className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition"
               >
@@ -10565,15 +10337,15 @@ const SalesDetail = () => {
             <div className="p-5 md:p-8 space-y-6 overflow-y-auto flex-1 bg-[#f8fafc] font-sans">
               {/* Paper Invoice Sheet */}
               <div className="bg-white border border-slate-200 rounded-[18px] p-6 md:p-8 shadow-sm space-y-6 text-slate-800 text-sm">
-                
+
                 {/* Invoice Top Header */}
                 <div className="flex flex-col sm:flex-row justify-between items-start gap-4 pb-6 border-b border-slate-100">
                   <div className="space-y-2">
                     {/* Branch Logo */}
                     {(opportunity?.branch_details?.logo || opportunity?.branch_details?.logo_url) ? (
-                      <img 
-                        src={opportunity?.branch_details?.logo || opportunity?.branch_details?.logo_url} 
-                        alt="Branch Logo" 
+                      <img
+                        src={opportunity?.branch_details?.logo || opportunity?.branch_details?.logo_url}
+                        alt="Branch Logo"
                         className="max-h-12 w-auto object-contain"
                       />
                     ) : (
@@ -10854,11 +10626,10 @@ const SalesDetail = () => {
                           key={contact?.id ? `contact-${contact.id}` : `new-contact-${index}`}
                           type="button"
                           onClick={() => setSelectedAdditionalContactIndex(index)}
-                          className={`w-full rounded-2xl border p-3 text-left transition ${
-                            isActive
+                          className={`w-full rounded-2xl border p-3 text-left transition ${isActive
                               ? 'border-emerald-300 bg-emerald-50 shadow-sm'
                               : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
-                          }`}
+                            }`}
                         >
                           <div className="flex items-center justify-between gap-2">
                             <div className="min-w-0">
@@ -11078,7 +10849,7 @@ const SalesDetail = () => {
                 <div className="label-eyebrow text-brand font-bold uppercase tracking-wider text-xs">Quick Access</div>
                 <h3 className="text-xl font-black text-ink-900 mt-0.5">Activities</h3>
               </div>
-              <button 
+              <button
                 onClick={() => setIsActivityDrawerOpen(false)}
                 className="p-1.5 rounded-full hover:bg-slate-100 text-ink-600 transition-colors"
                 aria-label="Close"
@@ -11269,144 +11040,30 @@ const SalesDetail = () => {
       ) : null}
 
       {isBookJobModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/20 p-4">
-            <div className="w-full max-w-lg bg-white rounded-3xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
-                <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-white">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2.5 bg-blue-50 text-blue-600 rounded-2xl">
-                            <Send size={24} strokeWidth={2} />
-                        </div>
-                        <div>
-                            <h2 className="text-xl font-black text-slate-900 tracking-tight">Book Move</h2>
-                            <p className="text-xs text-slate-500 font-semibold mt-0.5">Send booking confirmation instantly</p>
-                        </div>
-                    </div>
-                    <button 
-                        onClick={() => setIsBookJobModalOpen(false)}
-                        className="p-2.5 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-2xl transition-colors"
-                    >
-                        <X size={20} strokeWidth={2.5} />
-                    </button>
-                </div>
-                
-                <div className="p-6 space-y-6 overflow-y-auto">
-                    <div className="space-y-3">
-                        <label className="text-xs font-bold uppercase tracking-wider text-black">Delivery Channels</label>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <label className={`flex items-center gap-3 rounded-2xl border p-4 text-sm font-bold cursor-pointer transition-all ${
-                                bookJobSendEmail 
-                                    ? 'border-blue-200 bg-blue-50/50 text-blue-800' 
-                                    : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
-                            }`}>
-                                <input
-                                    type="checkbox"
-                                    checked={bookJobSendEmail}
-                                    onChange={(e) => setBookJobSendEmail(e.target.checked)}
-                                    className="h-5 w-5 rounded border-slate-300 text-blue-600 focus:ring-blue-600"
-                                />
-                                <span>Email</span>
-                            </label>
-                            <label className={`flex items-center gap-3 rounded-2xl border p-4 text-sm font-bold cursor-pointer transition-all ${
-                                bookJobSendSms 
-                                    ? 'border-blue-200 bg-blue-50/50 text-blue-800' 
-                                    : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
-                            }`}>
-                                <input
-                                    type="checkbox"
-                                    checked={bookJobSendSms}
-                                    onChange={(e) => setBookJobSendSms(e.target.checked)}
-                                    className="h-5 w-5 rounded border-slate-300 text-blue-600 focus:ring-blue-600"
-                                />
-                                <span>SMS</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    {bookJobSendEmail && (
-                        <div className="space-y-3">
-                            <div className="space-y-2">
-                                <label className="text-xs font-bold uppercase tracking-wider text-black">Recipient Email</label>
-                                {availableEmails.length > 0 && (
-                                    <select
-                                        value={bookJobEmail}
-                                        onChange={(e) => setBookJobEmail(e.target.value)}
-                                        className="w-full rounded-2xl border-2 border-slate-200 px-4 py-3 text-sm font-bold text-black focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 transition-all mb-2 bg-white"
-                                    >
-                                        {availableEmails.map((item) => (
-                                            <option key={item.value} value={item.value}>
-                                                {item.label}
-                                            </option>
-                                        ))}
-                                        <option value="">Custom Email...</option>
-                                    </select>
-                                )}
-                                {(!availableEmails.length || !availableEmails.some(e => e.value === bookJobEmail)) && (
-                                    <input
-                                        type="email"
-                                        value={bookJobEmail}
-                                        onChange={(e) => setBookJobEmail(e.target.value)}
-                                        placeholder="Enter recipient email"
-                                        className="w-full rounded-2xl border-2 border-slate-200 px-4 py-3 text-sm font-bold text-black placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 transition-all"
-                                    />
-                                )}
-                            </div>
-                        </div>
-                    )}
-
-                    {bookJobSendSms && (
-                        <div className="space-y-3">
-                            <div className="space-y-2">
-                                <label className="text-xs font-bold uppercase tracking-wider text-black">Recipient Phone</label>
-                                {availablePhones.length > 0 && (
-                                    <select
-                                        value={bookJobPhone}
-                                        onChange={(e) => setBookJobPhone(e.target.value)}
-                                        className="w-full rounded-2xl border-2 border-slate-200 px-4 py-3 text-sm font-bold text-black focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 transition-all mb-2 bg-white"
-                                    >
-                                        {availablePhones.map((item) => (
-                                            <option key={item.value} value={item.value}>
-                                                {item.label}
-                                            </option>
-                                        ))}
-                                        <option value="">Custom Phone...</option>
-                                    </select>
-                                )}
-                                {(!availablePhones.length || !availablePhones.some(p => p.value === bookJobPhone)) && (
-                                    <input
-                                        type="tel"
-                                        value={bookJobPhone}
-                                        onChange={(e) => setBookJobPhone(e.target.value)}
-                                        placeholder="Enter recipient phone"
-                                        className="w-full rounded-2xl border-2 border-slate-200 px-4 py-3 text-sm font-bold text-black placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10 transition-all"
-                                    />
-                                )}
-                            </div>
-                        </div>
-                    )}
-
-                    {(bookJobSendEmail || bookJobSendSms) && (
-                        <p className="text-xs text-slate-500 font-semibold mt-1 px-1">
-                            The booking confirmation template will be used.
-                        </p>
-                    )}
-                </div>
-                <div className="flex items-center justify-end gap-3 p-6 bg-slate-50 border-t border-slate-100">
-                    <GhostBtn onClick={() => setIsBookJobModalOpen(false)}>Cancel</GhostBtn>
-                    <GhostBtn 
-                        onClick={() => confirmBookJob(false, false, false)}
-                        disabled={isBookingJob}
-                    >
-                        Skip & Book
-                    </GhostBtn>
-                    <PrimaryBtn
-                        onClick={() => confirmBookJob(false)}
-                        disabled={isBookingJob || (!bookJobSendEmail && !bookJobSendSms)}
-                        loading={isBookingJob}
-                    >
-                        Send & Book Job
-                    </PrimaryBtn>
-                </div>
-          </div>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-heading/25 p-4">
+          <Card className="w-full max-w-lg space-y-4 p-6">
+            <h2 className="text-xl font-bold">Book Opportunity</h2>
+            <p>Booking creates operational jobs from the planned jobs.</p>
+            {bookingReadiness?.ready ? <p>All booking requirements are satisfied.</p> : (
+              <div role="alert">
+                <p>Complete these requirements before booking:</p>
+                <ul>{(bookingReadiness?.missing || []).map((requirement) => <li key={requirement}>{getWorkflowStageLabel(requirement)}</li>)}</ul>
+              </div>
+            )}
+            {(bookingReadiness?.overridable_missing || []).filter((name) => hasPermission(`opportunities.book_without_${name}`)).map((name) => (
+              <label key={name} className="flex gap-2">
+                <input type="checkbox" checked={bookingOverrides.includes(name)} onChange={(event) => setBookingOverrides((previous) => event.target.checked ? [...previous, name] : previous.filter((item) => item !== name))} />
+                Override {getWorkflowStageLabel(name)} requirement
+              </label>
+            ))}
+            {bookingOverrides.length > 0 && <label className="block">Override reason
+              <textarea aria-label="Booking override reason" value={bookingOverrideReason} onChange={(event) => setBookingOverrideReason(event.target.value)} className={inputCls} />
+            </label>}
+            <div className="flex justify-end gap-2">
+              <GhostBtn onClick={() => setIsBookJobModalOpen(false)} disabled={isBookingJob}>Cancel</GhostBtn>
+              <PrimaryBtn onClick={confirmBookJob} disabled={!canSubmitBooking} loading={isBookingJob}>Book Opportunity</PrimaryBtn>
+            </div>
+          </Card>
         </div>
       )}
 

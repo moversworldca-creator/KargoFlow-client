@@ -49,6 +49,8 @@ import {
   LEAD_STATUS_OPTIONS,
   OPPORTUNITY_STATUS_OPTIONS,
   getLeadStatusLabel,
+  getRecordSystemState,
+  canTransition,
   getOpportunityStatusLabel,
   getWorkflowStageLabel,
   toneForStatus,
@@ -169,17 +171,15 @@ const SegmentedTabs = ({ value, onChange, items }) => (
         key={it.value}
         type="button"
         onClick={() => onChange(it.value)}
-        className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${
-          value === it.value ? 'bg-heading text-white shadow-sm' : 'text-body hover:bg-page'
-        }`}
+        className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${value === it.value ? 'bg-heading text-white shadow-sm' : 'text-body hover:bg-page'
+          }`}
       >
         <span className="inline-flex items-center gap-2">
           {it.icon && <it.icon size={14} />}
           {it.label}
           {typeof it.count === 'number' && (
-            <span className={`ml-1 inline-flex items-center justify-center min-w-[24px] h-5 px-1 rounded-full text-[0.625rem] font-bold ${
-              value === it.value ? 'bg-card/15 text-white' : 'bg-page text-body'
-            }`}>
+            <span className={`ml-1 inline-flex items-center justify-center min-w-[24px] h-5 px-1 rounded-full text-[0.625rem] font-bold ${value === it.value ? 'bg-card/15 text-white' : 'bg-page text-body'
+              }`}>
               {it.count}
             </span>
           )}
@@ -607,14 +607,8 @@ const CRMHub = ({ defaultTab }) => {
     return count;
   }, [leads, oppByLeadId]);
 
-  const leadStatusOptions = useMemo(
-    () => (leadStatusCodes.length ? leadStatusCodes : LEAD_STATUS_OPTIONS).map((item) => item.code),
-    [leadStatusCodes]
-  );
-  const opportunityStatusOptions = useMemo(
-    () => (opportunityStatusCodes.length ? opportunityStatusCodes : OPPORTUNITY_STATUS_OPTIONS).map((item) => item.code),
-    [opportunityStatusCodes]
-  );
+  const leadStatusOptions = LEAD_STATUS_OPTIONS.map((item) => item.code);
+  const opportunityStatusOptions = OPPORTUNITY_STATUS_OPTIONS.map((item) => item.code);
 
   const oppByStatus = useMemo(() => {
     const map = {};
@@ -627,7 +621,7 @@ const CRMHub = ({ defaultTab }) => {
   }, [filteredOpps, opportunityStatusOptions]);
 
   const leadCounts = useMemo(() => {
-    const counts = { all: leads.length, new: 0, contacted: 0, qualified: 0, converted: 0 };
+    const counts = { all: leads.length, ...Object.fromEntries(LEAD_STATUS_OPTIONS.map(({ code }) => [code, 0])) };
     for (const l of leads) {
       const s = String(l?.status || '').toLowerCase();
       if (s in counts) counts[s] += 1;
@@ -954,7 +948,8 @@ const CRMHub = ({ defaultTab }) => {
     if (isBranchOverQuota(leadBranch, overQuotaBranchIds) || lead.branch_is_over_quota) {
       return denyHubAction('This lead belongs to an over-quota branch (read-only mode). Converting leads is disabled.');
     }
-    if (!canManageHubRecords) return denyHubAction('You do not have permission to convert leads.');
+    if (!hasPermission('leads.convert')) return denyHubAction('You do not have permission to convert leads.');
+    if (getRecordSystemState(lead, true) !== 'qualified') return denyHubAction('Qualify this lead before converting it.');
     if (!window.confirm('Convert this lead to a customer and create an opportunity?')) return;
     try {
       const res = await convertLead(lead.id);
@@ -1131,7 +1126,7 @@ const CRMHub = ({ defaultTab }) => {
         last_name: (leadForm.last_name || '').trim(),
         email: (leadForm.email || '').trim(),
         phone: (leadForm.phone || '').trim(),
-        status: leadForm.status || 'new',
+
         move_size: leadForm.move_size || '',
         move_date: leadForm.move_date || null,
         service_type: leadForm.service_type || '',
@@ -1198,7 +1193,7 @@ const CRMHub = ({ defaultTab }) => {
     setOppModal({ open: true, mode: 'edit', initial: opp });
     setOppForm({
       customer: opp.customer || '',
-      status: opp.status || 'new',
+      status: opp.system_state || opp.status || 'open',
       service_type: normalizeLookupValue(opp.service_type),
       move_type: normalizeLookupValue(opp.move_type),
       move_date: opp.move_date || '',
@@ -1237,7 +1232,7 @@ const CRMHub = ({ defaultTab }) => {
 
       const payload = {
         customer: customerId,
-        status: oppForm.status || 'new',
+
         service_type: normalizeLookupValue(oppForm.service_type) || null,
         move_type: normalizeLookupValue(oppForm.move_type) || null,
         move_date: oppForm.move_date || null,
@@ -1282,6 +1277,9 @@ const CRMHub = ({ defaultTab }) => {
     setIsSaving(true);
     try {
       if (confirmDelete.type === 'lead') {
+        if (!hasPermission('leads.update') || !canTransition(true, getRecordSystemState(confirmDelete.item, true), 'archived')) {
+          return denyHubAction('Only new or in-progress leads can be archived.');
+        }
         await deleteLead(confirmDelete.item.id);
         setLeads(prev => prev.filter(l => l.id !== confirmDelete.item.id));
         if (selectedLeadId === confirmDelete.item.id) setSelectedLeadId(null);
@@ -1365,18 +1363,16 @@ const CRMHub = ({ defaultTab }) => {
                 <button
                   type="button"
                   onClick={() => setLeadTempBucket('all')}
-                  className={`w-full text-left px-3 py-2 rounded-xl text-sm font-bold transition-all ${
-                    leadTempBucket === 'all' ? 'bg-heading text-white' : 'text-body hover:bg-page'
-                  }`}
+                  className={`w-full text-left px-3 py-2 rounded-xl text-sm font-bold transition-all ${leadTempBucket === 'all' ? 'bg-heading text-white' : 'text-body hover:bg-page'
+                    }`}
                 >
                   All
                 </button>
                 <button
                   type="button"
                   onClick={() => setLeadTempBucket('hot')}
-                  className={`w-full text-left px-3 py-2 rounded-xl text-sm font-bold transition-all ${
-                    leadTempBucket === 'hot' ? 'bg-heading text-white' : 'text-body hover:bg-page'
-                  }`}
+                  className={`w-full text-left px-3 py-2 rounded-xl text-sm font-bold transition-all ${leadTempBucket === 'hot' ? 'bg-heading text-white' : 'text-body hover:bg-page'
+                    }`}
                 >
                   Hot
                 </button>
@@ -1457,7 +1453,7 @@ const CRMHub = ({ defaultTab }) => {
                       className="w-full px-4 py-3 rounded-2xl bg-card border border-subtle outline-none focus:border-primary/30 focus:ring-2 focus:ring-primary/10"
                     >
                       <option value="">Any</option>
-                      {opportunityStatusOptions.map(s => <option key={s} value={s}>{getOpportunityStatusLabel(s)}</option>)}
+                      {OPPORTUNITY_STATUS_OPTIONS.map(({ code: s }) => <option key={s} value={s}>{getOpportunityStatusLabel(s)}</option>)}
                     </select>
                   </Field>
                   <Field label="Any Lead Status">
@@ -1467,7 +1463,7 @@ const CRMHub = ({ defaultTab }) => {
                       className="w-full px-4 py-3 rounded-2xl bg-card border border-subtle outline-none focus:border-primary/30 focus:ring-2 focus:ring-primary/10"
                     >
                       <option value="all">all</option>
-                      {leadStatusOptions.map(s => <option key={s} value={s}>{getLeadStatusLabel(s)}</option>)}
+                      {leadStatusCodes.filter((row) => row.id).map((row) => <option key={row.id} value={row.code}>{row.label}</option>)}
                     </select>
                   </Field>
                 </div>
@@ -1607,16 +1603,14 @@ const CRMHub = ({ defaultTab }) => {
                         key={lead.id}
                         type="button"
                         onClick={() => setSelectedLeadId(lead.id)}
-                        className={`w-full text-left px-6 py-5 transition-all ${
-                          active ? 'bg-heading text-white' : 'bg-card hover:bg-page/60'
-                        }`}
+                        className={`w-full text-left px-6 py-5 transition-all ${active ? 'bg-heading text-white' : 'bg-card hover:bg-page/60'
+                          }`}
                       >
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0">
                             <div className="flex items-center gap-3">
-                              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-heading font-bold text-sm ${
-                                active ? 'bg-card/10 text-white' : 'bg-page text-primary'
-                              }`}>
+                              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-heading font-bold text-sm ${active ? 'bg-card/10 text-white' : 'bg-page text-primary'
+                                }`}>
                                 {initials(d.fullName)}
                               </div>
                               <div className="min-w-0">
@@ -1629,24 +1623,21 @@ const CRMHub = ({ defaultTab }) => {
                             </div>
                             <div className="mt-3 flex flex-wrap gap-2">
                               <span
-                                className={`inline-flex items-center px-2.5 py-1 rounded-full text-[0.625rem] font-bold uppercase tracking-widest border ${
-                                  active ? 'border-white/15 text-white/90 bg-card/5' : 'border-subtle text-body bg-page'
-                                }`}
+                                className={`inline-flex items-center px-2.5 py-1 rounded-full text-[0.625rem] font-bold uppercase tracking-widest border ${active ? 'border-white/15 text-white/90 bg-card/5' : 'border-subtle text-body bg-page'
+                                  }`}
                                 style={!active ? (getStatusPillStyle(lead?.custom_status_code_details?.color_hex) || undefined) : undefined}
                               >
                                 {lead?.custom_status_code_details?.label || getLeadStatusLabel(d.status || 'new')}
                               </span>
                               {d.priority && (
-                                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[0.625rem] font-bold uppercase tracking-widest border ${
-                                  active ? 'border-white/15 text-white/90 bg-card/5' : 'border-subtle text-body bg-page'
-                                }`}>
+                                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[0.625rem] font-bold uppercase tracking-widest border ${active ? 'border-white/15 text-white/90 bg-card/5' : 'border-subtle text-body bg-page'
+                                  }`}>
                                   {d.priority}
                                 </span>
                               )}
                               {lead.move_size && (
-                                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[0.625rem] font-bold uppercase tracking-widest border ${
-                                  active ? 'border-white/15 text-white/90 bg-card/5' : 'border-subtle text-body bg-page'
-                                }`}>
+                                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[0.625rem] font-bold uppercase tracking-widest border ${active ? 'border-white/15 text-white/90 bg-card/5' : 'border-subtle text-body bg-page'
+                                  }`}>
                                   {lead.move_size}
                                 </span>
                               )}
@@ -1790,8 +1781,8 @@ const CRMHub = ({ defaultTab }) => {
                             {assignLoading
                               ? 'Saving...'
                               : (isSelectedLeadBranchOverQuota || isBranchOverQuota(assignForm.branch, overQuotaBranchIds))
-                              ? 'Branch Over Quota (Read-Only)'
-                              : 'Save Assignment'}
+                                ? 'Branch Over Quota (Read-Only)'
+                                : 'Save Assignment'}
                           </button>
                         </div>
 
@@ -1811,7 +1802,7 @@ const CRMHub = ({ defaultTab }) => {
                           >
                             Edit
                           </button>
-                          {String(selectedLead.status || '').toLowerCase() !== 'converted' && (
+                          {getRecordSystemState(selectedLead, true) === 'qualified' && hasPermission('leads.convert') && (
                             <button
                               type="button"
                               disabled={isSelectedLeadOverQuota}
@@ -1822,14 +1813,14 @@ const CRMHub = ({ defaultTab }) => {
                             </button>
                           )}
                         </div>
-                        <button
+                        {hasPermission('leads.update') && canTransition(true, getRecordSystemState(selectedLead, true), 'archived') && <button
                           type="button"
                           disabled={isSelectedLeadOverQuota}
                           onClick={() => setConfirmDelete({ type: 'lead', item: selectedLead })}
                           className={`w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-[#FDE8E8]/30 border border-[#FDE8E8] text-sm font-bold text-[#791F1F] hover:bg-[#FDE8E8]/50 transition-all ${isSelectedLeadOverQuota ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
-                          Delete Lead
-                        </button>
+                          Archive Lead
+                        </button>}
 
                         <div className="flex gap-3">
                           <button
@@ -2144,8 +2135,8 @@ const CRMHub = ({ defaultTab }) => {
                 {assignLoading
                   ? 'Assigning...'
                   : (bulkAssignForm.branch && isBranchOverQuota(bulkAssignForm.branch, overQuotaBranchIds))
-                  ? 'Branch Over Quota'
-                  : 'Assign'}
+                    ? 'Branch Over Quota'
+                    : 'Assign'}
               </button>
             </div>
           </div>
@@ -2153,7 +2144,7 @@ const CRMHub = ({ defaultTab }) => {
       )}
 
       {bulkStatusOpen && (
-        <ModalShell title={`Change Status (${selectedLeadIds.size} lead(s))`} onClose={() => setBulkStatusOpen(false)}>
+        <ModalShell title={`Change Custom Status (${selectedLeadIds.size} lead(s))`} onClose={() => setBulkStatusOpen(false)}>
           <div className="space-y-4">
             <Field label="Status">
               <select
@@ -2161,7 +2152,7 @@ const CRMHub = ({ defaultTab }) => {
                 onChange={(e) => setBulkStatus(e.target.value)}
                 className="w-full px-4 py-3 rounded-2xl bg-card border border-subtle outline-none focus:border-primary/30 focus:ring-2 focus:ring-primary/10"
               >
-                {leadStatusOptions.map(s => <option key={s} value={s}>{getLeadStatusLabel(s)}</option>)}
+                {leadStatusCodes.filter((row) => row.id).map((row) => <option key={row.id} value={row.code}>{row.label}</option>)}
               </select>
             </Field>
             <div className="flex gap-3 justify-end">
@@ -2232,10 +2223,11 @@ const CRMHub = ({ defaultTab }) => {
               <Field label="Status">
                 <select
                   value={leadForm.status}
-                  onChange={(e) => setLeadForm(prev => ({ ...prev, status: e.target.value }))}
+                  disabled
+                  title="Use the record workflow actions to change lifecycle status."
                   className="w-full bg-page border border-subtle px-4 py-3 rounded-xl outline-none text-sm font-medium"
                 >
-                  {leadStatusOptions.map(s => (
+                  {LEAD_STATUS_OPTIONS.map(({ code: s }) => (
                     <option key={s} value={s}>{getLeadStatusLabel(s)}</option>
                   ))}
                 </select>
@@ -2399,11 +2391,12 @@ const CRMHub = ({ defaultTab }) => {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Field label="Status">
                 <select
-                  value={oppForm.status}
-                  onChange={(e) => setOppForm(prev => ({ ...prev, status: e.target.value }))}
+                  value={oppModal.mode === 'edit' ? oppForm.status : 'open'}
+                  disabled
+                  title="Use the record workflow actions to change lifecycle status."
                   className="w-full bg-page border border-subtle px-4 py-3 rounded-xl outline-none text-sm font-medium"
                 >
-                  {opportunityStatusOptions.map(s => <option key={s} value={s}>{getOpportunityStatusLabel(s)}</option>)}
+                  {OPPORTUNITY_STATUS_OPTIONS.map(({ code: s }) => <option key={s} value={s}>{getOpportunityStatusLabel(s)}</option>)}
                 </select>
               </Field>
               <Field label="Move Date">
@@ -2491,8 +2484,8 @@ const CRMHub = ({ defaultTab }) => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-heading/40 backdrop-blur-sm">
           <Card className="w-full max-w-sm p-6 animate-in zoom-in duration-200 text-center">
             <AlertCircle size={42} className="text-[#791F1F] mx-auto" />
-            <h3 className="text-lg font-bold text-heading font-heading mt-3">Delete {confirmDelete.type === 'lead' ? 'Lead' : 'Opportunity'}?</h3>
-            <p className="text-sm text-body mt-1">This action cannot be undone.</p>
+            <h3 className="text-lg font-bold text-heading font-heading mt-3">{confirmDelete.type === 'lead' ? 'Archive Lead?' : 'Delete Opportunity?'}</h3>
+            <p className="text-sm text-body mt-1">{confirmDelete.type === 'lead' ? 'The lead will be archived. Authorized users can restore it to In Progress.' : 'This action cannot be undone.'}</p>
             <div className="flex gap-3 pt-5">
               <button
                 type="button"
@@ -2507,7 +2500,7 @@ const CRMHub = ({ defaultTab }) => {
                 onClick={doDelete}
                 className="flex-1 px-4 py-3 rounded-2xl bg-[#791F1F] text-white text-sm font-bold hover:bg-[#b0000a] transition-all disabled:opacity-70"
               >
-                {isSaving ? 'Deleting...' : 'Delete'}
+                {isSaving ? 'Saving...' : confirmDelete.type === 'lead' ? 'Archive' : 'Delete'}
               </button>
             </div>
           </Card>

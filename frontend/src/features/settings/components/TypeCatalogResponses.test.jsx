@@ -33,7 +33,9 @@ for (const [Component, path, name, empty] of [
     expect(await screen.findByText(name)).toBeInTheDocument();
     expect(screen.getByText('New description')).toBeInTheDocument();
     expect(screen.getByRole('button', { name:`Deactivate ${name}` })).toBeInTheDocument();
-    await waitFor(() => expect(api.post).toHaveBeenCalledWith(path, expect.objectContaining({ name, branch_id:1 })));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(path, expect.objectContaining({ name })));
+    expect(api.post.mock.calls[0][1]).not.toHaveProperty('branch_id');
+    expect(api.get).toHaveBeenCalledWith(path, { params: undefined });
   });
 }
 it('normalizes lookup lists and paginated service lists while preserving IDs and counts', async () => {

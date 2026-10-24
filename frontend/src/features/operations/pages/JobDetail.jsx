@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Loader2, Copy } from 'lucide-react';
+import { titleCaseStatus } from '../../crm/utils/statusWorkflow';
 import { getRecordDetailPath } from '../../crm/utils/recordRoutes';
+import JobLifecyclePanel from '../components/JobLifecyclePanel';
 
 import API from '../../../services/api';
 import FilesPanel from '../../files/components/FilesPanel';
@@ -71,8 +73,9 @@ export default function JobDetail() {
     try {
       const [jobRes, crewRes, trucksRes] = await Promise.all([
         API.jobs.getJob(jobId),
-        API.crew.getCrewMembers({ is_active: true }),
-        API.jobs.getTrucks(),
+        // Crew and fleet lists are optional here: the job still opens without them.
+        API.crew.getCrewMembers({ is_active: true }).catch(() => []),
+        API.jobs.getTrucks().catch(() => []),
       ]);
       setJob(jobRes);
       setSchedule({
@@ -211,19 +214,6 @@ export default function JobDetail() {
     }
   };
 
-  const confirmDispatch = async () => {
-    setBusy(true);
-    setError('');
-    try {
-      const updated = await API.jobs.updateJob(jobId, { status: 'confirmed', ...schedule });
-      setJob(updated);
-    } catch (err) {
-      const data = err?.response?.data;
-      setError(data?.detail || (data?.conflicts ? JSON.stringify(data.conflicts) : Object.values(data || {}).flat().join(' ')) || 'Unable to confirm dispatch.');
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const handleCopy = (text, label) => {
     navigator.clipboard.writeText(text);
@@ -291,13 +281,7 @@ export default function JobDetail() {
       icon: 'external-link',
       type: 'ghost',
     },
-    {
-      label: job.status === 'confirmed' || job.status === 'completed' ? 'Dispatch Active' : 'Confirm Dispatch',
-      onClick: confirmDispatch,
-      icon: 'check-circle-2',
-      type: 'primary',
-      disabled: busy || job.status === 'confirmed' || job.status === 'completed',
-    }
+
   ];
 
   return (
@@ -305,11 +289,9 @@ export default function JobDetail() {
       <StickyHeader 
         title={job.customer_name || job.name || 'Client Name'}
         subtitle="Operations / Jobs"
-        status={job.status}
+        status={titleCaseStatus(job.execution_state || job.booking_state || job.status || '')}
         statusTone={
-          job.status === 'confirmed' ? 'green' : 
-          job.status === 'completed' ? 'slate' : 
-          job.status === 'canceled' ? 'rose' : 'blue'
+          job.execution_state === 'completed' ? 'green' : job.booking_state === 'cancelled' ? 'rose' : 'blue'
         }
         id={job.sales_number || job.id}
         onBack={() => navigate('/jobs')}
@@ -377,7 +359,7 @@ export default function JobDetail() {
           <div className="hidden sm:flex items-center gap-3 pr-3 text-xs text-slate-500">
             <span className="inline-flex items-center gap-1.5 font-medium">
               <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span className="capitalize font-semibold text-slate-700">{job.status || 'Active'}</span>
+              <span className="capitalize font-semibold text-slate-700">{titleCaseStatus(job.execution_state || job.booking_state || job.status || '')}</span>
             </span>
             <span className="text-slate-300">|</span>
             <span className="font-mono text-[11px] text-slate-400">Ref #{job.sales_number || job.id}</span>
@@ -464,6 +446,7 @@ export default function JobDetail() {
               </div>
             </div>
 
+            <JobLifecyclePanel jobId={jobId} onChanged={(updated) => setJob((current) => ({ ...current, ...updated }))} />
             {/* Visual Workflow Steps */}
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-card">
               <div className="grid grid-cols-4 gap-2 relative">
@@ -472,19 +455,19 @@ export default function JobDetail() {
                   <div 
                     className="h-full bg-brand rounded-full transition-all duration-500"
                     style={{
-                      width: job.status === 'completed' ? '100%' 
-                             : job.status === 'confirmed' ? '66%' 
-                             : (schedule.start_time && crew.length > 0) ? '33%' : '0%'
+                      width: job.execution_state === 'completed' ? '100%'
+                             : job.dispatch_state === 'published' ? '66%'
+                             : ['scheduled', 'published'].includes(job.dispatch_state) ? '33%' : '0%'
                     }}
                   ></div>
                 </div>
 
                 {/* Steps */}
                 {[
-                  { label: 'Booked', active: true, desc: 'Opportunity won' },
-                  { label: 'Scheduled', active: !!schedule.start_time && crew.length > 0 && assignedTrucks.length > 0, desc: 'Resources assigned' },
-                  { label: 'Dispatched', active: job.status === 'confirmed' || job.status === 'completed', desc: 'Crew confirmed' },
-                  { label: 'Completed', active: job.status === 'completed', desc: 'Job finalized' }
+                  { label: 'Booked', active: ['booked', 'confirmed'].includes(job.booking_state), desc: titleCaseStatus(job.booking_state || '') },
+                  { label: 'Scheduled', active: ['scheduled', 'published'].includes(job.dispatch_state), desc: titleCaseStatus(job.dispatch_state || '') },
+                  { label: 'Dispatched', active: job.dispatch_state === 'published', desc: 'Dispatch published' },
+                  { label: 'Completed', active: job.execution_state === 'completed', desc: 'Fieldwork completed' }
                 ].map((step, idx) => (
                   <div key={idx} className="flex flex-col items-center text-center z-10">
                     <div className={`w-9 h-9 rounded-full flex items-center justify-center border-4 text-xs font-black shadow-sm transition-all duration-300 ${

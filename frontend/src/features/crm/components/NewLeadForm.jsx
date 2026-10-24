@@ -133,11 +133,10 @@ const NewLeadForm = ({ isOpen, onClose, metadata = {}, onSuccess, canCreateLead 
 
     let cancelled = false;
     const loadTypeLookups = async () => {
-      const params = form.branch ? { applicable_branch_id: form.branch } : {};
       try {
         const [moveTypesResponse, serviceTypesResponse] = await Promise.all([
-          getMoveTypeLookups(params),
-          getServices(params),
+          getMoveTypeLookups(),
+          getServices(),
         ]);
         if (cancelled) return;
         setMoveTypes(asList(moveTypesResponse));
@@ -154,7 +153,7 @@ const NewLeadForm = ({ isOpen, onClose, metadata = {}, onSuccess, canCreateLead 
     return () => {
       cancelled = true;
     };
-  }, [form.branch, isOpen]);
+  }, [isOpen]);
 
   const [entitlements, setEntitlements] = useState(metadata.entitlements || null);
 

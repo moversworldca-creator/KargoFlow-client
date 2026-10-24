@@ -81,28 +81,6 @@ const missingSelection = (value, options, label) => {
   return <option value={id} disabled>{label || getOptionLabel(value) || id} (unavailable)</option>;
 };
 
-const SERVICE_TYPE_OPTIONS = [
-  { id: 'moving', name: 'Moving' },
-  { id: 'packing', name: 'Packing' },
-  { id: 'moving_and_packing', name: 'Moving & Packing' },
-  { id: 'load_only', name: 'Load Only' },
-  { id: 'unload_only', name: 'Unload Only' },
-  { id: 'commercial', name: 'Commercial' },
-  { id: 'storage_inbound', name: 'Storage Inbound' },
-  { id: 'storage_outbound', name: 'Storage Outbound' },
-  { id: 'inner_house', name: 'Inner House' },
-  { id: 'junk_removal', name: 'Junk Removal' },
-  { id: 'labor_only', name: 'Labor Only' },
-];
-
-const MOVE_TYPE_OPTIONS = [
-  { id: 'local', name: 'Local' },
-  { id: 'interstate', name: 'Interstate' },
-  { id: 'long_distance', name: 'Long Distance' },
-  { id: 'intrastate', name: 'Long Distance' },
-  { id: 'commercial', name: 'Commercial' },
-  { id: 'residential', name: 'Residential' },
-];
 
 const inputCls = 'w-full px-3 py-2 rounded-lg border border-[#9fcdf5] bg-[#eef6ff] text-sm font-bold text-[#1f7ae0] outline-none shadow-sm transition-all placeholder-[#5b7083] hover:border-[#7bb9eb] focus:border-[#1f7ae0] focus:ring-2 focus:ring-[#1f7ae0]/10';
 const DEFAULT_MOVE_SIZE_OPTIONS = [
@@ -159,8 +137,6 @@ const LeadSpecs = ({
     opportunity?.move_size_details?.name || opportunity?.mover_size_details?.name || (typeof form.move_size === 'object' ? getOptionLabel(form.move_size) : '') || view.move_size || view.moveSize || currentMoveSize || '-');
   const resolvedServiceTypes = catalogOptions(serviceTypes, form.service_type);
   const resolvedMoveTypes = catalogOptions(moveTypes, form.move_type);
-  if (!view.isLead && !resolvedServiceTypes.length) resolvedServiceTypes.push(...SERVICE_TYPE_OPTIONS);
-  if (!view.isLead && !resolvedMoveTypes.length) resolvedMoveTypes.push(...MOVE_TYPE_OPTIONS);
   const resolvedReferralSources = catalogOptions(referralSources, form.referral_source);
   const resolvedBranches = catalogOptions(branches, form.branch);
 

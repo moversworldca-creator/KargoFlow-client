@@ -2,6 +2,7 @@ import api from "./axios";
 import { readOpportunity } from '../features/crm/leads/opportunityReadApi';
 import { getTenantStaff } from '../features/crm/leads/salesOverviewApi';
 import { recordActivities, recordTasks, createRecordActivity, updateRecordActivity, createRecordTask, updateRecordTask } from '../features/crm/leads/recordWorkApi';
+import { canTransition } from '../features/crm/utils/statusWorkflow';
 import { leadApi, leadPayload } from '../features/crm/leads/leadApi';
 import { getPipelineQueue } from '../features/crm/leads/pipelineApi';
 
@@ -152,8 +153,10 @@ export const updateLead = async (id, data = {}) => {
   if (requestedState) {
     current = await leadApi.get(id);
     if (requestedState !== current.system_state) {
-      action = { in_progress: current.system_state === 'lost' ? 'reopen' : 'start', qualified: 'qualify', archived: 'archive' }[requestedState];
+      if (!canTransition(true, current.system_state, requestedState)) throw new Error(`Invalid lead transition: ${current.system_state} → ${requestedState}.`);
+      action = { in_progress: ['archived', 'disqualified'].includes(current.system_state) ? 'restore' : current.system_state === 'lost' ? 'reopen' : 'start', qualified: 'qualify', archived: 'archive' }[requestedState];
       if (!action) throw new Error(`Use the lead workflow to change status to ${requestedState}.`);
+      if (action === 'restore' && !String(data.reason || '').trim()) throw new Error('A reason is required to restore a lead.');
     }
   }
   let updated = Object.keys(payload).length ? await leadApi.update(id, payload) : current;
@@ -414,13 +417,20 @@ export const updateOpportunityJobStop = (opportunityId, jobId, stopId, data) =>
 export const deleteOpportunity = (id) => api.delete(`/sales/opportunities/${id}/`);
 export const startOpportunityWorking = (id) => api.post(`/sales/opportunities/${id}/start-working/`);
 export const markOpportunityEstimateCreated = (id) => api.post(`/sales/opportunities/${id}/mark-estimate-created/`);
-export const bookOpportunityJob = (id, data = {}) => api.post(`/sales/opportunities/${id}/book-job/`, data);
-export const unbookOpportunityJob = (id, data = {}) => api.post(`/sales/opportunities/${id}/unbook-job/`, data);
+export const getOpportunityBookingReadiness = (id) => api.get(`/tenant/opportunities/${id}/booking-readiness/`);
+export const bookOpportunityJob = (id, data = {}) => api.post(`/tenant/opportunities/${id}/book/`, {
+  override_requirements: data.override_requirements || [], override_reason: data.override_reason || '',
+});
+export const getCancellationReasons = () => api.get('/tenant/cancellation-reasons/', { params: { active: true } });
+export const getDisqualificationReasons = () => api.get('/tenant/disqualification-reasons/', { params: { active: true } });
+export const disqualifyLead = (id, data) => leadApi.transition(id, 'disqualify', data);
+export const restoreLead = (id, data = {}) => leadApi.transition(id, 'restore', data);
+export const unbookOpportunityJob = (id, data = {}) => api.post(`/tenant/opportunities/${id}/unbook/`, data);
 export const confirmOpportunityJob = (id) => api.post(`/sales/opportunities/${id}/confirm-job/`);
-export const cancelOpportunityJob = (id, data) => api.post(`/sales/opportunities/${id}/cancel-job/`, data);
-export const completeOpportunityJob = (id) => api.post(`/sales/opportunities/${id}/complete-job/`);
-export const markOpportunityLost = (id, data) => api.post(`/sales/opportunities/${id}/mark-lost/`, data);
-export const reopenOpportunity = (id, data = {}) => api.post(`/sales/opportunities/${id}/reopen/`, data);
+export const cancelOpportunityJob = (id, data = {}) => api.post(`/tenant/opportunities/${id}/cancel/`, data);
+export const completeOpportunityJob = (id, data = {}) => api.post(`/tenant/opportunities/${id}/complete/`, data);
+export const markOpportunityLost = (id, data = {}) => api.post(`/tenant/opportunities/${id}/mark-lost/`, data);
+export const reopenOpportunity = (id, data = {}) => api.post(`/tenant/opportunities/${id}/reopen/`, data);
 export const createOpportunityStop = (data) => api.post("/sales/opportunity-stops/", data);
 export const updateOpportunityStop = (id, data) => api.patch(`/sales/opportunity-stops/${id}/`, data);
 export const deleteOpportunityStop = (id) => api.delete(`/sales/opportunity-stops/${id}/`);
@@ -508,11 +518,14 @@ export const getJobs = (params = {}) => {
   if (params?.opportunity) {
     return api.get(`/tenant/opportunities/${params.opportunity}/jobs/`);
   }
-  return legacyOperationsApiEnabled ? api.get("/jobs/", { params }) : Promise.resolve([]);
+  // Without the legacy operations API, jobs are the operational jobs created at booking.
+  return legacyOperationsApiEnabled
+    ? api.get("/jobs/", { params })
+    : api.get("/tenant/jobs/", { params }).then((page) => page?.results || []);
 };
 export const getJobsByServiceDateReport = (params = {}) => api.get("/jobs/reports/service-date/", { params });
 export const createJob = (data) => api.post("/jobs/", data);
-export const getJob = (id) => api.get(`/jobs/${id}/`);
+export const getJob = (id) => (legacyOperationsApiEnabled ? api.get(`/jobs/${id}/`) : api.get(`/tenant/jobs/${id}/`));
 export const updateJob = (id, data) => api.patch(`/jobs/${id}/`, data);
 export const deleteJob = (id) => api.delete(`/jobs/${id}/`);
 export const getTrucks = (params = {}) => api.get("/jobs/trucks/", { params });
@@ -599,14 +612,233 @@ export const createEstimateDiscountPreset = (data) => api.post("/estimate-discou
 export const updateEstimateDiscountPreset = (id, data) => api.patch(`/estimate-discount-presets/${id}/`, data);
 export const deleteEstimateDiscountPreset = (id) => api.delete(`/estimate-discount-presets/${id}/`);
 export const seedEstimateDiscountPresets = (data = {}) => api.post("/estimate-discount-presets/seed-defaults/", data);
-export const getInventoryRoomTemplates = (params) => api.get("/inventory-room-templates/", { params });
-export const createInventoryRoomTemplate = (data) => api.post("/inventory-room-templates/", data);
-export const updateInventoryRoomTemplate = (id, data) => api.patch(`/inventory-room-templates/${id}/`, data);
-export const deleteInventoryRoomTemplate = (id) => api.delete(`/inventory-room-templates/${id}/`);
-export const getInventoryItemTemplates = (params) => api.get("/inventory-item-templates/", { params });
-export const createInventoryItemTemplate = (data) => api.post("/inventory-item-templates/", data);
-export const updateInventoryItemTemplate = (id, data) => api.patch(`/inventory-item-templates/${id}/`, data);
-export const deleteInventoryItemTemplate = (id) => api.delete(`/inventory-item-templates/${id}/`);
+// Tenant catalogs wrap record fields in `data`; UI consumers use flat records.
+const catalogRecord = (record) => record?.data && typeof record.data === 'object'
+  ? { ...record.data, id: record.id ?? record.data.id }
+  : record;
+const catalogResponse = (response) => {
+  if (Array.isArray(response)) return response.map(catalogRecord);
+  if (Array.isArray(response?.results)) return { ...response, results: response.results.map(catalogRecord) };
+  return catalogRecord(response);
+};
+
+// Inventory Room & Item Template APIs (/tenant/rooms/ & /tenant/inventory/)
+export const getInventoryRoomTemplates = async (params = {}) => {
+  const branchVal = params?.applicable_branch_id ?? params?.branch_id ?? params?.branch ?? null;
+  const roomQueryParams = { limit: 100 };
+  const itemQueryParams = { limit: 100 };
+  if (branchVal !== null && branchVal !== undefined && branchVal !== '') {
+    roomQueryParams.applicable_branch_id = Number(branchVal);
+    itemQueryParams.applicable_branch_id = Number(branchVal);
+  }
+  if (params?.q || params?.search) {
+    roomQueryParams.q = params.q || params.search;
+  }
+  if (params?.active !== undefined) {
+    roomQueryParams.active = params.active;
+    itemQueryParams.active = params.active;
+  }
+
+  const roomsRes = catalogResponse(await api.get("/tenant/rooms/", { params: roomQueryParams }));
+  const rawRooms = Array.isArray(roomsRes)
+    ? roomsRes
+    : Array.isArray(roomsRes?.results)
+    ? roomsRes.results
+    : [];
+
+  let rawItems = [];
+  try {
+    const itemsRes = catalogResponse(await api.get("/tenant/inventory/", { params: itemQueryParams }));
+    rawItems = Array.isArray(itemsRes)
+      ? itemsRes
+      : Array.isArray(itemsRes?.results)
+      ? itemsRes.results
+      : [];
+  } catch {
+    rawItems = [];
+  }
+
+  const itemsByRoom = {};
+  rawItems.forEach((item) => {
+    const rId = String(item.room_template_id ?? item.room_template);
+    if (!itemsByRoom[rId]) itemsByRoom[rId] = [];
+    itemsByRoom[rId].push({
+      ...item,
+      room_template: item.room_template_id ?? item.room_template,
+      room_template_id: item.room_template_id ?? item.room_template,
+      branch: item.branch_id ?? item.branch,
+      branch_id: item.branch_id ?? item.branch,
+      weight_lbs_each: Number(item.weight_lbs_each ?? 0),
+    });
+  });
+
+  return rawRooms
+    .sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0))
+    .map((room, rIdx) => {
+      const rId = String(room.id);
+      const items = (itemsByRoom[rId] || [])
+        .sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0))
+        .map((it, iIdx) => ({
+          ...it,
+          sort_order: iIdx + 1,
+        }));
+      return {
+        ...room,
+        sort_order: rIdx + 1,
+        branch: room.branch_id ?? room.branch,
+        branch_id: room.branch_id ?? room.branch,
+        item_templates: items,
+      };
+    });
+};
+
+export const createInventoryRoomTemplate = async (data) => {
+  const payload = {
+    name: data.name,
+    sort_order: Number(data.sort_order ?? 0),
+    is_active: data.is_active !== false,
+  };
+  const branchId = data.branch_id ?? data.branch;
+  if (branchId !== undefined && branchId !== null && branchId !== '') {
+    payload.branch_id = Number(branchId);
+  }
+
+  const res = catalogResponse(await api.post("/tenant/rooms/", payload));
+  return {
+    ...res,
+    branch: res.branch_id ?? res.branch ?? payload.branch_id ?? null,
+    branch_id: res.branch_id ?? payload.branch_id ?? null,
+    item_templates: res.item_templates || [],
+  };
+};
+
+export const updateInventoryRoomTemplate = async (id, data) => {
+  const payload = {};
+  if (data.name !== undefined) payload.name = data.name;
+  if (data.sort_order !== undefined) payload.sort_order = Number(data.sort_order);
+  if (data.is_active !== undefined) payload.is_active = data.is_active;
+  const branchId = data.branch_id ?? data.branch;
+  if (branchId !== undefined) {
+    payload.branch_id = branchId ? Number(branchId) : null;
+  }
+
+  const res = catalogResponse(await api.patch(`/tenant/rooms/${id}/`, payload));
+  return {
+    ...res,
+    branch: res.branch_id ?? res.branch ?? payload.branch_id ?? null,
+    branch_id: res.branch_id ?? payload.branch_id ?? null,
+  };
+};
+
+export const deleteInventoryRoomTemplate = async (id) => {
+  try {
+    const itemsRes = catalogResponse(await api.get("/tenant/inventory/", { params: { room_template_id: id, limit: 100 } }));
+    const items = Array.isArray(itemsRes) ? itemsRes : Array.isArray(itemsRes?.results) ? itemsRes.results : [];
+    for (const item of items) {
+      try {
+        await api.delete(`/tenant/inventory/${item.id}/`);
+      } catch {
+        // ignore individual item deletion error
+      }
+    }
+  } catch {
+    // ignore
+  }
+  await api.delete(`/tenant/rooms/${id}/`);
+  return { success: true };
+};
+
+export const getInventoryItemTemplates = async (params = {}) => {
+  const queryParams = { limit: 100 };
+  const roomTemplateId = params?.room_template_id ?? params?.room_template;
+  if (roomTemplateId) {
+    queryParams.room_template_id = roomTemplateId;
+  }
+  const branchId = params?.applicable_branch_id ?? params?.branch_id ?? params?.branch;
+  if (branchId) {
+    queryParams.applicable_branch_id = branchId;
+  }
+  if (params?.active !== undefined) {
+    queryParams.active = params.active;
+  }
+  if (params?.q || params?.search) {
+    queryParams.q = params.q || params.search;
+  }
+
+  const res = catalogResponse(await api.get("/tenant/inventory/", { params: queryParams }));
+  const rows = Array.isArray(res) ? res : Array.isArray(res?.results) ? res.results : [];
+  return rows.map((item) => ({
+    ...item,
+    room_template: item.room_template_id ?? item.room_template,
+    room_template_id: item.room_template_id ?? item.room_template,
+    branch: item.branch_id ?? item.branch,
+    branch_id: item.branch_id ?? item.branch,
+    weight_lbs_each: Number(item.weight_lbs_each ?? 0),
+  }));
+};
+
+export const createInventoryItemTemplate = async (data) => {
+  const payload = {
+    name: data.name,
+    room_template_id: Number(data.room_template_id ?? data.room_template),
+    weight_lbs_each: Number(data.weight_lbs_each ?? 0),
+    sort_order: Number(data.sort_order ?? 0),
+    is_active: data.is_active !== false,
+  };
+  const branchId = data.branch_id ?? data.branch;
+  if (branchId !== undefined && branchId !== null && branchId !== '') {
+    payload.branch_id = Number(branchId);
+  }
+
+  const res = catalogResponse(await api.post("/tenant/inventory/", payload));
+  return {
+    ...res,
+    room_template: res.room_template_id ?? res.room_template ?? payload.room_template_id,
+    room_template_id: res.room_template_id ?? payload.room_template_id,
+    branch: res.branch_id ?? res.branch ?? payload.branch_id ?? null,
+    branch_id: res.branch_id ?? payload.branch_id ?? null,
+    weight_lbs_each: Number(res.weight_lbs_each ?? payload.weight_lbs_each),
+  };
+};
+
+export const updateInventoryItemTemplate = async (id, data) => {
+  const payload = {};
+  if (data.name !== undefined) payload.name = data.name;
+  if (data.room_template_id !== undefined || data.room_template !== undefined) {
+    payload.room_template_id = Number(data.room_template_id ?? data.room_template);
+  }
+  if (data.weight_lbs_each !== undefined) {
+    payload.weight_lbs_each = Number(data.weight_lbs_each ?? 0);
+  }
+  if (data.sort_order !== undefined) {
+    payload.sort_order = Number(data.sort_order ?? 0);
+  }
+  if (data.is_active !== undefined) {
+    payload.is_active = data.is_active;
+  }
+  const branchId = data.branch_id ?? data.branch;
+  if (branchId !== undefined) {
+    payload.branch_id = branchId ? Number(branchId) : null;
+  }
+
+  const res = catalogResponse(await api.patch(`/tenant/inventory/${id}/`, payload));
+  return {
+    ...res,
+    room_template: res.room_template_id ?? res.room_template ?? payload.room_template_id,
+    room_template_id: res.room_template_id ?? payload.room_template_id,
+    branch: res.branch_id ?? res.branch ?? payload.branch_id ?? null,
+    branch_id: res.branch_id ?? payload.branch_id ?? null,
+    weight_lbs_each: Number(res.weight_lbs_each ?? payload.weight_lbs_each ?? 0),
+  };
+};
+
+export const deleteInventoryItemTemplate = (id) => api.delete(`/tenant/inventory/${id}/`).then(() => ({ success: true }));
+
+export const getInventoryRooms = (params) => getInventoryRoomTemplates(params);
+export const getInventoryRoomLookups = async (params) => catalogResponse(await api.get("/tenant/rooms/lookup/", { params }));
+export const getInventoryItems = (params) => getInventoryItemTemplates(params);
+export const getInventory = (params) => getInventoryItemTemplates(params);
+export const getInventoryItemLookups = async (params) => catalogResponse(await api.get("/tenant/inventory/lookup/", { params }));
 export const getEstimateCatalogItems = (params) => legacyOperationsApiEnabled ? api.get("/catalog-items/", { params }) : Promise.resolve([]);
 export const getEstimatePortalTemplates = (params) => legacyOperationsApiEnabled ? api.get("/portal-templates/", { params }) : Promise.resolve([]);
 export const createEstimatePortalTemplate = (data) => api.post("/portal-templates/", data);
@@ -628,24 +860,24 @@ export const deleteEstimatePackageItem = (id) => api.delete(`/package-items/${id
 export const applyEstimatePackage = (estimateId, data) => api.post(`/estimates/${estimateId}/apply-package/`, data);
 export const resendEstimate = (estimateId, data) => api.post(`/estimates/${estimateId}/resend/`, data);
 export const clearEstimateSignatures = (estimateId) => api.post(`/estimates/${estimateId}/clear-signatures/`, {});
-export const getPublicEstimateInventoryPortal = (token) => api.get("/public/estimates/inventory/", { params: { token } });
-export const submitPublicEstimateInventoryPortal = (data) => api.post("/public/estimates/inventory/", data);
+export const getPublicEstimateInventoryPortal = (token) => api.get("/public/estimates/inventory/", { params: { token }, skipAuth: true });
+export const submitPublicEstimateInventoryPortal = (data) => api.post("/public/estimates/inventory/", data, { skipAuth: true });
 export const uploadPublicEstimateInventoryPortalPhoto = ({ token, file, notes = "" }) => {
   const formData = new FormData();
   formData.append("token", token);
   formData.append("file", file);
   if (notes) formData.append("notes", notes);
-  return api.post("/public/estimates/inventory/photos/", formData);
+  return api.post("/public/estimates/inventory/photos/", formData, { skipAuth: true });
 };
-export const getPublicEstimatePortal = (token) => api.get("/public/estimates/portal/", { params: { token } });
-export const approvePublicEstimatePortal = (data) => api.post("/public/estimates/portal/approve/", data);
+export const getPublicEstimatePortal = (token) => api.get("/public/estimates/portal/", { params: { token }, skipAuth: true });
+export const approvePublicEstimatePortal = (data) => api.post("/public/estimates/portal/approve/", data, { skipAuth: true });
 export const createPublicEstimatePaymentSession = (data) => api.post("/payments/public/estimates/portal/payment-request/", data);
 export const createPublicEstimateSquarePayment = (data) => api.post("/payments/public/estimates/portal/payments/create/", data);
 export const getPublicSquareOrder = (token, orderId) =>
   api.get(`/payments/public/estimates/portal/square/orders/${orderId}/`, { params: { token } });
 
-export const getPublicContractPortal = (token) => api.get("/public/contracts/portal/", { params: { token } });
-export const signPublicContractPortal = (data) => api.post("/public/contracts/portal/sign/", data);
+export const getPublicContractPortal = (token) => api.get("/public/contracts/portal/", { params: { token }, skipAuth: true });
+export const signPublicContractPortal = (data) => api.post("/public/contracts/portal/sign/", data, { skipAuth: true });
 
 export const getDocumentTemplates = (params) => legacyOperationsApiEnabled ? api.get("/documents/templates/", { params }) : Promise.resolve([]);
 export const createDocumentTemplate = (data) => api.post("/documents/templates/", data);
@@ -760,16 +992,6 @@ export const createAutomationStep = (data) => api.post("/automations/steps/", da
 export const updateAutomationStep = (id, data) => api.patch(`/automations/steps/${id}/`, data);
 export const deleteAutomationStep = (id) => api.delete(`/automations/steps/${id}/`);
 export const getAutomationRuns = (params) => api.get("/automations/runs/", { params });
-
-// Tenant catalogs wrap record fields in `data`; UI consumers use flat records.
-const catalogRecord = (record) => record?.data && typeof record.data === 'object'
-  ? { ...record.data, id: record.id ?? record.data.id }
-  : record;
-const catalogResponse = (response) => {
-  if (Array.isArray(response)) return response.map(catalogRecord);
-  if (Array.isArray(response?.results)) return { ...response, results: response.results.map(catalogRecord) };
-  return catalogRecord(response);
-};
 
 // Mover Type & Size APIs
 export const getServices = async (params) => catalogResponse(await api.get("/tenant/service-types/", { params }));
@@ -1016,6 +1238,16 @@ const API = {
     createShareLink: createFileShareLink,
     revokeShareLink: revokeFileShareLink,
   },
+  inventory: {
+    getInventoryRoomTemplates,
+    createInventoryRoomTemplate,
+    updateInventoryRoomTemplate,
+    deleteInventoryRoomTemplate,
+    getInventoryItemTemplates,
+    createInventoryItemTemplate,
+    updateInventoryItemTemplate,
+    deleteInventoryItemTemplate,
+  },
   // tariffs removed
 };
 
@@ -1047,3 +1279,18 @@ export const getOpportunityLossReasonLookupsPage = (search, offset, limit) =>
 export const getAuthorizeNetSettings = () => api.get('/tenant/integrations/authorize-net/');
 export const saveAuthorizeNetSettings = (data) => api.post('/tenant/integrations/authorize-net/', data);
 export const verifyAuthorizeNetSettings = () => api.post('/tenant/integrations/authorize-net/verify/');
+
+const publicPortalPath = (kind) => kind === 'estimate' ? '/public/estimates/portal/' : '/public/contracts/portal/';
+export const downloadPublicPortal = (kind, token) => api.get(`${publicPortalPath(kind)}pdf/`, { params: { token }, responseType: 'blob', skipAuth: true });
+export const publicPortalImageUrl = (kind, token, assetId) => api.getUri({ url: `${publicPortalPath(kind)}image/`, params: { token, asset_id: assetId } });
+export const issueBuilderDocuments = (stage, data, idempotencyKey) => api.post(`/tenant/builder/workflow/${stage}/`, data, { headers: { 'Idempotency-Key': idempotencyKey } });
+export const getIssuedPortals = (opportunityId) => api.get('/tenant/builder/portals/', { params: { opportunity_id: opportunityId } });
+export const revokeIssuedPortal = (id, opportunityId) => api.post(`/tenant/builder/portals/${id}/revoke/`, { opportunity_id: opportunityId });
+
+export const getPortalEstimates = (opportunityId) => api.get('/tenant/builder/portals/estimates/', { params: { opportunity_id: opportunityId } });
+export const emailIssuedPortal = (id, opportunityId, key) => api.post(`/tenant/builder/portals/${id}/email-link/`, { opportunity_id: opportunityId }, { headers: { 'Idempotency-Key': key } });
+
+export const downloadIssuedPortal = (id, opportunityId) => api.get(`/tenant/builder/portals/${id}/pdf/`, { params: { opportunity_id: opportunityId }, responseType: 'blob' });
+
+export const getInventoryPortal = (kind, recordId) => api.get('/tenant/builder/inventory-portals/', { params: { kind, record_id: recordId } });
+export const manageInventoryPortal = (kind, recordId, operation, key) => api.post('/tenant/builder/inventory-portals/manage/', { kind, record_id: recordId, operation }, { headers: key ? { 'Idempotency-Key': key } : {} });

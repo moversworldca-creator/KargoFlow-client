@@ -48,8 +48,8 @@ describe('NewLeadForm', () => {
     render(<NewLeadForm isOpen metadata={metadata} onClose={vi.fn()} onSuccess={onSuccess} />);
 
     fireEvent.change(screen.getByLabelText(/Target Branch/), { target: { value: '3' } });
-    await waitFor(() => expect(getMoveTypeLookups).toHaveBeenLastCalledWith({ applicable_branch_id: '3' }));
-    expect(getServices).toHaveBeenLastCalledWith({ applicable_branch_id: '3' });
+    await waitFor(() => expect(getMoveTypeLookups).toHaveBeenLastCalledWith());
+    expect(getServices).toHaveBeenLastCalledWith();
     expect(screen.getByRole('option', { name: 'Ada Manager' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Other Branch' })).not.toBeInTheDocument();
 

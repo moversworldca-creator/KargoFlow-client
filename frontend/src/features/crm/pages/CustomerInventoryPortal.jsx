@@ -55,13 +55,7 @@ const getPhotoUrl = (url) => {
   if (url.startsWith('http://') || url.startsWith('https://')) {
     return url;
   }
-  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
-  try {
-    const origin = new URL(apiUrl).origin;
-    return `${origin}${url}`;
-  } catch {
-    return `http://localhost:8000${url}`;
-  }
+  return new URL(url, new URL(import.meta.env.VITE_API_URL || '/api', window.location.origin)).href;
 };
 
 const SummaryStat = ({ label, value, icon: Icon, accent = 'text-primary' }) => (
@@ -102,6 +96,10 @@ const BreakdownRow = ({ label, value, max, tone = 'bg-primary', unit = 'lbs' }) 
 const CustomerInventoryPortal = () => {
   const [params] = useSearchParams();
   const token = params.get('token') || '';
+  return <InventoryPortalContent key={token} token={token} />;
+};
+
+const InventoryPortalContent = ({ token }) => {
   const photoInputRef = useRef(null);
 
   const [loading, setLoading] = useState(true);
@@ -140,11 +138,7 @@ const CustomerInventoryPortal = () => {
     };
   }, [photoDrafts]);
 
-  useEffect(() => {
-    if (rooms.length && !activeRoomName) {
-      setActiveRoomName(normalizeRoomName(rooms[0]?.name));
-    }
-  }, [rooms, activeRoomName]);
+
 
   const filteredItems = useMemo(() => {
     if (!searchTerm.trim()) return items;
@@ -261,8 +255,13 @@ const CustomerInventoryPortal = () => {
       const portalData = await getPublicEstimateInventoryPortal(token);
       if (!portalData || (!portalData.estimate_id && !portalData.lead_id)) throw new Error('Could not load portal data.');
 
-      setMeta(portalData);
       setUploadedPhotos(portalData.photos || []);
+      if (quiet) {
+        setMeta((previous) => ({ ...previous, inventory_portal_locked_at: portalData.inventory_portal_locked_at }));
+        return;
+      }
+      setError('');
+      setMeta(portalData);
 
       const templateRooms = (portalData.inventory_room_templates || []).map((room) => ({
         ...room,
@@ -274,6 +273,7 @@ const CustomerInventoryPortal = () => {
       const templateItems = templateRooms.flatMap((room) =>
         (room.item_templates || []).map((item) => ({
           id: `template-${room.id || room.name}-${item.id || item.name}`,
+          template_id: item.id,
           room_name: room.name,
           item_name: item.name,
           quantity: 0,
@@ -324,6 +324,7 @@ const CustomerInventoryPortal = () => {
       let finalRooms = Object.values(allRoomsMap);
       if (finalRooms.length === 0) finalRooms = [{ name: 'General', is_template: false }];
       setRooms(finalRooms);
+      setActiveRoomName((previous) => previous || normalizeRoomName(finalRooms[0]?.name));
     } catch (err) {
       setError(err.response?.data?.detail || 'The portal uplink is currently offline. Please try again later.');
     } finally {
@@ -373,7 +374,11 @@ const CustomerInventoryPortal = () => {
     }
   }, [token, fetchData, inventoryPortalLocked]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    let active = true;
+    Promise.resolve().then(() => { if (active) fetchData(); });
+    return () => { active = false; };
+  }, [fetchData]);
 
   const openPhotoPicker = useCallback(() => {
     if (inventoryPortalLocked) {
@@ -471,27 +476,33 @@ const CustomerInventoryPortal = () => {
   };
 
   // CONFIRM SUBMIT: Processes the actual request
+  const submittingRef = useRef(false);
   const handleConfirmSubmit = async () => {
+    if (submittingRef.current) return;
     if (inventoryPortalLocked) {
       setShowSubmitPreview(false);
       setError('Inventory portal is locked and cannot be submitted right now.');
       return;
     }
+    submittingRef.current = true;
     setShowSubmitPreview(false);
     setSyncing(true);
     setError('');
     try {
-      await submitPublicEstimateInventoryPortal({
+      const result = await submitPublicEstimateInventoryPortal({
         token,
+        version: meta.version,
         submitted_by_name: submittedByName,
         submitted_by_email: submittedByEmail,
         items: selectedItems
       });
+      setMeta((previous) => ({ ...previous, version: result.version }));
       setShowSuccess(true);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to transmit inventory. Please check your connection.');
     } finally {
+      submittingRef.current = false;
       setSyncing(false);
     }
   };
@@ -567,7 +578,7 @@ const CustomerInventoryPortal = () => {
                   </div>
                   <Calendar className="shrink-0 h-3 w-3 sm:h-[18px] sm:w-[18px] text-primary" />
                 </div>
-                {/* {inventoryPortalLocked ? (
+                {inventoryPortalLocked ? (
                   <div className="flex items-center gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-rose-800 shadow-sm">
                     <ShieldAlert size={18} className="shrink-0" />
                     <div className="min-w-0">
@@ -575,11 +586,11 @@ const CustomerInventoryPortal = () => {
                       <div className="text-sm">This inventory portal is read-only until the estimate team unlocks it.</div>
                     </div>
                   </div>
-                ) : null} */}
+                ) : null}
                 <button
                   type="button"
                   onClick={handleInitiateSubmit}
-                  disabled={syncing || selectedItems.length === 0 || inventoryPortalLocked}
+                  disabled={syncing || uploadingPhotos || selectedItems.length === 0 || inventoryPortalLocked}
                   className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-5 py-3 text-sm text-white shadow-[0_14px_28px_-18px_rgba(31,122,224,0.7)] transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-30"
                 >
                   {syncing ? <Loader2 className="animate-spin" size={18} /> : null}
@@ -592,6 +603,10 @@ const CustomerInventoryPortal = () => {
           </div>
 
           <main className="px-4 py-5 sm:px-6 lg:px-8">
+            <div className="mb-5 flex flex-wrap gap-4 rounded-lg border bg-white p-4">
+              <label>Your name<input aria-label="Your name" maxLength={255} disabled={inventoryPortalLocked || syncing} className="block rounded border p-2" value={submittedByName} onChange={(event) => setSubmittedByName(event.target.value)} autoComplete="name" /></label>
+              <label>Your email<input aria-label="Your email" type="email" maxLength={254} disabled={inventoryPortalLocked || syncing} className="block rounded border p-2" value={submittedByEmail} onChange={(event) => setSubmittedByEmail(event.target.value)} autoComplete="email" /></label>
+            </div>
             {error ? (
               <div className="mb-5 flex items-start gap-3 rounded-lg border border-primary/15 bg-brand-tint/50 px-4 py-3 text-slate-700">
                 <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
@@ -622,7 +637,7 @@ const CustomerInventoryPortal = () => {
               <input
                 ref={photoInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/jpeg,image/png,image/webp"
                 multiple
                 className="hidden"
                 onChange={handlePhotoInputChange}
@@ -690,7 +705,7 @@ const CustomerInventoryPortal = () => {
                           />
                         ) : (
                           <div className="flex h-full w-full items-center justify-center bg-slate-100 text-slate-400">
-                            <Package size={24} />
+                            <span className="p-2 text-center text-xs">{photo.state === 'ready' ? 'Photo unavailable' : photo.state === 'rejected' ? 'Photo rejected' : 'Photo processing. Refresh to check.'}</span>
                           </div>
                         )}
                         <div className="absolute inset-x-0 bottom-0 bg-black/60 p-2.5 text-white opacity-0 transition-opacity group-hover:opacity-100">

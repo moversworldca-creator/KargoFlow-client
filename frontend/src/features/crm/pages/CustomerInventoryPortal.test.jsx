@@ -1,0 +1,41 @@
+import React from 'react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import CustomerInventoryPortal from './CustomerInventoryPortal';
+import * as api from '../../../services/api';
+vi.mock('../../../services/api', () => ({ getPublicEstimateInventoryPortal: vi.fn(), submitPublicEstimateInventoryPortal: vi.fn(), uploadPublicEstimateInventoryPortalPhoto: vi.fn() }));
+afterEach(cleanup);
+const initial = { lead_id: 2, version: 7, customer_name: 'Customer', customer_email: 'test@example.com', photos: [], items: [{ id: 4, room_name: 'Bedroom', item_name: 'Bed', quantity: 1, weight_lbs_each: '100' }], inventory_room_templates: [] };
+beforeEach(() => { vi.clearAllMocks(); api.getPublicEstimateInventoryPortal.mockResolvedValue(initial); api.submitPublicEstimateInventoryPortal.mockResolvedValue({ success: true, version: 8 }); window.scrollTo = vi.fn(); URL.createObjectURL = vi.fn(() => 'blob:preview'); URL.revokeObjectURL = vi.fn(); });
+const portal = () => render(<MemoryRouter initialEntries={['/portal/inventory?token=issued-token']}><CustomerInventoryPortal /></MemoryRouter>);
+it('submits the displayed revision and customer identity', async () => {
+  portal();
+  await screen.findByRole('textbox', { name: 'Your name' });
+  fireEvent.change(screen.getByRole('textbox', { name: 'Your name' }), { target: { value: 'Jane Customer' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Submit', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: 'Accept & Submit' }));
+  await waitFor(() => expect(api.submitPublicEstimateInventoryPortal).toHaveBeenCalledWith(expect.objectContaining({ token: 'issued-token', version: 7, submitted_by_name: 'Jane Customer' })));
+  await screen.findByText('Inventory submitted');
+});
+it('renders locked inventory read-only', async () => {
+  api.getPublicEstimateInventoryPortal.mockResolvedValue({ ...initial, inventory_portal_locked_at: '2026-10-21' });
+  portal();
+  expect(await screen.findByRole('textbox', { name: 'Your name' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Locked' })).toBeDisabled();
+  expect(screen.getByText('Portal locked')).toBeInTheDocument();
+});
+it('preserves local quantities and revision when photo metadata refreshes', async () => {
+  portal();
+  await screen.findByRole('textbox', { name: 'Your name' });
+  fireEvent.click(screen.getAllByRole('button', { name: 'Increase quantity' })[0]);
+  api.uploadPublicEstimateInventoryPortalPhoto.mockResolvedValue({ id: 20, state: 'processing' });
+  api.getPublicEstimateInventoryPortal.mockResolvedValue({ ...initial, version: 99, photos: [{ id: 20, filename: 'Photo', state: 'processing' }] });
+  const input = document.querySelector('input[type="file"]');
+  fireEvent.change(input, { target: { files: [new File(['photo'], 'room.jpg', { type: 'image/jpeg' })] } });
+  await waitFor(() => expect(api.uploadPublicEstimateInventoryPortalPhoto).toHaveBeenCalled());
+  await screen.findByText('Photo processing. Refresh to check.');
+  fireEvent.click(screen.getByRole('button', { name: 'Submit', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: 'Accept & Submit' }));
+  await waitFor(() => expect(api.submitPublicEstimateInventoryPortal).toHaveBeenCalledWith(expect.objectContaining({ version: 7, items: [expect.objectContaining({ quantity: 2 })] })));
+});

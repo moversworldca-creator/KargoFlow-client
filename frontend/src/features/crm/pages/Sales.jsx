@@ -51,12 +51,20 @@ import { getRecordDetailPath, getSalesListTabFromSegment, getSalesListTabPath } 
 import useCan from '../../../shared/auth/useCan';
 import { useToast } from '../../../shared/context/ToastContext';
 import { PERMISSIONS } from '../../../shared/permissions/registry';
+import { getRecordSystemState, getLeadStatusLabel, getOpportunityStatusLabel } from '../utils/statusWorkflow';
 
 const STATUS = {
+  open: { label: 'Open', tone: 'bg-blue-50 text-blue-700 border-blue-200' },
+  closed: { label: 'Closed', tone: 'bg-emerald-50 text-emerald-800 border-emerald-200' },
+  cancelled: { label: 'Cancelled', tone: 'bg-red-50 text-red-700 border-red-200' },
+  qualified: { label: 'Qualified', tone: 'bg-emerald-50 text-emerald-800 border-emerald-200' },
+  converted: { label: 'Converted', tone: 'bg-emerald-50 text-emerald-800 border-emerald-200' },
+  disqualified: { label: 'Disqualified', tone: 'bg-rose-50 text-rose-700 border-rose-200' },
+  archived: { label: 'Archived', tone: 'bg-slate-50 text-slate-700 border-slate-200' },
   new:               { label: "New",               tone: "bg-sky-50 text-sky-700 border-sky-200" },
   new_lead:          { label: "New Lead",          tone: "bg-sky-50 text-sky-700 border-sky-200" },
   lead_in_progress:  { label: "Lead In Progress",  tone: "bg-indigo-50 text-indigo-700 border-indigo-200" },
-  in_progress:       { label: "In progress",       tone: "bg-indigo-50 text-indigo-700 border-indigo-200" },
+  in_progress:       { label: "In Progress",       tone: "bg-indigo-50 text-indigo-700 border-indigo-200" },
   opportunity:       { label: "Opportunity",       tone: "bg-blue-50 text-blue-700 border-blue-200" },
   qualifying:        { label: "Qualifying",        tone: "bg-purple-50 text-purple-700 border-purple-200" },
   estimate_ready:    { label: "Estimate Ready",    tone: "bg-violet-50 text-violet-700 border-violet-200" },
@@ -937,17 +945,20 @@ const FollowUpTaskEditModal = ({ item, form, setForm, users, isSaving, onClose, 
 };
 
 
-function StatusPill({ status, label, colorHex }) {
+function StatusPill({ status, label, colorHex, customLabel, customColor }) {
   const key = String(status || '').toLowerCase().replace(' ', '_');
   const s = STATUS[key] || { label: label || status || "New", tone: "bg-slate-100 text-slate-700 border-slate-200" };
   const colorStyle = getStatusPillColorStyle(colorHex);
   return (
+    <span className="inline-flex flex-col items-start gap-1">
     <span
       className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${colorStyle ? '' : s.tone}`}
       style={colorStyle || undefined}
     >
       <span className="inline-block h-1 w-1 rounded-full bg-current" />
-      {s.label}
+      {label || s.label}
+    </span>
+    {customLabel && <span className="text-[10px] font-medium text-slate-500" style={getStatusPillColorStyle(customColor) || undefined} title="Custom status">{customLabel}</span>}
     </span>
   );
 }
@@ -1334,7 +1345,7 @@ const PipelineRecordsPane = React.memo(function PipelineRecordsPane({
                         </div>
                       </td>
                       <td className="px-4 py-3.5">
-                        <StatusPill status={item.status} label={item.status_label} colorHex={item.status_color} />
+                        <StatusPill status={item.status} label={item.status_label} colorHex={item.status_color} customLabel={item.custom_status_label} customColor={item.custom_status_color} />
                       </td>
                       <td className="px-4 py-3.5">
                         <div className="min-w-0">
@@ -1584,7 +1595,7 @@ const PipelineRecordsPane = React.memo(function PipelineRecordsPane({
                             {formatCurrency(item.value || item.lead_cost)}
                           </span>
                         )}
-                        <StatusPill status={item.status} label={item.status_label} colorHex={item.status_color} />
+                        <StatusPill status={item.status} label={item.status_label} colorHex={item.status_color} customLabel={item.custom_status_label} customColor={item.custom_status_color} />
                       </div>
                     </div>
 
@@ -3655,18 +3666,12 @@ const Sales = () => {
 
   const normalizeQueueRow = useCallback((row) => {
     const isLeadRow = String(row.row_type || '').toLowerCase() === 'lead' || Boolean(row.lead_id && !row.opportunity_id);
-    const pipelineStatusValue = row.workflow_stage || (isLeadRow ? 'new_lead' : 'opportunity');
+    const pipelineStatusValue = getRecordSystemState({ ...row, status: row.system_state || (isLeadRow ? row.lead_status : row.opp_status) || row.status }, isLeadRow) || (isLeadRow ? 'new' : 'open');
     const internalStatusValue = row.custom_status_code || '';
     const normalizedStatus = String(pipelineStatusValue).toLowerCase();
-    const normalizedLabel = row.custom_status_label || row.workflow_stage_label || row.opp_status_label || row.lead_status_label || pipelineStatusValue;
+    const normalizedLabel = (isLeadRow ? getLeadStatusLabel : getOpportunityStatusLabel)(normalizedStatus);
 
-    const isLost =
-      activeTab === 'lost-leads' ||
-      String(row.status || '').toLowerCase() === 'lost' ||
-      String(row.lead_status || '').toLowerCase() === 'lost' ||
-      String(row.opp_status || '').toLowerCase() === 'lost' ||
-      String(row.workflow_stage || '').toLowerCase() === 'lost' ||
-      String(row.custom_status_code || '').toLowerCase() === 'lost';
+    const isLost = normalizedStatus === 'lost';
 
     const statusValues = Array.from(
       new Set(
@@ -3701,7 +3706,8 @@ const Sales = () => {
       raw_status: String(row.status || '').toLowerCase(),
       lead_status: String(row.lead_status || row.status || '').toLowerCase(),
       opp_status: String(row.opp_status || row.status || '').toLowerCase(),
-      status_color: isLost ? null : resolveStatusCodeColor(row),
+      status_color: null,
+      custom_status_color: row.custom_status_color || resolveStatusCodeColor(row),
       status_values: statusValues,
       custom_status_code: internalStatusValue || '',
       custom_status_label: row.custom_status_label || '',
@@ -3745,8 +3751,8 @@ const Sales = () => {
             getLookupUsers({ limit: 100 }),
             getStatusCodeLookupsPage('', 0, 100),
             getLeadStatusCodeLookups({ limit: 100, ...(filters.branch ? { branch: filters.branch } : {}) }).catch(() => null),
-            getServices(filters.branch ? { branch: filters.branch } : {}).catch(() => null),
-            getMoveTypeLookups(filters.branch ? { branch: filters.branch } : {}).catch(() => null),
+            getServices().catch(() => null),
+            getMoveTypeLookups().catch(() => null),
             getMoverSizeLookups(filters.branch ? { branch: filters.branch } : {}).catch(() => null),
           ];
       metadataPromiseRef.current = Promise.all(baseRequests)
@@ -5930,7 +5936,7 @@ const Sales = () => {
                           </td>
 
                           <td className="px-4 py-3.5">
-                            <StatusPill status={item.status} label={item.status_label} colorHex={item.status_color} />
+                            <StatusPill status={item.status} label={item.status_label} colorHex={item.status_color} customLabel={item.custom_status_label} customColor={item.custom_status_color} />
                           </td>
 
                           <td className="px-4 py-3.5">
@@ -6232,7 +6238,7 @@ const Sales = () => {
                                 {formatCurrency(item.value || item.lead_cost)}
                               </span>
                             )}
-                            <StatusPill status={item.status} label={item.status_label} colorHex={item.status_color} />
+                            <StatusPill status={item.status} label={item.status_label} colorHex={item.status_color} customLabel={item.custom_status_label} customColor={item.custom_status_color} />
                           </div>
                         </div>
 
