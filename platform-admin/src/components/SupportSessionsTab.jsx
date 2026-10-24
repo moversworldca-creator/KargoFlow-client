@@ -192,8 +192,10 @@ export default function SupportSessionsTab({
       const tenantIdNum = Number(session.tenantId);
 
       const response = await platformApi.createTenantConsoleToken(session.normalizedId);
-      const token = response.data?.access_token;
-      if (!token) {
+      // A single-use code, not a session: the tenant app exchanges it for an
+      // HttpOnly support cookie on its own origin within a minute.
+      const code = response.data?.handoff_code;
+      if (!code) {
         throw new Error('The platform did not return a tenant-console credential.');
       }
 
@@ -204,7 +206,7 @@ export default function SupportSessionsTab({
         : `${window.location.origin}/dashboard`;
       const handoff = new URL(crmUrl, window.location.origin);
       handoff.hash = new URLSearchParams({
-        support_token: token,
+        support_code: code,
         tenant_id: String(tenantIdNum),
         tenant_name: tenantName,
         access_mode: response.data?.access_mode || session.accessMode,
