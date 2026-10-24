@@ -881,13 +881,17 @@ export default function UnifiedTemplateBuilder({
       }
 
       if (onSave) {
-        await onSave(payload);
+        const result = await onSave(payload);
+        if (result === false || result === null) {
+          throw new Error("Unable to save template.");
+        }
       }
       setIsDirty(false);
       setToastMessage("Template saved successfully");
     } catch (err) {
       console.error("Save error:", err);
-      setToastMessage("Failed to save template");
+      const detail = err?.response?.data?.detail || err?.response?.data?.message || err?.message || "Failed to save template";
+      setToastMessage(typeof detail === "string" ? detail : "Failed to save template");
     } finally {
       setIsSaving(false);
     }
@@ -942,13 +946,17 @@ export default function UnifiedTemplateBuilder({
       }
 
       if (onSave) {
-        await onSave(payload);
+        const result = await onSave(payload);
+        if (result === false || result === null) {
+          throw new Error("Unable to save draft.");
+        }
       }
       setIsDirty(false);
       setToastMessage("Draft saved successfully");
     } catch (err) {
       console.error("Draft error:", err);
-      setToastMessage("Failed to save draft. Please retry.");
+      const detail = err?.response?.data?.detail || err?.response?.data?.message || err?.message || "Failed to save draft";
+      setToastMessage(typeof detail === "string" ? detail : "Failed to save draft. Please retry.");
     } finally {
       setIsSaving(false);
     }

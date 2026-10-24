@@ -33,7 +33,7 @@ import {
   deactivateDocumentTemplate,
   duplicateBuilderTemplate,
 } from '../../../services/api';
-import { fromBackendDocument } from './UnifiedTemplateBuilder/core/documentAdapter';
+import { fromBackendDocument, toBackendDocument } from './UnifiedTemplateBuilder/core/documentAdapter';
 import api from '../../../services/api';
 import { getPortalBaseUrl } from '../../../shared/utils/portalBaseUrl';
 import { filterAccessibleBranches } from '../../../shared/utils/branchScope';
@@ -505,8 +505,11 @@ const templateContentToHtml = (template) => {
 };
 
 const inlineTemplateContent = (content) => {
-  if (content && typeof content === 'object' && Array.isArray(content.blocks)) {
-    return { ...content, blocks: content.blocks.map((block) => ({ ...block, html: inlineDocumentBuilderStyles(block?.html || '') })) };
+  if (content && typeof content === 'object') {
+    if (Array.isArray(content.blocks)) {
+      return { ...content, blocks: content.blocks.map((block) => ({ ...block, html: inlineDocumentBuilderStyles(block?.html || '') })) };
+    }
+    return content;
   }
   return inlineDocumentBuilderStyles(content || '');
 };
@@ -1028,113 +1031,133 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
     }
   };
 
-  const saveTemplate = async () => {
-    if (activeBuilderMeta?.group === 'estimate' || draft?.source_type === 'estimate') {
+  const saveTemplate = async (incomingDraft = null) => {
+    const activeDraft = incomingDraft ? { ...draft, ...incomingDraft } : draft;
+    const resolvedBranch = activeDraft.branch
+      ? Number(activeDraft.branch)
+      : branchId
+      ? Number(branchId)
+      : branchFilter
+      ? Number(branchFilter)
+      : branches[0]?.id
+      ? Number(branches[0].id)
+      : null;
+
+    if (activeBuilderMeta?.group === 'estimate' || activeDraft?.source_type === 'estimate') {
       const payload = {
-        name: String(draft.name || '').trim(),
-        subtype: String(draft.subtype || draft.template_type || 'binding').trim(),
-        template_type: String(draft.subtype || draft.template_type || 'binding').trim(),
-        lock_version: draft.lock_version || 1,
+        name: String(activeDraft.name || '').trim(),
+        subtype: String(activeDraft.subtype || activeDraft.template_type || 'binding').trim(),
+        template_type: String(activeDraft.subtype || activeDraft.template_type || 'binding').trim(),
+        lock_version: activeDraft.lock_version || 1,
         applies_to_entity: 'opportunity',
-        subject: String(draft.subject || '').trim(),
-        version: Number(draft.version) || 1,
-        branch: draft.branch ? Number(draft.branch) : null,
-        is_active: Boolean(draft.is_active),
-        html_content: String(draft.html_content || ''),
+        subject: String(activeDraft.subject || '').trim(),
+        version: Number(activeDraft.version) || 1,
+        branch: resolvedBranch,
+        is_active: Boolean(activeDraft.is_active !== undefined ? activeDraft.is_active : true),
+        html_content: String(activeDraft.html_content || ''),
+        ...(activeDraft.document ? { document: activeDraft.document } : {}),
+        ...(activeDraft.content ? { content: activeDraft.content } : {}),
       };
       setIsSaving(true);
       try {
-        const res = draft.id ? await updateEstimatePortalTemplate(draft.id, payload) : await createEstimatePortalTemplate(payload);
+        const res = activeDraft.id ? await updateEstimatePortalTemplate(activeDraft.id, payload) : await createEstimatePortalTemplate(payload);
         const saved = res?.data ?? res;
         await loadTemplates();
         notify('success', 'Estimate portal template updated.');
         return saved;
       } catch (err) {
-        notify('error', getApiErrorMessage(err, 'Unable to save template.'));
-        return null;
+        const errorMsg = getApiErrorMessage(err, 'Unable to save template.');
+        notify('error', errorMsg);
+        throw new Error(errorMsg);
       } finally {
         setIsSaving(false);
       }
     }
 
-    if (activeBuilderMeta?.group === 'comm' || draft?.source_type === 'comm') {
+    if (activeBuilderMeta?.group === 'comm' || activeDraft?.source_type === 'comm') {
       const payload = {
-        name: String(draft.name || '').trim(),
-        channel: draft.channel || 'email',
-        template_key: String(draft.template_key || '').trim(),
-        subject: String(draft.subject || '').trim(),
-        body: String(draft.body || '').trim(),
-        body_html: String(draft.body_html || '').trim(),
-        branch: draft.branch ? Number(draft.branch) : null,
-        is_active: Boolean(draft.is_active),
+        name: String(activeDraft.name || '').trim(),
+        channel: activeDraft.channel || 'email',
+        template_key: String(activeDraft.template_key || '').trim(),
+        subject: String(activeDraft.subject || '').trim(),
+        body: String(activeDraft.body || '').trim(),
+        body_html: String(activeDraft.body_html || '').trim(),
+        branch: resolvedBranch,
+        is_active: Boolean(activeDraft.is_active !== undefined ? activeDraft.is_active : true),
       };
       setIsSaving(true);
       try {
-        const res = draft.id ? await updateCommunicationTemplate(draft.id, payload) : await createCommunicationTemplate(payload);
+        const res = activeDraft.id ? await updateCommunicationTemplate(activeDraft.id, payload) : await createCommunicationTemplate(payload);
         const saved = res?.data ?? res;
         await loadTemplates();
         notify('success', 'Communication template updated.');
         return saved;
       } catch (err) {
-        notify('error', getApiErrorMessage(err, 'Unable to save template.'));
-        return null;
+        const errorMsg = getApiErrorMessage(err, 'Unable to save template.');
+        notify('error', errorMsg);
+        throw new Error(errorMsg);
       } finally {
         setIsSaving(false);
       }
     }
 
     // Default: Legal template
+    const rawContent = activeDraft.content ?? String(activeDraft.html_content || '');
+    const compiledDocument = activeDraft.document || (rawContent && typeof rawContent === 'object' && rawContent.pages ? toBackendDocument(rawContent, activeDraft.subtype || activeDraft.template_type || templateKind) : undefined);
+
     const payload = {
-      name: String(draft.name || '').trim(),
+      name: String(activeDraft.name || '').trim(),
       kind: templateKind,
-      subtype: draft.subtype || (templateKind === 'invoice' ? 'final' : draft.template_type),
-      template_type: String(draft.template_type || '').trim(),
-      applies_to_entity: String(draft.applies_to_entity || '').trim() || 'opportunity',
-      scope_type: String(draft.scope_type || draft.applies_to_entity || '').trim() || 'opportunity',
-      applies_to_service_type: String(draft.applies_to_service_type || '').trim(),
-      applies_to_binding_type: String(draft.applies_to_binding_type || '').trim(),
-      applies_to_opp_type: String(draft.applies_to_opp_type || '').trim(),
-      subject: String(draft.subject || '').trim(),
-      version: String(draft.version || '').trim() || '1.0',
-      branch: draft.branch ? Number(draft.branch) : null,
-      is_active: Boolean(draft.is_active),
-      content: inlineTemplateContent(draft.content ?? String(draft.html_content || '')),
-      html_content: String(draft.html_content || ''),
+      subtype: activeDraft.subtype || (templateKind === 'invoice' ? 'final' : activeDraft.template_type),
+      template_type: String(activeDraft.template_type || '').trim(),
+      applies_to_entity: String(activeDraft.applies_to_entity || '').trim() || 'opportunity',
+      scope_type: String(activeDraft.scope_type || activeDraft.applies_to_entity || '').trim() || 'opportunity',
+      applies_to_service_type: String(activeDraft.applies_to_service_type || '').trim(),
+      applies_to_binding_type: String(activeDraft.applies_to_binding_type || '').trim(),
+      applies_to_opp_type: String(activeDraft.applies_to_opp_type || '').trim(),
+      subject: String(activeDraft.subject || '').trim(),
+      version: String(activeDraft.version || '').trim() || '1.0',
+      branch: resolvedBranch,
+      is_active: Boolean(activeDraft.is_active !== undefined ? activeDraft.is_active : true),
+      content: inlineTemplateContent(rawContent),
+      html_content: String(activeDraft.html_content || ''),
+      ...(compiledDocument ? { document: compiledDocument } : {}),
+      lock_version: activeDraft.lock_version || 1,
     };
     if (!payload.name) {
       notify('error', 'Document template name is required.');
-      return null;
+      throw new Error('Document template name is required.');
     }
     if (!payload.template_type) {
       notify('error', 'Document template type is required.');
-      return null;
+      throw new Error('Document template type is required.');
     }
     if (!DOCUMENT_TEMPLATE_TYPE_RE.test(payload.template_type)) {
       notify('error', 'Document template type can use letters, numbers, dash, or underscore only.');
-      return null;
+      throw new Error('Document template type can use letters, numbers, dash, or underscore only.');
     }
     if (!payload.branch) {
       notify('error', 'Choose a branch before saving this document template.');
-      return null;
+      throw new Error('Choose a branch before saving this document template.');
     }
     if (!DOCUMENT_VERSION_RE.test(payload.version)) {
       notify('error', 'Version can use letters, numbers, dot, dash, or underscore only.');
-      return null;
+      throw new Error('Version can use letters, numbers, dot, dash, or underscore only.');
     }
 
     setIsSaving(true);
     setMessage({ type: '', text: '' });
     try {
-      const wasExisting = Boolean(draft.id);
-      const res = draft.id
-        ? await updateDocumentTemplate(draft.id, { ...payload, lock_version: draft.lock_version || 1 })
+      const wasExisting = Boolean(activeDraft.id);
+      const res = activeDraft.id
+        ? await updateDocumentTemplate(activeDraft.id, { ...payload, lock_version: activeDraft.lock_version || 1 })
         : await createDocumentTemplate(payload);
       const saved = res?.data ?? res;
       const nextLock = saved?.draft?.revision?.lock_version || saved?.draft?.lock_version ||
-        saved?.lock_version || (draft.lock_version ? draft.lock_version + 1 : 1);
-      setDraft((current) => ({ ...current, id: saved?.id || current.id, lock_version: nextLock }));
+        saved?.lock_version || (activeDraft.lock_version ? activeDraft.lock_version + 1 : 1);
+      setDraft((current) => ({ ...current, ...activeDraft, ...saved, id: saved?.id || current.id, lock_version: nextLock }));
       setItems((current) => {
-        const row = { ...draft, ...payload, ...saved };
+        const row = { ...activeDraft, ...payload, ...saved };
         return current.some((item) => item.id === row.id)
           ? current.map((item) => item.id === row.id ? row : item)
           : [...current, row];
@@ -1142,8 +1165,9 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
       notify('success', wasExisting ? 'Document template updated.' : 'Document template created.');
       return saved;
     } catch (err) {
-      notify('error', getApiErrorMessage(err, 'Unable to save template.'));
-      return null;
+      const errorMsg = getApiErrorMessage(err, 'Unable to save template.');
+      notify('error', errorMsg);
+      throw new Error(errorMsg);
     } finally {
       setIsSaving(false);
     }
@@ -1258,7 +1282,7 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
     let templateIdToPreview = draft?.id;
     setIsFullPreviewOpen(true);
     setPreviewHtml(renderSamplePreviewHtml(templateContentToHtml(draft)));
-    const saved = await saveTemplate();
+    let saved; try { saved = await saveTemplate(); } catch { saved = null; }
     if (saved && saved.id) {
       templateIdToPreview = saved.id;
     } else {
@@ -1559,7 +1583,7 @@ export default function DocumentTemplates({ branchId = null, builderRouteView = 
           branchId={draft.branch || (branchFilter ? Number(branchFilter) : null)}
           onChange={(newDraft) => setDraft(newDraft)}
           onSave={async (savedDoc) => {
-            const saved = await saveTemplate();
+            const saved = await saveTemplate(savedDoc);
             if (saved?.id) {
               if (activeBuilderMeta?.group === 'estimate' || draft?.source_type === 'estimate') {
                 navigate(`${estimateBasePath}/${saved.id}/builder`, { replace: true });

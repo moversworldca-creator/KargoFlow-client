@@ -11,6 +11,10 @@ import API from '../../../services/api';
 import useCan from '../../../shared/auth/useCan';
 import { normalizePreviewHtml, replaceBranchPlaceholders, resolveRenderableUrl } from '../../crm/utils/emailPreview';
 import {
+  getCommunicationTemplate,
+  getCommunicationTemplates,
+  createCommunicationTemplate,
+  deleteCommunicationTemplate,
   updateCommunicationTemplate,
   updateAutomationStep,
   seedCommunicationTemplates,
@@ -338,6 +342,8 @@ const preparePreviewHtml = (raw) => {
   }
   return html.replace(/<!--\s*BUILDER_DATA:\s*[\s\S]*?-->/gi, '');
 };
+
+const getTemplateResponseData = (response) => response?.data || response;
 
 const normalize = (payload) => {
   if (Array.isArray(payload)) return payload;

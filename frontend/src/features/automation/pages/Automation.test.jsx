@@ -659,7 +659,7 @@ describe('Automation Page Component', () => {
 
     await waitFor(() => {
       expect(getCustomAutomation).toHaveBeenCalledWith(91);
-      expect(screen.getByPlaceholderText('Automation name')).toHaveValue('Follow up after a new lead');
+      expect(screen.getByPlaceholderText('e.g. New Lead Welcome')).toHaveValue('Follow up after a new lead');
     });
   });
 
@@ -694,17 +694,88 @@ describe('Automation Page Component', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Create Automation/i }));
 
     expect(await screen.findByText('When should this automation trigger?')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Automation name')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('e.g. New Lead Welcome')).toBeInTheDocument();
     expect(screen.getByText('Live Preview')).toBeInTheDocument();
+    expect(screen.getByText('When lead create')).toBeInTheDocument();
+    expect(screen.getByText('To: Lead contact Lead contact 2 Lead contact 3 Sales person email Branch email')).toBeInTheDocument();
+    expect(screen.getByText('No filters')).toBeInTheDocument();
+    expect(screen.queryByText(/1\. Send email/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Next/i }));
-    expect(await screen.findByRole('heading', { name: 'Actions' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Action' })).toBeInTheDocument();
+    expect(screen.queryByText(/1\. Send email/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Action/ })).toHaveAttribute('aria-current', 'step');
+    expect(screen.getByRole('button', { name: /Trigger/ })).toHaveTextContent('1');
 
     fireEvent.click(screen.getByRole('button', { name: /Next/i }));
-    expect(await screen.findByRole('heading', { name: 'Target' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Who should receive this?' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Action/ })).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('button', { name: /Action/ })).toHaveTextContent('2');
 
     fireEvent.click(screen.getByRole('button', { name: /Next/i }));
     expect(await screen.findByText('Add filters (optional)')).toBeInTheDocument();
+  });
+
+  it('configures target recipients and updates the live preview', async () => {
+    render(<Automation />);
+
+    fireEvent.click(screen.getByRole('button', { name: /^Automations$/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Create Automation/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Next/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Next/i }));
+
+    expect(await screen.findByRole('heading', { name: 'Who should receive this?' })).toBeInTheDocument();
+    expect(screen.getAllByRole('switch', { name: /recipient$/i })).toHaveLength(5);
+    expect(screen.getByRole('switch', { name: 'Lead contact recipient' })).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Lead contact recipient' }));
+    expect(screen.getByText('To: Lead contact 2 Lead contact 3 Sales person email Branch email')).toBeInTheDocument();
+
+    const emailInput = screen.getByLabelText('Custom email address');
+    fireEvent.change(emailInput, { target: { value: ' not-an-email ' } });
+    fireEvent.keyDown(emailInput, { key: 'Enter', code: 'Enter' });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Enter a valid email address.');
+
+    fireEvent.change(emailInput, { target: { value: 'contact@example.com ' } });
+    fireEvent.keyDown(emailInput, { key: 'Enter', code: 'Enter' });
+    expect(await screen.findByText('contact@example.com')).toBeInTheDocument();
+    expect(screen.getByText(/To: Lead contact 2 Lead contact 3 Sales person email Branch email contact@example.com/)).toBeInTheDocument();
+
+    const phoneInput = screen.getByLabelText('Custom phone number');
+    fireEvent.change(phoneInput, { target: { value: '+1 (555) 123-4567' } });
+    fireEvent.keyDown(phoneInput, { key: 'Enter', code: 'Enter' });
+    expect(await screen.findByText('+1 (555) 123-4567')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove email contact@example.com' }));
+    expect(screen.queryByText('contact@example.com')).not.toBeInTheDocument();
+    expect(screen.queryByText(/To: .*contact@example.com/)).not.toBeInTheDocument();
+  });
+
+  it('adds email attachment choices and a PDF picker without replacing action fields', async () => {
+    render(<Automation />);
+
+    fireEvent.click(screen.getByRole('button', { name: /^Automations$/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Create Automation/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Next/i }));
+
+    expect(await screen.findByRole('heading', { name: 'Action' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Add Step/i })).not.toBeInTheDocument();
+    expect(screen.getByText('Channel')).toBeInTheDocument();
+    expect(screen.getByText('General Template')).toBeInTheDocument();
+    expect(screen.getByText('Execution Delay')).toBeInTheDocument();
+    expect(screen.queryByTitle('Delete Step')).not.toBeInTheDocument();
+
+    const estimateAttachment = screen.getByRole('button', { name: /Attach estimate PDF/ });
+    expect(estimateAttachment).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(estimateAttachment);
+    expect(estimateAttachment).toHaveAttribute('aria-pressed', 'true');
+
+    const pdfFile = new File(['pdf content'], 'welcome-guide.pdf', { type: 'application/pdf' });
+    fireEvent.change(screen.getByLabelText('Browse PDF for step 1'), {
+      target: { files: [pdfFile] },
+    });
+    expect(await screen.findByText('welcome-guide.pdf')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    expect(screen.queryByText('welcome-guide.pdf')).not.toBeInTheDocument();
   });
 
   it('blocks the automation wizard when event metadata fails to load', async () => {

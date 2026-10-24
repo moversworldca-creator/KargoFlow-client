@@ -23,6 +23,7 @@ const apiMocks = vi.hoisted(() => ({
   previewCommunicationTemplate: vi.fn(),
   seedCommunicationTemplates: vi.fn(),
   updateCommunicationTemplate: vi.fn(),
+  getCommunicationTemplate: vi.fn(),
   updateAutomationStep: vi.fn(),
 }));
 
@@ -55,6 +56,7 @@ vi.mock('../../../services/api', () => ({
   seedCommunicationTemplates: apiMocks.seedCommunicationTemplates,
   updateAutomationStep: apiMocks.updateAutomationStep,
   updateCommunicationTemplate: apiMocks.updateCommunicationTemplate,
+  getCommunicationTemplate: apiMocks.getCommunicationTemplate,
 }));
 
 vi.mock('../../../shared/ui/Card', () => ({

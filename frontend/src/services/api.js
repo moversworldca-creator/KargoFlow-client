@@ -660,8 +660,8 @@ const toBackendTemplateDocument = (data, mode) => {
       const normalizedToken = token.trim().toLowerCase();
       return `{{${legacyTokenAliases[normalizedToken] || normalizedToken}${filters}}}`;
     });
-  const htmlContent = data.html_content || content.html_content || data.body_html || content.body_html ||
-    (typeof data.content === "string" ? data.content : "");
+  const rawContentHtml = data.content === "[object Object]" ? "" : (typeof data.content === "string" ? data.content : "");
+  const htmlContent = data.html_content || content.html_content || data.body_html || content.body_html || rawContentHtml;
   return toBackendDocument(
     {
       ...content,

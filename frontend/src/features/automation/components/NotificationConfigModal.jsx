@@ -274,7 +274,7 @@ export default function NotificationConfigModal({
                 onChange={(e) => setEnabled(e.target.checked)}
                 className="sr-only peer"
               />
-              <span className="relative block h-4 w-7 rounded-full bg-slate-200 transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary peer-checked:bg-primary after:content-[''] after:absolute after:left-[2px] after:top-[2px] after:h-2.5 after:w-2.5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-transform peer-checked:after:translate-x-3 peer-checked:after:border-white"></span>
+              <span className="relative block h-4 w-7 rounded-full bg-slate-200 transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary peer-checked:bg-[#1F7AE0] after:content-[''] after:absolute after:left-[2px] after:top-[2px] after:h-2.5 after:w-2.5 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-transform peer-checked:after:translate-x-3 peer-checked:after:border-white"></span>
             </label>
           </div>
 
@@ -303,7 +303,7 @@ export default function NotificationConfigModal({
                       onChange={(e) => setInAppEnabled(e.target.checked)}
                       className="sr-only peer"
                     />
-                    <span className="relative block h-3.5 w-6 rounded-full bg-slate-200 transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary peer-checked:bg-primary after:content-[''] after:absolute after:left-[3px] after:top-[3px] after:h-2 after:w-2 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-transform peer-checked:after:translate-x-2.5 peer-checked:after:border-white"></span>
+                    <span className="relative block h-3.5 w-6 rounded-full bg-slate-200 transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary peer-checked:bg-[#1F7AE0] after:content-[''] after:absolute after:left-[3px] after:top-[3px] after:h-2 after:w-2 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-transform peer-checked:after:translate-x-2.5 peer-checked:after:border-white"></span>
                   </label>
                 </div>
                 <p className="text-[11px] text-muted mt-2">No notification is created when the record has no active assigned salesperson.</p>
@@ -330,7 +330,7 @@ export default function NotificationConfigModal({
                     onChange={(e) => setEmailEnabled(e.target.checked)}
                     className="sr-only peer"
                   />
-                  <span className="relative block h-3.5 w-6 rounded-full bg-slate-200 transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary peer-checked:bg-primary after:content-[''] after:absolute after:left-[3px] after:top-[3px] after:h-2 after:w-2 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-transform peer-checked:after:translate-x-2.5 peer-checked:after:border-white"></span>
+                  <span className="relative block h-3.5 w-6 rounded-full bg-slate-200 transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary peer-checked:bg-[#1F7AE0] after:content-[''] after:absolute after:left-[3px] after:top-[3px] after:h-2 after:w-2 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-transform peer-checked:after:translate-x-2.5 peer-checked:after:border-white"></span>
                 </label>
               </div>
 
@@ -358,7 +358,7 @@ export default function NotificationConfigModal({
                 </select>
                 {emailTemplates.length === 0 && !loading && (
                   <p className="text-[11px] text-amber-600 mt-1">
-                    No active Notification templates found for Email channel.
+                    No active templates found with purpose "Notification" for Email channel.
                   </p>
                 )}
               </div>
@@ -385,7 +385,7 @@ export default function NotificationConfigModal({
                     onChange={(e) => setSmsEnabled(e.target.checked)}
                     className="sr-only peer"
                   />
-                  <span className="relative block h-3.5 w-6 rounded-full bg-slate-200 transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary peer-checked:bg-primary after:content-[''] after:absolute after:left-[3px] after:top-[3px] after:h-2 after:w-2 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-transform peer-checked:after:translate-x-2.5 peer-checked:after:border-white"></span>
+                  <span className="relative block h-3.5 w-6 rounded-full bg-slate-200 transition-colors peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary peer-checked:bg-[#1F7AE0] after:content-[''] after:absolute after:left-[3px] after:top-[3px] after:h-2 after:w-2 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-transform peer-checked:after:translate-x-2.5 peer-checked:after:border-white"></span>
                 </label>
               </div>
 
@@ -413,7 +413,7 @@ export default function NotificationConfigModal({
                 </select>
                 {smsTemplates.length === 0 && !loading && (
                   <p className="text-[11px] text-amber-600 mt-1">
-                    No active Notification templates found for SMS channel.
+                    No active templates found with purpose "Notification" for SMS channel.
                   </p>
                 )}
               </div>

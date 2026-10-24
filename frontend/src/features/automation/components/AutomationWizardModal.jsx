@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, Plus, Trash2, ArrowUp, ArrowDown, AlertCircle, CheckCircle2, ChevronRight } from 'lucide-react';
+import { X, Plus, Trash2, ArrowUp, ArrowDown, AlertCircle, ChevronRight } from 'lucide-react';
 import {
   createCustomAutomation,
   updateCustomAutomation,
@@ -8,86 +8,235 @@ import {
 } from '../../../services/api';
 
 const OPERATORS = [
-  { value: 'eq', label: 'Equals (==)' },
-  { value: 'ne', label: 'Does not equal (!=)' },
-  { value: 'in', label: 'Is in list (comma-separated)' },
-  { value: 'not_in', label: 'Is not in list' },
-  { value: 'gt', label: 'Greater than (>)' },
-  { value: 'gte', label: 'Greater than or equal (>=)' },
-  { value: 'lt', label: 'Less than (<)' },
-  { value: 'lte', label: 'Less than or equal (<=)' },
-  { value: 'is_set', label: 'Is set (not empty)' },
-  { value: 'is_empty', label: 'Is empty / not set' },
-  { value: 'contains', label: 'Contains (case-insensitive)' },
+  { value: 'eq', label: 'Equals' },
+  { value: 'ne', label: 'Not Equals' },
+  { value: 'in', label: 'In list' },
+  { value: 'not_in', label: 'Not in list' },
+  { value: 'gt', label: 'Greater than' },
+  { value: 'gte', label: 'Greater than or equal' },
+  { value: 'lt', label: 'Less than' },
+  { value: 'lte', label: 'Less than or equal' },
+  { value: 'is_set', label: 'Is set' },
+  { value: 'is_empty', label: 'Is empty' },
+  { value: 'contains', label: 'Contains' },
+];
+
+const LEAD_FILTER_OPERATORS = [
+  { value: 'eq', label: 'Equals' },
+  { value: 'ne', label: 'Not Equals' },
+  { value: 'contains', label: 'Contains' },
+  { value: 'in', label: 'In list' },
+  { value: 'is_set', label: 'Is set' },
+  { value: 'is_empty', label: 'Is empty' },
+  { value: 'within_next_days', label: 'Within next (days)', uiOnly: true },
+  { value: 'within_past_days', label: 'Within past (days)', uiOnly: true },
 ];
 
 const COMMON_FIELDS = {
   lead: [
-    { field: 'lead.system_state', label: 'System State (e.g. new)' },
-    { field: 'lead.status', label: 'Status' },
-    { field: 'lead.source', label: 'Lead Source' },
-    { field: 'lead.email', label: 'Customer Email' },
-    { field: 'lead.phone', label: 'Customer Phone' },
-    { field: 'lead.move_type', label: 'Move Type' },
+    { field: 'lead.system_state', label: 'Lead Status', valueType: 'select', options: [
+      { value: 'new', label: 'New' },
+      { value: 'in_progress', label: 'Contacted' },
+      { value: 'qualified', label: 'Qualified' },
+      { value: 'disqualified', label: 'Unqualified' },
+      { value: 'converted', label: 'Converted' },
+      { value: 'lost', label: 'Lost' },
+    ] },
+    { field: 'lead.custom_status_code_id', label: 'Lead Custom Status' },
+    { field: 'lead.workflow_stage', label: 'Lead Workflow Stage' },
+    { field: 'lead.branch_id', label: 'Lead Branch', valueType: 'select', optionsFrom: 'branches' },
+    { field: 'lead.assigned_employee_id', label: 'Lead Assigned To' },
+    { field: 'lead.move_date', label: 'Lead Move Date', valueType: 'date' },
+    { field: 'lead.referral_source_id', label: 'Referral Source' },
+    { field: 'contact.email', label: 'Has Email', valueType: 'presence' },
+    { field: 'contact.phone', label: 'Has Phone', valueType: 'presence' },
+    { field: 'lead.sms_opt_in', label: 'SMS Opt-in', valueType: 'boolean' },
   ],
   opportunity: [
     { field: 'opportunity.stage', label: 'Stage' },
     { field: 'opportunity.status', label: 'Status' },
     { field: 'opportunity.source', label: 'Source' },
+    { field: 'opportunity.estimated_value', label: 'Estimated Value' },
+    { field: 'opportunity.move_date', label: 'Move Date' },
+    { field: 'opportunity.pickup_city', label: 'Pickup City' },
+    { field: 'opportunity.dropoff_city', label: 'Dropoff City' },
     { field: 'opportunity.branch_id', label: 'Branch ID' },
   ],
 };
 
-const initialAutomationState = () => ({
+let filterIdSequence = 0;
+const createFilterId = () => {
+  filterIdSequence += 1;
+  return `filter-${Date.now()}-${filterIdSequence}`;
+};
+
+const TRIGGER_TARGETS = [
+  { value: 'lead', label: 'Lead' },
+  { value: 'estimate', label: 'Estimate' },
+  { value: 'job', label: 'Job' },
+  { value: 'opportunity', label: 'Opportunity' },
+];
+
+const getTriggerTarget = (eventName) =>
+  TRIGGER_TARGETS.find(({ value }) => String(eventName || '').startsWith(`${value}.`))?.value || 'lead';
+
+const getTriggerEventType = (eventName) => {
+  const eventSuffix = String(eventName || '').split('.').slice(1).join('.');
+  if (eventSuffix === 'updated') return 'update';
+  if (eventSuffix === 'status_changed' || eventSuffix === 'status_change') return 'status_change';
+  return 'create';
+};
+
+const RECIPIENT_OPTIONS = {
+  lead: [
+    { key: 'contact1', label: 'Lead contact' },
+    { key: 'contact2', label: 'Lead contact 2' },
+    { key: 'contact3', label: 'Lead contact 3' },
+    { key: 'sales_person_email', label: 'Sales person email' },
+    { key: 'branch_email', label: 'Branch email' },
+  ],
+  opportunity: [
+    { key: 'customer', label: 'Customer' },
+    { key: 'sales_person_email', label: 'Sales person email' },
+    { key: 'branch_email', label: 'Branch email' },
+  ],
+  estimate: [
+    { key: 'customer', label: 'Customer' },
+    { key: 'sales_person_email', label: 'Sales person email' },
+    { key: 'branch_email', label: 'Branch email' },
+  ],
+  job: [
+    { key: 'customer', label: 'Customer' },
+    { key: 'sales_person_email', label: 'Sales person email' },
+    { key: 'branch_email', label: 'Branch email' },
+  ],
+};
+
+const defaultRecipientKeys = (target) => (RECIPIENT_OPTIONS[target] || RECIPIENT_OPTIONS.lead).map(({ key }) => key);
+
+const normalizeRecipients = (recipients, target) => {
+  const availableKeys = defaultRecipientKeys(target);
+  const configured = Array.isArray(recipients?.tokens) ? recipients.tokens : availableKeys;
+  return {
+    tokens: configured.filter((key) => availableKeys.includes(key)),
+    custom_emails: Array.isArray(recipients?.custom_emails) ? recipients.custom_emails : [],
+    custom_phones: Array.isArray(recipients?.custom_phones) ? recipients.custom_phones : [],
+  };
+};
+
+const createDefaultStep = () => ({
+  channel: 'email',
+  template_id: '',
+  delay_minutes: 0,
+  delay_value: 0,
+  delay_unit: 'minutes',
+  is_active: true,
+  attachments: [],
+  attachment_file: null,
+});
+
+const initialAutomationState = (branchId = null) => ({
   id: null,
   name: '',
   description: '',
   event: 'lead.created',
-  branch_id: null,
+  branch_id: branchId ? Number(branchId) : null,
   is_active: true,
   conditions: {
     all: [],
     any: [],
   },
-  steps: [
-    {
-      channel: 'email',
-      template_id: '',
-      delay_minutes: 0,
-      delay_value: 0,
-      delay_unit: 'minutes',
-      is_active: true,
-    },
-  ],
+  recipients: normalizeRecipients(null, 'lead'),
+  steps: [createDefaultStep()],
 });
 
-export default function AutomationWizardModal({
+const createInitialFormData = (initialValue, defaultBranchId) => {
+  if (!initialValue) return initialAutomationState(defaultBranchId);
+
+  const conditions = {
+    all: (Array.isArray(initialValue.conditions?.all) ? initialValue.conditions.all : [])
+      .map((condition) => ({ ...condition, id: condition.id || createFilterId() })),
+    any: (Array.isArray(initialValue.conditions?.any) ? initialValue.conditions.any : [])
+      .map((condition) => ({ ...condition, id: condition.id || createFilterId() })),
+  };
+  const steps = (initialValue.steps || []).map((step) => {
+    const totalMinutes = Number(step.delay_minutes || 0);
+    let delayUnit = 'minutes';
+    let delayValue = totalMinutes;
+
+    if (totalMinutes > 0 && totalMinutes % 1440 === 0) {
+      delayUnit = 'days';
+      delayValue = totalMinutes / 1440;
+    } else if (totalMinutes > 0 && totalMinutes % 60 === 0) {
+      delayUnit = 'hours';
+      delayValue = totalMinutes / 60;
+    }
+
+    return {
+      id: step.id,
+      channel: step.channel || 'email',
+      template_id: step.template_id ? String(step.template_id) : '',
+      template_name: step.template_name || step.template?.name || '',
+      delay_minutes: totalMinutes,
+      delay_value: delayValue,
+      delay_unit: delayUnit,
+      is_active: step.is_active !== false,
+      attachments: Array.isArray(step.attachments) ? step.attachments : [],
+      attachment_file: null,
+    };
+  });
+
+  return {
+    id: initialValue.id || null,
+    name: initialValue.name || '',
+    description: initialValue.description || '',
+    event: initialValue.event || 'lead.created',
+    branch_id: initialValue.branch_id ?? null,
+    is_active: initialValue.is_active !== false,
+    conditions,
+    recipients: normalizeRecipients(initialValue.recipients, getTriggerTarget(initialValue.event || 'lead.created')),
+    steps: [steps[0] || createDefaultStep()],
+  };
+};
+
+export default function AutomationWizardModal(props) {
+  if (!props.open) return null;
+
+  return (
+    <AutomationWizardModalContent
+      key={`${props.initialValue?.id || 'new'}-${props.defaultBranchId || ''}`}
+      {...props}
+    />
+  );
+}
+
+function AutomationWizardModalContent({
   open,
   onClose,
   onSaved,
   initialValue,
   branches = [],
+  defaultBranchId = null,
 }) {
   const [activeStep, setActiveStep] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
-  const [metadataLoading, setMetadataLoading] = useState(false);
+  const [metadataLoading, setMetadataLoading] = useState(true);
   const [metadataError, setMetadataError] = useState('');
   const [error, setError] = useState(null);
 
   const [events, setEvents] = useState([]);
   const [generalEmailTemplates, setGeneralEmailTemplates] = useState([]);
   const [generalSmsTemplates, setGeneralSmsTemplates] = useState([]);
+  const [triggerEventType, setTriggerEventType] = useState(() => getTriggerEventType(initialValue?.event));
+  const [recipientInput, setRecipientInput] = useState({ email: '', phone: '' });
+  const [recipientErrors, setRecipientErrors] = useState({ email: '', phone: '' });
 
-  const [formData, setFormData] = useState(initialAutomationState);
+  const [formData, setFormData] = useState(() => createInitialFormData(initialValue, defaultBranchId));
 
   // Load events and general templates on modal open
   useEffect(() => {
     if (!open) return;
 
-    setError(null);
-    setMetadataError('');
-    setMetadataLoading(true);
-    setActiveStep(0);
     let cancelled = false;
 
     const loadMetadata = async () => {
@@ -136,99 +285,101 @@ export default function AutomationWizardModal({
 
     loadMetadata();
 
-    if (initialValue) {
-      // Normalize incoming automation
-      const condAll = Array.isArray(initialValue.conditions?.all) ? initialValue.conditions.all : [];
-      const condAny = Array.isArray(initialValue.conditions?.any) ? initialValue.conditions.any : [];
-
-      const mappedSteps = (initialValue.steps || []).map((s) => {
-        const totalMinutes = Number(s.delay_minutes || 0);
-        let delay_unit = 'minutes';
-        let delay_value = totalMinutes;
-
-        if (totalMinutes > 0 && totalMinutes % 1440 === 0) {
-          delay_unit = 'days';
-          delay_value = totalMinutes / 1440;
-        } else if (totalMinutes > 0 && totalMinutes % 60 === 0) {
-          delay_unit = 'hours';
-          delay_value = totalMinutes / 60;
-        }
-
-        return {
-          id: s.id,
-          channel: s.channel || 'email',
-          template_id: s.template_id ? String(s.template_id) : '',
-          template_name: s.template_name || s.template?.name || '',
-          delay_minutes: totalMinutes,
-          delay_value,
-          delay_unit,
-          is_active: s.is_active !== false,
-        };
-      });
-
-      setFormData({
-        id: initialValue.id || null,
-        name: initialValue.name || '',
-        description: initialValue.description || '',
-        event: initialValue.event || 'lead.created',
-        branch_id: initialValue.branch_id ?? null,
-        is_active: initialValue.is_active !== false,
-        conditions: {
-          all: condAll,
-          any: condAny,
-        },
-        steps: mappedSteps.length ? mappedSteps : [
-          {
-            channel: 'email',
-            template_id: '',
-            delay_minutes: 0,
-            delay_value: 0,
-            delay_unit: 'minutes',
-            is_active: true,
-          },
-        ],
-      });
-    } else {
-      setFormData(initialAutomationState());
-    }
-
     return () => {
       cancelled = true;
     };
-  }, [open, initialValue]);
+  }, [open]);
 
   if (!open) return null;
 
   const currentEventMeta = events.find((e) => e.event === formData.event);
   const targetType = currentEventMeta?.target || (formData.event.startsWith('lead.') ? 'lead' : 'opportunity');
+  const selectedTriggerTarget = getTriggerTarget(formData.event);
+  const targetLabel = TRIGGER_TARGETS.find(({ value }) => value === selectedTriggerTarget)?.label || 'Lead';
+  const triggerEventLabel = {
+    create: 'create',
+    update: 'update',
+    status_change: 'status change',
+  }[triggerEventType];
+  const recipientOptions = RECIPIENT_OPTIONS[selectedTriggerTarget] || RECIPIENT_OPTIONS.lead;
+  const selectedRecipients = normalizeRecipients(formData.recipients, selectedTriggerTarget);
+  const selectedRecipientLabels = [
+    ...recipientOptions
+      .filter(({ key }) => selectedRecipients.tokens.includes(key))
+      .map(({ label }) => label),
+    ...selectedRecipients.custom_emails,
+    ...selectedRecipients.custom_phones,
+  ];
+
+  const updateRecipients = (patch) => {
+    setFormData((previous) => ({
+      ...previous,
+      recipients: { ...normalizeRecipients(previous.recipients, selectedTriggerTarget), ...patch },
+    }));
+  };
+
+  const addCustomEmail = () => {
+    const email = recipientInput.email.trim();
+    if (!email) return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setRecipientErrors((previous) => ({ ...previous, email: 'Enter a valid email address.' }));
+      return;
+    }
+    if (selectedRecipients.custom_emails.some((value) => value.toLowerCase() === email.toLowerCase())) {
+      setRecipientErrors((previous) => ({ ...previous, email: 'This email is already added.' }));
+      return;
+    }
+    updateRecipients({ custom_emails: [...selectedRecipients.custom_emails, email] });
+    setRecipientInput((previous) => ({ ...previous, email: '' }));
+    setRecipientErrors((previous) => ({ ...previous, email: '' }));
+  };
+
+  const addCustomPhone = () => {
+    const phone = recipientInput.phone.trim();
+    if (!phone) return;
+    if (!/^\+?[0-9\s().-]{7,20}$/.test(phone) || phone.replace(/\D/g, '').length < 7) {
+      setRecipientErrors((previous) => ({ ...previous, phone: 'Enter a valid phone number.' }));
+      return;
+    }
+    const normalizedPhone = phone.replace(/\D/g, '');
+    if (selectedRecipients.custom_phones.some((value) => value.replace(/\D/g, '') === normalizedPhone)) {
+      setRecipientErrors((previous) => ({ ...previous, phone: 'This phone number is already added.' }));
+      return;
+    }
+    updateRecipients({ custom_phones: [...selectedRecipients.custom_phones, phone] });
+    setRecipientInput((previous) => ({ ...previous, phone: '' }));
+    setRecipientErrors((previous) => ({ ...previous, phone: '' }));
+  };
 
   // Steps for the stepper
   const stepLabels = ['Trigger', 'Action', 'Target', 'Filters'];
-  const triggerEvents = events;
-  const targetOptions = Array.from(new Set([
-    targetType,
-    ...triggerEvents.map((event) => event.target).filter(Boolean),
-  ]));
+  const triggerEvents = events.filter((event) => getTriggerTarget(event.event) === selectedTriggerTarget);
+  const availableTriggerTargets = new Set(events.map((event) => getTriggerTarget(event.event)));
   const branchName = branches.find((branch) => String(branch.id) === String(formData.branch_id))?.name;
   const allConditionsCount = (formData.conditions.all || []).length;
   const anyConditionsCount = (formData.conditions.any || []).length;
-
+  const filterFieldOptions = COMMON_FIELDS[targetType] || COMMON_FIELDS.opportunity;
+  const filterCount = allConditionsCount + anyConditionsCount;
+  const filterOperators = targetType === 'lead'
+    ? LEAD_FILTER_OPERATORS
+    : OPERATORS;
   // Add condition rule
   const addConditionRule = (group) => {
-    const defaultField = targetType === 'lead' ? 'lead.system_state' : 'opportunity.stage';
+    const defaultField = filterFieldOptions[0]?.field || 'opportunity.stage';
     setFormData((prev) => ({
       ...prev,
       conditions: {
         ...prev.conditions,
-        [group]: [...(prev.conditions[group] || []), { field: defaultField, op: 'eq', value: '' }],
+        [group]: [...(prev.conditions[group] || []), { id: createFilterId(), field: defaultField, op: 'eq', value: '' }],
       },
     }));
   };
 
-  const updateConditionRule = (group, index, patch) => {
+  const updateConditionRule = (group, filterId, patch) => {
     setFormData((prev) => {
-      const updatedGroup = [...(prev.conditions[group] || [])];
-      updatedGroup[index] = { ...updatedGroup[index], ...patch };
+      const updatedGroup = (prev.conditions[group] || []).map((condition) =>
+        condition.id === filterId ? { ...condition, ...patch } : condition
+      );
       return {
         ...prev,
         conditions: {
@@ -239,14 +390,144 @@ export default function AutomationWizardModal({
     });
   };
 
-  const removeConditionRule = (group, index) => {
+  const removeConditionRule = (group, filterId) => {
     setFormData((prev) => ({
       ...prev,
       conditions: {
         ...prev.conditions,
-        [group]: prev.conditions[group].filter((_, i) => i !== index),
+        [group]: prev.conditions[group].filter((condition) => condition.id !== filterId),
       },
     }));
+  };
+
+  const renderConditionRow = (group, rule) => {
+    const selectedField = filterFieldOptions.find((field) => field.field === rule.field);
+    const fieldOperators = selectedField?.valueType === 'date'
+      ? filterOperators
+      : filterOperators.filter((operator) => !operator.uiOnly);
+    const operators = fieldOperators.some((operator) => operator.value === rule.op)
+      ? fieldOperators
+      : [...fieldOperators, [...LEAD_FILTER_OPERATORS, ...OPERATORS].find((operator) => operator.value === rule.op)].filter(Boolean);
+    const valueRequired = rule.op !== 'is_set' && rule.op !== 'is_empty';
+    const valueClass = 'h-[34px] min-w-0 w-full rounded-lg border border-[#E6EDF5] bg-[#F0F4F8] px-3 text-xs text-[#17212B] outline-none focus:border-[#1877F2] focus:ring-2 focus:ring-blue-100';
+
+    let valueControl = null;
+    if (rule.op === 'within_next_days' || rule.op === 'within_past_days') {
+      valueControl = (
+        <input
+          aria-label="Number of days"
+          type="number"
+          min="1"
+          step="1"
+          value={rule.value ?? ''}
+          onChange={(event) => updateConditionRule(group, rule.id, { value: event.target.value })}
+          placeholder="Days"
+          className={valueClass}
+        />
+      );
+    } else if (valueRequired && selectedField?.valueType === 'select' && selectedField.options) {
+      valueControl = (
+        <select
+          aria-label="Filter value"
+          value={rule.value ?? ''}
+          onChange={(event) => updateConditionRule(group, rule.id, { value: event.target.value })}
+          className={valueClass}
+        >
+          <option value="">Select</option>
+          {selectedField.options.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+      );
+    } else if (valueRequired && selectedField?.optionsFrom === 'branches') {
+      valueControl = (
+        <select
+          aria-label="Filter value"
+          value={rule.value ?? ''}
+          onChange={(event) => updateConditionRule(group, rule.id, { value: event.target.value })}
+          className={valueClass}
+        >
+          <option value="">Select</option>
+          {branches.map((branch) => (
+            <option key={branch.id} value={branch.id}>{branch.name}</option>
+          ))}
+        </select>
+      );
+    } else if (valueRequired && selectedField?.valueType === 'boolean') {
+      valueControl = (
+        <select
+          aria-label="Filter value"
+          value={rule.value ?? ''}
+          onChange={(event) => updateConditionRule(group, rule.id, { value: event.target.value })}
+          className={valueClass}
+        >
+          <option value="">Select</option>
+          <option value="true">Yes</option>
+          <option value="false">No</option>
+        </select>
+      );
+    } else if (valueRequired) {
+      valueControl = (
+        <input
+          aria-label="Filter value"
+          type={selectedField?.valueType === 'date' ? 'date' : 'text'}
+          value={Array.isArray(rule.value) ? rule.value.join(', ') : rule.value ?? ''}
+          onChange={(event) => updateConditionRule(group, rule.id, { value: event.target.value })}
+          placeholder={selectedField?.valueType === 'date' ? 'Select date' : 'Enter value'}
+          className={valueClass}
+        />
+      );
+    }
+
+    return (
+      <div key={rule.id} className="grid min-w-0 grid-cols-[34px_minmax(0,1fr)] items-center gap-2 sm:grid-cols-[34px_minmax(0,1.55fr)_minmax(110px,0.9fr)_minmax(90px,0.65fr)]">
+        <button
+          type="button"
+          aria-label="Remove filter"
+          onClick={() => removeConditionRule(group, rule.id)}
+          className="flex h-[34px] w-[34px] items-center justify-center rounded-lg border border-[#E6EDF5] bg-white text-xs font-semibold text-[#17212B] hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+        >
+          ×
+        </button>
+        <select
+          aria-label="Filter field"
+          value={rule.field}
+          onChange={(event) => {
+            const field = filterFieldOptions.find((option) => option.field === event.target.value);
+            updateConditionRule(group, rule.id, {
+              field: event.target.value,
+              op: field?.valueType === 'presence' ? 'is_set' : 'eq',
+              value: '',
+            });
+          }}
+          className={`${valueClass} sm:min-w-0`}
+        >
+          {!filterFieldOptions.some((field) => field.field === rule.field) && (
+            <option value={rule.field}>{`Current field: ${rule.field}`}</option>
+          )}
+          {filterFieldOptions.map((field) => (
+            <option key={field.field} value={field.field}>{field.label}</option>
+          ))}
+        </select>
+        <select
+          aria-label="Filter operator"
+          value={rule.op}
+          onChange={(event) => updateConditionRule(group, rule.id, {
+            op: event.target.value,
+            ...(['is_set', 'is_empty'].includes(event.target.value) ? { value: '' } : {}),
+            ...(['within_next_days', 'within_past_days'].includes(event.target.value) ? { value: '' } : {}),
+          })}
+          className={valueClass}
+        >
+          {operators.map((operator) => (
+            <option key={operator.value} value={operator.value}>{operator.label}</option>
+          ))}
+        </select>
+        <div className="col-start-2 min-w-0 sm:col-start-auto">
+          {valueControl}
+        </div>
+      </div>
+    );
   };
 
   // Add communication step
@@ -262,9 +543,35 @@ export default function AutomationWizardModal({
           delay_value: 0,
           delay_unit: 'minutes',
           is_active: true,
+          attachments: [],
+          attachment_file: null,
         },
       ],
     }));
+  };
+
+  const toggleStepAttachment = (index, attachment) => {
+    setFormData((prev) => {
+      const steps = [...prev.steps];
+      const current = steps[index];
+      const attachments = current.attachments || [];
+      steps[index] = {
+        ...current,
+        attachments: attachments.includes(attachment)
+          ? attachments.filter((item) => item !== attachment)
+          : [...attachments, attachment],
+      };
+      return { ...prev, steps };
+    });
+  };
+
+  const selectStepAttachment = (index, file) => {
+    if (!file) return;
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      window.alert('Please select a PDF file.');
+      return;
+    }
+    updateCommunicationStep(index, { attachment_file: file });
   };
 
   const updateCommunicationStep = (index, patch) => {
@@ -278,19 +585,12 @@ export default function AutomationWizardModal({
         let mins = val;
         if (cur.delay_unit === 'hours') mins = val * 60;
         if (cur.delay_unit === 'days') mins = val * 1440;
-        cur.delay_minutes = Math.min(525600, mins); // Cap at 365 days
+        cur.delay_minutes = Math.min(10080, mins); // Cap at 7 days (10,080 minutes) per spec
       }
 
       nextSteps[index] = cur;
       return { ...prev, steps: nextSteps };
     });
-  };
-
-  const removeCommunicationStep = (index) => {
-    setFormData((prev) => ({
-      ...prev,
-      steps: prev.steps.filter((_, i) => i !== index),
-    }));
   };
 
   const moveCommunicationStep = (fromIndex, toIndex) => {
@@ -335,6 +635,9 @@ export default function AutomationWizardModal({
     const allConds = [...(formData.conditions.all || []), ...(formData.conditions.any || [])];
     for (const c of allConds) {
       const f = String(c.field || '').trim();
+      if (c.op === 'within_next_days' || c.op === 'within_past_days') {
+        return 'Relative date filters are currently UI-only and cannot be saved yet.';
+      }
       if (!f) {
         return 'Condition field name cannot be empty.';
       }
@@ -359,8 +662,8 @@ export default function AutomationWizardModal({
           ? `No active General ${s.channel.toUpperCase()} templates are available for step ${i + 1}.`
           : `Step ${i + 1} (${s.channel.toUpperCase()}) must use an active, usable General template.`;
       }
-      if (s.delay_minutes < 0 || s.delay_minutes > 525600) {
-        return `Step ${i + 1} delay must be between 0 and 525,600 minutes (365 days).`;
+      if (s.delay_minutes < 0 || s.delay_minutes > 10080) {
+        return `Step ${i + 1} delay must be between 0 and 10,080 minutes (7 days max per specification).`;
       }
     }
     return null;
@@ -489,7 +792,7 @@ export default function AutomationWizardModal({
 
         <div className="px-5 py-3 border-b border-brand-border shrink-0 space-y-2.5">
           <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-            <div className="md:col-span-6">
+            <div className="md:col-span-5">
               <label className="block text-[11px] font-bold uppercase tracking-widest text-muted mb-1">
                 Name <span className="text-rose-500">*</span>
               </label>
@@ -498,7 +801,7 @@ export default function AutomationWizardModal({
                 maxLength={160}
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="Automation name"
+                placeholder="e.g. New Lead Welcome"
                 className="w-full px-3 py-2 bg-subtle rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/20"
               />
             </div>
@@ -507,16 +810,24 @@ export default function AutomationWizardModal({
                 Target
               </label>
               <select
-                value={targetType}
+                aria-label="Target"
+                value={selectedTriggerTarget}
                 onChange={(e) => {
-                  const matchingEvent = triggerEvents.find((event) => event.target === e.target.value);
-                  if (matchingEvent) setFormData({ ...formData, event: matchingEvent.event });
+                  const nextTarget = e.target.value;
+                  const matchingEvent = events.find((event) => getTriggerTarget(event.event) === nextTarget);
+                  if (matchingEvent) {
+                    setFormData({
+                      ...formData,
+                      event: matchingEvent.event,
+                      recipients: normalizeRecipients(formData.recipients, nextTarget),
+                    });
+                  }
                 }}
                 className="w-full px-3 py-2 bg-subtle rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/20"
               >
-                {targetOptions.map((target) => (
-                  <option key={target} value={target}>
-                    {target.charAt(0).toUpperCase() + target.slice(1)}
+                {TRIGGER_TARGETS.map((target) => (
+                  <option key={target.value} value={target.value} disabled={!availableTriggerTargets.has(target.value)}>
+                    {target.label}
                   </option>
                 ))}
               </select>
@@ -526,6 +837,7 @@ export default function AutomationWizardModal({
                 Branch
               </label>
               <select
+                aria-label="Branch"
                 value={formData.branch_id || ''}
                 onChange={(e) =>
                   setFormData({
@@ -541,7 +853,7 @@ export default function AutomationWizardModal({
                 ))}
               </select>
             </div>
-            <label className="md:col-span-1 flex items-center gap-2 text-sm text-heading pb-2">
+            <label className="md:col-span-2 flex items-center gap-2 text-xs sm:text-sm font-semibold text-heading h-[38px] px-3 rounded-xl bg-subtle border border-brand-border cursor-pointer hover:bg-slate-100 transition-colors">
               <input
                 type="checkbox"
                 checked={formData.is_active}
@@ -560,7 +872,7 @@ export default function AutomationWizardModal({
               maxLength={2000}
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              placeholder="Describe what this automation does"
+              placeholder="What does this automation do?"
               className="w-full px-3 py-2 bg-subtle rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/20 resize-y"
             />
           </div>
@@ -568,47 +880,38 @@ export default function AutomationWizardModal({
 
         {/* Stepper Header */}
         <div className="px-5 py-2.5 border-b border-brand-border shrink-0 overflow-x-auto">
-          <div className="flex items-center justify-between min-w-[520px]">
+          <div className="flex items-center gap-5 min-w-max">
             {stepLabels.map((label, idx) => {
               const isActive = activeStep === idx;
               const isPast = activeStep > idx;
               return (
-                <React.Fragment key={label}>
-                  <button
-                    type="button"
-                    onClick={() => setActiveStep(idx)}
-                    disabled={metadataLoading || Boolean(metadataError)}
-                    className="flex items-center gap-2 group cursor-pointer focus:outline-none"
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => setActiveStep(idx)}
+                  disabled={metadataLoading || Boolean(metadataError)}
+                  aria-current={isActive ? 'step' : undefined}
+                  className="flex items-center gap-2.5 group cursor-pointer focus:outline-none disabled:cursor-not-allowed"
+                >
+                  <span
+                    className={`flex h-7 w-7 shrink-0 items-center justify-center text-xs font-bold transition-colors ${
+                      isActive
+                        ? 'rounded-full border border-blue-500 bg-blue-50 text-blue-600'
+                        : isPast
+                          ? 'rounded-md bg-orange-300 text-heading'
+                          : 'rounded-full bg-slate-100 text-slate-500 group-hover:bg-slate-200'
+                    }`}
                   >
-                    <div
-                      className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
-                        isActive
-                          ? 'bg-blue-50 text-primary border border-primary'
-                          : isPast
-                          ? 'bg-orange-200 text-heading'
-                          : 'bg-slate-100 text-slate-600 group-hover:bg-slate-200'
-                      }`}
-                    >
-                      {isPast ? <CheckCircle2 size={15} /> : idx + 1}
-                    </div>
-                    <span
-                      className={`text-xs font-bold tracking-tight ${
-                        isActive ? 'text-primary' : isPast ? 'text-slate-700' : 'text-slate-400'
-                      }`}
-                    >
-                      {label}
-                    </span>
-                  </button>
-                  {idx < stepLabels.length - 1 && (
-                    <div className="flex-1 mx-4 h-0.5 bg-slate-200">
-                      <div
-                        className={`h-full transition-all duration-300 ${
-                          activeStep > idx ? 'bg-emerald-600 w-full' : 'w-0'
-                        }`}
-                      />
-                    </div>
-                  )}
-                </React.Fragment>
+                    {idx + 1}
+                  </span>
+                  <span
+                    className={`text-sm tracking-tight ${
+                      isActive || isPast ? 'font-bold text-heading' : 'font-medium text-slate-500'
+                    }`}
+                  >
+                    {label}
+                  </span>
+                </button>
               );
             })}
           </div>
@@ -637,17 +940,27 @@ export default function AutomationWizardModal({
         )}
 
         {/* Step Content */}
-        <div className="flex flex-1 min-h-0 overflow-hidden">
-          <div className="flex-1 min-w-0 overflow-y-auto p-5">
+        <div className="flex flex-1 min-h-0 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
+          <div className="w-full min-w-0 p-5 md:flex-1 md:overflow-y-auto">
           {/* STEP 0: Trigger & Scope */}
           {activeStep === 0 && (
             <div className="space-y-6 max-w-3xl mx-auto">
               <div>
                 <h3 className="text-xl font-bold text-heading">When should this automation trigger?</h3>
+
                 <p className="text-xs text-muted mt-0.5">
                   Choose the event that will start this automation.
                 </p>
               </div>
+
+              <button
+                type="button"
+                aria-pressed="true"
+                className="w-full md:w-1/2 rounded-xl border border-primary bg-primary/5 p-4 text-left"
+              >
+                <div className="text-sm font-bold text-heading">When Something Changes</div>
+                <div className="text-xs text-muted mt-1">Trigger on an available business event</div>
+              </button>
 
               <div className="rounded-xl border border-brand-border p-4 space-y-3">
                 <div className="text-sm font-bold text-heading">Configure Trigger</div>
@@ -656,16 +969,15 @@ export default function AutomationWizardModal({
                     Event
                   </label>
                   <select
-                    value={formData.event}
-                    onChange={(e) => setFormData({ ...formData, event: e.target.value })}
-                    disabled={metadataLoading || Boolean(metadataError) || triggerEvents.length === 0}
+                    aria-label="Event"
+                    value={triggerEventType}
+                    onChange={(e) => setTriggerEventType(e.target.value)}
+                    disabled={metadataLoading || Boolean(metadataError)}
                     className="w-full px-3 py-2 bg-subtle rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/20"
                   >
-                    {triggerEvents.map((event) => (
-                      <option key={event.event} value={event.event}>
-                        {event.event} ({event.target}) {!event.emitted ? '— [Not emitted yet]' : ''}
-                      </option>
-                    ))}
+                    <option value="create">On Create</option>
+                    <option value="update">On Update</option>
+                    <option value="status_change">On Status Change</option>
                   </select>
                   {currentEventMeta && !currentEventMeta.emitted && (
                     <div className="mt-2 text-xs bg-amber-50 text-amber-800 border border-amber-200 rounded-lg p-2 flex items-center gap-2">
@@ -680,9 +992,70 @@ export default function AutomationWizardModal({
 
           {/* STEP 3: Filters */}
           {activeStep === 3 && (
+            <div className="mx-auto max-w-4xl space-y-4">
+              <div>
+                <h3 className="text-lg font-bold text-[#17212B]">Add filters (optional)</h3>
+                <p className="mt-1 text-xs text-[#526A8D]">
+                  Optionally add conditions to limit when this automation runs
+                </p>
+              </div>
+
+              <section aria-label="Filters" className="rounded-xl border border-[#E6EDF5] bg-white p-3 sm:p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h4 className="text-xs font-bold text-[#17212B]">Filters</h4>
+                  <button
+                    type="button"
+                    onClick={() => addConditionRule('all')}
+                    className="inline-flex h-[34px] items-center gap-1.5 rounded-lg bg-[#EDF4FA] px-3 text-xs font-bold text-[#17212B] transition-colors hover:bg-[#e2edf7]"
+                  >
+                    <Plus size={14} /> Add Filter
+                  </button>
+                </div>
+
+                {allConditionsCount > 0 ? (
+                  <div className="space-y-2">
+                    {formData.conditions.all.map((rule) => renderConditionRow('all', rule))}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-[#E6EDF5] bg-[#F7F9FC] px-3 py-4 text-center text-xs text-[#526A8D]">
+                    No filters added
+                  </div>
+                )}
+
+                {anyConditionsCount > 0 && (
+                  <div className="mt-4 border-t border-[#E6EDF5] pt-3">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <div>
+                        <h5 className="text-xs font-bold text-[#17212B]">Match any (OR)</h5>
+                        <p className="mt-0.5 text-[11px] text-[#526A8D]">At least one of these filters must match.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => addConditionRule('any')}
+                        className="inline-flex h-[34px] items-center gap-1.5 rounded-lg bg-[#EDF4FA] px-3 text-xs font-bold text-[#17212B] hover:bg-[#e2edf7]"
+                      >
+                        <Plus size={14} /> Add Filter
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {formData.conditions.any.map((rule) => renderConditionRow('any', rule))}
+                    </div>
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
+
+          {activeStep === 4 && (
             <div className="space-y-6 max-w-3xl mx-auto">
               <div>
                 <h3 className="text-xl font-bold text-heading">Add filters (optional)</h3>
+                <datalist id="common-fields-list">
+                  {[...(COMMON_FIELDS[targetType] || []), ...(COMMON_FIELDS[targetType === 'lead' ? 'opportunity' : 'lead'] || [])].map((f) => (
+                    <option key={f.field} value={f.field}>{f.label}</option>
+                  ))}
+                </datalist>
+
                 <p className="text-xs text-muted mt-0.5">
                   Define matching rules to filter when this automation should execute. If left empty, it runs for every record of target <strong>{targetType}</strong>.
                 </p>
@@ -696,7 +1069,8 @@ export default function AutomationWizardModal({
                       <span className="px-2 py-0.5 bg-primary/10 text-primary rounded font-mono text-[11px]">ALL</span>
                       <span>Must Match All Conditions (AND)</span>
                     </div>
-                    <p className="text-xs text-muted mt-0.5">Every condition in this group must be satisfied.</p>
+    
+                <p className="text-xs text-muted mt-0.5">Every condition in this group must be satisfied.</p>
                   </div>
                   <button
                     type="button"
@@ -713,36 +1087,100 @@ export default function AutomationWizardModal({
                   </div>
                 ) : (
                   <div className="space-y-2.5">
-                    {formData.conditions.all.map((rule, idx) => (
-                      <div key={idx} className="flex flex-wrap items-center gap-2 p-2.5 bg-white rounded-xl border border-brand-border">
-                        <input
-                          type="text"
-                          value={rule.field}
-                          onChange={(e) => updateConditionRule('all', idx, { field: e.target.value })}
-                          placeholder="e.g. lead.system_state"
-                          className="px-3 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border font-mono w-48"
-                        />
+                    {formData.conditions.all.map((rule) => (
+                      <div key={rule.id} className="flex flex-wrap items-center gap-2 p-2.5 bg-white rounded-xl border border-brand-border">
                         <select
+                          aria-label="Filter field"
+                          value={rule.field}
+                          onChange={(e) => {
+                            const selectedField = filterFieldOptions.find((field) => field.field === e.target.value);
+                            updateConditionRule('all', rule.id, {
+                              field: e.target.value,
+                              op: selectedField?.valueType === 'presence' ? 'is_set' : 'eq',
+                              value: '',
+                            });
+                          }}
+                          className="px-3 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border min-w-[190px]"
+                        >
+                          {!filterFieldOptions.some((field) => field.field === rule.field) && (
+                            <option value={rule.field}>{`Current field: ${rule.field}`}</option>
+                          )}
+                          {filterFieldOptions.map((field) => (
+                            <option key={field.field} value={field.field}>{field.label}</option>
+                          ))}
+                        </select>
+                        <select
+                          aria-label="Filter operator"
                           value={rule.op}
-                          onChange={(e) => updateConditionRule('all', idx, { op: e.target.value })}
+                          onChange={(e) => updateConditionRule('all', rule.id, { op: e.target.value })}
                           className="px-2.5 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border"
                         >
-                          {OPERATORS.map((op) => (
+                          {filterOperators.map((op) => (
                             <option key={op.value} value={op.value}>{op.label}</option>
                           ))}
                         </select>
                         {rule.op !== 'is_set' && rule.op !== 'is_empty' && (
-                          <input
-                            type="text"
-                            value={Array.isArray(rule.value) ? rule.value.join(', ') : rule.value ?? ''}
-                            onChange={(e) => updateConditionRule('all', idx, { value: e.target.value })}
-                            placeholder={rule.op === 'in' || rule.op === 'not_in' ? 'item1, item2' : 'value'}
-                            className="px-3 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border flex-1 min-w-[120px]"
-                          />
+                          (() => {
+                            const selectedField = filterFieldOptions.find((field) => field.field === rule.field);
+                            if (selectedField?.valueType === 'select' && selectedField.options) {
+                              return (
+                                <select
+                                  aria-label="Filter value"
+                                  value={rule.value ?? ''}
+                                  onChange={(e) => updateConditionRule('all', rule.id, { value: e.target.value })}
+                                  className="px-3 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border flex-1 min-w-[120px]"
+                                >
+                                  <option value="">Select</option>
+                                  {selectedField.options.map((option) => (
+                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                  ))}
+                                </select>
+                              );
+                            }
+                            if (selectedField?.valueType === 'select' && selectedField.optionsFrom === 'branches') {
+                              return (
+                                <select
+                                  aria-label="Filter value"
+                                  value={rule.value ?? ''}
+                                  onChange={(e) => updateConditionRule('all', rule.id, { value: e.target.value })}
+                                  className="px-3 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border flex-1 min-w-[120px]"
+                                >
+                                  <option value="">Select branch</option>
+                                  {branches.map((branch) => (
+                                    <option key={branch.id} value={branch.id}>{branch.name}</option>
+                                  ))}
+                                </select>
+                              );
+                            }
+                            if (selectedField?.valueType === 'boolean') {
+                              return (
+                                <select
+                                  aria-label="Filter value"
+                                  value={rule.value ?? ''}
+                                  onChange={(e) => updateConditionRule('all', rule.id, { value: e.target.value })}
+                                  className="px-3 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border flex-1 min-w-[120px]"
+                                >
+                                  <option value="">Select</option>
+                                  <option value="true">Yes</option>
+                                  <option value="false">No</option>
+                                </select>
+                              );
+                            }
+                            return (
+                              <input
+                                aria-label="Filter value"
+                                type={selectedField?.valueType === 'date' ? 'date' : 'text'}
+                                value={Array.isArray(rule.value) ? rule.value.join(', ') : rule.value ?? ''}
+                                onChange={(e) => updateConditionRule('all', rule.id, { value: e.target.value })}
+                                placeholder={rule.op === 'in' ? 'Select values (comma-separated)' : 'Value'}
+                                className="px-3 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border flex-1 min-w-[120px]"
+                              />
+                            );
+                          })()
                         )}
                         <button
                           type="button"
-                          onClick={() => removeConditionRule('all', idx)}
+                          onClick={() => removeConditionRule('all', rule.id)}
                           className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
                         >
                           <Trash2 size={14} />
@@ -761,7 +1199,8 @@ export default function AutomationWizardModal({
                       <span className="px-2 py-0.5 bg-amber-500/10 text-amber-700 rounded font-mono text-[11px]">ANY</span>
                       <span>Match At Least One Condition (OR)</span>
                     </div>
-                    <p className="text-xs text-muted mt-0.5">At least one condition in this group must be satisfied.</p>
+    
+                <p className="text-xs text-muted mt-0.5">At least one condition in this group must be satisfied.</p>
                   </div>
                   <button
                     type="button"
@@ -778,36 +1217,100 @@ export default function AutomationWizardModal({
                   </div>
                 ) : (
                   <div className="space-y-2.5">
-                    {formData.conditions.any.map((rule, idx) => (
-                      <div key={idx} className="flex flex-wrap items-center gap-2 p-2.5 bg-white rounded-xl border border-brand-border">
-                        <input
-                          type="text"
-                          value={rule.field}
-                          onChange={(e) => updateConditionRule('any', idx, { field: e.target.value })}
-                          placeholder="e.g. lead.source"
-                          className="px-3 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border font-mono w-48"
-                        />
+                    {formData.conditions.any.map((rule) => (
+                      <div key={rule.id} className="flex flex-wrap items-center gap-2 p-2.5 bg-white rounded-xl border border-brand-border">
                         <select
+                          aria-label="Filter field"
+                          value={rule.field}
+                          onChange={(e) => {
+                            const selectedField = filterFieldOptions.find((field) => field.field === e.target.value);
+                            updateConditionRule('any', rule.id, {
+                              field: e.target.value,
+                              op: selectedField?.valueType === 'presence' ? 'is_set' : 'eq',
+                              value: '',
+                            });
+                          }}
+                          className="px-3 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border min-w-[190px]"
+                        >
+                          {!filterFieldOptions.some((field) => field.field === rule.field) && (
+                            <option value={rule.field}>{`Current field: ${rule.field}`}</option>
+                          )}
+                          {filterFieldOptions.map((field) => (
+                            <option key={field.field} value={field.field}>{field.label}</option>
+                          ))}
+                        </select>
+                        <select
+                          aria-label="Filter operator"
                           value={rule.op}
-                          onChange={(e) => updateConditionRule('any', idx, { op: e.target.value })}
+                          onChange={(e) => updateConditionRule('any', rule.id, { op: e.target.value })}
                           className="px-2.5 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border"
                         >
-                          {OPERATORS.map((op) => (
+                          {filterOperators.map((op) => (
                             <option key={op.value} value={op.value}>{op.label}</option>
                           ))}
                         </select>
                         {rule.op !== 'is_set' && rule.op !== 'is_empty' && (
-                          <input
-                            type="text"
-                            value={Array.isArray(rule.value) ? rule.value.join(', ') : rule.value ?? ''}
-                            onChange={(e) => updateConditionRule('any', idx, { value: e.target.value })}
-                            placeholder={rule.op === 'in' || rule.op === 'not_in' ? 'item1, item2' : 'value'}
-                            className="px-3 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border flex-1 min-w-[120px]"
-                          />
+                          (() => {
+                            const selectedField = filterFieldOptions.find((field) => field.field === rule.field);
+                            if (selectedField?.valueType === 'select' && selectedField.options) {
+                              return (
+                                <select
+                                  aria-label="Filter value"
+                                  value={rule.value ?? ''}
+                                  onChange={(e) => updateConditionRule('any', rule.id, { value: e.target.value })}
+                                  className="px-3 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border flex-1 min-w-[120px]"
+                                >
+                                  <option value="">Select</option>
+                                  {selectedField.options.map((option) => (
+                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                  ))}
+                                </select>
+                              );
+                            }
+                            if (selectedField?.valueType === 'select' && selectedField.optionsFrom === 'branches') {
+                              return (
+                                <select
+                                  aria-label="Filter value"
+                                  value={rule.value ?? ''}
+                                  onChange={(e) => updateConditionRule('any', rule.id, { value: e.target.value })}
+                                  className="px-3 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border flex-1 min-w-[120px]"
+                                >
+                                  <option value="">Select branch</option>
+                                  {branches.map((branch) => (
+                                    <option key={branch.id} value={branch.id}>{branch.name}</option>
+                                  ))}
+                                </select>
+                              );
+                            }
+                            if (selectedField?.valueType === 'boolean') {
+                              return (
+                                <select
+                                  aria-label="Filter value"
+                                  value={rule.value ?? ''}
+                                  onChange={(e) => updateConditionRule('any', rule.id, { value: e.target.value })}
+                                  className="px-3 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border flex-1 min-w-[120px]"
+                                >
+                                  <option value="">Select</option>
+                                  <option value="true">Yes</option>
+                                  <option value="false">No</option>
+                                </select>
+                              );
+                            }
+                            return (
+                              <input
+                                aria-label="Filter value"
+                                type={selectedField?.valueType === 'date' ? 'date' : 'text'}
+                                value={Array.isArray(rule.value) ? rule.value.join(', ') : rule.value ?? ''}
+                                onChange={(e) => updateConditionRule('any', rule.id, { value: e.target.value })}
+                                placeholder={rule.op === 'in' ? 'Select values (comma-separated)' : 'Value'}
+                                className="px-3 py-1.5 text-xs bg-subtle rounded-lg border border-brand-border flex-1 min-w-[120px]"
+                              />
+                            );
+                          })()
                         )}
                         <button
                           type="button"
-                          onClick={() => removeConditionRule('any', idx)}
+                          onClick={() => removeConditionRule('any', rule.id)}
                           className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
                         >
                           <Trash2 size={14} />
@@ -820,215 +1323,356 @@ export default function AutomationWizardModal({
             </div>
           )}
 
-          {/* STEP 1: Actions */}
-          {activeStep === 1 && (
-            <div className="space-y-6 max-w-3xl mx-auto">
-              <div className="flex items-center justify-between">
+          {/* STEP 1: Action */}
+          {activeStep === 1 && (() => {
+            const step = formData.steps[0] || createDefaultStep();
+            const availableTemplates =
+              step.channel === 'sms' ? generalSmsTemplates : generalEmailTemplates;
+
+            return (
+              <div className="space-y-6 max-w-3xl mx-auto">
                 <div>
-                  <h3 className="text-xl font-bold text-heading">Actions</h3>
+                  <h3 className="text-xl font-bold text-heading">Action</h3>
                   <p className="text-xs text-muted mt-0.5">
-                    Configure the message steps to send. Each step uses an active General template.
+                    Configure the message action to send. This uses an active General template.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={addCommunicationStep}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-primary text-white rounded-xl text-xs font-bold hover:bg-[#003d2f] transition-all shadow-sm"
-                >
-                  <Plus size={15} /> Add Step
-                </button>
-              </div>
 
-              <div className="space-y-4">
-                {formData.steps.map((step, idx) => {
-                  const availableTemplates =
-                    step.channel === 'sms' ? generalSmsTemplates : generalEmailTemplates;
+                <div className="p-5 bg-slate-50/70 rounded-2xl border border-brand-border space-y-4 relative transition-all">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-heading">
+                        Send {step.channel.toUpperCase()}
+                      </span>
+                      {step.delay_minutes === 0 ? (
+                        <span className="text-[11px] px-2 py-0.5 bg-emerald-50 text-emerald-700 font-semibold rounded-full border border-emerald-200">
+                          Immediate
+                        </span>
+                      ) : (
+                        <span className="text-[11px] px-2 py-0.5 bg-blue-50 text-blue-700 font-semibold rounded-full border border-blue-200">
+                          Wait {step.delay_value} {step.delay_unit}
+                        </span>
+                      )}
+                    </div>
+                  </div>
 
-                  return (
-                    <div
-                      key={idx}
-                      className="p-5 bg-slate-50/70 rounded-2xl border border-brand-border space-y-4 relative transition-all"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center">
-                            {idx + 1}
-                          </span>
-                          <span className="text-sm font-bold text-heading">
-                            Step {idx + 1}: Send {step.channel.toUpperCase()}
-                          </span>
-                          {step.delay_minutes === 0 ? (
-                            <span className="text-[11px] px-2 py-0.5 bg-emerald-50 text-emerald-700 font-semibold rounded-full border border-emerald-200">
-                              Immediate
-                            </span>
-                          ) : (
-                            <span className="text-[11px] px-2 py-0.5 bg-blue-50 text-blue-700 font-semibold rounded-full border border-blue-200">
-                              Wait {step.delay_value} {step.delay_unit}
-                            </span>
-                          )}
-                        </div>
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-1">
+                    {/* Channel selector */}
+                    <div className="md:col-span-3">
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-muted mb-1">
+                        Channel
+                      </label>
+                      <select
+                        value={step.channel}
+                        onChange={(e) =>
+                          updateCommunicationStep(0, {
+                            channel: e.target.value,
+                            template_id: '',
+                          })
+                        }
+                        className="w-full px-3 py-2 bg-white rounded-xl text-xs font-semibold border border-brand-border outline-none focus:border-primary"
+                      >
+                        <option value="email">Email</option>
+                        <option value="sms">SMS</option>
+                      </select>
+                    </div>
 
-                        <div className="flex items-center gap-1">
+                    {/* General Template selector */}
+                    <div className="md:col-span-5">
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-muted mb-1">
+                        General Template <span className="text-rose-500">*</span>
+                      </label>
+                      <select
+                        value={step.template_id}
+                        onChange={(e) => updateCommunicationStep(0, { template_id: e.target.value })}
+                        className="w-full px-3 py-2 bg-white rounded-xl text-xs font-semibold border border-brand-border outline-none focus:border-primary"
+                      >
+                        <option value="">Select General Template...</option>
+                        {step.template_id && !availableTemplates.some((t) => String(t.id) === String(step.template_id)) && (
+                          <option value={step.template_id} disabled>
+                            {step.template_name || `Template #${step.template_id}`} (Inactive / Unavailable — Please change)
+                          </option>
+                        )}
+                        {availableTemplates.length === 0 && (
+                          <option value="" disabled>
+                            No active General {step.channel.toUpperCase()} templates found
+                          </option>
+                        )}
+                        {availableTemplates.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Delay Timing */}
+                    <div className="md:col-span-4">
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-muted mb-1">
+                        Execution Delay
+                      </label>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="number"
+                          min={0}
+                          max={10080}
+                          value={step.delay_value}
+                          onChange={(e) =>
+                            updateCommunicationStep(0, { delay_value: e.target.value })
+                          }
+                          className="w-20 px-2.5 py-2 bg-white rounded-xl text-xs font-semibold border border-brand-border outline-none focus:border-primary text-center"
+                        />
+                        <select
+                          value={step.delay_unit}
+                          onChange={(e) =>
+                            updateCommunicationStep(0, { delay_unit: e.target.value })
+                          }
+                          className="px-2.5 py-2 bg-white rounded-xl text-xs font-semibold border border-brand-border outline-none focus:border-primary"
+                        >
+                          <option value="minutes">Minutes</option>
+                          <option value="hours">Hours</option>
+                          <option value="days">Days</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {step.channel === 'email' && (
+                    <div className="space-y-2 border-t border-slate-200 pt-3">
+                      <div className="text-[11px] font-bold uppercase tracking-widest text-muted">Attachments</div>
+                      {[
+                        {
+                          key: 'estimate_pdf',
+                          label: 'Attach estimate PDF',
+                          description: 'Attach the latest estimate PDF when available.',
+                        },
+                        {
+                          key: 'invoice_pdf',
+                          label: 'Attach invoice PDF',
+                          description: 'Attach the latest invoice PDF when available.',
+                        },
+                      ].map((attachment) => {
+                        const selected = (step.attachments || []).includes(attachment.key);
+                        return (
                           <button
+                            key={attachment.key}
                             type="button"
-                            disabled={idx === 0}
-                            onClick={() => moveCommunicationStep(idx, idx - 1)}
-                            className="p-1.5 text-slate-400 hover:text-slate-600 disabled:opacity-30 rounded"
-                            title="Move Up"
+                            aria-pressed={selected}
+                            onClick={() => toggleStepAttachment(0, attachment.key)}
+                            className={`flex w-full items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left transition-colors ${
+                              selected
+                                ? 'border-primary bg-primary/5'
+                                : 'border-brand-border bg-white hover:bg-slate-50'
+                            }`}
                           >
-                            <ArrowUp size={15} />
+                            <span>
+                              <span className="block text-sm font-bold text-heading">{attachment.label}</span>
+                              <span className="block text-xs text-muted">{attachment.description}</span>
+                            </span>
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              readOnly
+                              tabIndex={-1}
+                              aria-hidden="true"
+                              className="h-4 w-4 rounded border-slate-300 text-primary"
+                            />
                           </button>
-                          <button
-                            type="button"
-                            disabled={idx === formData.steps.length - 1}
-                            onClick={() => moveCommunicationStep(idx, idx + 1)}
-                            className="p-1.5 text-slate-400 hover:text-slate-600 disabled:opacity-30 rounded"
-                            title="Move Down"
-                          >
-                            <ArrowDown size={15} />
-                          </button>
-                          {formData.steps.length > 1 && (
+                        );
+                      })}
+                      <div className="rounded-xl border border-brand-border bg-white px-4 py-3">
+                        <div className="text-sm font-bold text-heading">Attach PDF file</div>
+                        <p className="text-xs text-muted">Browse and select a PDF to send with this automation.</p>
+                        {step.attachment_file?.name && (
+                          <div className="mt-2 flex items-center justify-between gap-3">
+                            <span className="truncate text-xs font-semibold text-primary">
+                              {step.attachment_file.name}
+                            </span>
                             <button
                               type="button"
-                              onClick={() => removeCommunicationStep(idx)}
-                              className="p-1.5 text-rose-500 hover:bg-rose-50 rounded"
-                              title="Delete Step"
+                              onClick={() => updateCommunicationStep(0, { attachment_file: null })}
+                              className="shrink-0 text-xs font-bold text-muted hover:text-heading"
                             >
-                              <Trash2 size={15} />
+                              Remove
                             </button>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-1">
-                        {/* Channel selector */}
-                        <div className="md:col-span-3">
-                          <label className="block text-[11px] font-bold uppercase tracking-wider text-muted mb-1">
-                            Channel
-                          </label>
-                          <select
-                            value={step.channel}
-                            onChange={(e) =>
-                              updateCommunicationStep(idx, {
-                                channel: e.target.value,
-                                template_id: '',
-                              })
-                            }
-                            className="w-full px-3 py-2 bg-white rounded-xl text-xs font-semibold border border-brand-border outline-none focus:border-primary"
-                          >
-                            <option value="email">Email</option>
-                            <option value="sms">SMS</option>
-                          </select>
-                        </div>
-
-                        {/* General Template selector */}
-                        <div className="md:col-span-5">
-                          <label className="block text-[11px] font-bold uppercase tracking-wider text-muted mb-1">
-                            General Template <span className="text-rose-500">*</span>
-                          </label>
-                          <select
-                            value={step.template_id}
-                            onChange={(e) => updateCommunicationStep(idx, { template_id: e.target.value })}
-                            className="w-full px-3 py-2 bg-white rounded-xl text-xs font-semibold border border-brand-border outline-none focus:border-primary"
-                          >
-                            <option value="">Select General Template...</option>
-                            {step.template_id && !availableTemplates.some((t) => String(t.id) === String(step.template_id)) && (
-                              <option value={step.template_id} disabled>
-                                {step.template_name || `Template #${step.template_id}`} (Inactive / Unavailable — Please change)
-                              </option>
-                            )}
-                            {availableTemplates.map((t) => (
-                              <option key={t.id} value={t.id}>
-                                {t.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        {/* Delay Timing */}
-                        <div className="md:col-span-4">
-                          <label className="block text-[11px] font-bold uppercase tracking-wider text-muted mb-1">
-                            Execution Delay
-                          </label>
-                          <div className="flex items-center gap-1.5">
-                            <input
-                              type="number"
-                              min={0}
-                              max={525600}
-                              value={step.delay_value}
-                              onChange={(e) =>
-                                updateCommunicationStep(idx, { delay_value: e.target.value })
-                              }
-                              className="w-20 px-2.5 py-2 bg-white rounded-xl text-xs font-semibold border border-brand-border outline-none focus:border-primary text-center"
-                            />
-                            <select
-                              value={step.delay_unit}
-                              onChange={(e) =>
-                                updateCommunicationStep(idx, { delay_unit: e.target.value })
-                              }
-                              className="px-2.5 py-2 bg-white rounded-xl text-xs font-semibold border border-brand-border outline-none focus:border-primary"
-                            >
-                              <option value="minutes">Minutes</option>
-                              <option value="hours">Hours</option>
-                              <option value="days">Days</option>
-                            </select>
                           </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between pt-1 border-t border-slate-200 text-xs text-muted">
-                        <span>
-                          Total delay: <strong>{step.delay_minutes} minutes</strong> ({Math.round(step.delay_minutes / 60 * 10) / 10} hours)
-                        </span>
-                        <label className="flex items-center gap-1.5 cursor-pointer">
+                        )}
+                        <label className="mt-3 inline-flex cursor-pointer items-center rounded-lg border border-brand-border bg-subtle px-3 py-2 text-xs font-bold text-heading hover:bg-slate-100">
+                          Browse PDF
                           <input
-                            type="checkbox"
-                            checked={step.is_active}
-                            onChange={(e) =>
-                              updateCommunicationStep(idx, { is_active: e.target.checked })
-                            }
-                            className="rounded border-slate-300 text-primary h-3.5 w-3.5"
+                            type="file"
+                            accept="application/pdf,.pdf"
+                            aria-label="Browse PDF for step 1"
+                            className="sr-only"
+                            onChange={(event) => {
+                              selectStepAttachment(0, event.target.files?.[0]);
+                              event.target.value = '';
+                            }}
                           />
-                          <span>Step Active</span>
                         </label>
                       </div>
                     </div>
-                  );
-                })}
+                  )}
+
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-200 text-xs text-muted">
+                    <span>
+                      Total delay: <strong>{step.delay_minutes} minutes</strong> ({Math.round(step.delay_minutes / 60 * 10) / 10} hours)
+                    </span>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={step.is_active}
+                        onChange={(e) =>
+                          updateCommunicationStep(0, { is_active: e.target.checked })
+                        }
+                        className="rounded border-slate-300 text-primary h-3.5 w-3.5"
+                      />
+                      <span>Action Active</span>
+                    </label>
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* STEP 2: Target */}
           {activeStep === 2 && (
             <>
               <div className="max-w-3xl mx-auto space-y-4">
-                <div>
-                  <h3 className="text-xl font-bold text-heading">Target</h3>
-                  <p className="text-sm text-muted mt-0.5">
-                    The selected trigger determines the record type this automation targets.
-                  </p>
-                </div>
-                <div className="rounded-xl border border-brand-border p-4 space-y-3">
-                  <div className="text-sm font-bold text-heading">Automation scope</div>
-                  <div className="rounded-xl border border-primary bg-primary/5 p-4">
-                    <div className="text-sm font-bold text-heading capitalize">{targetType}</div>
-                    <div className="text-xs text-muted mt-1">Triggered by {formData.event}</div>
-                  </div>
-                  <div className="rounded-xl border border-brand-border bg-slate-50 p-4">
-                    <div className="text-sm font-bold text-heading">Branch</div>
-                    <div className="text-xs text-muted mt-1">
-                      {formData.branch_id ? branchName || `Branch #${formData.branch_id}` : 'All branches'}
-                    </div>
-                  </div>
-                  <p className="text-xs text-muted">
-                    Target type is tied to the selected trigger event and cannot be changed independently.
-                  </p>
-                </div>
+              <div>
+                <h3 className="text-xl font-bold text-heading">Who should receive this?</h3>
+                <p className="text-sm text-muted mt-0.5">Choose who will be targeted by this automation</p>
               </div>
+
+              <section aria-label="Dynamic recipients" className="rounded-xl border border-brand-border bg-white p-3 space-y-2">
+                <h4 className="text-sm font-bold text-heading">Dynamic recipients</h4>
+                {recipientOptions.map(({ key, label }) => {
+                  const enabled = selectedRecipients.tokens.includes(key);
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      role="switch"
+                      aria-checked={enabled}
+                      aria-label={`${label} recipient`}
+                      onClick={() => updateRecipients({
+                        tokens: enabled
+                          ? selectedRecipients.tokens.filter((token) => token !== key)
+                          : [...selectedRecipients.tokens, key],
+                      })}
+                      className={`flex min-h-[48px] w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition-colors ${
+                        enabled ? 'border-blue-500 bg-blue-50/60' : 'border-brand-border bg-white hover:bg-slate-50'
+                      }`}
+                    >
+                      <span>
+                        <span className="block text-xs font-bold text-heading">{label}</span>
+                        <span className="block text-[11px] text-muted">{enabled ? 'Enabled' : 'Disabled'}</span>
+                      </span>
+                      <span
+                        aria-hidden="true"
+                        className={`relative h-4 w-7 rounded-full transition-colors ${
+                          enabled ? 'bg-gradient-to-r from-orange-300 to-rose-200' : 'bg-slate-300'
+                        }`}
+                      >
+                        <span
+                          className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
+                            enabled ? 'translate-x-3.5' : 'translate-x-0.5'
+                          }`}
+                        />
+                      </span>
+                    </button>
+                  );
+                })}
+              </section>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <section aria-label="Custom emails" className="min-w-0 rounded-xl border border-brand-border bg-white p-3 space-y-2">
+                  <h4 className="text-xs font-bold text-heading">Custom emails</h4>
+                  <input
+                    type="email"
+                    aria-label="Custom email address"
+                    value={recipientInput.email}
+                    onChange={(event) => {
+                      setRecipientInput((previous) => ({ ...previous, email: event.target.value }));
+                      setRecipientErrors((previous) => ({ ...previous, email: '' }));
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        addCustomEmail();
+                      }
+                    }}
+                    placeholder="Type email and press Enter"
+                    className="w-full rounded-lg bg-subtle px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                  {recipientErrors.email && <p role="alert" className="text-xs text-rose-600">{recipientErrors.email}</p>}
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedRecipients.custom_emails.map((email) => (
+                      <span key={email} className="inline-flex max-w-full items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-xs text-heading">
+                        <span className="truncate">{email}</span>
+                        <button
+                          type="button"
+                          aria-label={`Remove email ${email}`}
+                          onClick={() => updateRecipients({
+                            custom_emails: selectedRecipients.custom_emails.filter((value) => value !== email),
+                          })}
+                          className="font-bold text-muted hover:text-rose-600"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </section>
+
+                <section aria-label="Custom phone numbers" className="min-w-0 rounded-xl border border-brand-border bg-white p-3 space-y-2">
+                  <h4 className="text-xs font-bold text-heading">Custom phone numbers</h4>
+                  <input
+                    type="tel"
+                    aria-label="Custom phone number"
+                    value={recipientInput.phone}
+                    onChange={(event) => {
+                      setRecipientInput((previous) => ({ ...previous, phone: event.target.value }));
+                      setRecipientErrors((previous) => ({ ...previous, phone: '' }));
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        addCustomPhone();
+                      }
+                    }}
+                    placeholder="Type phone and press Enter"
+                    className="w-full rounded-lg bg-subtle px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-primary/20"
+                  />
+                  {recipientErrors.phone && <p role="alert" className="text-xs text-rose-600">{recipientErrors.phone}</p>}
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedRecipients.custom_phones.map((phone) => (
+                      <span key={phone} className="inline-flex max-w-full items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-xs text-heading">
+                        <span className="truncate">{phone}</span>
+                        <button
+                          type="button"
+                          aria-label={`Remove phone ${phone}`}
+                          onClick={() => updateRecipients({
+                            custom_phones: selectedRecipients.custom_phones.filter((value) => value !== phone),
+                          })}
+                          className="font-bold text-muted hover:text-rose-600"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </section>
+              </div>
+
+              <div className="rounded-xl border border-brand-border bg-slate-50 px-3 py-2 text-xs text-muted">
+                Branch: {formData.branch_id ? branchName || `Branch #${formData.branch_id}` : 'All branches'}
+              </div>
+            </div>
               <div className="hidden">
               <div>
                 <h3 className="text-base font-bold text-heading">4. Review Automation Configuration</h3>
+
                 <p className="text-xs text-muted mt-0.5">
                   Confirm your settings before saving the custom automation.
                 </p>
@@ -1092,36 +1736,32 @@ export default function AutomationWizardModal({
                 </div>
 
                 <div className="border-t border-brand-border pt-4">
-                  <div className="text-xs font-bold uppercase tracking-wider text-muted mb-3">Sequence Steps ({formData.steps.length})</div>
-                  <div className="relative pl-6 space-y-4 before:content-[''] before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
-                    {formData.steps.map((s, i) => {
-                      const tmpl = (s.channel === 'sms' ? generalSmsTemplates : generalEmailTemplates).find(
-                        (t) => String(t.id) === String(s.template_id)
-                      );
+                  <div className="text-xs font-bold uppercase tracking-wider text-muted mb-3">Action Details</div>
+                  {(() => {
+                    const s = formData.steps[0] || createDefaultStep();
+                    const tmpl = (s.channel === 'sms' ? generalSmsTemplates : generalEmailTemplates).find(
+                      (t) => String(t.id) === String(s.template_id)
+                    );
 
-                      return (
-                        <div key={i} className="relative flex items-center justify-between bg-white p-3 rounded-xl border border-brand-border text-xs">
-                          <div className="absolute -left-[27px] w-5 h-5 rounded-full bg-primary text-white text-[10px] font-bold flex items-center justify-center">
-                            {i + 1}
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <span className="font-bold uppercase tracking-wider text-heading px-2 py-0.5 bg-slate-100 rounded">
-                              {s.channel}
-                            </span>
-                            <span className="font-semibold text-body">
-                              Template: <span className="text-heading font-bold">{tmpl?.name || `#${s.template_id}`}</span>
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <span className="text-muted">
-                              {s.delay_minutes === 0 ? 'Immediately' : `+${s.delay_minutes} min delay`}
-                            </span>
-                            <span className={`w-2 h-2 rounded-full ${s.is_active ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                          </div>
+                    return (
+                      <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-brand-border text-xs">
+                        <div className="flex items-center gap-3">
+                          <span className="font-bold uppercase tracking-wider text-heading px-2 py-0.5 bg-slate-100 rounded">
+                            {s.channel}
+                          </span>
+                          <span className="font-semibold text-body">
+                            Template: <span className="text-heading font-bold">{tmpl?.name || `#${s.template_id || 'Not set'}`}</span>
+                          </span>
                         </div>
-                      );
-                    })}
-                  </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-muted">
+                            {s.delay_minutes === 0 ? 'Immediately' : `+${s.delay_minutes} min delay`}
+                          </span>
+                          <span className={`w-2 h-2 rounded-full ${s.is_active ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
@@ -1129,7 +1769,7 @@ export default function AutomationWizardModal({
           )}
           </div>
 
-          <aside className="hidden md:block w-80 shrink-0 border-l border-brand-border bg-slate-50/70 overflow-y-auto p-5">
+          <aside className="w-full shrink-0 border-t border-brand-border bg-slate-50/70 p-5 md:w-[34%] md:max-w-[380px] md:min-w-[280px] md:border-l md:border-t-0 md:overflow-y-auto">
             <div className="space-y-3">
               <div>
                 <div className="text-sm font-bold text-heading">Live Preview</div>
@@ -1137,26 +1777,17 @@ export default function AutomationWizardModal({
               </div>
               <div className="space-y-2">
                 <div className="rounded-xl border border-brand-border bg-white px-3 py-2.5 text-sm">
-                  When {targetType} {String(formData.event.split('.').slice(1).join(' ') || 'changes')}
+                  When {targetLabel.toLowerCase()} {triggerEventLabel}
                 </div>
-                {formData.steps.map((step, index) => {
-                  const templates = step.channel === 'sms' ? generalSmsTemplates : generalEmailTemplates;
-                  const template = templates.find((item) => String(item.id) === String(step.template_id));
-                  const action = `Send ${step.channel}`;
-                  return (
-                    <div key={`${step.channel}-${index}`} className="rounded-xl border border-brand-border bg-white px-3 py-2.5 text-sm">
-                      {index + 1}. {action}
-                      {template?.name ? ` · ${template.name}` : ''}
-                      {step.delay_minutes > 0 ? ` · after ${step.delay_value} ${step.delay_unit}` : ''}
-                    </div>
-                  );
-                })}
                 <div className="rounded-xl border border-brand-border bg-white px-3 py-2.5 text-sm">
-                  Scope: {formData.branch_id ? branchName || `Branch #${formData.branch_id}` : 'All branches'}
+                  To: {selectedRecipientLabels.length ? selectedRecipientLabels.join(' ') : 'No recipients selected'}
                 </div>
               </div>
               <div className="text-xs text-muted">
-                {allConditionsCount + anyConditionsCount} {allConditionsCount + anyConditionsCount === 1 ? 'filter' : 'filters'} applied
+                {filterCount === 0
+                  ? 'No filters'
+                  : `${filterCount} ${filterCount === 1 ? 'filter' : 'filters'} applied`}
+
               </div>
             </div>
           </aside>
@@ -1178,7 +1809,7 @@ export default function AutomationWizardModal({
               type="button"
               onClick={handleSave}
               disabled={isSaving || metadataLoading || Boolean(metadataError)}
-              className="px-5 py-2 bg-gradient-to-r from-orange-300 to-rose-200 text-heading rounded-xl text-sm font-bold transition-colors disabled:opacity-50"
+              className="px-5 py-2 bg-gradient-to-r from-orange-300 to-rose-200 text-heading rounded-xl text-sm font-bold shadow-sm transition-all hover:brightness-95 disabled:opacity-50"
             >
               {isSaving ? 'Saving...' : 'Save'}
             </button>

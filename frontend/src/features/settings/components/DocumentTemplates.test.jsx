@@ -500,4 +500,40 @@ describe('DocumentTemplates Page & Create Document Modal', () => {
 
 
   });
+  it('preserves canvas document model and passes compiled document and lock_version when saving via UnifiedTemplateBuilder', async () => {
+    apiMocks.getBuilderTemplateDraft.mockResolvedValueOnce({
+      data: {
+        document: {
+          sections: [
+            { key: 'sec_1', title: 'Terms', blocks: [{ key: 'b_1', type: 'text', props: { html: '<p>Custom Terms</p>' } }] },
+          ],
+        },
+        revision: { lock_version: 3 },
+      },
+    });
+    apiMocks.updateDocumentTemplate.mockResolvedValueOnce({
+      data: { id: 11, lock_version: 4, name: 'Moving Services Agreement' },
+    });
+
+    render(<DocumentTemplates branchId={5} builderRouteView="builder" builderRouteItemId={11} />);
+    const builder = await screen.findByTestId('unified-template-builder');
+    expect(builder).toBeInTheDocument();
+
+    const saveBtn = screen.getByRole('button', { name: 'Save Builder Document' });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(apiMocks.updateDocumentTemplate).toHaveBeenCalledWith(
+        11,
+        expect.objectContaining({
+          branch: 5,
+          lock_version: 3,
+          name: 'Moving Services Agreement',
+          content: expect.objectContaining({
+            pages: expect.any(Array),
+          }),
+        })
+      );
+    });
+  });
 });
